@@ -14,12 +14,13 @@ import { type InsertVehicle } from "@shared/schema";
 
 export default function CreateVehicle() {
   const { toast } = useToast();
-  const [vehicleForm, setVehicleForm] = useState<Partial<InsertVehicle>>({
+  const [vehicleForm, setVehicleForm] = useState<Partial<InsertVehicle & { vehicleType: string }>>({
     vin: "",
     vehicleNumber: "",
     modelYear: new Date().getFullYear(),
     makeName: "",
     modelName: "",
+    vehicleType: "",
     color: "",
     licensePlate: "",
     licenseState: "",
@@ -47,6 +48,7 @@ export default function CreateVehicle() {
       modelYear: new Date().getFullYear(),
       makeName: "",
       modelName: "",
+      vehicleType: "",
       color: "",
       licensePlate: "",
       licenseState: "",
@@ -155,6 +157,24 @@ export default function CreateVehicle() {
                         data-testid="input-model-name"
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="vehicleType">Vehicle Type *</Label>
+                    <Select 
+                      value={vehicleForm.vehicleType || ""} 
+                      onValueChange={(value) => setVehicleForm(prev => ({ ...prev, vehicleType: value }))}
+                      data-testid="select-vehicle-type"
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select vehicle type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="sears-fleet" data-testid="option-sears-fleet">Sears Fleet</SelectItem>
+                        <SelectItem value="byov" data-testid="option-byov">Bring Your Own Vehicle (B.Y.O.V.)</SelectItem>
+                        <SelectItem value="rental" data-testid="option-rental">Rental</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="space-y-2">
