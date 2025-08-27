@@ -54,67 +54,89 @@ function Router() {
       
       <Route path="/">
         <ProtectedRoute>
-          <AssistanceSelection />
+          <MainContent>
+            <AssistanceSelection />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/dashboard">
         <ProtectedRoute>
-          <Dashboard />
+          <MainContent>
+            <Dashboard />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/requester">
         <ProtectedRoute>
-          <RequesterInterface />
+          <MainContent>
+            <RequesterInterface />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/approver">
         <ProtectedRoute>
-          <ApproverInterface />
+          <MainContent>
+            <ApproverInterface />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/requests">
         <ProtectedRoute>
-          <RequestsPage />
+          <MainContent>
+            <RequestsPage />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/approvals">
         <ProtectedRoute>
-          <ApproverInterface />
+          <MainContent>
+            <ApproverInterface />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/create-vehicle-location">
         <ProtectedRoute>
-          <CreateVehicle />
+          <MainContent>
+            <CreateVehicle />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/assign-vehicle-location">
         <ProtectedRoute>
-          <AssignVehicleLocation />
+          <MainContent>
+            <AssignVehicleLocation />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/onboard-hire">
         <ProtectedRoute>
-          <OnboardHire />
+          <MainContent>
+            <OnboardHire />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/offboard-vehicle-location">
         <ProtectedRoute>
-          <OffboardVehicleLocation />
+          <MainContent>
+            <OffboardVehicleLocation />
+          </MainContent>
         </ProtectedRoute>
       </Route>
 
       <Route path="/api-management">
         <ProtectedRoute>
-          <ApiManagement />
+          <MainContent>
+            <ApiManagement />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
