@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Car, Search, Calendar, MapPin, Settings } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
@@ -26,6 +27,7 @@ export default function AssignVehicleLocation() {
   const [brandingFilter, setBrandingFilter] = useState("all");
   const [interiorFilter, setInteriorFilter] = useState("all");
   const [targetZipcode, setTargetZipcode] = useState("");
+  const [isAssignmentDialogOpen, setIsAssignmentDialogOpen] = useState(false);
 
   // Real data from CSV
   const employees = [
@@ -98,12 +100,14 @@ export default function AssignVehicleLocation() {
       purpose: ""
     });
     setSelectedVehicle(null);
+    setIsAssignmentDialogOpen(false);
   };
 
   const handleVehicleSelect = (vehicleVin: string) => {
     const vehicle = availableVehicles.find(v => v.vin === vehicleVin);
     setSelectedVehicle(vehicle || null);
     setVehicleAssignment(prev => ({ ...prev, vehicleId: vehicleVin }));
+    setIsAssignmentDialogOpen(true);
   };
 
 
@@ -368,6 +372,114 @@ export default function AssignVehicleLocation() {
               </Card>
             </div>
           </div>
+          
+          {/* Assignment Dialog */}
+          <Dialog open={isAssignmentDialogOpen} onOpenChange={setIsAssignmentDialogOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Complete the Assignment Details</DialogTitle>
+                <DialogDescription>
+                  Assign the selected vehicle to an employee
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={(e) => {
+                handleVehicleAssignment(e);
+              }} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="dialog-employeeId">Employee *</Label>
+                  <Select 
+                    value={vehicleAssignment.employeeId} 
+                    onValueChange={(value) => setVehicleAssignment(prev => ({ ...prev, employeeId: value }))}
+                    data-testid="dialog-select-employee"
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select employee" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {employees.map(employee => (
+                        <SelectItem key={employee.id} value={employee.id} data-testid={`dialog-option-employee-${employee.id}`}>
+                          {employee.name}
+                          <span className="text-muted-foreground ml-2">({employee.department} - {employee.region})</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {selectedVehicle && (
+                  <div className="p-3 bg-muted rounded-lg">
+                    <p className="font-semibold text-sm mb-1">Selected Vehicle:</p>
+                    <p className="text-sm">{selectedVehicle.modelYear} {selectedVehicle.makeName} {selectedVehicle.modelName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedVehicle.licensePlate} | VIN: {selectedVehicle.vin}
+                    </p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="dialog-startDate">Start Date *</Label>
+                  <Input
+                    id="dialog-startDate"
+                    type="date"
+                    value={vehicleAssignment.startDate}
+                    onChange={(e) => setVehicleAssignment(prev => ({ ...prev, startDate: e.target.value }))}
+                    data-testid="dialog-input-start-date"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="dialog-endDate">End Date</Label>
+                  <Input
+                    id="dialog-endDate"
+                    type="date"
+                    value={vehicleAssignment.endDate}
+                    onChange={(e) => setVehicleAssignment(prev => ({ ...prev, endDate: e.target.value }))}
+                    data-testid="dialog-input-end-date"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dialog-purpose">Purpose</Label>
+                  <Select 
+                    value={vehicleAssignment.purpose} 
+                    onValueChange={(value) => setVehicleAssignment(prev => ({ ...prev, purpose: value }))}
+                    data-testid="dialog-select-purpose"
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select purpose" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="field_service" data-testid="dialog-option-field-service">Field Service</SelectItem>
+                      <SelectItem value="delivery" data-testid="dialog-option-delivery">Acquisition/Transport</SelectItem>
+                      <SelectItem value="maintenance" data-testid="dialog-option-maintenance">Maintenance Work</SelectItem>
+                      <SelectItem value="business_travel" data-testid="dialog-option-business-travel">Business Travel</SelectItem>
+                      <SelectItem value="daily_operations" data-testid="dialog-option-daily-operations">Daily Operations</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex gap-2 pt-4">
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    className="flex-1" 
+                    onClick={() => setIsAssignmentDialogOpen(false)}
+                    data-testid="dialog-button-cancel"
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    type="submit" 
+                    className="flex-1" 
+                    disabled={!vehicleAssignment.employeeId || !vehicleAssignment.vehicleId || !vehicleAssignment.startDate}
+                    data-testid="dialog-button-assign-vehicle"
+                  >
+                    Assign Vehicle
+                  </Button>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
         </div>
       </main>
     </MainContent>
