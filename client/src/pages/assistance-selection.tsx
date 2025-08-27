@@ -84,8 +84,8 @@ export default function AssistanceSelection() {
         <div className="absolute inset-0 bg-background/80"></div>
         <div className="relative z-10 max-w-6xl mx-auto">
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold mb-4" data-testid="text-selection-title">
-              Welcome to Sears Operations
+            <h2 className="text-3xl font-bold mb-4" style={{ color: '#007bff' }} data-testid="text-selection-title">
+              Welcome to Sears Vehicle and Asset Tool
             </h2>
             <p className="text-muted-foreground text-lg">
               What can we help you with today?
