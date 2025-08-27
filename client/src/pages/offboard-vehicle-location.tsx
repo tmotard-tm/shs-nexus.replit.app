@@ -105,14 +105,14 @@ export default function OffboardVehicleLocation() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex-1">
       <TopBar 
         title="Offboard Vehicle/Location" 
         breadcrumbs={["Home", "Offboard"]}
       />
       
       <main className="p-6">
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           <div className="mb-6">
             <Link href="/">
               <Button variant="outline" size="sm" data-testid="button-back">

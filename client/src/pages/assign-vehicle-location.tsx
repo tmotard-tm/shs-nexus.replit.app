@@ -86,14 +86,14 @@ export default function AssignVehicleLocation() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex-1">
       <TopBar 
         title="Assign Vehicle/Location" 
         breadcrumbs={["Home", "Assign"]}
       />
       
       <main className="p-6">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <div className="mb-6">
             <Link href="/">
               <Button variant="outline" size="sm" data-testid="button-back">
