@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useLocation } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,6 +14,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { 
   getAvailableVehicles, 
   getActiveVehicleCount,
+  activeVehicles,
   getBrandingOptions, 
   getInteriorOptions, 
   getTuneStatusOptions,
@@ -29,6 +31,7 @@ import {
 } from "@/data/fleetData";
 
 export default function ActiveVehicles() {
+  const [location] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [brandingFilter, setBrandingFilter] = useState("all");
   const [interiorFilter, setInteriorFilter] = useState("all");
@@ -44,6 +47,16 @@ export default function ActiveVehicles() {
   const [cityFilter, setCityFilter] = useState("all");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   
+  // Check for URL parameters and set initial filter
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const filterParam = urlParams.get('filter');
+    if (filterParam === 'assigned') {
+      // Filter is already set to show only assigned vehicles by using getAvailableVehicles()
+      // which filters out out-of-service vehicles
+    }
+  }, [location]);
+  
   // Count active filters
   const activeFiltersCount = [
     brandingFilter, interiorFilter, tuneStatusFilter, makeFilter, modelFilter,
@@ -51,8 +64,13 @@ export default function ActiveVehicles() {
     yearFilter, cityFilter
   ].filter(filter => filter !== "all").length;
 
-  const availableVehicles = getAvailableVehicles();
-  const filteredVehicles = availableVehicles.filter(vehicle => {
+  // Check if we should show only assigned vehicles based on URL parameter
+  const urlParams = new URLSearchParams(window.location.search);
+  const showOnlyAssigned = urlParams.get('filter') === 'assigned';
+  
+  // Use appropriate vehicle list based on filter
+  const baseVehicles = showOnlyAssigned ? getAvailableVehicles() : activeVehicles;
+  const filteredVehicles = baseVehicles.filter(vehicle => {
     const matchesSearch = !searchQuery || 
       vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
       vehicle.vehicleNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -82,8 +100,8 @@ export default function ActiveVehicles() {
   return (
     <MainContent>
       <TopBar 
-        title="Active Vehicles" 
-        breadcrumbs={["Home", "Active Vehicles"]}
+        title={showOnlyAssigned ? "Assigned Vehicles" : "Active Vehicles"}
+        breadcrumbs={["Home", showOnlyAssigned ? "Assigned Vehicles" : "Active Vehicles"]}
       />
       
       <main className="p-6">
@@ -95,7 +113,7 @@ export default function ActiveVehicles() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span>Search Active Vehicles</span>
+                  <span>{showOnlyAssigned ? "Search Assigned Vehicles" : "Search Active Vehicles"}</span>
                   <div className="flex items-center gap-2">
                     {activeFiltersCount > 0 && (
                       <span className="text-sm bg-primary/10 text-primary px-2 py-1 rounded-full">
@@ -379,7 +397,7 @@ export default function ActiveVehicles() {
             {/* Vehicle List */}
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">Active Vehicles ({getActiveVehicleCount()})</h3>
+                <h3 className="text-lg font-semibold">{showOnlyAssigned ? `Assigned Vehicles (${baseVehicles.length})` : `Active Vehicles (${getActiveVehicleCount()})`}</h3>
               </div>
               
               <div className="grid gap-4">

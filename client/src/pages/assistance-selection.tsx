@@ -114,7 +114,11 @@ export default function AssistanceSelection() {
                   <p className="text-sm text-black">Locations</p>
                 </CardContent>
               </Card>
-              <Card className="bg-white">
+              <Card 
+                className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
+                onClick={() => setLocation("/active-vehicles?filter=assigned")}
+                data-testid="card-assigned-vehicles"
+              >
                 <CardContent className="flex flex-col items-center text-center p-4">
                   <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                   <p className="text-lg font-bold text-black" data-testid="text-assigned-count">{getAvailableVehicles().length}</p>
