@@ -108,10 +108,10 @@ export default function AssistanceSelection() {
                       >
                         <Icon className={`h-8 w-8 text-[hsl(var(--${option.color}))]`} />
                       </div>
-                      <CardTitle className="text-lg font-bold text-foreground drop-shadow-sm" data-testid={`title-${option.id}`}>
+                      <CardTitle className="text-lg font-bold drop-shadow-sm" style={{ color: '#c6281e' }} data-testid={`title-${option.id}`}>
                         {option.title}
                       </CardTitle>
-                      <CardDescription className="text-foreground/90 font-medium drop-shadow-sm" data-testid={`description-${option.id}`}>
+                      <CardDescription className="font-medium drop-shadow-sm" style={{ color: '#c6281e' }} data-testid={`description-${option.id}`}>
                         {option.description}
                       </CardDescription>
                     </CardHeader>
