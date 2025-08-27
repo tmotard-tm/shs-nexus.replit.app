@@ -14,16 +14,16 @@ export default function AssistanceSelection() {
   const assistanceOptions = [
     {
       id: "create-vehicle-location",
-      title: "Create A New Vehicle",
-      description: "Add New Vehicles To The System",
+      title: "Create a New Vehicle",
+      description: "Add New Vehicles to the System",
       icon: Car,
       color: "chart-1",
       action: () => setLocation("/create-vehicle-location")
     },
     {
       id: "assign-vehicle-location", 
-      title: "Assign Or Update A Vehicle",
-      description: "Assign Existing Vehicles To Users",
+      title: "Assign or Update a Vehicle",
+      description: "Assign Existing Vehicles to Users",
       icon: MapPin,
       color: "chart-2", 
       action: () => setLocation("/assign-vehicle-location")
@@ -39,7 +39,7 @@ export default function AssistanceSelection() {
     {
       id: "offboard-vehicle-location",
       title: "Offboarding", 
-      description: "Remove Vehicles Or Locations From The System",
+      description: "Remove Vehicles or Locations from the System",
       icon: UserMinus,
       color: "chart-4",
       action: () => setLocation("/offboard-vehicle-location")
@@ -47,7 +47,7 @@ export default function AssistanceSelection() {
     {
       id: "other",
       title: "Other",
-      description: "Access Additional Tools And Features",
+      description: "Access Additional Tools and Features",
       icon: HelpCircle,
       color: "chart-5",
       action: () => setLocation("/dashboard")
