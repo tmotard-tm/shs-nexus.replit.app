@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Settings } from "lucide-react";
+import { useLocation } from "wouter";
 
 export default function Login() {
   const [enterpriseId, setEnterpriseId] = useState("");
@@ -13,6 +14,7 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,7 +22,10 @@ export default function Login() {
 
     try {
       const success = await login(enterpriseId, password);
-      if (!success) {
+      if (success) {
+        // Redirect to home page after successful login
+        setLocation("/");
+      } else {
         toast({
           title: "Login Failed",
           description: "Invalid username or password",
