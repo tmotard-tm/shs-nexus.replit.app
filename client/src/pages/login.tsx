@@ -8,9 +8,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Settings } from "lucide-react";
 
 export default function Login() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const [enterpriseId, setEnterpriseId] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const { toast } = useToast();
@@ -20,7 +19,7 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      const success = await login(username, password, enterpriseId);
+      const success = await login(enterpriseId, password);
       if (!success) {
         toast({
           title: "Login Failed",
@@ -65,18 +64,6 @@ export default function Login() {
                 placeholder="Enter your Enterprise ID"
                 required
                 data-testid="input-enterprise-id"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter your username"
-                required
-                data-testid="input-username"
               />
             </div>
             <div className="space-y-2">
