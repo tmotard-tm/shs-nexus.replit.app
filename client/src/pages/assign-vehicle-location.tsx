@@ -141,7 +141,7 @@ export default function AssignVehicleLocation() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Sort by distance to zipcode</Label>
+                      <Label>Sort By Distance To Zipcode</Label>
                       <Input
                         placeholder="Enter zipcode (e.g. 10001)"
                         value={targetZipcode}

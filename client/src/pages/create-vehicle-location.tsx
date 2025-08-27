@@ -353,12 +353,12 @@ export default function CreateVehicle() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="zip">ZIP Code</Label>
+                      <Label htmlFor="zip">Zip Code</Label>
                       <Input
                         id="zip"
                         value={vehicleForm.zip || ""}
                         onChange={(e) => setVehicleForm(prev => ({ ...prev, zip: e.target.value }))}
-                        placeholder="ZIP code"
+                        placeholder="Zip code"
                         data-testid="input-zip"
                       />
                     </div>
