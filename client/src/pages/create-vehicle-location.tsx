@@ -152,11 +152,9 @@ export default function CreateVehicleLocation() {
                             <SelectValue placeholder="Select vehicle type" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="sedan" data-testid="option-sedan">Sedan</SelectItem>
-                            <SelectItem value="suv" data-testid="option-suv">SUV</SelectItem>
-                            <SelectItem value="truck" data-testid="option-truck">Truck</SelectItem>
-                            <SelectItem value="van" data-testid="option-van">Van</SelectItem>
-                            <SelectItem value="motorcycle" data-testid="option-motorcycle">Motorcycle</SelectItem>
+                            <SelectItem value="rental" data-testid="option-rental">Rental</SelectItem>
+                            <SelectItem value="byov" data-testid="option-byov">Bring Your Own Vehicle (B.Y.O.V.)</SelectItem>
+                            <SelectItem value="sears-fleet" data-testid="option-sears-fleet">Sears Fleet Vehicle</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
