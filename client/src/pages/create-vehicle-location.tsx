@@ -29,7 +29,7 @@ export default function CreateVehicle() {
     tuneStatus: "",
     region: "",
     district: "",
-    deliveryAddress: "",
+    acquisitionAddress: "",
     city: "",
     state: "",
     zip: "",
@@ -57,7 +57,7 @@ export default function CreateVehicle() {
       tuneStatus: "",
       region: "",
       district: "",
-      deliveryAddress: "",
+      acquisitionAddress: "",
       city: "",
       state: "",
       zip: "",
@@ -320,13 +320,13 @@ export default function CreateVehicle() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="deliveryAddress">Delivery Address</Label>
+                    <Label htmlFor="acquisitionAddress">Acquisition Address</Label>
                     <Input
-                      id="deliveryAddress"
-                      value={vehicleForm.deliveryAddress || ""}
-                      onChange={(e) => setVehicleForm(prev => ({ ...prev, deliveryAddress: e.target.value }))}
+                      id="acquisitionAddress"
+                      value={vehicleForm.acquisitionAddress || ""}
+                      onChange={(e) => setVehicleForm(prev => ({ ...prev, acquisitionAddress: e.target.value }))}
                       placeholder="Street address"
-                      data-testid="input-delivery-address"
+                      data-testid="input-acquisition-address"
                     />
                   </div>
 

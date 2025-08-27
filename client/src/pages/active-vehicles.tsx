@@ -423,7 +423,7 @@ export default function ActiveVehicles() {
                         {vehicle.deliveryDate && (
                           <div className="flex items-center gap-2">
                             <Calendar className="h-3 w-3" />
-                            <span>Delivered: {vehicle.deliveryDate}</span>
+                            <span>Acquired: {vehicle.deliveryDate}</span>
                           </div>
                         )}
                         {vehicle.odometerDelivery > 0 && (

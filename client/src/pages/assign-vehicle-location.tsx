@@ -346,7 +346,7 @@ export default function AssignVehicleLocation() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="field_service" data-testid="option-field-service">Field Service</SelectItem>
-                          <SelectItem value="delivery" data-testid="option-delivery">Delivery/Transport</SelectItem>
+                          <SelectItem value="delivery" data-testid="option-delivery">Acquisition/Transport</SelectItem>
                           <SelectItem value="maintenance" data-testid="option-maintenance">Maintenance Work</SelectItem>
                           <SelectItem value="business_travel" data-testid="option-business-travel">Business Travel</SelectItem>
                           <SelectItem value="daily_operations" data-testid="option-daily-operations">Daily Operations</SelectItem>
