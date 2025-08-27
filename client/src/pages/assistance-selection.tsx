@@ -14,16 +14,16 @@ export default function AssistanceSelection() {
   const assistanceOptions = [
     {
       id: "create-vehicle-location",
-      title: "Create a new vehicle/location",
-      description: "Add new vehicles or locations to the system",
+      title: "Create a new vehicle",
+      description: "Add new vehicles to the system",
       icon: Car,
       color: "chart-1",
       action: () => setLocation("/create-vehicle-location")
     },
     {
       id: "assign-vehicle-location", 
-      title: "Assign a vehicle/location",
-      description: "Assign existing vehicles or locations to users",
+      title: "Assign a vehicle",
+      description: "Assign existing vehicles to users",
       icon: MapPin,
       color: "chart-2", 
       action: () => setLocation("/assign-vehicle-location")
