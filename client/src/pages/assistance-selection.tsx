@@ -4,6 +4,7 @@ import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
 import { Car, MapPin, UserPlus, UserMinus, HelpCircle, Settings } from "lucide-react";
 import { useLocation } from "wouter";
+import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 
 export default function AssistanceSelection() {
   const { user } = useAuth();
@@ -70,8 +71,18 @@ export default function AssistanceSelection() {
       </header>
 
       {/* Main Content */}
-      <main className="p-8">
-        <div className="max-w-6xl mx-auto">
+      <main 
+        className="p-8 relative min-h-screen"
+        style={{
+          backgroundImage: `url(${searsVanImage})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat'
+        }}
+      >
+        {/* Overlay for better content readability */}
+        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm"></div>
+        <div className="relative z-10 max-w-6xl mx-auto">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold mb-4" data-testid="text-selection-title">
               Welcome to Sears Operations
