@@ -92,41 +92,43 @@ export default function AssistanceSelection() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {assistanceOptions.map((option) => {
-              const Icon = option.icon;
-              return (
-                <Card 
-                  key={option.id} 
-                  className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-                  data-testid={`card-${option.id}`}
-                >
-                  <CardHeader className="text-center">
-                    <div 
-                      className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-[hsl(var(--${option.color})/.1)]`}
-                      data-testid={`icon-${option.id}`}
-                    >
-                      <Icon className={`h-8 w-8 text-[hsl(var(--${option.color}))]`} />
-                    </div>
-                    <CardTitle className="text-lg" data-testid={`title-${option.id}`}>
-                      {option.title}
-                    </CardTitle>
-                    <CardDescription data-testid={`description-${option.id}`}>
-                      {option.description}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Button 
-                      onClick={option.action}
-                      className="w-full"
-                      data-testid={`button-${option.id}`}
-                    >
-                      Get Started
-                    </Button>
-                  </CardContent>
-                </Card>
-              );
-            })}
+          <div className="overflow-x-auto pb-4">
+            <div className="flex gap-6 min-w-max">
+              {assistanceOptions.map((option) => {
+                const Icon = option.icon;
+                return (
+                  <Card 
+                    key={option.id} 
+                    className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105 min-w-[300px] flex-shrink-0"
+                    data-testid={`card-${option.id}`}
+                  >
+                    <CardHeader className="text-center">
+                      <div 
+                        className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-[hsl(var(--${option.color})/.1)]`}
+                        data-testid={`icon-${option.id}`}
+                      >
+                        <Icon className={`h-8 w-8 text-[hsl(var(--${option.color}))]`} />
+                      </div>
+                      <CardTitle className="text-lg" data-testid={`title-${option.id}`}>
+                        {option.title}
+                      </CardTitle>
+                      <CardDescription data-testid={`description-${option.id}`}>
+                        {option.description}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Button 
+                        onClick={option.action}
+                        className="w-full"
+                        data-testid={`button-${option.id}`}
+                      >
+                        Get Started
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
           </div>
 
           {/* Quick Stats or Additional Info */}
