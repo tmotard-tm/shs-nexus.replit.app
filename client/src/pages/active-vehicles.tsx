@@ -45,6 +45,7 @@ export default function ActiveVehicles() {
   const [districtFilter, setDistrictFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
+  const [assignmentStatusFilter, setAssignmentStatusFilter] = useState("all");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   
   // Check for URL parameters and set initial filter
@@ -61,7 +62,7 @@ export default function ActiveVehicles() {
   const activeFiltersCount = [
     brandingFilter, interiorFilter, tuneStatusFilter, makeFilter, modelFilter,
     colorFilter, stateFilter, licenseStateFilter, regionFilter, districtFilter,
-    yearFilter, cityFilter
+    yearFilter, cityFilter, assignmentStatusFilter
   ].filter(filter => filter !== "all").length;
 
   // Check if we should show only assigned vehicles based on URL parameter
@@ -91,10 +92,13 @@ export default function ActiveVehicles() {
     const matchesDistrict = districtFilter === "all" || vehicle.district === districtFilter;
     const matchesYear = yearFilter === "all" || vehicle.modelYear.toString() === yearFilter;
     const matchesCity = cityFilter === "all" || vehicle.city === cityFilter;
+    const matchesAssignmentStatus = assignmentStatusFilter === "all" || 
+      (assignmentStatusFilter === "assigned" && !vehicle.outOfServiceDate) ||
+      (assignmentStatusFilter === "unassigned" && vehicle.outOfServiceDate);
     
     return matchesSearch && matchesBranding && matchesInterior && matchesTuneStatus &&
            matchesMake && matchesModel && matchesColor && matchesState && matchesLicenseState &&
-           matchesRegion && matchesDistrict && matchesYear && matchesCity;
+           matchesRegion && matchesDistrict && matchesYear && matchesCity && matchesAssignmentStatus;
   });
 
   return (
@@ -247,6 +251,26 @@ export default function ActiveVehicles() {
                           </div>
                         </div>
                         
+                        {/* Assignment Status Filter */}
+                        <div className="space-y-3">
+                          <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Assignment Status</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Status</Label>
+                              <Select value={assignmentStatusFilter} onValueChange={setAssignmentStatusFilter} data-testid="select-assignment-status-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All vehicles</SelectItem>
+                                  <SelectItem value="assigned">Assigned</SelectItem>
+                                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                        
                         {/* Location Filters */}
                         <div className="space-y-3">
                           <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Location</h4>
@@ -351,6 +375,7 @@ export default function ActiveVehicles() {
                                   setDistrictFilter("all");
                                   setYearFilter("all");
                                   setCityFilter("all");
+                                  setAssignmentStatusFilter("all");
                                 }}
                                 data-testid="button-clear-filters"
                               >
