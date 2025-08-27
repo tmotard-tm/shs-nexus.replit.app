@@ -360,8 +360,26 @@ export const getActiveVehicleCount = () => activeVehicles.length;
 
 export const getAvailableVehicles = () => activeVehicles.filter(v => !v.outOfServiceDate || new Date(v.outOfServiceDate) > new Date());
 
-export const getBrandingOptions = () => Array.from(new Set(activeVehicles.map(v => v.branding))).filter(Boolean);
+export const getBrandingOptions = () => Array.from(new Set(activeVehicles.map(v => v.branding))).filter(Boolean).sort();
 
-export const getInteriorOptions = () => Array.from(new Set(activeVehicles.map(v => v.interior))).filter(Boolean);
+export const getInteriorOptions = () => Array.from(new Set(activeVehicles.map(v => v.interior))).filter(Boolean).sort();
 
-export const getTuneStatusOptions = () => Array.from(new Set(activeVehicles.map(v => v.tuneStatus))).filter(Boolean);
+export const getTuneStatusOptions = () => Array.from(new Set(activeVehicles.map(v => v.tuneStatus))).filter(Boolean).sort();
+
+export const getMakeOptions = () => Array.from(new Set(activeVehicles.map(v => v.makeName))).filter(Boolean).sort();
+
+export const getModelOptions = () => Array.from(new Set(activeVehicles.map(v => v.modelName))).filter(Boolean).sort();
+
+export const getColorOptions = () => Array.from(new Set(activeVehicles.map(v => v.color))).filter(Boolean).sort();
+
+export const getStateOptions = () => Array.from(new Set(activeVehicles.map(v => v.state))).filter(Boolean).sort();
+
+export const getLicenseStateOptions = () => Array.from(new Set(activeVehicles.map(v => v.licenseState))).filter(Boolean).sort();
+
+export const getRegionOptions = () => Array.from(new Set(activeVehicles.map(v => v.region))).filter(Boolean).sort();
+
+export const getDistrictOptions = () => Array.from(new Set(activeVehicles.map(v => v.district))).filter(Boolean).sort();
+
+export const getYearOptions = () => Array.from(new Set(activeVehicles.map(v => v.modelYear))).filter(Boolean).sort((a, b) => b - a);
+
+export const getCityOptions = () => Array.from(new Set(activeVehicles.map(v => v.city))).filter(Boolean).sort();
