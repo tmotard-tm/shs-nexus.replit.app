@@ -22,8 +22,8 @@ export default function AssignVehicleLocation() {
   });
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [brandingFilter, setBrandingFilter] = useState("");
-  const [interiorFilter, setInteriorFilter] = useState("");
+  const [brandingFilter, setBrandingFilter] = useState("all");
+  const [interiorFilter, setInteriorFilter] = useState("all");
 
   // Real data from CSV
   const employees = [
@@ -42,8 +42,8 @@ export default function AssignVehicleLocation() {
       vehicle.licensePlate.toLowerCase().includes(searchQuery.toLowerCase()) ||
       `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchQuery.toLowerCase());
     
-    const matchesBranding = !brandingFilter || vehicle.branding === brandingFilter;
-    const matchesInterior = !interiorFilter || vehicle.interior === interiorFilter;
+    const matchesBranding = brandingFilter === "all" || vehicle.branding === brandingFilter;
+    const matchesInterior = interiorFilter === "all" || vehicle.interior === interiorFilter;
     
     return matchesSearch && matchesBranding && matchesInterior;
   });
@@ -126,7 +126,7 @@ export default function AssignVehicleLocation() {
                           <SelectValue placeholder="All branding" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">All branding</SelectItem>
+                          <SelectItem value="all">All branding</SelectItem>
                           {getBrandingOptions().map(option => (
                             <SelectItem key={option} value={option}>{option}</SelectItem>
                           ))}
@@ -140,7 +140,7 @@ export default function AssignVehicleLocation() {
                           <SelectValue placeholder="All interiors" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">All interiors</SelectItem>
+                          <SelectItem value="all">All interiors</SelectItem>
                           {getInteriorOptions().map(option => (
                             <SelectItem key={option} value={option}>{option}</SelectItem>
                           ))}
