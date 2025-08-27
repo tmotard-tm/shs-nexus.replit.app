@@ -7,6 +7,11 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
+import AssistanceSelection from "@/pages/assistance-selection";
+import CreateVehicleLocation from "@/pages/create-vehicle-location";
+import AssignVehicleLocation from "@/pages/assign-vehicle-location";
+import OnboardHire from "@/pages/onboard-hire";
+import OffboardVehicleLocation from "@/pages/offboard-vehicle-location";
 import Dashboard from "@/pages/dashboard";
 import RequesterInterface from "@/pages/requester";
 import ApproverInterface from "@/pages/approver";
@@ -46,7 +51,7 @@ function Router() {
       
       <Route path="/">
         <ProtectedRoute>
-          <Dashboard />
+          <AssistanceSelection />
         </ProtectedRoute>
       </Route>
       
@@ -80,6 +85,30 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
+      <Route path="/create-vehicle-location">
+        <ProtectedRoute>
+          <CreateVehicleLocation />
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/assign-vehicle-location">
+        <ProtectedRoute>
+          <AssignVehicleLocation />
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/onboard-hire">
+        <ProtectedRoute>
+          <OnboardHire />
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/offboard-vehicle-location">
+        <ProtectedRoute>
+          <OffboardVehicleLocation />
+        </ProtectedRoute>
+      </Route>
+
       <Route path="/api-management">
         <ProtectedRoute>
           <ApiManagement />
