@@ -1,0 +1,242 @@
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema } from "@shared/schema";
+import { z } from "zod";
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  // Auth routes
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      const user = await storage.getUserByUsername(username);
+      
+      if (!user || user.password !== password) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      // In a real app, you'd use proper session management/JWT
+      res.json({ user: { ...user, password: undefined } });
+    } catch (error) {
+      res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const userData = insertUserSchema.parse(req.body);
+      
+      // Check if user already exists
+      const existingUser = await storage.getUserByUsername(userData.username);
+      if (existingUser) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const user = await storage.createUser(userData);
+      
+      // Log activity
+      await storage.createActivityLog({
+        userId: user.id,
+        action: "user_registered",
+        entityType: "user",
+        entityId: user.id,
+        details: `User ${user.username} registered`,
+      });
+
+      res.status(201).json({ user: { ...user, password: undefined } });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid user data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Registration failed" });
+    }
+  });
+
+  // Dashboard routes
+  app.get("/api/dashboard/stats", async (req, res) => {
+    try {
+      const stats = await storage.getDashboardStats();
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch dashboard stats" });
+    }
+  });
+
+  // Request routes
+  app.get("/api/requests", async (req, res) => {
+    try {
+      const { status, requesterId } = req.query;
+      
+      let requests;
+      if (status) {
+        requests = await storage.getRequestsByStatus(status as string);
+      } else if (requesterId) {
+        requests = await storage.getRequestsByRequester(requesterId as string);
+      } else {
+        requests = await storage.getRequests();
+      }
+      
+      res.json(requests);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch requests" });
+    }
+  });
+
+  app.get("/api/requests/:id", async (req, res) => {
+    try {
+      const request = await storage.getRequest(req.params.id);
+      if (!request) {
+        return res.status(404).json({ message: "Request not found" });
+      }
+      res.json(request);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch request" });
+    }
+  });
+
+  app.post("/api/requests", async (req, res) => {
+    try {
+      const requestData = insertRequestSchema.parse(req.body);
+      const request = await storage.createRequest(requestData);
+      
+      // Log activity
+      await storage.createActivityLog({
+        userId: request.requesterId,
+        action: "request_created",
+        entityType: "request",
+        entityId: request.id,
+        details: `Created request: ${request.title}`,
+      });
+
+      res.status(201).json(request);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid request data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create request" });
+    }
+  });
+
+  app.patch("/api/requests/:id", async (req, res) => {
+    try {
+      const updates = req.body;
+      const request = await storage.updateRequest(req.params.id, updates);
+      
+      if (!request) {
+        return res.status(404).json({ message: "Request not found" });
+      }
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: request.approverId || request.requesterId,
+        action: "request_updated",
+        entityType: "request",
+        entityId: request.id,
+        details: `Updated request: ${request.title} - Status: ${request.status}`,
+      });
+
+      res.json(request);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update request" });
+    }
+  });
+
+  // API Configuration routes
+  app.get("/api/configurations", async (req, res) => {
+    try {
+      const configurations = await storage.getApiConfigurations();
+      res.json(configurations);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch API configurations" });
+    }
+  });
+
+  app.post("/api/configurations", async (req, res) => {
+    try {
+      const configData = insertApiConfigurationSchema.parse(req.body);
+      const config = await storage.createApiConfiguration(configData);
+      res.status(201).json(config);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid configuration data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create API configuration" });
+    }
+  });
+
+  app.patch("/api/configurations/:id", async (req, res) => {
+    try {
+      const updates = req.body;
+      const config = await storage.updateApiConfiguration(req.params.id, updates);
+      
+      if (!config) {
+        return res.status(404).json({ message: "Configuration not found" });
+      }
+
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update configuration" });
+    }
+  });
+
+  app.delete("/api/configurations/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteApiConfiguration(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Configuration not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete configuration" });
+    }
+  });
+
+  // Activity logs
+  app.get("/api/activity-logs", async (req, res) => {
+    try {
+      const { userId } = req.query;
+      
+      let logs;
+      if (userId) {
+        logs = await storage.getActivityLogsByUser(userId as string);
+      } else {
+        logs = await storage.getActivityLogs();
+      }
+      
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch activity logs" });
+    }
+  });
+
+  // Mock API integration endpoints
+  app.post("/api/integrations/test", async (req, res) => {
+    try {
+      const { apiId } = req.body;
+      const config = await storage.getApiConfiguration(apiId);
+      
+      if (!config) {
+        return res.status(404).json({ message: "API configuration not found" });
+      }
+
+      // Mock API test - in real implementation, this would make actual API calls
+      const isHealthy = Math.random() > 0.2; // 80% success rate for demo
+      
+      await storage.updateApiConfiguration(apiId, {
+        healthStatus: isHealthy ? "healthy" : "error",
+        lastChecked: new Date(),
+      });
+
+      res.json({ 
+        success: isHealthy, 
+        status: isHealthy ? "healthy" : "error",
+        message: isHealthy ? "API connection successful" : "API connection failed"
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to test API connection" });
+    }
+  });
+
+  const httpServer = createServer(app);
+  return httpServer;
+}
