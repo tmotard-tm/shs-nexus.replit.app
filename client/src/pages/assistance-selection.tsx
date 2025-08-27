@@ -30,7 +30,7 @@ export default function AssistanceSelection() {
     },
     {
       id: "onboard-hire",
-      title: "Onboard a new hire",
+      title: "Onboarding",
       description: "Process new employee onboarding",
       icon: UserPlus,
       color: "chart-3",
