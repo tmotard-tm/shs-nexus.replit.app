@@ -94,31 +94,31 @@ export default function AssistanceSelection() {
 
           <div className="flex gap-8">
             {/* Left side stats */}
-            <div className="flex flex-col gap-4 w-64">
-              <Card className="bg-gray-500/20 backdrop-blur-sm border-white/20">
+            <div className="flex flex-col gap-4 w-32">
+              <Card className="bg-white">
                 <CardContent className="flex items-center p-4">
                   <Car className="h-6 w-6 mr-3" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                   <div>
-                    <p className="text-lg font-bold" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-vehicles-count">12</p>
-                    <p className="text-sm" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>Active Vehicles</p>
+                    <p className="text-lg font-bold text-black" data-testid="text-vehicles-count">12</p>
+                    <p className="text-sm text-black">Active Vehicles</p>
                   </div>
                 </CardContent>
               </Card>
-              <Card className="bg-gray-500/20 backdrop-blur-sm border-white/20">
+              <Card className="bg-white">
                 <CardContent className="flex items-center p-4">
                   <MapPin className="h-6 w-6 mr-3" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                   <div>
-                    <p className="text-lg font-bold" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-locations-count">8</p>
-                    <p className="text-sm" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>Locations</p>
+                    <p className="text-lg font-bold text-black" data-testid="text-locations-count">8</p>
+                    <p className="text-sm text-black">Locations</p>
                   </div>
                 </CardContent>
               </Card>
-              <Card className="bg-gray-500/20 backdrop-blur-sm border-white/20">
+              <Card className="bg-white">
                 <CardContent className="flex items-center p-4">
                   <UserPlus className="h-6 w-6 mr-3" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                   <div>
-                    <p className="text-lg font-bold" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-employees-count">24</p>
-                    <p className="text-sm" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>Active Employees</p>
+                    <p className="text-lg font-bold text-black" data-testid="text-employees-count">24</p>
+                    <p className="text-sm text-black">Active Employees</p>
                   </div>
                 </CardContent>
               </Card>
