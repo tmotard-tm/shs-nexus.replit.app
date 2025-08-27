@@ -92,16 +92,15 @@ export default function AssistanceSelection() {
             </p>
           </div>
 
-          <div className="overflow-x-auto pb-4">
-            <div className="flex gap-6 min-w-max">
-              {assistanceOptions.map((option) => {
-                const Icon = option.icon;
-                return (
-                  <Card 
-                    key={option.id} 
-                    className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105 min-w-[300px] flex-shrink-0 bg-card/30 backdrop-blur-sm border-white/20"
-                    data-testid={`card-${option.id}`}
-                  >
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {assistanceOptions.map((option) => {
+              const Icon = option.icon;
+              return (
+                <Card 
+                  key={option.id} 
+                  className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105 bg-card/10 backdrop-blur-sm border-white/20"
+                  data-testid={`card-${option.id}`}
+                >
                     <CardHeader className="text-center">
                       <div 
                         className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-[hsl(var(--${option.color})/.1)]`}
@@ -128,7 +127,6 @@ export default function AssistanceSelection() {
                   </Card>
                 );
               })}
-            </div>
           </div>
 
           {/* Quick Stats or Additional Info */}
