@@ -104,7 +104,7 @@ export default function AssistanceSelection() {
                 >
                     <CardHeader className="text-center">
                       <div 
-                        className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-white/20`}
+                        className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-gray-500/40`}
                         data-testid={`icon-${option.id}`}
                       >
                         <Icon className="h-8 w-8" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
