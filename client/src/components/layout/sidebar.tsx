@@ -34,7 +34,10 @@ export function Sidebar() {
         variant="ghost"
         size="sm"
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute -right-3 top-6 z-50 h-6 w-6 rounded-full border border-border bg-background"
+        className={cn(
+          "fixed top-6 z-50 h-6 w-6 rounded-full border border-border bg-background transition-all duration-300",
+          isCollapsed ? "left-14" : "left-60"
+        )}
         data-testid="button-toggle-sidebar"
       >
         {isCollapsed ? (
