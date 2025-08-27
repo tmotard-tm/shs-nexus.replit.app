@@ -61,7 +61,7 @@ export default function AssistanceSelection() {
               <Settings className="h-4 w-4 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold" data-testid="text-app-title">Admin Platform</h1>
+              <h1 className="text-2xl font-bold" data-testid="text-app-title">Sears Management Platform</h1>
               <p className="text-sm text-muted-foreground">Welcome back, {user?.username}</p>
             </div>
           </div>
@@ -73,10 +73,10 @@ export default function AssistanceSelection() {
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold mb-4" data-testid="text-selection-title">
-              What do you need assistance with?
+              Welcome to Sears Operations
             </h2>
             <p className="text-muted-foreground text-lg">
-              Select the type of task you'd like to complete
+              What can we help you with today?
             </p>
           </div>
 
