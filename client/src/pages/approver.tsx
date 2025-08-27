@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { Request } from "@shared/schema";
+import { BackButton } from "@/components/ui/back-button";
 import { CheckCircle, XCircle, Clock } from "lucide-react";
 
 export default function ApproverInterface() {
@@ -153,6 +154,7 @@ export default function ApproverInterface() {
       />
       
       <main className="p-6">
+        <BackButton href="/" />
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardContent className="flex items-center p-6">

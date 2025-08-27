@@ -7,8 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Car, MapPin, ArrowLeft, Search } from "lucide-react";
-import { Link } from "wouter";
+import { Car, MapPin, Search } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
 
 export default function AssignVehicleLocation() {
   const { toast } = useToast();
@@ -94,14 +94,7 @@ export default function AssignVehicleLocation() {
       
       <main className="p-6">
         <div className="max-w-6xl mx-auto">
-          <div className="mb-6">
-            <Link href="/">
-              <Button variant="outline" size="sm" data-testid="button-back">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Selection
-              </Button>
-            </Link>
-          </div>
+          <BackButton href="/" />
 
           <Tabs defaultValue="vehicle" className="w-full">
             <TabsList className="grid w-full grid-cols-2">

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { ApiConfiguration } from "@shared/schema";
+import { BackButton } from "@/components/ui/back-button";
 import { Plus, Settings, Trash2, TestTube } from "lucide-react";
 
 export default function ApiManagement() {
@@ -157,6 +158,7 @@ export default function ApiManagement() {
       />
       
       <main className="p-6">
+        <BackButton href="/" />
         {/* Stats Overview */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card>

@@ -17,6 +17,7 @@ import RequesterInterface from "@/pages/requester";
 import ApproverInterface from "@/pages/approver";
 import RequestsPage from "@/pages/requests";
 import ApiManagement from "@/pages/api-management";
+import { BackButton } from "@/components/ui/back-button";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -118,6 +119,7 @@ function Router() {
       <Route path="/snowflake">
         <ProtectedRoute>
           <div className="flex-1 ml-64 p-6">
+            <BackButton href="/" />
             <h1 className="text-2xl font-bold">Snowflake Configuration</h1>
             <p className="text-muted-foreground mt-2">Coming soon...</p>
           </div>
@@ -127,6 +129,7 @@ function Router() {
       <Route path="/users">
         <ProtectedRoute>
           <div className="flex-1 ml-64 p-6">
+            <BackButton href="/" />
             <h1 className="text-2xl font-bold">User Management</h1>
             <p className="text-muted-foreground mt-2">Coming soon...</p>
           </div>
@@ -136,6 +139,7 @@ function Router() {
       <Route path="/activity">
         <ProtectedRoute>
           <div className="flex-1 ml-64 p-6">
+            <BackButton href="/" />
             <h1 className="text-2xl font-bold">Activity Logs</h1>
             <p className="text-muted-foreground mt-2">Coming soon...</p>
           </div>

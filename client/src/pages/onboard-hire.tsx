@@ -8,8 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { UserPlus, ArrowLeft, CheckCircle, Clock, Users } from "lucide-react";
-import { Link } from "wouter";
+import { UserPlus, CheckCircle, Clock, Users } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
 
 export default function OnboardHire() {
   const { toast } = useToast();
@@ -97,14 +97,7 @@ export default function OnboardHire() {
       
       <main className="p-6">
         <div className="max-w-7xl mx-auto">
-          <div className="mb-6">
-            <Link href="/">
-              <Button variant="outline" size="sm" data-testid="button-back">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Selection
-              </Button>
-            </Link>
-          </div>
+          <BackButton href="/" />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Employee Information Form */}

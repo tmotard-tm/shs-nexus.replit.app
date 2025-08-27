@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Request } from "@shared/schema";
+import { BackButton } from "@/components/ui/back-button";
 import { useState } from "react";
 import { Search } from "lucide-react";
 
@@ -41,6 +42,7 @@ export default function RequestsPage() {
       />
       
       <main className="p-6">
+        <BackButton href="/" />
         {/* Stats Overview */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card>

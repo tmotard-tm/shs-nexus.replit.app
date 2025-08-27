@@ -5,6 +5,7 @@ import { RequestItem } from "@/components/request-item";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { BackButton } from "@/components/ui/back-button";
 import { Request } from "@shared/schema";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -65,6 +66,7 @@ export default function Dashboard() {
       <TopBar title="Administrator Dashboard" breadcrumbs={["Home", "Dashboard"]} />
       
       <main className="p-6">
+        <BackButton href="/" />
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatsCard

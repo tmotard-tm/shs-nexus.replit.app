@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Car, ArrowLeft } from "lucide-react";
-import { Link } from "wouter";
+import { BackButton } from "@/components/ui/back-button";
+import { Car } from "lucide-react";
 
 export default function CreateVehicle() {
   const { toast } = useToast();
@@ -48,14 +48,7 @@ export default function CreateVehicle() {
       
       <main className="p-6">
         <div className="max-w-4xl mx-auto">
-          <div className="mb-6">
-            <Link href="/">
-              <Button variant="outline" size="sm" data-testid="button-back">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Selection
-              </Button>
-            </Link>
-          </div>
+          <BackButton href="/" />
           <Card>
             <CardHeader>
               <CardTitle data-testid="text-vehicle-title">Add New Vehicle</CardTitle>

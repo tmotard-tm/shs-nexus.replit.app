@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { Request } from "@shared/schema";
+import { BackButton } from "@/components/ui/back-button";
 import { Plus } from "lucide-react";
 
 export default function RequesterInterface() {
@@ -92,6 +93,7 @@ export default function RequesterInterface() {
       />
       
       <main className="p-6">
+        <BackButton href="/" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* My Requests */}
           <div className="lg:col-span-2">
