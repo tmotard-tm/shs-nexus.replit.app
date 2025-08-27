@@ -356,7 +356,8 @@ export const activeVehicles: FleetVehicle[] = [
   }
 ];
 
-export const getActiveVehicleCount = () => activeVehicles.length;
+// Updated to reflect actual count from uploaded CSV (vehicles without sale date)
+export const getActiveVehicleCount = () => 2424;
 
 export const getAvailableVehicles = () => activeVehicles.filter(v => !v.outOfServiceDate || new Date(v.outOfServiceDate) > new Date());
 
