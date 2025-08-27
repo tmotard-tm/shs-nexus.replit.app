@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Car, Search, Calendar, MapPin, Settings, Tag } from "lucide-react";
+import { Car, Search, Calendar, MapPin, Settings } from "lucide-react";
+import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { getAvailableVehicles, getBrandingOptions, getInteriorOptions, getTuneStatusOptions, type FleetVehicle } from "@/data/fleetData";
 
@@ -224,7 +225,7 @@ export default function AssignVehicleLocation() {
                           
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <Tag className="h-4 w-4 text-muted-foreground" />
+                              <img src={licensePlateIcon} alt="License plate" className="h-4 w-5 object-contain" />
                               <span className="text-sm">{vehicle.licensePlate}</span>
                             </div>
                             <p className="text-xs text-muted-foreground">{vehicle.licenseState}</p>
