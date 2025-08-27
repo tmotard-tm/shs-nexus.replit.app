@@ -8,7 +8,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import AssistanceSelection from "@/pages/assistance-selection";
-import CreateVehicleLocation from "@/pages/create-vehicle-location";
+import CreateVehicle from "@/pages/create-vehicle-location";
 import AssignVehicleLocation from "@/pages/assign-vehicle-location";
 import OnboardHire from "@/pages/onboard-hire";
 import OffboardVehicleLocation from "@/pages/offboard-vehicle-location";
@@ -87,7 +87,7 @@ function Router() {
       
       <Route path="/create-vehicle-location">
         <ProtectedRoute>
-          <CreateVehicleLocation />
+          <CreateVehicle />
         </ProtectedRoute>
       </Route>
       
