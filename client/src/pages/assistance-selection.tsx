@@ -99,7 +99,7 @@ export default function AssistanceSelection() {
                 return (
                   <Card 
                     key={option.id} 
-                    className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105 min-w-[300px] flex-shrink-0"
+                    className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105 min-w-[300px] flex-shrink-0 bg-card/30 backdrop-blur-sm border-white/20"
                     data-testid={`card-${option.id}`}
                   >
                     <CardHeader className="text-center">
