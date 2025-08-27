@@ -216,7 +216,7 @@ export default function AssignVehicleLocation() {
                             {targetZipcode.trim() && 'distanceScore' in vehicle && (
                               <div className="flex items-center gap-1 mt-1">
                                 <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
-                                  Distance Score: {vehicle.distanceScore}
+                                  Distance Score: {(vehicle as any).distanceScore}
                                 </span>
                               </div>
                             )}

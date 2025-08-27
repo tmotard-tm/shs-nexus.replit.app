@@ -96,7 +96,11 @@ export default function AssistanceSelection() {
           <div className="flex gap-8">
             {/* Left side stats */}
             <div className="flex flex-col gap-4 w-32">
-              <Card className="bg-white">
+              <Card 
+                className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
+                onClick={() => setLocation("/active-vehicles")}
+                data-testid="card-active-vehicles"
+              >
                 <CardContent className="flex flex-col items-center text-center p-4">
                   <Car className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                   <p className="text-lg font-bold text-black" data-testid="text-vehicles-count">{getActiveVehicleCount()}</p>

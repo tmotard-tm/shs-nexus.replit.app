@@ -13,6 +13,7 @@ import CreateVehicle from "@/pages/create-vehicle-location";
 import AssignVehicleLocation from "@/pages/assign-vehicle-location";
 import OnboardHire from "@/pages/onboard-hire";
 import OffboardVehicleLocation from "@/pages/offboard-vehicle-location";
+import ActiveVehicles from "@/pages/active-vehicles";
 import Dashboard from "@/pages/dashboard";
 import RequesterInterface from "@/pages/requester";
 import ApproverInterface from "@/pages/approver";
@@ -167,6 +168,12 @@ function Router() {
             <h1 className="text-2xl font-bold">Activity Logs</h1>
             <p className="text-muted-foreground mt-2">Coming soon...</p>
           </MainContent>
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/active-vehicles">
+        <ProtectedRoute>
+          <ActiveVehicles />
         </ProtectedRoute>
       </Route>
       
