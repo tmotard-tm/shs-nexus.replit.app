@@ -81,7 +81,7 @@ export default function AssistanceSelection() {
         }}
       >
         {/* Overlay for better content readability */}
-        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm"></div>
+        <div className="absolute inset-0 bg-background/80"></div>
         <div className="relative z-10 max-w-6xl mx-auto">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold mb-4" data-testid="text-selection-title">
