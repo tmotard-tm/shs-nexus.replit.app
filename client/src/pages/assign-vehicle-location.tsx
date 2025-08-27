@@ -225,7 +225,7 @@ export default function AssignVehicleLocation() {
                           
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <img src={licensePlateIcon} alt="License plate" className="h-4 w-5 object-contain" />
+                              <img src={licensePlateIcon} alt="License plate" className="h-6 w-8 object-contain" />
                               <span className="text-sm">{vehicle.licensePlate}</span>
                             </div>
                             <p className="text-xs text-muted-foreground">{vehicle.licenseState}</p>
