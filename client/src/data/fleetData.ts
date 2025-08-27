@@ -65484,6 +65484,8 @@ export const getActiveVehicleCount = () => activeVehicles.length;
 
 export const getAvailableVehicles = () => activeVehicles.filter(v => !v.outOfServiceDate || new Date(v.outOfServiceDate) > new Date());
 
+export const getUnassignedVehicles = () => activeVehicles.filter(v => v.outOfServiceDate && new Date(v.outOfServiceDate) <= new Date());
+
 export const getBrandingOptions = () => Array.from(new Set(activeVehicles.map(v => v.branding))).filter(Boolean).sort();
 
 export const getInteriorOptions = () => Array.from(new Set(activeVehicles.map(v => v.interior))).filter(Boolean).sort();

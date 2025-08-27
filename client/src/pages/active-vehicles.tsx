@@ -14,6 +14,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { 
   getAvailableVehicles, 
   getActiveVehicleCount,
+  getUnassignedVehicles,
   activeVehicles,
   getBrandingOptions, 
   getInteriorOptions, 
@@ -65,12 +66,19 @@ export default function ActiveVehicles() {
     yearFilter, cityFilter, assignmentStatusFilter
   ].filter(filter => filter !== "all").length;
 
-  // Check if we should show only assigned vehicles based on URL parameter
+  // Check if we should filter vehicles based on URL parameter
   const urlParams = new URLSearchParams(window.location.search);
-  const showOnlyAssigned = urlParams.get('filter') === 'assigned';
+  const filterParam = urlParams.get('filter');
+  const showOnlyAssigned = filterParam === 'assigned';
+  const showOnlyUnassigned = filterParam === 'unassigned';
   
   // Use appropriate vehicle list based on filter
-  const baseVehicles = showOnlyAssigned ? getAvailableVehicles() : activeVehicles;
+  let baseVehicles = activeVehicles;
+  if (showOnlyAssigned) {
+    baseVehicles = getAvailableVehicles();
+  } else if (showOnlyUnassigned) {
+    baseVehicles = getUnassignedVehicles();
+  }
   const filteredVehicles = baseVehicles.filter(vehicle => {
     const matchesSearch = !searchQuery || 
       vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -104,8 +112,8 @@ export default function ActiveVehicles() {
   return (
     <MainContent>
       <TopBar 
-        title={showOnlyAssigned ? "Assigned Vehicles" : "Active Vehicles"}
-        breadcrumbs={["Home", showOnlyAssigned ? "Assigned Vehicles" : "Active Vehicles"]}
+        title={showOnlyAssigned ? "Assigned Vehicles" : showOnlyUnassigned ? "Unassigned Vehicles" : "Active Vehicles"}
+        breadcrumbs={["Home", showOnlyAssigned ? "Assigned Vehicles" : showOnlyUnassigned ? "Unassigned Vehicles" : "Active Vehicles"]}
       />
       
       <main className="p-6">
@@ -117,7 +125,7 @@ export default function ActiveVehicles() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span>{showOnlyAssigned ? "Search Assigned Vehicles" : "Search Active Vehicles"}</span>
+                  <span>{showOnlyAssigned ? "Search Assigned Vehicles" : showOnlyUnassigned ? "Search Unassigned Vehicles" : "Search Active Vehicles"}</span>
                   <div className="flex items-center gap-2">
                     {activeFiltersCount > 0 && (
                       <span className="text-sm bg-primary/10 text-primary px-2 py-1 rounded-full">
@@ -422,7 +430,7 @@ export default function ActiveVehicles() {
             {/* Vehicle List */}
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">{showOnlyAssigned ? `Assigned Vehicles (${baseVehicles.length})` : `Active Vehicles (${getActiveVehicleCount()})`}</h3>
+                <h3 className="text-lg font-semibold">{showOnlyAssigned ? `Assigned Vehicles (${baseVehicles.length})` : showOnlyUnassigned ? `Unassigned Vehicles (${baseVehicles.length})` : `Active Vehicles (${getActiveVehicleCount()})`}</h3>
               </div>
               
               <div className="grid gap-4">
