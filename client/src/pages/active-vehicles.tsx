@@ -12,6 +12,7 @@ import licensePlateIcon from "@assets/generated_images/Generic_license_plate_ico
 import { BackButton } from "@/components/ui/back-button";
 import { 
   getAvailableVehicles, 
+  getActiveVehicleCount,
   getBrandingOptions, 
   getInteriorOptions, 
   getTuneStatusOptions,
@@ -378,7 +379,7 @@ export default function ActiveVehicles() {
             {/* Vehicle List */}
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">Active Vehicles ({filteredVehicles.length})</h3>
+                <h3 className="text-lg font-semibold">Active Vehicles ({getActiveVehicleCount()})</h3>
               </div>
               
               <div className="grid gap-4">
