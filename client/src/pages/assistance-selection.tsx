@@ -22,7 +22,7 @@ export default function AssistanceSelection() {
     },
     {
       id: "assign-vehicle-location", 
-      title: "Assign a vehicle",
+      title: "Assign or update a vehicle",
       description: "Assign existing vehicles to users",
       icon: MapPin,
       color: "chart-2", 
