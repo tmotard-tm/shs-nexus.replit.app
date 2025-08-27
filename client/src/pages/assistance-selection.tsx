@@ -2,10 +2,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
-import { Car, MapPin, UserPlus, UserMinus, HelpCircle, Settings } from "lucide-react";
+import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
-import { getActiveVehicleCount } from "@/data/fleetData";
+import { getActiveVehicleCount, getAvailableVehicles } from "@/data/fleetData";
 
 export default function AssistanceSelection() {
   const { user } = useAuth();
@@ -116,9 +116,9 @@ export default function AssistanceSelection() {
               </Card>
               <Card className="bg-white">
                 <CardContent className="flex flex-col items-center text-center p-4">
-                  <UserPlus className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                  <p className="text-lg font-bold text-black" data-testid="text-employees-count">24</p>
-                  <p className="text-sm text-black">Active Employees</p>
+                  <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                  <p className="text-lg font-bold text-black" data-testid="text-assigned-count">{getAvailableVehicles().length}</p>
+                  <p className="text-sm text-black">Assigned Vehicles</p>
                 </CardContent>
               </Card>
             </div>
