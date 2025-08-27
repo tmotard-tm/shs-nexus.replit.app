@@ -107,7 +107,7 @@ export default function AssistanceSelection() {
                         className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-white/20`}
                         data-testid={`icon-${option.id}`}
                       >
-                        <Icon className="h-8 w-8" style={{ color: '#01effc' }} />
+                        <Icon className="h-8 w-8" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                       </div>
                       <CardTitle className="text-lg font-bold" style={{ color: '#01effc', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid={`title-${option.id}`}>
                         {option.title}
