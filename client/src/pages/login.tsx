@@ -10,6 +10,7 @@ import { Settings } from "lucide-react";
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [enterpriseId, setEnterpriseId] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const { toast } = useToast();
@@ -19,7 +20,7 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      const success = await login(username, password);
+      const success = await login(username, password, enterpriseId);
       if (!success) {
         toast({
           title: "Login Failed",
@@ -47,13 +48,25 @@ export default function Login() {
               <Settings className="h-6 w-6 text-primary-foreground" />
             </div>
           </div>
-          <CardTitle className="text-2xl" data-testid="text-login-title">Admin Platform</CardTitle>
+          <CardTitle className="text-2xl" data-testid="text-login-title">Sears Management Platform</CardTitle>
           <CardDescription data-testid="text-login-description">
-            Sign in to access the admin dashboard
+            Sign in to access Sears Operations
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="enterpriseId">Enterprise ID</Label>
+              <Input
+                id="enterpriseId"
+                type="text"
+                value={enterpriseId}
+                onChange={(e) => setEnterpriseId(e.target.value)}
+                placeholder="Enter your Enterprise ID"
+                required
+                data-testid="input-enterprise-id"
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="username">Username</Label>
               <Input
@@ -88,9 +101,10 @@ export default function Login() {
             </Button>
           </form>
           <div className="mt-4 text-center text-sm text-muted-foreground">
-            <p>Demo credentials:</p>
-            <p><strong>Username:</strong> admin</p>
-            <p><strong>Password:</strong> admin123</p>
+            <p>Demo Enterprise IDs:</p>
+            <p><strong>Requesters:</strong> ENT1234</p>
+            <p><strong>Approvers:</strong> ENT1235</p>
+            <p><strong>Administrators:</strong> ADMIN123</p>
           </div>
         </CardContent>
       </Card>
