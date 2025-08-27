@@ -84,10 +84,10 @@ export default function AssistanceSelection() {
         <div className="absolute inset-0 bg-background/80"></div>
         <div className="relative z-10 max-w-6xl mx-auto">
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold mb-4" style={{ color: '#007bff' }} data-testid="text-selection-title">
+            <h2 className="text-3xl font-bold mb-4" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-selection-title">
               Welcome to Sears Vehicle and Asset Tool
             </h2>
-            <p className="text-muted-foreground text-lg">
+            <p className="text-lg" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>
               What can we help you with today?
             </p>
           </div>
@@ -109,10 +109,10 @@ export default function AssistanceSelection() {
                       >
                         <Icon className="h-8 w-8" style={{ color: '#01effc' }} />
                       </div>
-                      <CardTitle className="text-lg font-bold drop-shadow-sm" style={{ color: '#01effc' }} data-testid={`title-${option.id}`}>
+                      <CardTitle className="text-lg font-bold" style={{ color: '#01effc', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid={`title-${option.id}`}>
                         {option.title}
                       </CardTitle>
-                      <CardDescription className="font-medium drop-shadow-sm" style={{ color: '#01effc' }} data-testid={`description-${option.id}`}>
+                      <CardDescription className="font-medium" style={{ color: '#01effc', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid={`description-${option.id}`}>
                         {option.description}
                       </CardDescription>
                     </CardHeader>
