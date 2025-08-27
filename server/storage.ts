@@ -64,16 +64,35 @@ export class MemStorage implements IStorage {
   }
 
   private async initializeDefaultData() {
-    // Create admin user
-    const adminUser: User = {
-      id: randomUUID(),
-      username: "admin",
-      email: "admin@company.com",
-      password: "admin123", // In real app, this would be hashed
-      role: "admin",
-      createdAt: new Date(),
-    };
-    this.users.set(adminUser.id, adminUser);
+    // Create Enterprise ID users
+    const enterpriseUsers: User[] = [
+      {
+        id: randomUUID(),
+        username: "ENT1234",
+        email: "requester@sears.com",
+        password: "passwords", // In real app, this would be hashed
+        role: "requester",
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "ENT1235",
+        email: "approver@sears.com",
+        password: "passwords", // In real app, this would be hashed
+        role: "approver",
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "ADMIN123",
+        email: "admin@sears.com",
+        password: "passwords", // In real app, this would be hashed
+        role: "admin",
+        createdAt: new Date(),
+      },
+    ];
+    
+    enterpriseUsers.forEach(user => this.users.set(user.id, user));
 
     // Create sample API configurations
     const sampleApis: ApiConfiguration[] = [
@@ -128,7 +147,8 @@ export class MemStorage implements IStorage {
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
     const user: User = { 
-      ...insertUser, 
+      ...insertUser,
+      role: insertUser.role || "requester",
       id, 
       createdAt: new Date(),
     };
@@ -172,6 +192,10 @@ export class MemStorage implements IStorage {
     const id = randomUUID();
     const request: Request = {
       ...insertRequest,
+      status: insertRequest.status || "pending",
+      priority: insertRequest.priority || "medium",
+      targetApi: insertRequest.targetApi || null,
+      approverId: insertRequest.approverId || null,
       id,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -206,6 +230,9 @@ export class MemStorage implements IStorage {
     const id = randomUUID();
     const config: ApiConfiguration = {
       ...insertConfig,
+      apiKey: insertConfig.apiKey || null,
+      isActive: insertConfig.isActive !== undefined ? insertConfig.isActive : true,
+      healthStatus: insertConfig.healthStatus || "healthy",
       id,
       lastChecked: new Date(),
       createdAt: new Date(),
@@ -244,6 +271,8 @@ export class MemStorage implements IStorage {
     const id = randomUUID();
     const log: ActivityLog = {
       ...insertLog,
+      entityId: insertLog.entityId || null,
+      details: insertLog.details || null,
       id,
       createdAt: new Date(),
     };
