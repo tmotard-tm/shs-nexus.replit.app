@@ -52,105 +52,103 @@ export default function AssistanceSelection() {
   ];
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="flex-1">
       {/* Header */}
-      <div className="flex-1">
-        <header className="bg-card border-b border-border">
-          <div className="flex items-center justify-between p-6">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                <Settings className="h-4 w-4 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold" data-testid="text-app-title">Admin Platform</h1>
-                <p className="text-sm text-muted-foreground">Welcome back, {user?.username}</p>
-              </div>
+      <header className="bg-card border-b border-border">
+        <div className="flex items-center justify-between p-6">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+              <Settings className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold" data-testid="text-app-title">Admin Platform</h1>
+              <p className="text-sm text-muted-foreground">Welcome back, {user?.username}</p>
             </div>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* Main Content */}
-        <main className="p-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-8">
-              <h2 className="text-3xl font-bold mb-4" data-testid="text-selection-title">
-                What do you need assistance with?
-              </h2>
-              <p className="text-muted-foreground text-lg">
-                Select the type of task you'd like to complete
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {assistanceOptions.map((option) => {
-                const Icon = option.icon;
-                return (
-                  <Card 
-                    key={option.id} 
-                    className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-                    data-testid={`card-${option.id}`}
-                  >
-                    <CardHeader className="text-center">
-                      <div 
-                        className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-[hsl(var(--${option.color})/.1)]`}
-                        data-testid={`icon-${option.id}`}
-                      >
-                        <Icon className={`h-8 w-8 text-[hsl(var(--${option.color}))]`} />
-                      </div>
-                      <CardTitle className="text-lg" data-testid={`title-${option.id}`}>
-                        {option.title}
-                      </CardTitle>
-                      <CardDescription data-testid={`description-${option.id}`}>
-                        {option.description}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <Button 
-                        onClick={option.action}
-                        className="w-full"
-                        data-testid={`button-${option.id}`}
-                      >
-                        Get Started
-                      </Button>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-
-            {/* Quick Stats or Additional Info */}
-            <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-              <Card>
-                <CardContent className="flex items-center p-6">
-                  <Car className="h-8 w-8 text-[hsl(var(--chart-1))] mr-4" />
-                  <div>
-                    <p className="text-2xl font-bold" data-testid="text-vehicles-count">12</p>
-                    <p className="text-sm text-muted-foreground">Active Vehicles</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="flex items-center p-6">
-                  <MapPin className="h-8 w-8 text-[hsl(var(--chart-2))] mr-4" />
-                  <div>
-                    <p className="text-2xl font-bold" data-testid="text-locations-count">8</p>
-                    <p className="text-sm text-muted-foreground">Locations</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="flex items-center p-6">
-                  <UserPlus className="h-8 w-8 text-[hsl(var(--chart-3))] mr-4" />
-                  <div>
-                    <p className="text-2xl font-bold" data-testid="text-employees-count">24</p>
-                    <p className="text-sm text-muted-foreground">Active Employees</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+      {/* Main Content */}
+      <main className="p-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-8">
+            <h2 className="text-3xl font-bold mb-4" data-testid="text-selection-title">
+              What do you need assistance with?
+            </h2>
+            <p className="text-muted-foreground text-lg">
+              Select the type of task you'd like to complete
+            </p>
           </div>
-        </main>
-      </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {assistanceOptions.map((option) => {
+              const Icon = option.icon;
+              return (
+                <Card 
+                  key={option.id} 
+                  className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
+                  data-testid={`card-${option.id}`}
+                >
+                  <CardHeader className="text-center">
+                    <div 
+                      className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-[hsl(var(--${option.color})/.1)]`}
+                      data-testid={`icon-${option.id}`}
+                    >
+                      <Icon className={`h-8 w-8 text-[hsl(var(--${option.color}))]`} />
+                    </div>
+                    <CardTitle className="text-lg" data-testid={`title-${option.id}`}>
+                      {option.title}
+                    </CardTitle>
+                    <CardDescription data-testid={`description-${option.id}`}>
+                      {option.description}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button 
+                      onClick={option.action}
+                      className="w-full"
+                      data-testid={`button-${option.id}`}
+                    >
+                      Get Started
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Quick Stats or Additional Info */}
+          <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card>
+              <CardContent className="flex items-center p-6">
+                <Car className="h-8 w-8 text-[hsl(var(--chart-1))] mr-4" />
+                <div>
+                  <p className="text-2xl font-bold" data-testid="text-vehicles-count">12</p>
+                  <p className="text-sm text-muted-foreground">Active Vehicles</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="flex items-center p-6">
+                <MapPin className="h-8 w-8 text-[hsl(var(--chart-2))] mr-4" />
+                <div>
+                  <p className="text-2xl font-bold" data-testid="text-locations-count">8</p>
+                  <p className="text-sm text-muted-foreground">Locations</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="flex items-center p-6">
+                <UserPlus className="h-8 w-8 text-[hsl(var(--chart-3))] mr-4" />
+                <div>
+                  <p className="text-2xl font-bold" data-testid="text-employees-count">24</p>
+                  <p className="text-sm text-muted-foreground">Active Employees</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
