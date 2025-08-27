@@ -106,7 +106,7 @@ export default function CreateVehicle() {
                       <SelectContent>
                         <SelectItem value="rental" data-testid="option-rental">Rental</SelectItem>
                         <SelectItem value="byov" data-testid="option-byov">Bring Your Own Vehicle (B.Y.O.V.)</SelectItem>
-                        <SelectItem value="sears-fleet" data-testid="option-sears-fleet">Sears Fleet Vehicle</SelectItem>
+                        <SelectItem value="sears-fleet" data-testid="option-sears-fleet">Sears Fleet</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
