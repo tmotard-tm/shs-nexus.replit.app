@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { RoleSelector } from "@/components/role-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3 } from "lucide-react";
+import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
@@ -12,6 +12,7 @@ export function Sidebar() {
   if (!user) return null;
 
   const navigation = [
+    { name: "Home", href: "/", icon: Home },
     { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
     { name: "Requests", href: "/requests", icon: FileText },
     { name: "Approvals", href: "/approvals", icon: CheckCircle },
