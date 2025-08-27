@@ -24,6 +24,7 @@ export default function AssignVehicleLocation() {
   const [searchQuery, setSearchQuery] = useState("");
   const [brandingFilter, setBrandingFilter] = useState("all");
   const [interiorFilter, setInteriorFilter] = useState("all");
+  const [targetZipcode, setTargetZipcode] = useState("");
 
   // Real data from CSV
   const employees = [
@@ -34,8 +35,18 @@ export default function AssignVehicleLocation() {
     { id: "5", name: "David Brown", department: "Field Service", region: "Southwest" }
   ];
 
+  // Simple distance calculation based on zip code numerical difference
+  // This is a basic approximation - can be enhanced with proper geocoding later
+  const calculateZipDistance = (zip1: string, zip2: string): number => {
+    if (!zip1 || !zip2) return 9999;
+    const num1 = parseInt(zip1.replace(/\D/g, ''), 10);
+    const num2 = parseInt(zip2.replace(/\D/g, ''), 10);
+    if (isNaN(num1) || isNaN(num2)) return 9999;
+    return Math.abs(num1 - num2);
+  };
+
   const availableVehicles = getAvailableVehicles();
-  const filteredVehicles = availableVehicles.filter(vehicle => {
+  let filteredVehicles = availableVehicles.filter(vehicle => {
     const matchesSearch = !searchQuery || 
       vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
       vehicle.vehicleNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -47,6 +58,16 @@ export default function AssignVehicleLocation() {
     
     return matchesSearch && matchesBranding && matchesInterior;
   });
+
+  // Sort by distance to target zipcode if provided
+  if (targetZipcode.trim()) {
+    filteredVehicles = filteredVehicles
+      .map(vehicle => ({
+        ...vehicle,
+        distanceScore: calculateZipDistance(vehicle.zip, targetZipcode.trim())
+      }))
+      .sort((a, b) => a.distanceScore - b.distanceScore);
+  }
 
 
   const handleVehicleAssignment = (e: React.FormEvent) => {
@@ -107,15 +128,26 @@ export default function AssignVehicleLocation() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                    <Input
-                      placeholder="Search vehicles..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10"
-                      data-testid="input-search-vehicles"
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        placeholder="Search vehicles..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-10"
+                        data-testid="input-search-vehicles"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Sort by distance to zipcode</Label>
+                      <Input
+                        placeholder="Enter zipcode (e.g. 10001)"
+                        value={targetZipcode}
+                        onChange={(e) => setTargetZipcode(e.target.value)}
+                        data-testid="input-target-zipcode"
+                      />
+                    </div>
                   </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -154,7 +186,14 @@ export default function AssignVehicleLocation() {
               {/* Vehicle List */}
               <div className="grid gap-4">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold">Available Vehicles ({filteredVehicles.length})</h3>
+                  <h3 className="text-lg font-semibold">
+                    Available Vehicles ({filteredVehicles.length})
+                    {targetZipcode.trim() && (
+                      <span className="text-sm font-normal text-muted-foreground ml-2">
+                        - Sorted by distance to {targetZipcode}
+                      </span>
+                    )}
+                  </h3>
                 </div>
                 
                 <div className="grid gap-4">
@@ -174,6 +213,13 @@ export default function AssignVehicleLocation() {
                             </div>
                             <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                             <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
+                            {targetZipcode.trim() && 'distanceScore' in vehicle && (
+                              <div className="flex items-center gap-1 mt-1">
+                                <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
+                                  Distance Score: {vehicle.distanceScore}
+                                </span>
+                              </div>
+                            )}
                           </div>
                           
                           <div className="space-y-1">
@@ -194,7 +240,7 @@ export default function AssignVehicleLocation() {
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
                               <MapPin className="h-4 w-4 text-muted-foreground" />
-                              <span className="text-sm">{vehicle.city}, {vehicle.state}</span>
+                              <span className="text-sm">{vehicle.city}, {vehicle.state} {vehicle.zip}</span>
                             </div>
                             <p className="text-xs text-muted-foreground">Region: {vehicle.region}</p>
                             <p className="text-xs text-muted-foreground">District: {vehicle.district}</p>
