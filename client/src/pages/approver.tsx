@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { Request } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
+import { MainContent } from "@/components/layout/main-content";
 import { CheckCircle, XCircle, Clock } from "lucide-react";
 
 export default function ApproverInterface() {
@@ -147,7 +148,7 @@ export default function ApproverInterface() {
   );
 
   return (
-    <div className="flex-1 ml-64">
+    <MainContent>
       <TopBar 
         title="Approver Interface" 
         breadcrumbs={["Home", "Approver"]}
@@ -289,6 +290,6 @@ export default function ApproverInterface() {
           </TabsContent>
         </Tabs>
       </main>
-    </div>
+    </MainContent>
   );
 }

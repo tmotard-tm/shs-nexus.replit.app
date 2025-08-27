@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { ApiConfiguration } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
+import { MainContent } from "@/components/layout/main-content";
 import { Plus, Settings, Trash2, TestTube } from "lucide-react";
 
 export default function ApiManagement() {
@@ -151,7 +152,7 @@ export default function ApiManagement() {
   };
 
   return (
-    <div className="flex-1 ml-64">
+    <MainContent>
       <TopBar 
         title="API Management" 
         breadcrumbs={["Home", "API Management"]}
@@ -382,6 +383,6 @@ export default function ApiManagement() {
           </CardContent>
         </Card>
       </main>
-    </div>
+    </MainContent>
   );
 }

@@ -14,6 +14,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { Request } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
+import { MainContent } from "@/components/layout/main-content";
 import { Plus } from "lucide-react";
 
 export default function RequesterInterface() {
@@ -85,7 +86,7 @@ export default function RequesterInterface() {
   };
 
   return (
-    <div className="flex-1 ml-64">
+    <MainContent>
       <TopBar 
         title="Requester Interface" 
         breadcrumbs={["Home", "Requester"]}
@@ -307,6 +308,6 @@ export default function RequesterInterface() {
           </DialogContent>
         </Dialog>
       </main>
-    </div>
+    </MainContent>
   );
 }

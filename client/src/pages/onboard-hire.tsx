@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { TopBar } from "@/components/layout/top-bar";
+import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,7 +90,7 @@ export default function OnboardHire() {
   const totalTasks = onboardingTasks.length;
 
   return (
-    <div className="flex-1">
+    <MainContent>
       <TopBar 
         title="Onboard New Hire" 
         breadcrumbs={["Home", "Onboard"]}
@@ -349,6 +350,6 @@ export default function OnboardHire() {
           </div>
         </div>
       </main>
-    </div>
+    </MainContent>
   );
 }

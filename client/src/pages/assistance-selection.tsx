@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
 import { Car, MapPin, UserPlus, UserMinus, HelpCircle, Settings } from "lucide-react";
 import { useLocation } from "wouter";
@@ -52,7 +53,7 @@ export default function AssistanceSelection() {
   ];
 
   return (
-    <div className="flex-1">
+    <MainContent>
       {/* Header */}
       <header className="bg-card border-b border-border">
         <div className="flex items-center justify-between p-6">
@@ -149,6 +150,6 @@ export default function AssistanceSelection() {
           </div>
         </div>
       </main>
-    </div>
+    </MainContent>
   );
 }

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
+import { MainContent } from "@/components/layout/main-content";
 import { StatsCard } from "@/components/stats-card";
 import { RequestItem } from "@/components/request-item";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,7 +63,7 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="flex-1 ml-64">
+    <MainContent>
       <TopBar title="Administrator Dashboard" breadcrumbs={["Home", "Dashboard"]} />
       
       <main className="p-6">
@@ -218,6 +219,6 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
-    </div>
+    </MainContent>
   );
 }

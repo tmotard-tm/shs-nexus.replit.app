@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { SidebarProvider } from "@/hooks/use-sidebar";
 import { Sidebar } from "@/components/layout/sidebar";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
@@ -18,6 +19,7 @@ import ApproverInterface from "@/pages/approver";
 import RequestsPage from "@/pages/requests";
 import ApiManagement from "@/pages/api-management";
 import { BackButton } from "@/components/ui/back-button";
+import { MainContent } from "@/components/layout/main-content";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -118,31 +120,31 @@ function Router() {
       
       <Route path="/snowflake">
         <ProtectedRoute>
-          <div className="flex-1 ml-64 p-6">
+          <MainContent className="p-6">
             <BackButton href="/" />
             <h1 className="text-2xl font-bold">Snowflake Configuration</h1>
             <p className="text-muted-foreground mt-2">Coming soon...</p>
-          </div>
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/users">
         <ProtectedRoute>
-          <div className="flex-1 ml-64 p-6">
+          <MainContent className="p-6">
             <BackButton href="/" />
             <h1 className="text-2xl font-bold">User Management</h1>
             <p className="text-muted-foreground mt-2">Coming soon...</p>
-          </div>
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
       <Route path="/activity">
         <ProtectedRoute>
-          <div className="flex-1 ml-64 p-6">
+          <MainContent className="p-6">
             <BackButton href="/" />
             <h1 className="text-2xl font-bold">Activity Logs</h1>
             <p className="text-muted-foreground mt-2">Coming soon...</p>
-          </div>
+          </MainContent>
         </ProtectedRoute>
       </Route>
       
@@ -156,8 +158,10 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthProvider>
-          <Toaster />
-          <Router />
+          <SidebarProvider>
+            <Toaster />
+            <Router />
+          </SidebarProvider>
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>

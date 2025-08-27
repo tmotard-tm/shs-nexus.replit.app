@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Request } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
+import { MainContent } from "@/components/layout/main-content";
 import { useState } from "react";
 import { Search } from "lucide-react";
 
@@ -35,7 +36,7 @@ export default function RequestsPage() {
   };
 
   return (
-    <div className="flex-1 ml-64">
+    <MainContent>
       <TopBar 
         title="All Requests" 
         breadcrumbs={["Home", "Requests"]}
@@ -174,6 +175,6 @@ export default function RequestsPage() {
           </CardContent>
         </Card>
       </main>
-    </div>
+    </MainContent>
   );
 }

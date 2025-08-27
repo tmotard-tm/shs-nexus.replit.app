@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { TopBar } from "@/components/layout/top-bar";
+import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -86,7 +87,7 @@ export default function AssignVehicleLocation() {
   };
 
   return (
-    <div className="flex-1">
+    <MainContent>
       <TopBar 
         title="Assign Vehicle/Location" 
         breadcrumbs={["Home", "Assign"]}
@@ -319,6 +320,6 @@ export default function AssignVehicleLocation() {
           </Tabs>
         </div>
       </main>
-    </div>
+    </MainContent>
   );
 }
