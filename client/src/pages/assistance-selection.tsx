@@ -82,7 +82,7 @@ export default function AssistanceSelection() {
       >
         {/* Overlay for better content readability */}
         <div className="absolute inset-0 bg-background/80"></div>
-        <div className="relative z-10 max-w-6xl mx-auto">
+        <div className="relative z-10 max-w-7xl mx-auto">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold mb-4" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-selection-title">
               Welcome to Sears Vehicle and Asset Tool
@@ -92,7 +92,40 @@ export default function AssistanceSelection() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          <div className="flex gap-8">
+            {/* Left side stats */}
+            <div className="flex flex-col gap-4 w-64">
+              <Card className="bg-gray-500/20 backdrop-blur-sm border-white/20">
+                <CardContent className="flex items-center p-4">
+                  <Car className="h-6 w-6 mr-3" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                  <div>
+                    <p className="text-lg font-bold" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-vehicles-count">12</p>
+                    <p className="text-sm" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>Active Vehicles</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-gray-500/20 backdrop-blur-sm border-white/20">
+                <CardContent className="flex items-center p-4">
+                  <MapPin className="h-6 w-6 mr-3" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                  <div>
+                    <p className="text-lg font-bold" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-locations-count">8</p>
+                    <p className="text-sm" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>Locations</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-gray-500/20 backdrop-blur-sm border-white/20">
+                <CardContent className="flex items-center p-4">
+                  <UserPlus className="h-6 w-6 mr-3" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                  <div>
+                    <p className="text-lg font-bold" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-employees-count">24</p>
+                    <p className="text-sm" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>Active Employees</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Right side main options */}
+            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {assistanceOptions.map((option) => {
               const Icon = option.icon;
               return (
@@ -128,37 +161,7 @@ export default function AssistanceSelection() {
                   </Card>
                 );
               })}
-          </div>
-
-          {/* Quick Stats or Additional Info */}
-          <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card>
-              <CardContent className="flex items-center p-6">
-                <Car className="h-8 w-8 text-[hsl(var(--chart-1))] mr-4" />
-                <div>
-                  <p className="text-2xl font-bold" data-testid="text-vehicles-count">12</p>
-                  <p className="text-sm text-muted-foreground">Active Vehicles</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="flex items-center p-6">
-                <MapPin className="h-8 w-8 text-[hsl(var(--chart-2))] mr-4" />
-                <div>
-                  <p className="text-2xl font-bold" data-testid="text-locations-count">8</p>
-                  <p className="text-sm text-muted-foreground">Locations</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="flex items-center p-6">
-                <UserPlus className="h-8 w-8 text-[hsl(var(--chart-3))] mr-4" />
-                <div>
-                  <p className="text-2xl font-bold" data-testid="text-employees-count">24</p>
-                  <p className="text-sm text-muted-foreground">Active Employees</p>
-                </div>
-              </CardContent>
-            </Card>
+            </div>
           </div>
         </div>
       </main>
