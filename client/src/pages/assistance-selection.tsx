@@ -103,15 +103,15 @@ export default function AssistanceSelection() {
                 >
                     <CardHeader className="text-center">
                       <div 
-                        className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-[hsl(var(--${option.color})/.1)]`}
+                        className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-[hsl(var(--${option.color})/.2)]`}
                         data-testid={`icon-${option.id}`}
                       >
                         <Icon className={`h-8 w-8 text-[hsl(var(--${option.color}))]`} />
                       </div>
-                      <CardTitle className="text-lg" data-testid={`title-${option.id}`}>
+                      <CardTitle className="text-lg font-bold text-foreground drop-shadow-sm" data-testid={`title-${option.id}`}>
                         {option.title}
                       </CardTitle>
-                      <CardDescription data-testid={`description-${option.id}`}>
+                      <CardDescription className="text-foreground/90 font-medium drop-shadow-sm" data-testid={`description-${option.id}`}>
                         {option.description}
                       </CardDescription>
                     </CardHeader>
