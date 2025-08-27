@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { 
@@ -412,6 +412,19 @@ export default function ActiveVehicles() {
                           </div>
                           <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
+                          <div className="flex items-center gap-2 mt-2">
+                            {!vehicle.outOfServiceDate ? (
+                              <>
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                                <span className="text-sm font-medium text-green-600" data-testid="status-assigned">Assigned</span>
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="h-4 w-4 text-red-500" />
+                                <span className="text-sm font-medium text-red-600" data-testid="status-unassigned">Unassigned</span>
+                              </>
+                            )}
+                          </div>
                         </div>
                         
                         <div className="space-y-1">
