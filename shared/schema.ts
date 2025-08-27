@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -47,6 +47,38 @@ export const activityLogs = pgTable("activity_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const vehicles = pgTable("vehicles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  vin: varchar("vin", { length: 17 }).notNull().unique(),
+  vehicleNumber: varchar("vehicle_number"),
+  modelYear: integer("model_year").notNull(),
+  makeName: text("make_name").notNull(),
+  modelName: text("model_name").notNull(),
+  color: text("color"),
+  licensePlate: varchar("license_plate"),
+  licenseState: varchar("license_state", { length: 2 }),
+  deliveryDate: date("delivery_date"),
+  outOfServiceDate: date("out_of_service_date"),
+  saleDate: date("sale_date"),
+  registrationRenewalDate: date("registration_renewal_date"),
+  odometerDelivery: integer("odometer_delivery"),
+  branding: text("branding"), // AE Factory Service, Sears, Unmarked
+  interior: text("interior"), // Lawn & Garden, Utility With Ref Racks, Utility Without Ref Racks, Empty
+  tuneStatus: text("tune_status"), // Maximum, Medium, Stock, NA
+  region: varchar("region"),
+  district: varchar("district"),
+  deliveryAddress: text("delivery_address"),
+  city: text("city"),
+  state: varchar("state", { length: 2 }),
+  zip: varchar("zip", { length: 10 }),
+  mis: varchar("mis"),
+  remainingBookValue: decimal("remaining_book_value", { precision: 10, scale: 2 }),
+  leaseEndDate: date("lease_end_date"),
+  status: text("status").notNull().default("available"), // available, assigned, maintenance, retired
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -70,6 +102,12 @@ export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({
   createdAt: true,
 });
 
+export const insertVehicleSchema = createInsertSchema(vehicles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -79,3 +117,5 @@ export type ApiConfiguration = typeof apiConfigurations.$inferSelect;
 export type InsertApiConfiguration = z.infer<typeof insertApiConfigurationSchema>;
 export type ActivityLog = typeof activityLogs.$inferSelect;
 export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
+export type Vehicle = typeof vehicles.$inferSelect;
+export type InsertVehicle = z.infer<typeof insertVehicleSchema>;
