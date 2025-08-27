@@ -38,7 +38,7 @@ export default function AssistanceSelection() {
     },
     {
       id: "offboard-vehicle-location",
-      title: "Offboard a vehicle or location", 
+      title: "Offboarding", 
       description: "Remove vehicles or locations from the system",
       icon: UserMinus,
       color: "chart-4",
