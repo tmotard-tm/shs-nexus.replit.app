@@ -96,30 +96,24 @@ export default function AssistanceSelection() {
             {/* Left side stats */}
             <div className="flex flex-col gap-4 w-32">
               <Card className="bg-white">
-                <CardContent className="flex items-center p-4">
-                  <Car className="h-6 w-6 mr-3" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                  <div>
-                    <p className="text-lg font-bold text-black" data-testid="text-vehicles-count">12</p>
-                    <p className="text-sm text-black">Active Vehicles</p>
-                  </div>
+                <CardContent className="flex flex-col items-center text-center p-4">
+                  <Car className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                  <p className="text-lg font-bold text-black" data-testid="text-vehicles-count">12</p>
+                  <p className="text-sm text-black">Active Vehicles</p>
                 </CardContent>
               </Card>
               <Card className="bg-white">
-                <CardContent className="flex items-center p-4">
-                  <MapPin className="h-6 w-6 mr-3" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                  <div>
-                    <p className="text-lg font-bold text-black" data-testid="text-locations-count">8</p>
-                    <p className="text-sm text-black">Locations</p>
-                  </div>
+                <CardContent className="flex flex-col items-center text-center p-4">
+                  <MapPin className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                  <p className="text-lg font-bold text-black" data-testid="text-locations-count">8</p>
+                  <p className="text-sm text-black">Locations</p>
                 </CardContent>
               </Card>
               <Card className="bg-white">
-                <CardContent className="flex items-center p-4">
-                  <UserPlus className="h-6 w-6 mr-3" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                  <div>
-                    <p className="text-lg font-bold text-black" data-testid="text-employees-count">24</p>
-                    <p className="text-sm text-black">Active Employees</p>
-                  </div>
+                <CardContent className="flex flex-col items-center text-center p-4">
+                  <UserPlus className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                  <p className="text-lg font-bold text-black" data-testid="text-employees-count">24</p>
+                  <p className="text-sm text-black">Active Employees</p>
                 </CardContent>
               </Card>
             </div>
