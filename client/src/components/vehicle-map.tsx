@@ -78,19 +78,99 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
         <div className="flex gap-4 h-[70vh]">
           {/* Map Container */}
           <div className="flex-1 relative bg-slate-100 rounded-lg overflow-hidden border">
-            {/* Simple US Map Background */}
-            <div 
-              className="w-full h-full relative bg-gradient-to-b from-blue-100 to-green-100"
-              style={{
-                backgroundImage: `
-                  radial-gradient(circle at 30% 40%, rgba(34, 139, 34, 0.1) 0%, transparent 50%),
-                  radial-gradient(circle at 70% 30%, rgba(139, 69, 19, 0.1) 0%, transparent 50%),
-                  radial-gradient(circle at 50% 70%, rgba(255, 215, 0, 0.1) 0%, transparent 50%)
-                `
-              }}
-            >
+            {/* US Map Background with Geographic Features */}
+            <div className="w-full h-full relative bg-blue-50">
+              {/* US Map SVG Background */}
+              <svg 
+                className="absolute inset-0 w-full h-full" 
+                viewBox="0 0 1000 600" 
+                style={{ zIndex: 1 }}
+              >
+                {/* Ocean/Background */}
+                <rect width="1000" height="600" fill="#e0f2fe" />
+                
+                {/* US Mainland Outline (Simplified) */}
+                <path
+                  d="M 200 300 L 250 280 L 300 250 L 400 240 L 500 230 L 600 235 L 700 250 L 750 270 L 800 300 L 820 350 L 800 400 L 750 450 L 650 480 L 550 470 L 450 460 L 350 450 L 280 420 L 220 380 Z"
+                  fill="#f0fdf4"
+                  stroke="#16a34a"
+                  strokeWidth="2"
+                />
+                
+                {/* Florida */}
+                <path
+                  d="M 650 450 L 680 480 L 690 520 L 670 540 L 650 520 Z"
+                  fill="#f0fdf4"
+                  stroke="#16a34a"
+                  strokeWidth="1"
+                />
+                
+                {/* Texas */}
+                <path
+                  d="M 350 380 L 450 370 L 480 420 L 450 470 L 380 480 L 320 450 Z"
+                  fill="#f0fdf4"
+                  stroke="#16a34a"
+                  strokeWidth="1"
+                />
+                
+                {/* California */}
+                <path
+                  d="M 50 200 L 120 180 L 140 250 L 130 350 L 100 420 L 70 400 L 60 300 Z"
+                  fill="#f0fdf4"
+                  stroke="#16a34a"
+                  strokeWidth="1"
+                />
+                
+                {/* Great Lakes Region */}
+                <ellipse cx="550" cy="280" rx="40" ry="20" fill="#3b82f6" opacity="0.6" />
+                <ellipse cx="520" cy="300" rx="25" ry="15" fill="#3b82f6" opacity="0.6" />
+                <ellipse cx="480" cy="320" rx="30" ry="18" fill="#3b82f6" opacity="0.6" />
+                
+                {/* Mountain Ranges (Rockies) */}
+                <path
+                  d="M 300 200 L 320 180 L 340 190 L 360 170 L 380 185 L 400 165 L 420 180 L 400 200 L 380 210 L 360 200 L 340 215 L 320 205 Z"
+                  fill="#a1a1aa"
+                  opacity="0.4"
+                />
+                
+                {/* Appalachian Mountains */}
+                <path
+                  d="M 650 250 L 680 230 L 700 240 L 720 220 L 740 235 L 720 250 L 700 260 L 680 255 L 660 265 Z"
+                  fill="#a1a1aa"
+                  opacity="0.4"
+                />
+                
+                {/* State Boundary Lines (Simplified Grid) */}
+                <g stroke="#10b981" strokeWidth="0.5" opacity="0.3" fill="none">
+                  <line x1="200" y1="200" x2="200" y2="500" />
+                  <line x1="300" y1="200" x2="300" y2="500" />
+                  <line x1="400" y1="200" x2="400" y2="500" />
+                  <line x1="500" y1="200" x2="500" y2="500" />
+                  <line x1="600" y1="200" x2="600" y2="500" />
+                  <line x1="700" y1="200" x2="700" y2="500" />
+                  
+                  <line x1="100" y1="250" x2="800" y2="250" />
+                  <line x1="100" y1="350" x2="800" y2="350" />
+                  <line x1="100" y1="450" x2="800" y2="450" />
+                </g>
+                
+                {/* Major Cities (Small dots) */}
+                <circle cx="150" cy="320" r="2" fill="#ef4444" opacity="0.7" />
+                <circle cx="750" cy="300" r="2" fill="#ef4444" opacity="0.7" />
+                <circle cx="400" cy="380" r="2" fill="#ef4444" opacity="0.7" />
+                <circle cx="600" cy="320" r="2" fill="#ef4444" opacity="0.7" />
+                <circle cx="300" cy="300" r="2" fill="#ef4444" opacity="0.7" />
+                
+                {/* Compass Rose */}
+                <g transform="translate(50,50)">
+                  <circle cx="0" cy="0" r="20" fill="white" stroke="#374151" strokeWidth="1" opacity="0.9" />
+                  <path d="M 0,-15 L 5,0 L 0,15 L -5,0 Z" fill="#ef4444" />
+                  <text x="0" y="-25" textAnchor="middle" fontSize="12" fill="#374151" fontWeight="bold">N</text>
+                </g>
+              </svg>
+              
               {/* Map Title */}
-              <div className="absolute top-4 left-4 bg-white/90 px-3 py-2 rounded-lg shadow">
+              <div className="absolute top-4 left-4 bg-white/90 px-3 py-2 rounded-lg shadow" style={{ zIndex: 10 }}>
                 <h3 className="text-sm font-semibold">United States Vehicle Distribution</h3>
                 <p className="text-xs text-muted-foreground">
                   {assignedVehicles.length} Assigned • {unassignedVehicles.length} Unassigned
