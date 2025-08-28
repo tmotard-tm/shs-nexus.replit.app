@@ -28,24 +28,41 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading...</p>
+      <>
+        <div className="dev-banner">
+          🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
         </div>
-      </div>
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading...</p>
+          </div>
+        </div>
+      </>
     );
   }
 
   if (!user) {
-    return <Login />;
+    return (
+      <>
+        <div className="dev-banner">
+          🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
+        </div>
+        <Login />
+      </>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
-      <Sidebar />
-      {children}
-    </div>
+    <>
+      <div className="dev-banner">
+        🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
+      </div>
+      <div className="min-h-screen bg-background flex">
+        <Sidebar />
+        {children}
+      </div>
+    </>
   );
 }
 
