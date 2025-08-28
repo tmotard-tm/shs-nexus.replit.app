@@ -8,8 +8,7 @@ import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter, ZoomIn, ZoomOut, R
 import { activeVehicles, type FleetVehicle } from "@/data/fleetData";
 import L from "leaflet";
 
-// Import Leaflet CSS
-import "leaflet/dist/leaflet.css";
+// Import Leaflet CSS - moved to index.css to avoid conflicts
 
 interface VehicleMapProps {
   open: boolean;
@@ -120,24 +119,46 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   useEffect(() => {
     if (!mapRef.current || leafletMapRef.current || !open) return;
 
-    // Create map
-    const map = L.map(mapRef.current).setView([39.8, -98.5], 4);
+    // Small delay to ensure container is properly rendered
+    const timer = setTimeout(() => {
+      if (!mapRef.current) return;
 
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
+      try {
+        // Create map with specific options
+        const map = L.map(mapRef.current, {
+          zoomControl: false, // We have custom controls
+          attributionControl: true,
+        }).setView([39.8, -98.5], 4);
 
-    // Create markers layer
-    const markersLayer = L.layerGroup().addTo(map);
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors',
+          maxZoom: 19,
+          minZoom: 3
+        }).addTo(map);
 
-    leafletMapRef.current = map;
-    markersRef.current = markersLayer;
+        // Create markers layer
+        const markersLayer = L.layerGroup().addTo(map);
+
+        leafletMapRef.current = map;
+        markersRef.current = markersLayer;
+
+        // Force map to refresh after a moment
+        setTimeout(() => {
+          map.invalidateSize();
+        }, 100);
+
+      } catch (error) {
+        console.error('Error initializing map:', error);
+      }
+    }, 100);
 
     return () => {
+      if (timer) clearTimeout(timer);
       if (leafletMapRef.current) {
         leafletMapRef.current.remove();
         leafletMapRef.current = null;
+        markersRef.current = null;
       }
     };
   }, [open]);
@@ -263,7 +284,12 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
             <div 
               ref={mapRef} 
               className="w-full h-full"
-              style={{ zIndex: 1 }}
+              style={{ 
+                zIndex: 1,
+                minHeight: '600px',
+                width: '100%',
+                height: '100%'
+              }}
             />
           </div>
 

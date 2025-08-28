@@ -1,3 +1,4 @@
+@import 'leaflet/dist/leaflet.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -107,4 +108,24 @@
     @apply font-sans antialiased bg-background text-foreground;
     font-family: var(--font-sans);
   }
+}
+
+/* Leaflet Map Fixes */
+.leaflet-container {
+  font-family: var(--font-sans) !important;
+  font-size: 14px !important;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 8px !important;
+}
+
+.vehicle-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Ensure map tiles load correctly */
+.leaflet-tile {
+  filter: none !important;
 }
