@@ -167,13 +167,26 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   useEffect(() => {
     if (!leafletMapRef.current || !markersRef.current) return;
 
+    console.log('Adding markers for', filteredVehicles.length, 'vehicles');
+    
     // Clear existing markers
     markersRef.current.clearLayers();
 
     // Add new markers
-    filteredVehicles.forEach((vehicle) => {
+    filteredVehicles.forEach((vehicle, index) => {
       const status = vehicleStatuses[vehicle.status as keyof typeof vehicleStatuses];
       if (!status) return;
+
+      // Debug log for first few vehicles
+      if (index < 3) {
+        console.log(`Vehicle ${index}:`, {
+          vin: vehicle.vin,
+          position: vehicle.position,
+          status: vehicle.status,
+          state: vehicle.state,
+          city: vehicle.city
+        });
+      }
 
       const icon = L.divIcon({
         html: `<div style="background-color: ${status.color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.4);"></div>`,
@@ -185,11 +198,11 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
       const marker = L.marker([vehicle.position.lat, vehicle.position.lng], { icon })
         .bindPopup(`
           <div style="min-width: 200px;">
-            <strong>${vehicle.year} ${vehicle.make} ${vehicle.model}</strong><br/>
+            <strong>${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}</strong><br/>
             <strong>VIN:</strong> ${vehicle.vin}<br/>
             <strong>Status:</strong> ${status.label}<br/>
             <strong>Location:</strong> ${vehicle.city}, ${vehicle.state}<br/>
-            <strong>Mileage:</strong> ${vehicle.mileage?.toLocaleString() || 'N/A'} miles<br/>
+            <strong>Vehicle #:</strong> ${vehicle.vehicleNumber}<br/>
             <strong>Branding:</strong> ${vehicle.branding || 'None'}
           </div>
         `)
@@ -366,7 +379,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <Car className="h-5 w-5 text-primary" />
-                  {selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}
+                  {selectedVehicle.modelYear} {selectedVehicle.makeName} {selectedVehicle.modelName}
                 </DialogTitle>
                 <DialogDescription>
                   Vehicle details and current status
@@ -385,10 +398,10 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                       <div 
                         className="w-2 h-2 rounded-full" 
                         style={{ 
-                          backgroundColor: vehicleStatuses[selectedVehicle.status as keyof typeof vehicleStatuses]?.color 
+                          backgroundColor: vehicleStatuses[getVehicleStatus(selectedVehicle) as keyof typeof vehicleStatuses]?.color 
                         }}
                       />
-                      {vehicleStatuses[selectedVehicle.status as keyof typeof vehicleStatuses]?.label}
+                      {vehicleStatuses[getVehicleStatus(selectedVehicle) as keyof typeof vehicleStatuses]?.label}
                     </div>
                   </div>
                 </div>
@@ -400,7 +413,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                   </div>
                   <div>
                     <Label className="text-sm font-medium text-muted-foreground">Mileage</Label>
-                    <div className="text-sm">{selectedVehicle.mileage?.toLocaleString() || 'N/A'} miles</div>
+                    <div className="text-sm">{selectedVehicle.odometerDelivery?.toLocaleString() || 'N/A'} miles</div>
                   </div>
                 </div>
 
