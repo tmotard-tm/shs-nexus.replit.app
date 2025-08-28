@@ -155,12 +155,12 @@
       45deg,
       transparent,
       transparent 200px,
-      rgba(255, 0, 0, 0.25) 200px,
-      rgba(255, 0, 0, 0.25) 220px
+      rgba(255, 0, 0, 0.15) 200px,
+      rgba(255, 0, 0, 0.15) 220px
     );
   font-size: 2rem;
   font-weight: bold;
-  color: rgba(255, 0, 0, 0.25);
+  color: rgba(255, 0, 0, 0.15);
   text-transform: uppercase;
   font-family: monospace;
   letter-spacing: 0.2em;
@@ -182,14 +182,14 @@
     -45deg,
     transparent 0px,
     transparent 150px,
-    rgba(255, 0, 0, 0.15) 150px,
-    rgba(255, 0, 0, 0.15) 300px,
+    rgba(255, 0, 0, 0.08) 150px,
+    rgba(255, 0, 0, 0.08) 300px,
     transparent 300px,
     transparent 450px
   );
   font-size: 1.5rem;
   font-weight: bold;
-  color: rgba(255, 0, 0, 0.2);
+  color: rgba(255, 0, 0, 0.12);
   text-transform: uppercase;
   font-family: monospace;
   letter-spacing: 0.1em;
