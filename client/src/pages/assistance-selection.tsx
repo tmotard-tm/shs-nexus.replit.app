@@ -51,7 +51,7 @@ export default function AssistanceSelection() {
     },
     {
       id: "other",
-      title: "Future Enhancements",
+      title: "Other",
       description: "Access Additional Tools and Features",
       icon: HelpCircle,
       color: "chart-5",
