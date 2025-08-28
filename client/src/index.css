@@ -130,13 +130,30 @@
   filter: none !important;
 }
 
-/* Ensure map containers have proper z-index */
+/* Ensure map containers have proper z-index and styling */
 .leaflet-container {
   z-index: 1 !important;
+  background: transparent !important;
+  font-family: inherit !important;
 }
 
 .leaflet-control-container {
   z-index: 1001 !important;
+}
+
+/* Fix leaflet marker icons */
+.leaflet-marker-icon {
+  margin-left: -12px !important;
+  margin-top: -41px !important;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 8px !important;
+}
+
+/* Ensure tiles render properly */
+.leaflet-tile-pane {
+  filter: none !important;
 }
 
 /* Development Watermark */
