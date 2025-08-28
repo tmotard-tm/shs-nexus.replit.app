@@ -97,6 +97,12 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
     status: getVehicleStatus(vehicle)
   }));
 
+  // Debug status distribution
+  console.log('Status distribution:', vehiclePositions.reduce((acc, v) => {
+    acc[v.status] = (acc[v.status] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>));
+
   // Apply filters
   const filteredVehicles = vehiclePositions.filter(vehicle => {
     if (statusFilter !== "all" && vehicle.status !== statusFilter) return false;
@@ -167,7 +173,9 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   useEffect(() => {
     if (!leafletMapRef.current || !markersRef.current) return;
 
-    console.log('Adding markers for', filteredVehicles.length, 'vehicles');
+    console.log('Total vehicle positions:', vehiclePositions.length);
+    console.log('Filtered vehicles after filters:', filteredVehicles.length);
+    console.log('Current filters:', { statusFilter, brandingFilter, regionFilter });
     
     // Clear existing markers
     markersRef.current.clearLayers();
@@ -175,7 +183,10 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
     // Add new markers
     filteredVehicles.forEach((vehicle, index) => {
       const status = vehicleStatuses[vehicle.status as keyof typeof vehicleStatuses];
-      if (!status) return;
+      if (!status) {
+        console.log('No status found for vehicle:', vehicle.vin, 'status:', vehicle.status);
+        return;
+      }
 
       // Debug log for first few vehicles
       if (index < 3) {
@@ -184,7 +195,8 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
           position: vehicle.position,
           status: vehicle.status,
           state: vehicle.state,
-          city: vehicle.city
+          city: vehicle.city,
+          statusColor: status.color
         });
       }
 
@@ -209,6 +221,11 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
         .on('click', () => setSelectedVehicle(vehicle));
 
       markersRef.current?.addLayer(marker);
+      
+      // Debug marker creation
+      if (index < 3) {
+        console.log(`Marker ${index} added at:`, vehicle.position.lat, vehicle.position.lng);
+      }
     });
   }, [filteredVehicles]);
 
