@@ -1,0 +1,532 @@
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+stripe.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+value @ stripe.js:1
+recaptcha__en.js:494 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en.js:494
+recaptcha__en.js:356 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en.js:356
+recaptcha__en.js:356 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en.js:356
+js?id=AW-11411994397:128 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+Nc @ js?id=AW-11411994397:128
+js?id=AW-11411994397:128 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+Nc @ js?id=AW-11411994397:128
+js?id=AW-11411994397:515 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+q @ js?id=AW-11411994397:515
+stripe.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+value @ stripe.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+recaptcha__en.js:494 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en.js:494
+recaptcha__en.js:356 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en.js:356
+recaptcha__en.js:356 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en.js:356
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+recaptcha__en.js:494 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en.js:494
+recaptcha__en.js:356 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en.js:356
+recaptcha__en.js:356 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en.js:356
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ framework-7058bdd505236e1b.js:1
+e @ framework-7058bdd505236e1b.js:1
+e @ framework-7058bdd505236e1b.js:1
+oK @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+oQ @ framework-7058bdd505236e1b.js:1
+oq @ framework-7058bdd505236e1b.js:1
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+_app-a2c290ddf1970192.js:38 
+      /////////////////////
+   ///////////////////////////
+  ////////@@@@@@@//////////////
+  ////////@@@@@@@//////////////
+  ////////@@@@@@@//////////////        Curious and driven?
+  ///////////////@@@@@@@///////        Work with us!
+  ///////////////@@@@@@@///////
+  ///////////////@@@@@@@///////        https://join.replit.com/hack.with.us
+  ////////@@@@@@@//////////////
+  ////////@@@@@@@//////////////
+  ////////@@@@@@#//////////////
+   ///////////////////////////
+      /////////////////////
+      
+MultiApiSnowflake:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+MultiApiSnowflake:1 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+MultiApiSnowflake:1 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+_app-a2c290ddf1970192.js:38 [LaunchDarkly] LaunchDarkly client initialized
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'ambient-light-sensor'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'battery'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'execution-while-not-rendered'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'execution-while-out-of-viewport'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'layout-animations'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'legacy-image-formats'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'navigation-override'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'oversized-images'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'publickey-credentials'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'speaker-selection'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'unoptimized-images'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'unsized-media'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Unrecognized feature: 'pointer-lock'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Allow attribute will take precedence over 'allowfullscreen'.
+_ @ framework-7058bdd505236e1b.js:1
+framework-7058bdd505236e1b.js:1 Allow attribute will take precedence over 'allowpaymentrequest'.
+_ @ framework-7058bdd505236e1b.js:1
+MultiApiSnowflake:1 Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner.
+stallwart.build.js:1 stallwart: failed ping 1
+stallwart.build.js:1 stallwart: failed ping 2
+stallwart.build.js:1 stallwart: failed ping 3
+/graphql:1  Failed to load resource: the server responded with a status of 520 ()
+stallwart.build.js:1 stallwart: failed ping 1
+stallwart.build.js:1 stallwart: failed ping 1
+stallwart.build.js:1 stallwart: failed ping 2
+stallwart.build.js:1 stallwart: failed ping 3
+stallwart.build.js:1 stallwart: failed ping 4
+stallwart.build.js:1 stallwart: failed ping 1
+stallwart.build.js:1 stallwart: failed ping 1
+sp.replit.com/v1/t:1  Failed to load resource: the server responded with a status of 400 ()
+stallwart.build.js:1 stallwart: failed ping 1
+stallwart.build.js:1 stallwart: failed ping 2
+stallwart.build.js:1 stallwart: failed ping 1
+stallwart.build.js:1 stallwart: failed ping 1
+stallwart.build.js:1 stallwart: failed ping 2
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'ambient-light-sensor'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'battery'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'execution-while-not-rendered'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'execution-while-out-of-viewport'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'layout-animations'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'legacy-image-formats'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'navigation-override'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'oversized-images'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'publickey-credentials'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'speaker-selection'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'unoptimized-images'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Unrecognized feature: 'unsized-media'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Allow attribute will take precedence over 'allowfullscreen'.
+workspace_iframe.html?initialPath=%2F&id=%3Ar2do%3A:32 Allow attribute will take precedence over 'allowpaymentrequest'.
+Console.js:61 Warning: validateDOMNesting(...): <a> cannot appear as a descendant of <a>.
+    at a
+    at a
+    at https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=60c10380:337:18
+    at nav
+    at div
+    at div
+    at Sidebar (https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/src/components/layout/sidebar.tsx:27:22)
+    at div
+    at ProtectedRoute (https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/src/App.tsx?v=lJtQy9KmuwtROJo68WvhC:42:27)
+    at Route (https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=60c10380:323:16)
+    at Switch (https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=60c10380:379:17)
+    at Router
+    at SidebarProvider (https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/src/hooks/use-sidebar.tsx:20:35)
+    at AuthProvider (https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/src/hooks/use-auth.tsx:20:32)
+    at Provider (https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-MAE4WKEQ.js?v=60c10380:38:15)
+    at TooltipProvider (https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=60c10380:59:5)
+    at QueryClientProvider (https://04599bfa-a9af-4cb0-9978-bfecc1959bcf-00-21dk77qm3x6i1.kirk.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=60c10380:2805:3)
+    at App
+Mt.forEach.n.<computed> @ Console.js:61
+printWarning @ chunk-WERSD76P.js?v=60c10380:521
+error @ chunk-WERSD76P.js?v=60c10380:505
+validateDOMNesting @ chunk-WERSD76P.js?v=60c10380:8256
+createInstance @ chunk-WERSD76P.js?v=60c10380:8328
+completeWork @ chunk-WERSD76P.js?v=60c10380:16290
+completeUnitOfWork @ chunk-WERSD76P.js?v=60c10380:19224
+performUnitOfWork @ chunk-WERSD76P.js?v=60c10380:19206
+workLoopSync @ chunk-WERSD76P.js?v=60c10380:19137
+renderRootSync @ chunk-WERSD76P.js?v=60c10380:19116
+performConcurrentWorkOnRoot @ chunk-WERSD76P.js?v=60c10380:18678
+workLoop @ chunk-WERSD76P.js?v=60c10380:197
+flushWork @ chunk-WERSD76P.js?v=60c10380:176
+performWorkUntilDeadline @ chunk-WERSD76P.js?v=60c10380:384
