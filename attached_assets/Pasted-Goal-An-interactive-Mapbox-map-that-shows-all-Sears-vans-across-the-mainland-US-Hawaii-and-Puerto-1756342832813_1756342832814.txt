@@ -1,0 +1,95 @@
+Goal: An interactive Mapbox map that shows all Sears vans across the mainland US, Hawaii, and Puerto Rico as colored dots. Users can zoom/pan and click a dot to see details.
+
+Requirements
+
+Regions covered
+
+Must display vans in: CONUS (lower 48), Hawaii, Puerto Rico.
+
+First load should auto-fit to include all vans across those regions.
+
+Controls
+
+Show zoom in/out buttons and a compass in the top-left.
+
+Enable mouse/touch scroll zoom and drag/pan.
+
+Dots (markers)
+
+Each van is a circle dot on the map.
+
+Color by status:
+
+Assigned = Blue
+
+In Repair = Red
+
+Available = Green
+
+Reserved = Light Blue
+
+Declined = Orange
+
+Add a small legend box in the corner listing those colors.
+
+Click behavior
+
+Clicking a dot opens a small popup with:
+
+Van ID
+
+Status
+
+City/State or region (if available)
+
+(Optional) Last updated timestamp
+
+Data contract (what the map expects per van)
+
+Fields: id (string), lat (number), lon (number), status (string), label (string).
+
+Coordinate system: WGS84 (latitude/longitude).
+
+Mainland US: lat 24–49, lon −125 to −66
+Hawaii: lat 19–22, lon −160 to −155
+Puerto Rico: lat 17–19, lon −68 to −65
+
+Data safety rules (to avoid bad dots)
+
+If lon is positive but looks like US/PR/Hawaii (50 to 180), make it negative.
+
+If values look swapped (lat is around −100 and lon around 20–50), swap them back.
+
+Drop any row with missing/invalid lat/lon.
+
+After plotting, fit bounds to all valid points with ~40px padding.
+
+Performance/UX
+
+Dots scale slightly with zoom so they’re small at national view and readable when zoomed in.
+
+Add a thin black stroke on dots so they remain visible on the dark basemap.
+
+Use a dark basemap style to match the screenshots.
+
+Acceptance criteria (QA checklist)
+
+ On load, the map shows CONUS + Hawaii + Puerto Rico simultaneously (auto-fit).
+
+ Zoom buttons work; scroll and drag work.
+
+ Dots are colored by status and match the legend.
+
+ Clicking any dot shows ID, Status, and Label (city/region).
+
+ Known test points appear in correct places:
+
+Honolulu, HI (~21.3069, −157.8583)
+
+San Juan, PR (~18.4655, −66.1057)
+
+Chicago, IL (~41.8781, −87.6298)
+
+ No dots appear far off the US map due to sign/swap errors.
+
+ First load is not stuck zoomed into a single region.

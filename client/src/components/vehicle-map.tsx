@@ -4,18 +4,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter, ZoomIn, ZoomOut, RotateCcw, Compass } from "lucide-react";
 import { activeVehicles, type FleetVehicle } from "@/data/fleetData";
-import L from "leaflet";
-
-// Import Leaflet CSS - moved to index.css to avoid conflicts
+import mapboxgl from "mapbox-gl";
 
 interface VehicleMapProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-// State coordinates for positioning vehicles on map (lat, lng for Leaflet)
+// State coordinates for positioning vehicles on map (lat, lng)
 const stateCoordinates: { [key: string]: { lat: number; lng: number } } = {
   "AL": { lat: 32.3, lng: -86.8 }, "AK": { lat: 64.2, lng: -154.0 }, "AZ": { lat: 34.0, lng: -112.1 },
   "AR": { lat: 34.7, lng: -92.2 }, "CA": { lat: 36.8, lng: -119.4 }, "CO": { lat: 39.0, lng: -105.5 },
@@ -36,26 +34,40 @@ const stateCoordinates: { [key: string]: { lat: number; lng: number } } = {
   "WI": { lat: 44.3, lng: -89.6 }, "WY": { lat: 42.8, lng: -107.3 }, "PR": { lat: 18.2, lng: -66.5 }
 };
 
-// Vehicle status categories with colors
+// Vehicle status categories with colors (per Mapbox requirements)
 const vehicleStatuses = {
-  "assigned": { label: "Assigned to Tech", color: "#3b82f6", bgColor: "bg-blue-500" },
-  "maintenance": { label: "In Repair", color: "#ef4444", bgColor: "bg-red-500" },
-  "available": { label: "Available", color: "#10b981", bgColor: "bg-emerald-500" },
-  "reserved": { label: "Reserved for New Hire", color: "#22c55e", bgColor: "bg-green-500" },
-  "auction": { label: "Sent to Auction", color: "#f59e0b", bgColor: "bg-amber-500" },
-  "declined": { label: "Declined Repair", color: "#f97316", bgColor: "bg-orange-500" }
+  "assigned": { label: "Assigned", color: "#3b82f6" },      // Blue
+  "maintenance": { label: "In Repair", color: "#ef4444" }, // Red  
+  "available": { label: "Available", color: "#22c55e" },   // Green
+  "reserved": { label: "Reserved", color: "#06b6d4" },     // Light Blue
+  "declined": { label: "Declined", color: "#f97316" },     // Orange
+  "auction": { label: "Sent to Auction", color: "#f59e0b" } // Amber
+};
+
+// Data safety: Clean and validate coordinates
+const validateCoordinates = (lat: number, lng: number): { lat: number; lng: number } => {
+  // If longitude is positive but looks like US/PR/Hawaii, make it negative
+  if (lng > 0 && lng >= 50 && lng <= 180) {
+    lng = -lng;
+  }
+  
+  // If values look swapped (lat around -100, lng around 20-50), swap them
+  if (lat < -90 && lng > 20 && lng < 50) {
+    [lat, lng] = [lng, lat];
+  }
+  
+  return { lat, lng };
 };
 
 export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
-  const [hoveredVehicle, setHoveredVehicle] = useState<FleetVehicle | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [brandingFilter, setBrandingFilter] = useState("all");
   const [regionFilter, setRegionFilter] = useState("all");
   
   const mapRef = useRef<HTMLDivElement>(null);
-  const leafletMapRef = useRef<L.Map | null>(null);
-  const markersRef = useRef<L.LayerGroup | null>(null);
+  const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
 
   // Assign vehicle status based on various conditions
   const getVehicleStatus = (vehicle: FleetVehicle) => {
@@ -67,7 +79,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
     return "available";
   };
 
-  // Enhanced geocoding system to convert delivery addresses to map coordinates
+  // Enhanced geocoding system to convert delivery addresses to map coordinates  
   const getDeliveryAddressPosition = (vehicle: FleetVehicle) => {
     const stateCoord = stateCoordinates[vehicle.state];
     if (!stateCoord) return { lat: 39.8, lng: -98.5 }; // Default center US position
@@ -76,7 +88,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
     let baseLat = stateCoord.lat;
     let baseLng = stateCoord.lng;
     
-    // Add some randomization based on delivery address to spread vehicles within the state
+    // Add randomization based on delivery address to spread vehicles within the state
     const addressHash = vehicle.deliveryAddress.split('').reduce((hash, char) => {
       return char.charCodeAt(0) + ((hash << 5) - hash);
     }, 0);
@@ -85,23 +97,41 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
     const spreadLat = (addressHash % 100) / 100 * 0.5 - 0.25; // ±0.25° spread
     const spreadLng = ((addressHash >> 8) % 100) / 100 * 0.5 - 0.25; // ±0.25° spread
     
-    return {
+    const coordinates = {
       lat: baseLat + spreadLat,
       lng: baseLng + spreadLng
     };
+    
+    // Apply data safety validation
+    return validateCoordinates(coordinates.lat, coordinates.lng);
   };
 
-  const vehiclePositions = activeVehicles.map(vehicle => ({
-    ...vehicle,
-    position: getDeliveryAddressPosition(vehicle),
-    status: getVehicleStatus(vehicle)
-  }));
-
-  // Debug status distribution
-  console.log('Status distribution:', vehiclePositions.reduce((acc, v) => {
-    acc[v.status] = (acc[v.status] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>));
+  // Process vehicles with validated coordinates
+  const vehiclePositions = activeVehicles
+    .map(vehicle => {
+      const position = getDeliveryAddressPosition(vehicle);
+      const status = getVehicleStatus(vehicle);
+      
+      // Drop any row with missing/invalid lat/lng
+      if (!position.lat || !position.lng || 
+          Math.abs(position.lat) > 90 || Math.abs(position.lng) > 180) {
+        return null;
+      }
+      
+      return {
+        ...vehicle,
+        position,
+        status,
+        id: vehicle.vin,
+        label: `${vehicle.city}, ${vehicle.state}`
+      };
+    })
+    .filter(Boolean) as (FleetVehicle & { 
+      position: { lat: number; lng: number }; 
+      status: string;
+      id: string;
+      label: string;
+    })[];
 
   // Apply filters
   const filteredVehicles = vehiclePositions.filter(vehicle => {
@@ -121,129 +151,143 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding).filter(b => b && b.trim()))).sort();
   const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region).filter(r => r && r.trim()))).sort();
 
-  // Initialize Leaflet map
+  // Initialize Mapbox map
   useEffect(() => {
-    if (!mapRef.current || leafletMapRef.current || !open) return;
+    if (!mapRef.current || mapboxMapRef.current || !open) return;
 
-    // Small delay to ensure container is properly rendered
-    const timer = setTimeout(() => {
-      if (!mapRef.current) return;
+    // Set Mapbox access token
+    mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || 'your-mapbox-token-here';
 
-      try {
-        // Create map with specific options
-        const map = L.map(mapRef.current, {
-          zoomControl: false, // We have custom controls
-          attributionControl: true,
-        }).setView([39.8, -98.5], 4);
+    try {
+      // Create Mapbox map with dark style
+      const map = new mapboxgl.Map({
+        container: mapRef.current,
+        style: 'mapbox://styles/mapbox/dark-v11', // Dark basemap
+        center: [-98.5, 39.8], // Center of US
+        zoom: 3,
+        minZoom: 2,
+        maxZoom: 20
+      });
 
-        // Add OpenStreetMap tiles
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap contributors',
-          maxZoom: 19,
-          minZoom: 3
-        }).addTo(map);
+      // Add navigation controls (zoom, compass) in top-left
+      map.addControl(new mapboxgl.NavigationControl(), 'top-left');
 
-        // Create markers layer
-        const markersLayer = L.layerGroup().addTo(map);
+      // Wait for map to load before adding markers
+      map.on('load', () => {
+        mapboxMapRef.current = map;
+        
+        // Auto-fit to include all vehicles with padding
+        if (filteredVehicles.length > 0) {
+          const bounds = new mapboxgl.LngLatBounds();
+          filteredVehicles.forEach(vehicle => {
+            bounds.extend([vehicle.position.lng, vehicle.position.lat]);
+          });
+          map.fitBounds(bounds, { padding: 40 });
+        }
+      });
 
-        leafletMapRef.current = map;
-        markersRef.current = markersLayer;
-
-        // Force map to refresh after a moment
-        setTimeout(() => {
-          map.invalidateSize();
-        }, 100);
-
-      } catch (error) {
-        console.error('Error initializing map:', error);
-      }
-    }, 100);
+    } catch (error) {
+      console.error('Error initializing Mapbox:', error);
+    }
 
     return () => {
-      if (timer) clearTimeout(timer);
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove();
-        leafletMapRef.current = null;
-        markersRef.current = null;
+      if (mapboxMapRef.current) {
+        mapboxMapRef.current.remove();
+        mapboxMapRef.current = null;
+        markersRef.current = [];
       }
     };
   }, [open]);
 
   // Update markers when vehicles or filters change
   useEffect(() => {
-    if (!leafletMapRef.current || !markersRef.current) return;
+    if (!mapboxMapRef.current) return;
 
-    console.log('Total vehicle positions:', vehiclePositions.length);
-    console.log('Filtered vehicles after filters:', filteredVehicles.length);
-    console.log('Current filters:', { statusFilter, brandingFilter, regionFilter });
-    
     // Clear existing markers
-    markersRef.current.clearLayers();
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = [];
 
     // Add new markers
-    filteredVehicles.forEach((vehicle, index) => {
+    filteredVehicles.forEach((vehicle) => {
       const status = vehicleStatuses[vehicle.status as keyof typeof vehicleStatuses];
-      if (!status) {
-        console.log('No status found for vehicle:', vehicle.vin, 'status:', vehicle.status);
-        return;
-      }
+      if (!status) return;
 
-      // Debug log for first few vehicles
-      if (index < 3) {
-        console.log(`Vehicle ${index}:`, {
-          vin: vehicle.vin,
-          position: vehicle.position,
-          status: vehicle.status,
-          state: vehicle.state,
-          city: vehicle.city,
-          statusColor: status.color
-        });
-      }
-
-      const icon = L.divIcon({
-        html: `<div style="background-color: ${status.color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.4);"></div>`,
-        className: 'vehicle-marker',
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
+      // Create marker element with scaling based on zoom
+      const markerEl = document.createElement('div');
+      markerEl.className = 'vehicle-marker';
+      markerEl.style.cssText = `
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background-color: ${status.color};
+        border: 2px solid #000;
+        box-shadow: 0 0 4px rgba(0,0,0,0.6);
+        cursor: pointer;
+        transition: all 0.2s;
+      `;
+      
+      // Scale with zoom
+      markerEl.addEventListener('mouseenter', () => {
+        markerEl.style.transform = 'scale(1.3)';
+      });
+      markerEl.addEventListener('mouseleave', () => {
+        markerEl.style.transform = 'scale(1)';
       });
 
-      const marker = L.marker([vehicle.position.lat, vehicle.position.lng], { icon })
-        .bindPopup(`
-          <div style="min-width: 200px;">
-            <strong>${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}</strong><br/>
-            <strong>VIN:</strong> ${vehicle.vin}<br/>
+      // Create popup content
+      const popup = new mapboxgl.Popup({ offset: 15 })
+        .setHTML(`
+          <div style="min-width: 200px; font-family: system-ui, sans-serif;">
+            <strong>${vehicle.id}</strong><br/>
             <strong>Status:</strong> ${status.label}<br/>
-            <strong>Location:</strong> ${vehicle.city}, ${vehicle.state}<br/>
-            <strong>Vehicle #:</strong> ${vehicle.vehicleNumber}<br/>
-            <strong>Branding:</strong> ${vehicle.branding || 'None'}
+            <strong>Location:</strong> ${vehicle.label}<br/>
+            <small>Click for more details</small>
           </div>
-        `)
-        .on('click', () => setSelectedVehicle(vehicle));
+        `);
 
-      markersRef.current?.addLayer(marker);
-      
-      // Debug marker creation
-      if (index < 3) {
-        console.log(`Marker ${index} added at:`, vehicle.position.lat, vehicle.position.lng);
-      }
+      // Create marker
+      const marker = new mapboxgl.Marker(markerEl)
+        .setLngLat([vehicle.position.lng, vehicle.position.lat])
+        .setPopup(popup)
+        .addTo(mapboxMapRef.current!);
+
+      // Click handler for detailed view
+      markerEl.addEventListener('click', () => {
+        setSelectedVehicle(vehicle);
+      });
+
+      markersRef.current.push(marker);
     });
+
+    // Auto-fit bounds when vehicles change
+    if (filteredVehicles.length > 0) {
+      const bounds = new mapboxgl.LngLatBounds();
+      filteredVehicles.forEach(vehicle => {
+        bounds.extend([vehicle.position.lng, vehicle.position.lat]);
+      });
+      mapboxMapRef.current.fitBounds(bounds, { padding: 40 });
+    }
   }, [filteredVehicles]);
 
   const handleZoomIn = () => {
-    if (leafletMapRef.current) {
-      leafletMapRef.current.zoomIn();
+    if (mapboxMapRef.current) {
+      mapboxMapRef.current.zoomIn();
     }
   };
 
   const handleZoomOut = () => {
-    if (leafletMapRef.current) {
-      leafletMapRef.current.zoomOut();
+    if (mapboxMapRef.current) {
+      mapboxMapRef.current.zoomOut();
     }
   };
 
   const handleResetView = () => {
-    if (leafletMapRef.current) {
-      leafletMapRef.current.setView([39.8, -98.5], 4);
+    if (mapboxMapRef.current && filteredVehicles.length > 0) {
+      const bounds = new mapboxgl.LngLatBounds();
+      filteredVehicles.forEach(vehicle => {
+        bounds.extend([vehicle.position.lng, vehicle.position.lat]);
+      });
+      mapboxMapRef.current.fitBounds(bounds, { padding: 40 });
     }
   };
 
