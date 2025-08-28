@@ -65,28 +65,71 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
     return "available";
   };
 
-  // Convert longitude/latitude to map coordinates (simplified projection)
-  const getMapPosition = (vehicle: FleetVehicle) => {
+  // Enhanced geocoding system to convert delivery addresses to map coordinates
+  const getDeliveryAddressPosition = (vehicle: FleetVehicle) => {
     const stateCoord = stateCoordinates[vehicle.state];
     if (!stateCoord) return { x: 50, y: 50 }; // Default center position
     
-    // Convert to percentage for positioning on our map
-    const x = ((stateCoord.x + 180) / 360) * 100;
-    const y = ((90 - stateCoord.y) / 180) * 100;
+    // Start with base state coordinates
+    let baseX = stateCoord.x;
+    let baseY = stateCoord.y;
     
-    // Add some random offset to prevent overlapping markers in same state
-    const offsetX = (Math.random() - 0.5) * 2;
-    const offsetY = (Math.random() - 0.5) * 2;
+    // Create deterministic but varied positioning based on address
+    const addressHash = vehicle.deliveryAddress + vehicle.city + vehicle.zip;
+    let hash = 0;
+    for (let i = 0; i < addressHash.length; i++) {
+      const char = addressHash.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    
+    // Use hash to create consistent positioning within city/region
+    const normalizedHash = Math.abs(hash) / 2147483647; // Normalize to 0-1
+    
+    // Adjust coordinates based on city name for better distribution
+    let cityOffsetX = 0;
+    let cityOffsetY = 0;
+    
+    const cityLower = vehicle.city.toLowerCase();
+    // Major city adjustments for better geographic accuracy
+    if (cityLower.includes('los angeles') || cityLower.includes('la')) {
+      cityOffsetX = -1.5; cityOffsetY = 0.5;
+    } else if (cityLower.includes('san francisco') || cityLower.includes('oakland')) {
+      cityOffsetX = -2; cityOffsetY = -1;
+    } else if (cityLower.includes('new york') || cityLower.includes('bronx') || cityLower.includes('brooklyn')) {
+      cityOffsetX = 1; cityOffsetY = -0.5;
+    } else if (cityLower.includes('chicago')) {
+      cityOffsetX = -1; cityOffsetY = -1.5;
+    } else if (cityLower.includes('houston')) {
+      cityOffsetX = -1.5; cityOffsetY = 1;
+    } else if (cityLower.includes('phoenix')) {
+      cityOffsetX = -2; cityOffsetY = 0.5;
+    } else if (cityLower.includes('philadelphia')) {
+      cityOffsetX = 0.8; cityOffsetY = -0.3;
+    } else if (cityLower.includes('miami') || cityLower.includes('fort lauderdale')) {
+      cityOffsetX = 0.5; cityOffsetY = 2;
+    }
+    
+    // Apply city offset and address-specific variation
+    const addressVariationX = (normalizedHash - 0.5) * 0.5; // ±0.25 degree variation
+    const addressVariationY = ((normalizedHash * 7) % 1 - 0.5) * 0.5; // Different variation for Y
+    
+    const finalX = baseX + cityOffsetX + addressVariationX;
+    const finalY = baseY + cityOffsetY + addressVariationY;
+    
+    // Convert to percentage for positioning on our map
+    const x = ((finalX + 180) / 360) * 100;
+    const y = ((90 - finalY) / 180) * 100;
     
     return { 
-      x: Math.max(1, Math.min(99, x + offsetX)), 
-      y: Math.max(1, Math.min(99, y + offsetY)) 
+      x: Math.max(1, Math.min(99, x)), 
+      y: Math.max(1, Math.min(99, y)) 
     };
   };
 
   const vehiclePositions = activeVehicles.map(vehicle => ({
     ...vehicle,
-    position: getMapPosition(vehicle),
+    position: getDeliveryAddressPosition(vehicle),
     status: getVehicleStatus(vehicle)
   }));
 
@@ -302,7 +345,8 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                           ></div>
                           <span style={{ color: status.color }}>{status.label}</span>
                         </div>
-                        <div className="text-gray-300">{vehicle.city}, {vehicle.state}</div>
+                        <div className="text-gray-300">{vehicle.deliveryAddress}</div>
+                        <div className="text-gray-300">{vehicle.city}, {vehicle.state} {vehicle.zip}</div>
                         {/* Tooltip arrow */}
                         <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-transparent border-t-black/90"></div>
                       </div>
