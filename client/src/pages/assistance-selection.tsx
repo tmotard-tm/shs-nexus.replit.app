@@ -69,7 +69,6 @@ export default function AssistanceSelection() {
               <Settings className="h-4 w-4 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold" data-testid="text-app-title">Sears Management Platform</h1>
               <p className="text-sm text-muted-foreground">Welcome back, {user?.username}</p>
             </div>
           </div>
