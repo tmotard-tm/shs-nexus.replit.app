@@ -256,14 +256,14 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                 transition: isDragging ? 'none' : 'transform 0.2s ease-out'
               }}
             >
-              {/* Detailed US Map */}
+              {/* Detailed US Map with Hawaii and Puerto Rico */}
               <svg 
                 className="absolute inset-0 w-full h-full" 
-                viewBox="0 0 1000 600" 
+                viewBox="0 0 1000 700" 
                 style={{ zIndex: 1 }}
               >
                 {/* Ocean/Background */}
-                <rect width="1000" height="600" fill="#a5b4fc" />
+                <rect width="1000" height="700" fill="#a5b4fc" />
                 
                 {/* Individual State Shapes */}
                 
@@ -375,10 +375,85 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                 </g>
 
                 {/* Scale */}
-                <g transform="translate(850,550)">
+                <g transform="translate(850,520)">
                   <text x="0" y="0" fontSize="8" fill="#374151">Scale: 1 inch = 200 miles</text>
                   <line x1="0" y1="10" x2="50" y2="10" stroke="#374151" strokeWidth="2"/>
                   <text x="25" y="25" fontSize="8" fill="#374151" textAnchor="middle">200 mi</text>
+                </g>
+
+                {/* Hawaii Inset Map */}
+                <g transform="translate(150,580)">
+                  {/* Hawaii Background Box */}
+                  <rect x="-5" y="-5" width="160" height="80" fill="white" stroke="#374151" strokeWidth="1" opacity="0.9"/>
+                  <text x="75" y="10" fontSize="10" fill="#374151" textAnchor="middle" fontWeight="bold">Hawaii</text>
+                  
+                  {/* Hawaiian Islands */}
+                  {/* Big Island (Hawaii) */}
+                  <path d="M 120 30 L 135 28 L 145 35 L 140 45 L 130 50 L 115 48 L 110 40 L 115 32 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  <text x="127" y="42" fontSize="8" fill="#047857" textAnchor="middle">HI</text>
+                  
+                  {/* Maui */}
+                  <ellipse cx="100" cy="35" rx="8" ry="5" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  
+                  {/* Oahu */}
+                  <ellipse cx="85" cy="40" rx="6" ry="4" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  
+                  {/* Kauai */}
+                  <ellipse cx="65" cy="45" rx="5" ry="3" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  
+                  {/* Molokai */}
+                  <ellipse cx="90" cy="38" rx="4" ry="2" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  
+                  {/* Lanai */}
+                  <ellipse cx="95" cy="40" rx="3" ry="2" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  
+                  {/* Scale for Hawaii */}
+                  <line x1="10" y1="65" x2="40" y2="65" stroke="#374151" strokeWidth="1"/>
+                  <text x="25" y="62" fontSize="6" fill="#374151" textAnchor="middle">100 mi</text>
+                </g>
+
+                {/* Puerto Rico Inset Map */}
+                <g transform="translate(350,580)">
+                  {/* Puerto Rico Background Box */}
+                  <rect x="-5" y="-5" width="160" height="80" fill="white" stroke="#374151" strokeWidth="1" opacity="0.9"/>
+                  <text x="75" y="10" fontSize="10" fill="#374151" textAnchor="middle" fontWeight="bold">Puerto Rico</text>
+                  
+                  {/* Puerto Rico Main Island */}
+                  <path d="M 30 35 L 120 30 L 130 35 L 135 40 L 130 45 L 120 50 L 35 48 L 25 45 L 25 40 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  <text x="80" y="42" fontSize="8" fill="#047857" textAnchor="middle">PR</text>
+                  
+                  {/* Vieques */}
+                  <ellipse cx="140" cy="45" rx="6" ry="2" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  
+                  {/* Culebra */}
+                  <ellipse cx="135" cy="35" rx="3" ry="2" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  
+                  {/* Scale for Puerto Rico */}
+                  <line x1="10" y1="65" x2="40" y2="65" stroke="#374151" strokeWidth="1"/>
+                  <text x="25" y="62" fontSize="6" fill="#374151" textAnchor="middle">50 mi</text>
+                </g>
+
+                {/* Alaska Inset Map */}
+                <g transform="translate(550,580)">
+                  {/* Alaska Background Box */}
+                  <rect x="-5" y="-5" width="160" height="80" fill="white" stroke="#374151" strokeWidth="1" opacity="0.9"/>
+                  <text x="75" y="10" fontSize="10" fill="#374151" textAnchor="middle" fontWeight="bold">Alaska</text>
+                  
+                  {/* Alaska Mainland */}
+                  <path d="M 20 25 L 60 20 L 90 25 L 110 30 L 130 35 L 135 45 L 125 55 L 100 60 L 70 58 L 40 55 L 20 50 L 15 40 L 18 30 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                  <text x="75" y="45" fontSize="8" fill="#047857" textAnchor="middle">AK</text>
+                  
+                  {/* Aleutian Islands (simplified) */}
+                  <g fill="#dcfce7" stroke="#059669" strokeWidth="0.5">
+                    <ellipse cx="35" cy="60" rx="3" ry="1"/>
+                    <ellipse cx="45" cy="62" rx="2" ry="1"/>
+                    <ellipse cx="55" cy="63" rx="2" ry="1"/>
+                    <ellipse cx="65" cy="64" rx="2" ry="1"/>
+                  </g>
+                  
+                  {/* Scale for Alaska */}
+                  <line x1="10" y1="68" x2="50" y2="68" stroke="#374151" strokeWidth="1"/>
+                  <text x="30" y="75" fontSize="6" fill="#374151" textAnchor="middle">400 mi</text>
                 </g>
               </svg>
               
