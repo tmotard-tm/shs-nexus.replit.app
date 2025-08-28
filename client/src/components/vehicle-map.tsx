@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter } from "lucide-react";
+import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { activeVehicles, type FleetVehicle } from "@/data/fleetData";
 
 interface VehicleMapProps {
@@ -49,6 +49,11 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [brandingFilter, setBrandingFilter] = useState("all");
   const [regionFilter, setRegionFilter] = useState("all");
+  const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   // Assign vehicle status based on various conditions
   const getVehicleStatus = (vehicle: FleetVehicle) => {
@@ -103,6 +108,30 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding).filter(b => b && b.trim()))).sort();
   const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region).filter(r => r && r.trim()))).sort();
 
+  // Zoom and pan handlers
+  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.5, 3));
+  const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.5, 0.5));
+  const handleResetView = () => {
+    setZoom(1);
+    setPanX(0);
+    setPanY(0);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - panX, y: e.clientY - panY });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setPanX(e.clientX - dragStart.x);
+    setPanY(e.clientY - dragStart.y);
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden">
@@ -131,35 +160,88 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
         </div>
         
         <div className="flex gap-4 h-[75vh]">
-          {/* Map Container with Dark Satellite Style */}
-          <div className="flex-1 relative rounded-lg overflow-hidden border">
-            {/* Dark Satellite Map Background */}
+          {/* Interactive Map Container */}
+          <div className="flex-1 relative rounded-lg overflow-hidden border bg-blue-50">
+            {/* Zoom Controls */}
+            <div className="absolute top-4 left-4 z-20 bg-white rounded-lg shadow-md border">
+              <div className="flex flex-col">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-none rounded-t-lg px-2 py-1"
+                  onClick={handleZoomIn}
+                  disabled={zoom >= 3}
+                  data-testid="button-zoom-in"
+                >
+                  <ZoomIn className="h-4 w-4" />
+                </Button>
+                <div className="px-2 py-1 text-xs text-center border-t border-b bg-gray-50 min-w-[3rem]">
+                  {Math.round(zoom * 100)}%
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-none px-2 py-1"
+                  onClick={handleZoomOut}
+                  disabled={zoom <= 0.5}
+                  data-testid="button-zoom-out"
+                >
+                  <ZoomOut className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-none rounded-b-lg px-2 py-1 border-t"
+                  onClick={handleResetView}
+                  data-testid="button-reset-view"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Map Container with Pan and Zoom */}
             <div 
-              className="w-full h-full relative"
-              style={{
-                background: `
-                  radial-gradient(circle at 25% 25%, #1a1a1a 0%, #0d1117 25%),
-                  radial-gradient(circle at 75% 75%, #161b22 0%, #0d1117 25%),
-                  linear-gradient(135deg, #21262d 0%, #0d1117 100%)
-                `
+              className="w-full h-full relative cursor-move"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              style={{ 
+                transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+                transformOrigin: 'center center',
+                transition: isDragging ? 'none' : 'transform 0.2s ease-out'
               }}
             >
-              {/* US Map SVG with Dark Styling */}
+              {/* Clean US Map Background */}
               <svg 
-                className="absolute inset-0 w-full h-full opacity-40" 
+                className="absolute inset-0 w-full h-full" 
                 viewBox="0 0 1000 600" 
                 style={{ zIndex: 1 }}
               >
+                {/* Ocean/Background */}
+                <rect width="1000" height="600" fill="#e0f2fe" />
+                
                 {/* US Mainland Outline */}
                 <path
                   d="M 200 300 L 250 280 L 300 250 L 400 240 L 500 230 L 600 235 L 700 250 L 750 270 L 800 300 L 820 350 L 800 400 L 750 450 L 650 480 L 550 470 L 450 460 L 350 450 L 280 420 L 220 380 Z"
-                  fill="none"
-                  stroke="#4a5568"
-                  strokeWidth="1"
+                  fill="#f0fdf4"
+                  stroke="#16a34a"
+                  strokeWidth="2"
                 />
                 
-                {/* State Boundary Lines */}
-                <g stroke="#2d3748" strokeWidth="0.5" fill="none" opacity="0.6">
+                {/* Major States */}
+                <path d="M 650 450 L 680 480 L 690 520 L 670 540 L 650 520 Z" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1" />
+                <path d="M 350 380 L 450 370 L 480 420 L 450 470 L 380 480 L 320 450 Z" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1" />
+                <path d="M 50 200 L 120 180 L 140 250 L 130 350 L 100 420 L 70 400 L 60 300 Z" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1" />
+                
+                {/* Great Lakes */}
+                <ellipse cx="550" cy="280" rx="40" ry="20" fill="#3b82f6" opacity="0.7" />
+                <ellipse cx="520" cy="300" rx="25" ry="15" fill="#3b82f6" opacity="0.7" />
+                <ellipse cx="480" cy="320" rx="30" ry="18" fill="#3b82f6" opacity="0.7" />
+                
+                {/* State Boundary Grid */}
+                <g stroke="#10b981" strokeWidth="0.5" opacity="0.4" fill="none">
                   <line x1="200" y1="200" x2="200" y2="500" />
                   <line x1="300" y1="200" x2="300" y2="500" />
                   <line x1="400" y1="200" x2="400" y2="500" />
@@ -172,11 +254,18 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                 </g>
 
                 {/* State Labels */}
-                <text x="400" y="380" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">Texas</text>
-                <text x="100" y="320" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">California</text>
-                <text x="680" y="400" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">Florida</text>
-                <text x="550" y="300" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">Great Lakes</text>
-                <text x="750" y="280" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">New York</text>
+                <text x="400" y="380" fill="#374151" fontSize="12" textAnchor="middle" fontWeight="bold">Texas</text>
+                <text x="100" y="320" fill="#374151" fontSize="12" textAnchor="middle" fontWeight="bold">California</text>
+                <text x="680" y="480" fill="#374151" fontSize="12" textAnchor="middle" fontWeight="bold">Florida</text>
+                <text x="550" y="300" fill="#374151" fontSize="10" textAnchor="middle">Great Lakes</text>
+                <text x="750" y="280" fill="#374151" fontSize="12" textAnchor="middle" fontWeight="bold">New York</text>
+
+                {/* Major Cities */}
+                <circle cx="100" cy="320" r="2" fill="#374151" />
+                <circle cx="400" cy="380" r="2" fill="#374151" />
+                <circle cx="680" cy="480" r="2" fill="#374151" />
+                <circle cx="750" cy="280" r="2" fill="#374151" />
+                <circle cx="600" cy="320" r="2" fill="#374151" />
               </svg>
               
               {/* Vehicle Markers */}
@@ -186,7 +275,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                 return (
                   <div
                     key={vehicle.vin}
-                    className="absolute w-3 h-3 rounded-full cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-all duration-200 hover:scale-150 hover:z-20 shadow-lg border border-white/50"
+                    className="absolute w-4 h-4 rounded-full cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-all duration-200 hover:scale-125 hover:z-20 shadow-lg border-2 border-white"
                     style={{
                       left: `${vehicle.position.x}%`,
                       top: `${vehicle.position.y}%`,
@@ -195,14 +284,17 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                     }}
                     onMouseEnter={() => setHoveredVehicle(vehicle)}
                     onMouseLeave={() => setHoveredVehicle(null)}
-                    onClick={() => setSelectedVehicle(vehicle)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedVehicle(vehicle);
+                    }}
                     data-testid={`map-marker-${vehicle.vin}`}
                   >
                     {/* Hover Tooltip */}
                     {hoveredVehicle?.vin === vehicle.vin && (
-                      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-3 py-2 rounded-lg shadow-xl whitespace-nowrap z-30 pointer-events-none border border-gray-600">
+                      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-black/90 text-white text-xs px-3 py-2 rounded-lg shadow-xl whitespace-nowrap z-30 pointer-events-none">
                         <div className="font-semibold">{vehicle.modelYear} {vehicle.makeName} {vehicle.modelName}</div>
-                        <div className="text-gray-300">{vehicle.licensePlate}</div>
+                        <div>{vehicle.licensePlate}</div>
                         <div className="flex items-center gap-1">
                           <div 
                             className="w-2 h-2 rounded-full" 
@@ -210,19 +302,19 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                           ></div>
                           <span style={{ color: status.color }}>{status.label}</span>
                         </div>
-                        <div className="text-gray-400">{vehicle.city}, {vehicle.state}</div>
+                        <div className="text-gray-300">{vehicle.city}, {vehicle.state}</div>
                         {/* Tooltip arrow */}
-                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-transparent border-t-black/90"></div>
                       </div>
                     )}
                   </div>
                 );
               })}
+            </div>
 
-              {/* Attribution */}
-              <div className="absolute bottom-2 left-2 text-xs text-gray-500">
-                © 2025 Fleet Tracking • {filteredVehicles.length} vehicles shown
-              </div>
+            {/* Map Info */}
+            <div className="absolute bottom-2 left-2 text-xs text-gray-600 bg-white/80 px-2 py-1 rounded">
+              © 2025 Fleet Tracking • {filteredVehicles.length} vehicles • Click and drag to pan
             </div>
           </div>
 
