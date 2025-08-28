@@ -11,6 +11,7 @@ import Login from "@/pages/login";
 import AssistanceSelection from "@/pages/assistance-selection";
 import CreateVehicle from "@/pages/create-vehicle-location";
 import AssignVehicleLocation from "@/pages/assign-vehicle-location";
+import UpdateVehicle from "@/pages/update-vehicle";
 import OnboardHire from "@/pages/onboard-hire";
 import OffboardVehicleLocation from "@/pages/offboard-vehicle-location";
 import ActiveVehicles from "@/pages/active-vehicles";
@@ -113,6 +114,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <AssignVehicleLocation />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/update-vehicle">
+        <ProtectedRoute>
+          <MainContent>
+            <UpdateVehicle />
           </MainContent>
         </ProtectedRoute>
       </Route>

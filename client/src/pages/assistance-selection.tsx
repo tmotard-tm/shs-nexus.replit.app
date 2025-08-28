@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
 import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings } from "lucide-react";
@@ -10,6 +12,7 @@ import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } fr
 export default function AssistanceSelection() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
+  const [isAssignUpdateDialogOpen, setIsAssignUpdateDialogOpen] = useState(false);
 
   const assistanceOptions = [
     {
@@ -26,7 +29,7 @@ export default function AssistanceSelection() {
       description: "Assign Existing Vehicles to Users",
       icon: MapPin,
       color: "chart-2", 
-      action: () => setLocation("/assign-vehicle-location")
+      action: () => setIsAssignUpdateDialogOpen(true)
     },
     {
       id: "onboard-hire",
@@ -178,6 +181,43 @@ export default function AssistanceSelection() {
             </div>
           </div>
         </div>
+        
+        {/* Assign/Update Selection Dialog */}
+        <Dialog open={isAssignUpdateDialogOpen} onOpenChange={setIsAssignUpdateDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Choose Action</DialogTitle>
+              <DialogDescription>
+                Would you like to assign a vehicle to an employee or update vehicle information?
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Button 
+                className="w-full justify-start" 
+                onClick={() => {
+                  setIsAssignUpdateDialogOpen(false);
+                  setLocation("/assign-vehicle-location");
+                }}
+                data-testid="button-assign-vehicle"
+              >
+                <Truck className="mr-2 h-4 w-4" />
+                Assign Vehicle to Employee
+              </Button>
+              <Button 
+                variant="outline" 
+                className="w-full justify-start"
+                onClick={() => {
+                  setIsAssignUpdateDialogOpen(false);
+                  setLocation("/update-vehicle");
+                }}
+                data-testid="button-update-vehicle"
+              >
+                <Settings className="mr-2 h-4 w-4" />
+                Update Vehicle Information
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </main>
     </MainContent>
   );
