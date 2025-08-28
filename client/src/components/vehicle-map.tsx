@@ -2,7 +2,9 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MapPin, Car, Truck, CheckCircle, XCircle, X } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter } from "lucide-react";
 import { activeVehicles, type FleetVehicle } from "@/data/fleetData";
 
 interface VehicleMapProps {
@@ -31,36 +33,75 @@ const stateCoordinates: { [key: string]: { x: number; y: number } } = {
   "WI": { x: 89.6, y: 44.3 }, "WY": { x: 107.3, y: 42.8 }
 };
 
+// Vehicle status categories with colors
+const vehicleStatuses = {
+  "assigned": { label: "Assigned to Tech", color: "#3b82f6", bgColor: "bg-blue-500" },
+  "maintenance": { label: "In Repair", color: "#ef4444", bgColor: "bg-red-500" },
+  "available": { label: "Available", color: "#10b981", bgColor: "bg-emerald-500" },
+  "reserved": { label: "Reserved for New Hire", color: "#22c55e", bgColor: "bg-green-500" },
+  "auction": { label: "Sent to Auction", color: "#f59e0b", bgColor: "bg-amber-500" },
+  "declined": { label: "Declined Repair", color: "#f97316", bgColor: "bg-orange-500" }
+};
+
 export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
   const [hoveredVehicle, setHoveredVehicle] = useState<FleetVehicle | null>(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [brandingFilter, setBrandingFilter] = useState("all");
+  const [regionFilter, setRegionFilter] = useState("all");
+
+  // Assign vehicle status based on various conditions
+  const getVehicleStatus = (vehicle: FleetVehicle) => {
+    if (vehicle.outOfServiceDate) return "auction";
+    if (vehicle.tuneStatus === "Needs Repair") return "maintenance"; 
+    if (vehicle.tuneStatus === "Declined") return "declined";
+    if (!vehicle.outOfServiceDate && vehicle.branding === "Sears") return "assigned";
+    if (vehicle.branding === "Reserved") return "reserved";
+    return "available";
+  };
 
   // Convert longitude/latitude to map coordinates (simplified projection)
   const getMapPosition = (vehicle: FleetVehicle) => {
     const stateCoord = stateCoordinates[vehicle.state];
     if (!stateCoord) return { x: 50, y: 50 }; // Default center position
     
-    // Convert to percentage for positioning on our 800x500 map
+    // Convert to percentage for positioning on our map
     const x = ((stateCoord.x + 180) / 360) * 100;
     const y = ((90 - stateCoord.y) / 180) * 100;
     
     // Add some random offset to prevent overlapping markers in same state
-    const offsetX = (Math.random() - 0.5) * 3;
-    const offsetY = (Math.random() - 0.5) * 3;
+    const offsetX = (Math.random() - 0.5) * 2;
+    const offsetY = (Math.random() - 0.5) * 2;
     
     return { 
-      x: Math.max(2, Math.min(98, x + offsetX)), 
-      y: Math.max(2, Math.min(98, y + offsetY)) 
+      x: Math.max(1, Math.min(99, x + offsetX)), 
+      y: Math.max(1, Math.min(99, y + offsetY)) 
     };
   };
 
   const vehiclePositions = activeVehicles.map(vehicle => ({
     ...vehicle,
-    position: getMapPosition(vehicle)
+    position: getMapPosition(vehicle),
+    status: getVehicleStatus(vehicle)
   }));
 
-  const assignedVehicles = vehiclePositions.filter(v => !v.outOfServiceDate);
-  const unassignedVehicles = vehiclePositions.filter(v => v.outOfServiceDate);
+  // Apply filters
+  const filteredVehicles = vehiclePositions.filter(vehicle => {
+    if (statusFilter !== "all" && vehicle.status !== statusFilter) return false;
+    if (brandingFilter !== "all" && vehicle.branding !== brandingFilter) return false;
+    if (regionFilter !== "all" && vehicle.region !== regionFilter) return false;
+    return true;
+  });
+
+  // Group vehicles by status for counts
+  const statusCounts = Object.keys(vehicleStatuses).reduce((acc, status) => {
+    acc[status] = filteredVehicles.filter(v => v.status === status).length;
+    return acc;
+  }, {} as Record<string, number>);
+
+  // Get unique values for filters
+  const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding))).sort();
+  const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region))).sort();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -68,141 +109,89 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <MapPin className="h-5 w-5 text-primary" />
-            Vehicle Locations Map
+            TRUCK STATUS
           </DialogTitle>
           <DialogDescription>
-            View all active vehicles on the map. Green markers show assigned vehicles, red markers show unassigned vehicles.
+            Interactive fleet tracking with real-time status updates
           </DialogDescription>
         </DialogHeader>
+
+        {/* Status Legend Bar */}
+        <div className="flex flex-wrap gap-4 p-4 bg-gray-50 rounded-lg border">
+          {Object.entries(vehicleStatuses).map(([key, status]) => (
+            <div key={key} className="flex items-center gap-2">
+              <div 
+                className="w-3 h-3 rounded-full" 
+                style={{ backgroundColor: status.color }}
+              ></div>
+              <span className="text-sm font-medium">{status.label}</span>
+              <span className="text-sm text-muted-foreground">({statusCounts[key] || 0})</span>
+            </div>
+          ))}
+        </div>
         
-        <div className="flex gap-4 h-[70vh]">
-          {/* Map Container */}
-          <div className="flex-1 relative bg-slate-100 rounded-lg overflow-hidden border">
-            {/* US Map Background with Geographic Features */}
-            <div className="w-full h-full relative bg-blue-50">
-              {/* US Map SVG Background */}
+        <div className="flex gap-4 h-[75vh]">
+          {/* Map Container with Dark Satellite Style */}
+          <div className="flex-1 relative rounded-lg overflow-hidden border">
+            {/* Dark Satellite Map Background */}
+            <div 
+              className="w-full h-full relative"
+              style={{
+                background: `
+                  radial-gradient(circle at 25% 25%, #1a1a1a 0%, #0d1117 25%),
+                  radial-gradient(circle at 75% 75%, #161b22 0%, #0d1117 25%),
+                  linear-gradient(135deg, #21262d 0%, #0d1117 100%)
+                `
+              }}
+            >
+              {/* US Map SVG with Dark Styling */}
               <svg 
-                className="absolute inset-0 w-full h-full" 
+                className="absolute inset-0 w-full h-full opacity-40" 
                 viewBox="0 0 1000 600" 
                 style={{ zIndex: 1 }}
               >
-                {/* Ocean/Background */}
-                <rect width="1000" height="600" fill="#e0f2fe" />
-                
-                {/* US Mainland Outline (Simplified) */}
+                {/* US Mainland Outline */}
                 <path
                   d="M 200 300 L 250 280 L 300 250 L 400 240 L 500 230 L 600 235 L 700 250 L 750 270 L 800 300 L 820 350 L 800 400 L 750 450 L 650 480 L 550 470 L 450 460 L 350 450 L 280 420 L 220 380 Z"
-                  fill="#f0fdf4"
-                  stroke="#16a34a"
-                  strokeWidth="2"
-                />
-                
-                {/* Florida */}
-                <path
-                  d="M 650 450 L 680 480 L 690 520 L 670 540 L 650 520 Z"
-                  fill="#f0fdf4"
-                  stroke="#16a34a"
+                  fill="none"
+                  stroke="#4a5568"
                   strokeWidth="1"
                 />
                 
-                {/* Texas */}
-                <path
-                  d="M 350 380 L 450 370 L 480 420 L 450 470 L 380 480 L 320 450 Z"
-                  fill="#f0fdf4"
-                  stroke="#16a34a"
-                  strokeWidth="1"
-                />
-                
-                {/* California */}
-                <path
-                  d="M 50 200 L 120 180 L 140 250 L 130 350 L 100 420 L 70 400 L 60 300 Z"
-                  fill="#f0fdf4"
-                  stroke="#16a34a"
-                  strokeWidth="1"
-                />
-                
-                {/* Great Lakes Region */}
-                <ellipse cx="550" cy="280" rx="40" ry="20" fill="#3b82f6" opacity="0.6" />
-                <ellipse cx="520" cy="300" rx="25" ry="15" fill="#3b82f6" opacity="0.6" />
-                <ellipse cx="480" cy="320" rx="30" ry="18" fill="#3b82f6" opacity="0.6" />
-                
-                {/* Mountain Ranges (Rockies) */}
-                <path
-                  d="M 300 200 L 320 180 L 340 190 L 360 170 L 380 185 L 400 165 L 420 180 L 400 200 L 380 210 L 360 200 L 340 215 L 320 205 Z"
-                  fill="#a1a1aa"
-                  opacity="0.4"
-                />
-                
-                {/* Appalachian Mountains */}
-                <path
-                  d="M 650 250 L 680 230 L 700 240 L 720 220 L 740 235 L 720 250 L 700 260 L 680 255 L 660 265 Z"
-                  fill="#a1a1aa"
-                  opacity="0.4"
-                />
-                
-                {/* State Boundary Lines (Simplified Grid) */}
-                <g stroke="#10b981" strokeWidth="0.5" opacity="0.3" fill="none">
+                {/* State Boundary Lines */}
+                <g stroke="#2d3748" strokeWidth="0.5" fill="none" opacity="0.6">
                   <line x1="200" y1="200" x2="200" y2="500" />
                   <line x1="300" y1="200" x2="300" y2="500" />
                   <line x1="400" y1="200" x2="400" y2="500" />
                   <line x1="500" y1="200" x2="500" y2="500" />
                   <line x1="600" y1="200" x2="600" y2="500" />
                   <line x1="700" y1="200" x2="700" y2="500" />
-                  
                   <line x1="100" y1="250" x2="800" y2="250" />
                   <line x1="100" y1="350" x2="800" y2="350" />
                   <line x1="100" y1="450" x2="800" y2="450" />
                 </g>
-                
-                {/* Major Cities (Small dots) */}
-                <circle cx="150" cy="320" r="2" fill="#ef4444" opacity="0.7" />
-                <circle cx="750" cy="300" r="2" fill="#ef4444" opacity="0.7" />
-                <circle cx="400" cy="380" r="2" fill="#ef4444" opacity="0.7" />
-                <circle cx="600" cy="320" r="2" fill="#ef4444" opacity="0.7" />
-                <circle cx="300" cy="300" r="2" fill="#ef4444" opacity="0.7" />
-                
-                {/* Compass Rose */}
-                <g transform="translate(50,50)">
-                  <circle cx="0" cy="0" r="20" fill="white" stroke="#374151" strokeWidth="1" opacity="0.9" />
-                  <path d="M 0,-15 L 5,0 L 0,15 L -5,0 Z" fill="#ef4444" />
-                  <text x="0" y="-25" textAnchor="middle" fontSize="12" fill="#374151" fontWeight="bold">N</text>
-                </g>
+
+                {/* State Labels */}
+                <text x="400" y="380" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">Texas</text>
+                <text x="100" y="320" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">California</text>
+                <text x="680" y="400" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">Florida</text>
+                <text x="550" y="300" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">Great Lakes</text>
+                <text x="750" y="280" fill="#718096" fontSize="14" textAnchor="middle" opacity="0.7">New York</text>
               </svg>
               
-              {/* Map Title */}
-              <div className="absolute top-4 left-4 bg-white/90 px-3 py-2 rounded-lg shadow" style={{ zIndex: 10 }}>
-                <h3 className="text-sm font-semibold">United States Vehicle Distribution</h3>
-                <p className="text-xs text-muted-foreground">
-                  {assignedVehicles.length} Assigned • {unassignedVehicles.length} Unassigned
-                </p>
-              </div>
-
-              {/* Legend */}
-              <div className="absolute top-4 right-4 bg-white/90 px-3 py-2 rounded-lg shadow space-y-2">
-                <h4 className="text-xs font-semibold">Legend</h4>
-                <div className="flex items-center gap-2 text-xs">
-                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  <span>Assigned ({assignedVehicles.length})</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                  <span>Unassigned ({unassignedVehicles.length})</span>
-                </div>
-              </div>
-              
               {/* Vehicle Markers */}
-              {vehiclePositions.map((vehicle, index) => {
-                const isAssigned = !vehicle.outOfServiceDate;
+              {filteredVehicles.map((vehicle, index) => {
+                const status = vehicleStatuses[vehicle.status as keyof typeof vehicleStatuses];
+                if (!status) return null;
                 return (
                   <div
                     key={vehicle.vin}
-                    className={`absolute w-4 h-4 rounded-full cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-all duration-200 hover:scale-125 hover:z-10 ${
-                      isAssigned ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'
-                    } shadow-lg border-2 border-white`}
+                    className="absolute w-3 h-3 rounded-full cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-all duration-200 hover:scale-150 hover:z-20 shadow-lg border border-white/50"
                     style={{
                       left: `${vehicle.position.x}%`,
                       top: `${vehicle.position.y}%`,
-                      zIndex: hoveredVehicle?.vin === vehicle.vin ? 20 : 10
+                      backgroundColor: status.color,
+                      zIndex: hoveredVehicle?.vin === vehicle.vin ? 25 : 10
                     }}
                     onMouseEnter={() => setHoveredVehicle(vehicle)}
                     onMouseLeave={() => setHoveredVehicle(null)}
@@ -211,34 +200,141 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                   >
                     {/* Hover Tooltip */}
                     {hoveredVehicle?.vin === vehicle.vin && (
-                      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-black/90 text-white text-xs px-3 py-2 rounded-lg shadow-lg whitespace-nowrap z-30 pointer-events-none">
+                      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-3 py-2 rounded-lg shadow-xl whitespace-nowrap z-30 pointer-events-none border border-gray-600">
                         <div className="font-semibold">{vehicle.modelYear} {vehicle.makeName} {vehicle.modelName}</div>
-                        <div>{vehicle.licensePlate}</div>
+                        <div className="text-gray-300">{vehicle.licensePlate}</div>
                         <div className="flex items-center gap-1">
-                          {isAssigned ? (
-                            <>
-                              <CheckCircle className="h-3 w-3 text-green-400" />
-                              <span className="text-green-400">Assigned</span>
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="h-3 w-3 text-red-400" />
-                              <span className="text-red-400">Unassigned</span>
-                            </>
-                          )}
+                          <div 
+                            className="w-2 h-2 rounded-full" 
+                            style={{ backgroundColor: status.color }}
+                          ></div>
+                          <span style={{ color: status.color }}>{status.label}</span>
                         </div>
-                        <div className="text-gray-300">{vehicle.city}, {vehicle.state}</div>
+                        <div className="text-gray-400">{vehicle.city}, {vehicle.state}</div>
                         {/* Tooltip arrow */}
-                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-transparent border-t-black/90"></div>
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
                       </div>
                     )}
                   </div>
                 );
               })}
+
+              {/* Attribution */}
+              <div className="absolute bottom-2 left-2 text-xs text-gray-500">
+                © 2025 Fleet Tracking • {filteredVehicles.length} vehicles shown
+              </div>
             </div>
           </div>
 
-          {/* Vehicle Details Sidebar */}
+          {/* Filters Sidebar */}
+          <div className="w-80 bg-white rounded-lg border shadow-sm">
+            <div className="p-4 border-b">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Filter className="h-4 w-4" />
+                Filters
+              </h3>
+            </div>
+            
+            <div className="p-4 space-y-4">
+              {/* Status Filter */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Vehicle Status</Label>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    {Object.entries(vehicleStatuses).map(([key, status]) => (
+                      <SelectItem key={key} value={key}>
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: status.color }}
+                          ></div>
+                          {status.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Branding Filter */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Vehicle Branding</Label>
+                <Select value={brandingFilter} onValueChange={setBrandingFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All branding" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Branding</SelectItem>
+                    {brandingOptions.map(branding => (
+                      <SelectItem key={branding} value={branding}>{branding}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Region Filter */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Region</Label>
+                <Select value={regionFilter} onValueChange={setRegionFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All regions" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Regions</SelectItem>
+                    {regionOptions.map(region => (
+                      <SelectItem key={region} value={region}>{region}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Clear Filters */}
+              {(statusFilter !== "all" || brandingFilter !== "all" || regionFilter !== "all") && (
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={() => {
+                    setStatusFilter("all");
+                    setBrandingFilter("all");
+                    setRegionFilter("all");
+                  }}
+                >
+                  Clear All Filters
+                </Button>
+              )}
+
+              {/* Statistics */}
+              <div className="pt-4 border-t space-y-3">
+                <h4 className="font-medium text-sm">Fleet Statistics</h4>
+                <div className="space-y-2">
+                  {Object.entries(vehicleStatuses).map(([key, status]) => (
+                    <div key={key} className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <div 
+                          className="w-2 h-2 rounded-full" 
+                          style={{ backgroundColor: status.color }}
+                        ></div>
+                        <span className="text-gray-600">{status.label}</span>
+                      </div>
+                      <span className="font-medium">{statusCounts[key] || 0}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-2 border-t">
+                  <div className="flex items-center justify-between text-sm font-medium">
+                    <span>Total Vehicles</span>
+                    <span>{filteredVehicles.length}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Vehicle Details Sidebar (when vehicle selected) */}
           {selectedVehicle && (
             <div className="w-80 bg-white rounded-lg border shadow-sm">
               <div className="p-4 border-b flex items-center justify-between">
