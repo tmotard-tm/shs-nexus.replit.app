@@ -130,6 +130,15 @@
   filter: none !important;
 }
 
+/* Ensure map containers have proper z-index */
+.leaflet-container {
+  z-index: 1 !important;
+}
+
+.leaflet-control-container {
+  z-index: 1001 !important;
+}
+
 /* Development Watermark */
 .dev-watermark {
   position: fixed;
@@ -138,7 +147,7 @@
   width: 100vw;
   height: 100vh;
   pointer-events: none;
-  z-index: 9999;
+  z-index: 1000;
   user-select: none;
   overflow: hidden;
 }
