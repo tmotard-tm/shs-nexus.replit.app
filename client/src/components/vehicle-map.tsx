@@ -155,15 +155,22 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   useEffect(() => {
     if (!mapRef.current || leafletMapRef.current || !open) return;
 
+    console.log('Initializing map...', { vehicleCount: filteredVehicles.length });
+
     const timer = setTimeout(() => {
       if (!mapRef.current) return;
 
       try {
+        console.log('Creating Leaflet map...');
+        
         // Create map with professional dark-themed tiles
         const map = L.map(mapRef.current, {
           zoomControl: false,
           attributionControl: true,
+          preferCanvas: true
         }).setView([39.8, -98.5], 4);
+
+        console.log('Map created, adding tiles...');
 
         // Use CartoDB Dark Matter for professional dark appearance
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -171,6 +178,8 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
           maxZoom: 19,
           minZoom: 3
         }).addTo(map);
+
+        console.log('Tiles added, creating controls...');
 
         // Add professional zoom control with custom styling
         const zoomControl = L.control.zoom({ position: 'topleft' }).addTo(map);
@@ -181,16 +190,97 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
         leafletMapRef.current = map;
         markersRef.current = markersLayer;
 
+        console.log('Map initialization complete');
+
+        // Add markers immediately after map is created
+        console.log('Adding markers to map...', filteredVehicles.length);
+        console.log('First 3 vehicles sample:', filteredVehicles.slice(0, 3).map(v => ({
+          vin: v.vin,
+          position: v.position,
+          status: v.status,
+          city: v.city,
+          state: v.state,
+          hasPosition: !!v.position
+        })));
+        
+        filteredVehicles.forEach((vehicle, index) => {
+          const status = vehicleStatuses[vehicle.status as keyof typeof vehicleStatuses];
+          if (!status) {
+            console.warn(`No status found for vehicle ${vehicle.vin} with status "${vehicle.status}"`);
+            return;
+          }
+
+          if (!vehicle.position || !vehicle.position.lat || !vehicle.position.lng) {
+            console.warn(`Invalid position for vehicle ${vehicle.vin}:`, vehicle.position);
+            return;
+          }
+
+          try {
+            // Create professional marker with dark theme styling
+            const icon = L.divIcon({
+              html: `<div style="
+                width: 14px;
+                height: 14px;
+                border-radius: 50%;
+                background-color: ${status.color};
+                border: 2px solid white;
+                box-shadow: 0 0 8px rgba(0,0,0,0.5);
+                transition: all 0.2s;
+              "></div>`,
+              className: 'vehicle-marker-professional',
+              iconSize: [18, 18],
+              iconAnchor: [9, 9],
+            });
+
+            // Professional popup styling
+            const marker = L.marker([vehicle.position.lat, vehicle.position.lng], { icon })
+              .bindPopup(`
+                <div style="
+                  min-width: 200px; 
+                  font-family: system-ui, sans-serif;
+                  background: #1a1a1a;
+                  color: #fff;
+                  padding: 12px;
+                  border-radius: 8px;
+                  border: 1px solid #333;
+                ">
+                  <strong style="color: ${status.color};">${vehicle.vin}</strong><br/>
+                  <strong>Year:</strong> ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}<br/>
+                  <strong>Status:</strong> ${status.label}<br/>
+                  <strong>Location:</strong> ${vehicle.city}, ${vehicle.state}<br/>
+                  <strong>Mileage:</strong> ${vehicle.odometerDelivery?.toLocaleString() || 'N/A'} miles<br/>
+                  <small style="opacity: 0.7;">Click for more details</small>
+                </div>
+              `, {
+                className: 'professional-popup'
+              })
+              .on('click', () => setSelectedVehicle(vehicle));
+
+            markersLayer.addLayer(marker);
+
+            if (index < 10) {
+              console.log(`Added marker ${index + 1} for ${vehicle.vin} at [${vehicle.position.lat}, ${vehicle.position.lng}] status: ${vehicle.status}`);
+            }
+
+          } catch (error) {
+            console.error(`Error creating marker for vehicle ${vehicle.vin}:`, error);
+          }
+        });
+        
+        console.log(`Total markers added: ${filteredVehicles.length}`);
+
         // Auto-fit to all vehicles with padding
         setTimeout(() => {
           map.invalidateSize();
+          console.log('Map invalidated, vehicles to show:', filteredVehicles.length);
           if (filteredVehicles.length > 0) {
             const group = new L.FeatureGroup(filteredVehicles.map(vehicle => 
               L.marker([vehicle.position.lat, vehicle.position.lng])
             ));
             map.fitBounds(group.getBounds().pad(0.05));
+            console.log('Map bounds fitted to vehicles');
           }
-        }, 100);
+        }, 200);
 
       } catch (error) {
         console.error('Error initializing map:', error);
@@ -205,60 +295,95 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
         markersRef.current = null;
       }
     };
-  }, [open]);
+  }, [open, filteredVehicles.length]);
 
   // Update markers when vehicles or filters change
   useEffect(() => {
     if (!leafletMapRef.current || !markersRef.current) return;
 
+    console.log('Updating markers...', { filteredVehicles: filteredVehicles.length });
+
     // Clear existing markers
     markersRef.current.clearLayers();
 
     // Add new professional markers
-    filteredVehicles.forEach((vehicle) => {
+    console.log('Creating markers for vehicles:', filteredVehicles.slice(0, 5).map(v => ({ 
+      vin: v.vin, 
+      position: v.position, 
+      status: v.status,
+      city: v.city,
+      state: v.state 
+    })));
+
+    filteredVehicles.forEach((vehicle, index) => {
       const status = vehicleStatuses[vehicle.status as keyof typeof vehicleStatuses];
-      if (!status) return;
+      if (!status) {
+        console.warn(`No status found for vehicle ${vehicle.vin} with status "${vehicle.status}"`);
+        return;
+      }
 
-      // Create professional marker with dark theme styling
-      const icon = L.divIcon({
-        html: `<div style="
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          background-color: ${status.color};
-          border: 2px solid #000;
-          box-shadow: 0 0 6px rgba(0,0,0,0.8);
-          transition: all 0.2s;
-        "></div>`,
-        className: 'vehicle-marker-professional',
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
-      });
+      if (!vehicle.position || !vehicle.position.lat || !vehicle.position.lng) {
+        console.warn(`Invalid position for vehicle ${vehicle.vin}:`, vehicle.position);
+        return;
+      }
 
-      // Professional popup styling
-      const marker = L.marker([vehicle.position.lat, vehicle.position.lng], { icon })
-        .bindPopup(`
-          <div style="
-            min-width: 200px; 
-            font-family: system-ui, sans-serif;
-            background: #1a1a1a;
-            color: #fff;
-            padding: 12px;
-            border-radius: 8px;
-            border: 1px solid #333;
-          ">
-            <strong style="color: ${status.color};">${vehicle.id}</strong><br/>
-            <strong>Status:</strong> ${status.label}<br/>
-            <strong>Location:</strong> ${vehicle.label}<br/>
-            <small style="opacity: 0.7;">Click for more details</small>
-          </div>
-        `, {
-          className: 'professional-popup'
-        })
-        .on('click', () => setSelectedVehicle(vehicle));
+      if (!markersRef.current) {
+        console.warn('markersRef.current is null');
+        return;
+      }
 
-      markersRef.current?.addLayer(marker);
+      try {
+        // Create professional marker with dark theme styling
+        const icon = L.divIcon({
+          html: `<div style="
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: ${status.color};
+            border: 2px solid #000;
+            box-shadow: 0 0 6px rgba(0,0,0,0.8);
+            transition: all 0.2s;
+          "></div>`,
+          className: 'vehicle-marker-professional',
+          iconSize: [16, 16],
+          iconAnchor: [8, 8],
+        });
+
+        // Professional popup styling
+        const marker = L.marker([vehicle.position.lat, vehicle.position.lng], { icon })
+          .bindPopup(`
+            <div style="
+              min-width: 200px; 
+              font-family: system-ui, sans-serif;
+              background: #1a1a1a;
+              color: #fff;
+              padding: 12px;
+              border-radius: 8px;
+              border: 1px solid #333;
+            ">
+              <strong style="color: ${status.color};">${vehicle.vin}</strong><br/>
+              <strong>Year:</strong> ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}<br/>
+              <strong>Status:</strong> ${status.label}<br/>
+              <strong>Location:</strong> ${vehicle.city}, ${vehicle.state}<br/>
+              <small style="opacity: 0.7;">Click for more details</small>
+            </div>
+          `, {
+            className: 'professional-popup'
+          })
+          .on('click', () => setSelectedVehicle(vehicle));
+
+        markersRef.current.addLayer(marker);
+
+        if (index < 5) {
+          console.log(`Created marker ${index + 1} for vehicle ${vehicle.vin} at [${vehicle.position.lat}, ${vehicle.position.lng}] status: ${vehicle.status}`);
+        }
+
+      } catch (error) {
+        console.error(`Error creating marker for vehicle ${vehicle.vin}:`, error);
+      }
     });
+
+    console.log(`Total markers added to map: ${filteredVehicles.length}`);
 
     // Auto-fit bounds when vehicles change
     if (filteredVehicles.length > 0 && leafletMapRef.current) {
@@ -269,7 +394,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
       );
       leafletMapRef.current.fitBounds(group.getBounds().pad(0.05));
     }
-  }, [filteredVehicles]);
+  }, [filteredVehicles, statusFilter, brandingFilter, regionFilter, open]);
 
   const handleZoomIn = () => {
     if (leafletMapRef.current) {
