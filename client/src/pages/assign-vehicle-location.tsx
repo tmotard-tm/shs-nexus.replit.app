@@ -122,9 +122,9 @@ export default function AssignVehicleLocation() {
         <div className="max-w-6xl mx-auto">
           <BackButton href="/" />
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="space-y-6">
             {/* Vehicle Search and Filters */}
-            <div className="lg:col-span-2 space-y-6">
+            <div className="space-y-6">
               <Card>
                 <CardHeader>
                   <CardTitle>Search Available Vehicles</CardTitle>
@@ -273,103 +273,6 @@ export default function AssignVehicleLocation() {
                   )}
                 </div>
               </div>
-            </div>
-
-            {/* Assignment Form */}
-            <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle data-testid="text-assign-vehicle-title">Assign Vehicle</CardTitle>
-                  <CardDescription>
-                    Complete the assignment details
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={handleVehicleAssignment} className="space-y-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="employeeId">Employee *</Label>
-                      <Select 
-                        value={vehicleAssignment.employeeId} 
-                        onValueChange={(value) => setVehicleAssignment(prev => ({ ...prev, employeeId: value }))}
-                        data-testid="select-employee"
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select employee" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {employees.map(employee => (
-                            <SelectItem key={employee.id} value={employee.id} data-testid={`option-employee-${employee.id}`}>
-                              {employee.name}
-                              <span className="text-muted-foreground ml-2">({employee.department} - {employee.region})</span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {selectedVehicle && (
-                      <div className="p-3 bg-muted rounded-lg">
-                        <p className="font-semibold text-sm mb-1">Selected Vehicle:</p>
-                        <p className="text-sm">{selectedVehicle.modelYear} {selectedVehicle.makeName} {selectedVehicle.modelName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {selectedVehicle.licensePlate} | VIN: {selectedVehicle.vin}
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="space-y-2">
-                      <Label htmlFor="startDate">Start Date *</Label>
-                      <Input
-                        id="startDate"
-                        type="date"
-                        value={vehicleAssignment.startDate}
-                        onChange={(e) => setVehicleAssignment(prev => ({ ...prev, startDate: e.target.value }))}
-                        data-testid="input-start-date"
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="endDate">End Date</Label>
-                      <Input
-                        id="endDate"
-                        type="date"
-                        value={vehicleAssignment.endDate}
-                        onChange={(e) => setVehicleAssignment(prev => ({ ...prev, endDate: e.target.value }))}
-                        data-testid="input-end-date"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="purpose">Purpose</Label>
-                      <Select 
-                        value={vehicleAssignment.purpose} 
-                        onValueChange={(value) => setVehicleAssignment(prev => ({ ...prev, purpose: value }))}
-                        data-testid="select-purpose"
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select purpose" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="field_service" data-testid="option-field-service">Field Service</SelectItem>
-                          <SelectItem value="delivery" data-testid="option-delivery">Acquisition/Transport</SelectItem>
-                          <SelectItem value="maintenance" data-testid="option-maintenance">Maintenance Work</SelectItem>
-                          <SelectItem value="business_travel" data-testid="option-business-travel">Business Travel</SelectItem>
-                          <SelectItem value="daily_operations" data-testid="option-daily-operations">Daily Operations</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <Button 
-                      type="submit" 
-                      className="w-full" 
-                      disabled={!vehicleAssignment.employeeId || !vehicleAssignment.vehicleId || !vehicleAssignment.startDate}
-                      data-testid="button-assign-vehicle"
-                    >
-                      Assign Vehicle
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
             </div>
           </div>
           
