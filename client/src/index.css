@@ -129,3 +129,21 @@
 .leaflet-tile {
   filter: none !important;
 }
+
+/* Development Watermark */
+.dev-watermark {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-45deg);
+  font-size: 3rem;
+  font-weight: bold;
+  color: rgba(255, 0, 0, 0.1);
+  pointer-events: none;
+  z-index: 9999;
+  white-space: nowrap;
+  user-select: none;
+  text-transform: uppercase;
+  font-family: monospace;
+  letter-spacing: 0.2em;
+}
