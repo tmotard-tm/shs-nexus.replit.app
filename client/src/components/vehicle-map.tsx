@@ -256,59 +256,130 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                 transition: isDragging ? 'none' : 'transform 0.2s ease-out'
               }}
             >
-              {/* Clean US Map Background */}
+              {/* Detailed US Map */}
               <svg 
                 className="absolute inset-0 w-full h-full" 
                 viewBox="0 0 1000 600" 
                 style={{ zIndex: 1 }}
               >
                 {/* Ocean/Background */}
-                <rect width="1000" height="600" fill="#e0f2fe" />
+                <rect width="1000" height="600" fill="#a5b4fc" />
                 
-                {/* US Mainland Outline */}
-                <path
-                  d="M 200 300 L 250 280 L 300 250 L 400 240 L 500 230 L 600 235 L 700 250 L 750 270 L 800 300 L 820 350 L 800 400 L 750 450 L 650 480 L 550 470 L 450 460 L 350 450 L 280 420 L 220 380 Z"
-                  fill="#f0fdf4"
-                  stroke="#16a34a"
-                  strokeWidth="2"
-                />
+                {/* Individual State Shapes */}
                 
-                {/* Major States */}
-                <path d="M 650 450 L 680 480 L 690 520 L 670 540 L 650 520 Z" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1" />
-                <path d="M 350 380 L 450 370 L 480 420 L 450 470 L 380 480 L 320 450 Z" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1" />
-                <path d="M 50 200 L 120 180 L 140 250 L 130 350 L 100 420 L 70 400 L 60 300 Z" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1" />
-                
+                {/* California */}
+                <path d="M 20 180 L 50 160 L 80 170 L 90 200 L 95 250 L 90 300 L 85 350 L 80 400 L 70 430 L 50 440 L 30 435 L 25 420 L 15 380 L 10 340 L 15 300 L 20 260 L 25 220 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="55" y="300" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">CA</text>
+
+                {/* Texas */}
+                <path d="M 280 320 L 380 310 L 420 320 L 460 330 L 480 350 L 490 390 L 480 430 L 460 460 L 420 470 L 380 465 L 340 460 L 310 450 L 290 430 L 280 400 L 275 380 L 280 350 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="380" y="390" fontSize="12" fill="#047857" textAnchor="middle" fontWeight="bold">TX</text>
+
+                {/* Florida */}
+                <path d="M 620 430 L 670 425 L 710 430 L 740 440 L 760 460 L 770 480 L 780 510 L 770 530 L 750 540 L 720 545 L 690 540 L 660 535 L 640 520 L 625 500 L 620 480 L 618 455 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="690" y="490" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">FL</text>
+
+                {/* New York */}
+                <path d="M 710 220 L 750 215 L 780 220 L 800 230 L 810 250 L 805 270 L 795 285 L 780 290 L 760 285 L 740 280 L 720 270 L 710 250 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="760" y="250" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">NY</text>
+
+                {/* Pennsylvania */}
+                <path d="M 670 260 L 720 255 L 750 260 L 760 270 L 755 285 L 740 295 L 720 300 L 700 295 L 680 290 L 665 280 L 665 270 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="712" y="280" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">PA</text>
+
+                {/* Illinois */}
+                <path d="M 520 260 L 550 255 L 570 260 L 575 280 L 580 310 L 575 340 L 570 360 L 565 380 L 550 385 L 530 380 L 520 360 L 515 340 L 520 310 L 525 280 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="547" y="320" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">IL</text>
+
+                {/* Ohio */}
+                <path d="M 580 280 L 620 275 L 650 280 L 655 300 L 650 320 L 645 340 L 630 345 L 610 340 L 590 335 L 580 320 L 575 300 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="617" y="310" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">OH</text>
+
+                {/* Michigan */}
+                <path d="M 540 220 L 570 215 L 590 220 L 600 240 L 595 260 L 580 270 L 560 265 L 545 250 L 540 235 Z M 580 180 L 600 175 L 610 185 L 605 200 L 590 205 L 580 195 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="572" y="240" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">MI</text>
+
+                {/* Georgia */}
+                <path d="M 640 350 L 680 345 L 700 350 L 710 370 L 705 390 L 700 410 L 685 420 L 665 415 L 645 410 L 635 390 L 635 370 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="672" y="380" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">GA</text>
+
+                {/* North Carolina */}
+                <path d="M 660 320 L 720 315 L 760 320 L 770 330 L 765 345 L 750 350 L 720 345 L 690 340 L 665 335 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="712" y="335" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">NC</text>
+
+                {/* Virginia */}
+                <path d="M 680 300 L 730 295 L 750 300 L 755 315 L 740 320 L 715 315 L 690 310 L 680 305 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="717" y="310" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">VA</text>
+
+                {/* Arizona */}
+                <path d="M 150 300 L 200 295 L 220 300 L 225 340 L 220 380 L 215 420 L 200 425 L 180 420 L 160 415 L 150 380 L 145 340 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="185" y="360" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">AZ</text>
+
+                {/* Nevada */}
+                <path d="M 100 220 L 150 215 L 170 220 L 175 260 L 170 300 L 165 340 L 150 345 L 130 340 L 115 320 L 105 280 L 100 240 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="137" y="280" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">NV</text>
+
+                {/* Colorado */}
+                <path d="M 230 280 L 300 275 L 320 280 L 325 320 L 320 360 L 300 365 L 270 360 L 240 355 L 230 320 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="277" y="320" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">CO</text>
+
+                {/* New Mexico */}
+                <path d="M 230 360 L 280 355 L 300 360 L 305 400 L 300 440 L 280 445 L 250 440 L 230 435 L 225 400 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="265" y="400" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">NM</text>
+
+                {/* Utah */}
+                <path d="M 180 240 L 230 235 L 250 240 L 255 280 L 250 320 L 230 325 L 210 320 L 190 315 L 180 280 Z" fill="#dcfce7" stroke="#059669" strokeWidth="1"/>
+                <text x="217" y="280" fontSize="10" fill="#047857" textAnchor="middle" fontWeight="bold">UT</text>
+
                 {/* Great Lakes */}
-                <ellipse cx="550" cy="280" rx="40" ry="20" fill="#3b82f6" opacity="0.7" />
-                <ellipse cx="520" cy="300" rx="25" ry="15" fill="#3b82f6" opacity="0.7" />
-                <ellipse cx="480" cy="320" rx="30" ry="18" fill="#3b82f6" opacity="0.7" />
-                
-                {/* State Boundary Grid */}
-                <g stroke="#10b981" strokeWidth="0.5" opacity="0.4" fill="none">
-                  <line x1="200" y1="200" x2="200" y2="500" />
-                  <line x1="300" y1="200" x2="300" y2="500" />
-                  <line x1="400" y1="200" x2="400" y2="500" />
-                  <line x1="500" y1="200" x2="500" y2="500" />
-                  <line x1="600" y1="200" x2="600" y2="500" />
-                  <line x1="700" y1="200" x2="700" y2="500" />
-                  <line x1="100" y1="250" x2="800" y2="250" />
-                  <line x1="100" y1="350" x2="800" y2="350" />
-                  <line x1="100" y1="450" x2="800" y2="450" />
+                <ellipse cx="580" cy="240" rx="25" ry="15" fill="#3b82f6" opacity="0.8"/>
+                <ellipse cx="600" cy="260" rx="20" ry="12" fill="#3b82f6" opacity="0.8"/>
+                <ellipse cx="620" cy="250" rx="15" ry="10" fill="#3b82f6" opacity="0.8"/>
+                <ellipse cx="560" cy="255" rx="18" ry="8" fill="#3b82f6" opacity="0.8"/>
+                <ellipse cx="540" cy="270" rx="12" ry="6" fill="#3b82f6" opacity="0.8"/>
+
+                {/* Interstate Highways */}
+                <g stroke="#6b7280" strokeWidth="1" fill="none" opacity="0.3">
+                  <path d="M 100 350 L 800 300" /> {/* I-40 */}
+                  <path d="M 200 200 L 750 250" /> {/* I-80 */}
+                  <path d="M 400 150 L 400 500" /> {/* I-35 */}
+                  <path d="M 700 200 L 700 450" /> {/* I-95 */}
                 </g>
 
-                {/* State Labels */}
-                <text x="400" y="380" fill="#374151" fontSize="12" textAnchor="middle" fontWeight="bold">Texas</text>
-                <text x="100" y="320" fill="#374151" fontSize="12" textAnchor="middle" fontWeight="bold">California</text>
-                <text x="680" y="480" fill="#374151" fontSize="12" textAnchor="middle" fontWeight="bold">Florida</text>
-                <text x="550" y="300" fill="#374151" fontSize="10" textAnchor="middle">Great Lakes</text>
-                <text x="750" y="280" fill="#374151" fontSize="12" textAnchor="middle" fontWeight="bold">New York</text>
-
                 {/* Major Cities */}
-                <circle cx="100" cy="320" r="2" fill="#374151" />
-                <circle cx="400" cy="380" r="2" fill="#374151" />
-                <circle cx="680" cy="480" r="2" fill="#374151" />
-                <circle cx="750" cy="280" r="2" fill="#374151" />
-                <circle cx="600" cy="320" r="2" fill="#374151" />
+                <g fill="#dc2626" opacity="0.7">
+                  <circle cx="55" cy="320" r="3"/>
+                  <text x="65" y="325" fontSize="8" fill="#dc2626">LA</text>
+                  
+                  <circle cx="547" cy="300" r="3"/>
+                  <text x="557" y="305" fontSize="8" fill="#dc2626">Chicago</text>
+                  
+                  <circle cx="760" cy="250" r="3"/>
+                  <text x="770" y="255" fontSize="8" fill="#dc2626">NYC</text>
+                  
+                  <circle cx="380" cy="390" r="3"/>
+                  <text x="390" y="395" fontSize="8" fill="#dc2626">Houston</text>
+                  
+                  <circle cx="690" cy="490" r="3"/>
+                  <text x="700" y="495" fontSize="8" fill="#dc2626">Miami</text>
+                </g>
+
+                {/* Compass Rose */}
+                <g transform="translate(50,50)">
+                  <circle cx="0" cy="0" r="25" fill="white" stroke="#374151" strokeWidth="1" opacity="0.9" />
+                  <path d="M 0,-20 L 5,0 L 0,20 L -5,0 Z" fill="#dc2626" />
+                  <text x="0" y="-30" textAnchor="middle" fontSize="10" fill="#374151" fontWeight="bold">N</text>
+                  <text x="30" y="5" textAnchor="middle" fontSize="8" fill="#374151">E</text>
+                  <text x="0" y="40" textAnchor="middle" fontSize="8" fill="#374151">S</text>
+                  <text x="-30" y="5" textAnchor="middle" fontSize="8" fill="#374151">W</text>
+                </g>
+
+                {/* Scale */}
+                <g transform="translate(850,550)">
+                  <text x="0" y="0" fontSize="8" fill="#374151">Scale: 1 inch = 200 miles</text>
+                  <line x1="0" y1="10" x2="50" y2="10" stroke="#374151" strokeWidth="2"/>
+                  <text x="25" y="25" fontSize="8" fill="#374151" textAnchor="middle">200 mi</text>
+                </g>
               </svg>
               
               {/* Vehicle Markers */}
