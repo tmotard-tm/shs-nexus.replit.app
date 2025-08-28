@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter, ZoomIn, ZoomOut, RotateCcw, Compass } from "lucide-react";
 import { activeVehicles, type FleetVehicle } from "@/data/fleetData";
-import mapboxgl from "mapbox-gl";
+import L from "leaflet";
 
 interface VehicleMapProps {
   open: boolean;
@@ -66,8 +66,8 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const [regionFilter, setRegionFilter] = useState("all");
   
   const mapRef = useRef<HTMLDivElement>(null);
-  const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const leafletMapRef = useRef<L.Map | null>(null);
+  const markersRef = useRef<L.LayerGroup | null>(null);
 
   // Assign vehicle status based on various conditions
   const getVehicleStatus = (vehicle: FleetVehicle) => {
@@ -151,143 +151,148 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding).filter(b => b && b.trim()))).sort();
   const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region).filter(r => r && r.trim()))).sort();
 
-  // Initialize Mapbox map
+  // Initialize professional OpenStreetMap
   useEffect(() => {
-    if (!mapRef.current || mapboxMapRef.current || !open) return;
+    if (!mapRef.current || leafletMapRef.current || !open) return;
 
-    // Set Mapbox access token
-    mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || 'your-mapbox-token-here';
+    const timer = setTimeout(() => {
+      if (!mapRef.current) return;
 
-    try {
-      // Create Mapbox map with dark style
-      const map = new mapboxgl.Map({
-        container: mapRef.current,
-        style: 'mapbox://styles/mapbox/dark-v11', // Dark basemap
-        center: [-98.5, 39.8], // Center of US
-        zoom: 3,
-        minZoom: 2,
-        maxZoom: 20
-      });
+      try {
+        // Create map with professional dark-themed tiles
+        const map = L.map(mapRef.current, {
+          zoomControl: false,
+          attributionControl: true,
+        }).setView([39.8, -98.5], 4);
 
-      // Add navigation controls (zoom, compass) in top-left
-      map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+        // Use CartoDB Dark Matter for professional dark appearance
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '© OpenStreetMap contributors © CARTO',
+          maxZoom: 19,
+          minZoom: 3
+        }).addTo(map);
 
-      // Wait for map to load before adding markers
-      map.on('load', () => {
-        mapboxMapRef.current = map;
-        
-        // Auto-fit to include all vehicles with padding
-        if (filteredVehicles.length > 0) {
-          const bounds = new mapboxgl.LngLatBounds();
-          filteredVehicles.forEach(vehicle => {
-            bounds.extend([vehicle.position.lng, vehicle.position.lat]);
-          });
-          map.fitBounds(bounds, { padding: 40 });
-        }
-      });
+        // Add professional zoom control with custom styling
+        const zoomControl = L.control.zoom({ position: 'topleft' }).addTo(map);
 
-    } catch (error) {
-      console.error('Error initializing Mapbox:', error);
-    }
+        // Create markers layer
+        const markersLayer = L.layerGroup().addTo(map);
+
+        leafletMapRef.current = map;
+        markersRef.current = markersLayer;
+
+        // Auto-fit to all vehicles with padding
+        setTimeout(() => {
+          map.invalidateSize();
+          if (filteredVehicles.length > 0) {
+            const group = new L.FeatureGroup(filteredVehicles.map(vehicle => 
+              L.marker([vehicle.position.lat, vehicle.position.lng])
+            ));
+            map.fitBounds(group.getBounds().pad(0.05));
+          }
+        }, 100);
+
+      } catch (error) {
+        console.error('Error initializing map:', error);
+      }
+    }, 100);
 
     return () => {
-      if (mapboxMapRef.current) {
-        mapboxMapRef.current.remove();
-        mapboxMapRef.current = null;
-        markersRef.current = [];
+      if (timer) clearTimeout(timer);
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove();
+        leafletMapRef.current = null;
+        markersRef.current = null;
       }
     };
   }, [open]);
 
   // Update markers when vehicles or filters change
   useEffect(() => {
-    if (!mapboxMapRef.current) return;
+    if (!leafletMapRef.current || !markersRef.current) return;
 
     // Clear existing markers
-    markersRef.current.forEach(marker => marker.remove());
-    markersRef.current = [];
+    markersRef.current.clearLayers();
 
-    // Add new markers
+    // Add new professional markers
     filteredVehicles.forEach((vehicle) => {
       const status = vehicleStatuses[vehicle.status as keyof typeof vehicleStatuses];
       if (!status) return;
 
-      // Create marker element with scaling based on zoom
-      const markerEl = document.createElement('div');
-      markerEl.className = 'vehicle-marker';
-      markerEl.style.cssText = `
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background-color: ${status.color};
-        border: 2px solid #000;
-        box-shadow: 0 0 4px rgba(0,0,0,0.6);
-        cursor: pointer;
-        transition: all 0.2s;
-      `;
-      
-      // Scale with zoom
-      markerEl.addEventListener('mouseenter', () => {
-        markerEl.style.transform = 'scale(1.3)';
-      });
-      markerEl.addEventListener('mouseleave', () => {
-        markerEl.style.transform = 'scale(1)';
+      // Create professional marker with dark theme styling
+      const icon = L.divIcon({
+        html: `<div style="
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background-color: ${status.color};
+          border: 2px solid #000;
+          box-shadow: 0 0 6px rgba(0,0,0,0.8);
+          transition: all 0.2s;
+        "></div>`,
+        className: 'vehicle-marker-professional',
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
       });
 
-      // Create popup content
-      const popup = new mapboxgl.Popup({ offset: 15 })
-        .setHTML(`
-          <div style="min-width: 200px; font-family: system-ui, sans-serif;">
-            <strong>${vehicle.id}</strong><br/>
+      // Professional popup styling
+      const marker = L.marker([vehicle.position.lat, vehicle.position.lng], { icon })
+        .bindPopup(`
+          <div style="
+            min-width: 200px; 
+            font-family: system-ui, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #333;
+          ">
+            <strong style="color: ${status.color};">${vehicle.id}</strong><br/>
             <strong>Status:</strong> ${status.label}<br/>
             <strong>Location:</strong> ${vehicle.label}<br/>
-            <small>Click for more details</small>
+            <small style="opacity: 0.7;">Click for more details</small>
           </div>
-        `);
+        `, {
+          className: 'professional-popup'
+        })
+        .on('click', () => setSelectedVehicle(vehicle));
 
-      // Create marker
-      const marker = new mapboxgl.Marker(markerEl)
-        .setLngLat([vehicle.position.lng, vehicle.position.lat])
-        .setPopup(popup)
-        .addTo(mapboxMapRef.current!);
-
-      // Click handler for detailed view
-      markerEl.addEventListener('click', () => {
-        setSelectedVehicle(vehicle);
-      });
-
-      markersRef.current.push(marker);
+      markersRef.current?.addLayer(marker);
     });
 
     // Auto-fit bounds when vehicles change
-    if (filteredVehicles.length > 0) {
-      const bounds = new mapboxgl.LngLatBounds();
-      filteredVehicles.forEach(vehicle => {
-        bounds.extend([vehicle.position.lng, vehicle.position.lat]);
-      });
-      mapboxMapRef.current.fitBounds(bounds, { padding: 40 });
+    if (filteredVehicles.length > 0 && leafletMapRef.current) {
+      const group = new L.FeatureGroup(
+        filteredVehicles.map(vehicle => 
+          L.marker([vehicle.position.lat, vehicle.position.lng])
+        )
+      );
+      leafletMapRef.current.fitBounds(group.getBounds().pad(0.05));
     }
   }, [filteredVehicles]);
 
   const handleZoomIn = () => {
-    if (mapboxMapRef.current) {
-      mapboxMapRef.current.zoomIn();
+    if (leafletMapRef.current) {
+      leafletMapRef.current.zoomIn();
     }
   };
 
   const handleZoomOut = () => {
-    if (mapboxMapRef.current) {
-      mapboxMapRef.current.zoomOut();
+    if (leafletMapRef.current) {
+      leafletMapRef.current.zoomOut();
     }
   };
 
   const handleResetView = () => {
-    if (mapboxMapRef.current && filteredVehicles.length > 0) {
-      const bounds = new mapboxgl.LngLatBounds();
-      filteredVehicles.forEach(vehicle => {
-        bounds.extend([vehicle.position.lng, vehicle.position.lat]);
-      });
-      mapboxMapRef.current.fitBounds(bounds, { padding: 40 });
+    if (leafletMapRef.current && filteredVehicles.length > 0) {
+      const group = new L.FeatureGroup(
+        filteredVehicles.map(vehicle => 
+          L.marker([vehicle.position.lat, vehicle.position.lng])
+        )
+      );
+      leafletMapRef.current.fitBounds(group.getBounds().pad(0.05));
+    } else if (leafletMapRef.current) {
+      leafletMapRef.current.setView([39.8, -98.5], 4);
     }
   };
 
