@@ -55,6 +55,17 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
+  // Individual sub-map states
+  const [hawaiiZoom, setHawaiiZoom] = useState(1);
+  const [hawaiiPanX, setHawaiiPanX] = useState(0);
+  const [hawaiiPanY, setHawaiiPanY] = useState(0);
+  const [puertoRicoZoom, setPuertoRicoZoom] = useState(1);
+  const [puertoRicoPanX, setPuertoRicoPanX] = useState(0);
+  const [puertoRicoPanY, setPuertoRicoPanY] = useState(0);
+  const [alaskaZoom, setAlaskaZoom] = useState(1);
+  const [alaskaPanX, setAlaskaPanX] = useState(0);
+  const [alaskaPanY, setAlaskaPanY] = useState(0);
+
   // Assign vehicle status based on various conditions
   const getVehicleStatus = (vehicle: FleetVehicle) => {
     if (vehicle.outOfServiceDate) return "auction";
@@ -464,28 +475,235 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                   <text x="720" y="470">Florida</text>
                 </g>
 
-                {/* Hawaii Inset */}
+                {/* Interactive Hawaii Inset */}
                 <g transform="translate(150,580)">
                   <rect x="-5" y="-5" width="160" height="80" fill="#2a2a2a" stroke="#555" strokeWidth="1"/>
                   <text x="75" y="12" fontSize="10" fill="#8e8e93" textAnchor="middle">Hawaii</text>
-                  <circle cx="60" cy="35" r="2" fill="none" stroke="#555" />
-                  <circle cx="75" cy="32" r="3" fill="none" stroke="#555" />
-                  <circle cx="90" cy="35" r="2" fill="none" stroke="#555" />
-                  <circle cx="105" cy="38" r="4" fill="none" stroke="#555" />
+                  
+                  {/* Hawaii Zoom Controls */}
+                  <g transform="translate(5, 15)">
+                    <rect width="20" height="50" fill="#333" stroke="#555" strokeWidth="0.5" rx="2"/>
+                    <rect x="2" y="2" width="16" height="12" fill="#444" stroke="#666" strokeWidth="0.5" rx="1" className="cursor-pointer" onClick={() => setHawaiiZoom(Math.min(hawaiiZoom * 1.2, 3))}/>
+                    <text x="10" y="10" fontSize="8" fill="#8e8e93" textAnchor="middle">+</text>
+                    <rect x="2" y="16" width="16" height="12" fill="#333" stroke="#555" strokeWidth="0.5"/>
+                    <text x="10" y="24" fontSize="6" fill="#8e8e93" textAnchor="middle">{Math.round(hawaiiZoom * 100)}%</text>
+                    <rect x="2" y="30" width="16" height="12" fill="#444" stroke="#666" strokeWidth="0.5" rx="1" className="cursor-pointer" onClick={() => setHawaiiZoom(Math.max(hawaiiZoom / 1.2, 0.5))}/>
+                    <text x="10" y="38" fontSize="8" fill="#8e8e93" textAnchor="middle">-</text>
+                    <rect x="2" y="44" width="16" height="4" fill="#444" stroke="#666" strokeWidth="0.5" rx="1" className="cursor-pointer" onClick={() => { setHawaiiZoom(1); setHawaiiPanX(0); setHawaiiPanY(0); }}/>
+                    <text x="10" y="47" fontSize="5" fill="#8e8e93" textAnchor="middle">↺</text>
+                  </g>
+                  
+                  {/* Hawaii Map Content */}
+                  <g transform={`translate(${hawaiiPanX}, ${hawaiiPanY}) scale(${hawaiiZoom})`} style={{ transformOrigin: '75px 40px' }}>
+                    {/* Detailed Hawaiian Islands */}
+                    <g fill="#3a3a3a" stroke="#555" strokeWidth="0.5">
+                      {/* Kauai */}
+                      <path d="M 50 30 Q 55 28 60 30 Q 65 32 62 36 Q 58 38 54 36 Q 50 34 50 30 Z"/>
+                      <text x="55" y="50" fontSize="5" fill="#8e8e93" textAnchor="middle">Kauai</text>
+                      
+                      {/* Oahu */}
+                      <path d="M 65 32 Q 72 30 78 33 Q 82 36 80 40 Q 76 42 70 40 Q 65 37 65 32 Z"/>
+                      <text x="72" y="52" fontSize="5" fill="#8e8e93" textAnchor="middle">Oahu</text>
+                      
+                      {/* Molokai */}
+                      <path d="M 80 31 Q 88 30 94 32 Q 96 34 94 36 Q 88 37 82 35 Q 80 33 80 31 Z"/>
+                      <text x="87" y="48" fontSize="5" fill="#8e8e93" textAnchor="middle">Molokai</text>
+                      
+                      {/* Lanai */}
+                      <circle cx="85" cy="38" r="3" />
+                      <text x="85" y="53" fontSize="4" fill="#8e8e93" textAnchor="middle">Lanai</text>
+                      
+                      {/* Maui */}
+                      <path d="M 92 35 Q 100 33 106 36 Q 110 40 106 44 Q 100 46 94 43 Q 92 39 92 35 Z"/>
+                      <text x="99" y="56" fontSize="5" fill="#8e8e93" textAnchor="middle">Maui</text>
+                      
+                      {/* Big Island (Hawaii) */}
+                      <path d="M 115 30 Q 125 28 135 32 Q 140 38 138 45 Q 135 52 125 54 Q 115 52 112 45 Q 112 38 115 30 Z"/>
+                      <text x="125" y="62" fontSize="5" fill="#8e8e93" textAnchor="middle">Big Island</text>
+                    </g>
+                    
+                    {/* Hawaii Vehicle Pins */}
+                    {filteredVehicles.filter(v => v.state === "HI").map((vehicle, idx) => {
+                      const status = vehicleStatuses[getVehicleStatus(vehicle) as keyof typeof vehicleStatuses];
+                      if (!status) return null;
+                      // Distribute vehicles across Hawaiian islands
+                      const islandPositions = [
+                        { x: 72, y: 35 }, // Oahu (most populated)
+                        { x: 125, y: 42 }, // Big Island
+                        { x: 99, y: 38 }, // Maui
+                        { x: 55, y: 33 }, // Kauai
+                        { x: 87, y: 33 }, // Molokai
+                        { x: 85, y: 38 }  // Lanai
+                      ];
+                      const pos = islandPositions[idx % islandPositions.length];
+                      return (
+                        <circle
+                          key={`hawaii-${vehicle.vin}`}
+                          cx={pos.x + (Math.random() - 0.5) * 4}
+                          cy={pos.y + (Math.random() - 0.5) * 3}
+                          r="1.5"
+                          fill={status.color}
+                          stroke="white"
+                          strokeWidth="0.3"
+                          className="cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedVehicle(vehicle);
+                          }}
+                        />
+                      );
+                    })}
+                  </g>
                 </g>
 
-                {/* Alaska Inset */}
+                {/* Interactive Alaska Inset */}
                 <g transform="translate(350,580)">
                   <rect x="-5" y="-5" width="160" height="80" fill="#2a2a2a" stroke="#555" strokeWidth="1"/>
                   <text x="75" y="12" fontSize="10" fill="#8e8e93" textAnchor="middle">Alaska</text>
-                  <path d="M 30 25 L 80 20 L 120 25 L 130 40 L 120 55 L 80 60 L 40 55 L 25 40 Z" fill="none" stroke="#555" strokeWidth="1"/>
+                  
+                  {/* Alaska Zoom Controls */}
+                  <g transform="translate(5, 15)">
+                    <rect width="20" height="50" fill="#333" stroke="#555" strokeWidth="0.5" rx="2"/>
+                    <rect x="2" y="2" width="16" height="12" fill="#444" stroke="#666" strokeWidth="0.5" rx="1" className="cursor-pointer" onClick={() => setAlaskaZoom(Math.min(alaskaZoom * 1.2, 3))}/>
+                    <text x="10" y="10" fontSize="8" fill="#8e8e93" textAnchor="middle">+</text>
+                    <rect x="2" y="16" width="16" height="12" fill="#333" stroke="#555" strokeWidth="0.5"/>
+                    <text x="10" y="24" fontSize="6" fill="#8e8e93" textAnchor="middle">{Math.round(alaskaZoom * 100)}%</text>
+                    <rect x="2" y="30" width="16" height="12" fill="#444" stroke="#666" strokeWidth="0.5" rx="1" className="cursor-pointer" onClick={() => setAlaskaZoom(Math.max(alaskaZoom / 1.2, 0.5))}/>
+                    <text x="10" y="38" fontSize="8" fill="#8e8e93" textAnchor="middle">-</text>
+                    <rect x="2" y="44" width="16" height="4" fill="#444" stroke="#666" strokeWidth="0.5" rx="1" className="cursor-pointer" onClick={() => { setAlaskaZoom(1); setAlaskaPanX(0); setAlaskaPanY(0); }}/>
+                    <text x="10" y="47" fontSize="5" fill="#8e8e93" textAnchor="middle">↺</text>
+                  </g>
+                  
+                  {/* Alaska Map Content */}
+                  <g transform={`translate(${alaskaPanX}, ${alaskaPanY}) scale(${alaskaZoom})`} style={{ transformOrigin: '75px 40px' }}>
+                    {/* Detailed Alaska */}
+                    <g fill="#3a3a3a" stroke="#555" strokeWidth="0.5">
+                      {/* Alaska Mainland */}
+                      <path d="M 30 25 L 50 20 Q 70 18 90 22 Q 110 25 125 30 Q 135 35 140 42 Q 138 50 130 56 Q 110 60 85 58 Q 60 56 40 52 Q 25 48 20 42 Q 18 35 25 28 L 30 25 Z"/>
+                      
+                      {/* Aleutian Islands Chain */}
+                      <g fill="#3a3a3a" stroke="#555" strokeWidth="0.3">
+                        <ellipse cx="30" cy="58" rx="3" ry="1.5"/>
+                        <ellipse cx="40" cy="60" rx="2.5" ry="1"/>
+                        <ellipse cx="50" cy="61" rx="2" ry="1"/>
+                        <ellipse cx="60" cy="62" rx="2" ry="1"/>
+                        <ellipse cx="70" cy="62" rx="1.5" ry="0.8"/>
+                        <ellipse cx="80" cy="63" rx="1.5" ry="0.8"/>
+                      </g>
+                      
+                      {/* Southeast Alaska Islands */}
+                      <g fill="#3a3a3a" stroke="#555" strokeWidth="0.3">
+                        <ellipse cx="125" cy="48" rx="4" ry="2"/>
+                        <ellipse cx="135" cy="50" rx="3" ry="1.5"/>
+                        <ellipse cx="140" cy="45" rx="2" ry="1"/>
+                      </g>
+                    </g>
+                    
+                    {/* Alaska Vehicle Pins */}
+                    {filteredVehicles.filter(v => v.state === "AK").map((vehicle, idx) => {
+                      const status = vehicleStatuses[getVehicleStatus(vehicle) as keyof typeof vehicleStatuses];
+                      if (!status) return null;
+                      // Distribute vehicles across Alaska regions
+                      const alaskaPositions = [
+                        { x: 80, y: 35 }, // Anchorage area
+                        { x: 95, y: 40 }, // Interior Alaska
+                        { x: 125, y: 48 }, // Southeast Alaska
+                        { x: 65, y: 45 }, // Southwest Alaska
+                        { x: 110, y: 30 }, // Northern Alaska
+                        { x: 50, y: 58 }  // Aleutian Islands
+                      ];
+                      const pos = alaskaPositions[idx % alaskaPositions.length];
+                      return (
+                        <circle
+                          key={`alaska-${vehicle.vin}`}
+                          cx={pos.x + (Math.random() - 0.5) * 6}
+                          cy={pos.y + (Math.random() - 0.5) * 4}
+                          r="1.5"
+                          fill={status.color}
+                          stroke="white"
+                          strokeWidth="0.3"
+                          className="cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedVehicle(vehicle);
+                          }}
+                        />
+                      );
+                    })}
+                  </g>
                 </g>
 
-                {/* Puerto Rico Inset */}
+                {/* Interactive Puerto Rico Inset */}
                 <g transform="translate(550,580)">
                   <rect x="-5" y="-5" width="160" height="80" fill="#2a2a2a" stroke="#555" strokeWidth="1"/>
                   <text x="75" y="12" fontSize="10" fill="#8e8e93" textAnchor="middle">Puerto Rico</text>
-                  <ellipse cx="75" cy="40" rx="35" ry="6" fill="none" stroke="#555" strokeWidth="1"/>
+                  
+                  {/* Puerto Rico Zoom Controls */}
+                  <g transform="translate(5, 15)">
+                    <rect width="20" height="50" fill="#333" stroke="#555" strokeWidth="0.5" rx="2"/>
+                    <rect x="2" y="2" width="16" height="12" fill="#444" stroke="#666" strokeWidth="0.5" rx="1" className="cursor-pointer" onClick={() => setPuertoRicoZoom(Math.min(puertoRicoZoom * 1.2, 3))}/>
+                    <text x="10" y="10" fontSize="8" fill="#8e8e93" textAnchor="middle">+</text>
+                    <rect x="2" y="16" width="16" height="12" fill="#333" stroke="#555" strokeWidth="0.5"/>
+                    <text x="10" y="24" fontSize="6" fill="#8e8e93" textAnchor="middle">{Math.round(puertoRicoZoom * 100)}%</text>
+                    <rect x="2" y="30" width="16" height="12" fill="#444" stroke="#666" strokeWidth="0.5" rx="1" className="cursor-pointer" onClick={() => setPuertoRicoZoom(Math.max(puertoRicoZoom / 1.2, 0.5))}/>
+                    <text x="10" y="38" fontSize="8" fill="#8e8e93" textAnchor="middle">-</text>
+                    <rect x="2" y="44" width="16" height="4" fill="#444" stroke="#666" strokeWidth="0.5" rx="1" className="cursor-pointer" onClick={() => { setPuertoRicoZoom(1); setPuertoRicoPanX(0); setPuertoRicoPanY(0); }}/>
+                    <text x="10" y="47" fontSize="5" fill="#8e8e93" textAnchor="middle">↺</text>
+                  </g>
+                  
+                  {/* Puerto Rico Map Content */}
+                  <g transform={`translate(${puertoRicoPanX}, ${puertoRicoPanY}) scale(${puertoRicoZoom})`} style={{ transformOrigin: '75px 40px' }}>
+                    {/* Detailed Puerto Rico */}
+                    <g fill="#3a3a3a" stroke="#555" strokeWidth="0.5">
+                      {/* Main Puerto Rico Island */}
+                      <path d="M 35 35 Q 50 32 75 33 Q 100 34 115 36 Q 125 38 130 40 Q 132 42 130 44 Q 125 46 115 47 Q 100 48 75 47 Q 50 46 35 43 Q 30 41 30 39 Q 32 36 35 35 Z"/>
+                      <text x="80" y="55" fontSize="6" fill="#8e8e93" textAnchor="middle">Puerto Rico</text>
+                      
+                      {/* Vieques */}
+                      <ellipse cx="135" cy="42" rx="6" ry="2" />
+                      <text x="135" y="52" fontSize="4" fill="#8e8e93" textAnchor="middle">Vieques</text>
+                      
+                      {/* Culebra */}
+                      <ellipse cx="140" cy="35" rx="3" ry="1.5" />
+                      <text x="140" y="32" fontSize="4" fill="#8e8e93" textAnchor="middle">Culebra</text>
+                      
+                      {/* Smaller Islands */}
+                      <circle cx="32" cy="36" r="1" />
+                      <circle cx="145" cy="40" r="1" />
+                    </g>
+                    
+                    {/* Puerto Rico Vehicle Pins */}
+                    {filteredVehicles.filter(v => v.state === "PR").map((vehicle, idx) => {
+                      const status = vehicleStatuses[getVehicleStatus(vehicle) as keyof typeof vehicleStatuses];
+                      if (!status) return null;
+                      // Distribute vehicles across Puerto Rico regions
+                      const prPositions = [
+                        { x: 65, y: 40 }, // San Juan area
+                        { x: 90, y: 42 }, // Central Puerto Rico
+                        { x: 115, y: 43 }, // Eastern Puerto Rico
+                        { x: 135, y: 42 }, // Vieques
+                        { x: 50, y: 41 }, // Western Puerto Rico
+                        { x: 140, y: 35 }  // Culebra
+                      ];
+                      const pos = prPositions[idx % prPositions.length];
+                      return (
+                        <circle
+                          key={`pr-${vehicle.vin}`}
+                          cx={pos.x + (Math.random() - 0.5) * 4}
+                          cy={pos.y + (Math.random() - 0.5) * 2}
+                          r="1.5"
+                          fill={status.color}
+                          stroke="white"
+                          strokeWidth="0.3"
+                          className="cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedVehicle(vehicle);
+                          }}
+                        />
+                      );
+                    })}
+                  </g>
                 </g>
               </svg>
               
