@@ -204,7 +204,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
         
         <div className="flex gap-4 h-[75vh]">
           {/* Interactive Map Container */}
-          <div className="flex-1 relative rounded-lg overflow-hidden border bg-blue-50">
+          <div className="flex-1 relative rounded-lg overflow-hidden border" style={{ backgroundColor: '#1a1a1a' }}>
             {/* Zoom Controls */}
             <div className="absolute top-4 left-4 z-20 bg-white rounded-lg shadow-md border">
               <div className="flex flex-col">
@@ -256,98 +256,236 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                 transition: isDragging ? 'none' : 'transform 0.2s ease-out'
               }}
             >
-              {/* Clean US Map */}
+              {/* Professional Dark US Map */}
               <svg 
                 className="absolute inset-0 w-full h-full" 
                 viewBox="0 0 1000 700" 
                 style={{ zIndex: 1 }}
               >
-                {/* Ocean/Background */}
-                <rect width="1000" height="700" fill="#e0f7fa" />
+                {/* Dark Background */}
+                <rect width="1000" height="700" fill="#1a1a1a" />
                 
-                {/* United States Outline */}
-                <path
-                  d="M 150 200 L 200 180 L 280 170 L 350 165 L 420 160 L 490 155 L 560 160 L 630 165 L 700 175 L 750 190 L 800 210 L 820 250 L 815 290 L 800 330 L 780 370 L 750 400 L 700 430 L 650 450 L 600 460 L 550 465 L 500 470 L 450 465 L 400 460 L 350 450 L 300 440 L 250 425 L 200 405 L 170 380 L 150 350 L 145 320 L 150 290 L 155 260 L 150 230 Z"
-                  fill="#f1f8e9"
-                  stroke="#2e7d32"
-                  strokeWidth="2"
-                />
-                
-                {/* State Boundaries - Simple Grid */}
-                <g stroke="#4caf50" strokeWidth="1" opacity="0.4" fill="none">
-                  {/* Vertical Lines */}
-                  <line x1="220" y1="170" x2="220" y2="450" />
-                  <line x1="300" y1="165" x2="300" y2="460" />
-                  <line x1="380" y1="160" x2="380" y2="465" />
-                  <line x1="460" y1="155" x2="460" y2="470" />
-                  <line x1="540" y1="160" x2="540" y2="465" />
-                  <line x1="620" y1="165" x2="620" y2="450" />
-                  <line x1="700" y1="175" x2="700" y2="430" />
+                {/* US State Boundaries */}
+                <g fill="none" stroke="#404040" strokeWidth="1" opacity="0.8">
+                  {/* Individual State Outlines */}
                   
-                  {/* Horizontal Lines */}
-                  <line x1="150" y1="220" x2="800" y2="200" />
-                  <line x1="155" y1="280" x2="810" y2="260" />
-                  <line x1="150" y1="340" x2="790" y2="320" />
-                  <line x1="170" y1="400" x2="760" y2="380" />
-                </g>
-                
-                {/* Major Geographic Features */}
-                {/* Great Lakes */}
-                <ellipse cx="550" cy="230" rx="30" ry="18" fill="#1976d2" opacity="0.7" />
-                <ellipse cx="520" cy="250" rx="20" ry="12" fill="#1976d2" opacity="0.7" />
-                <ellipse cx="580" cy="245" rx="15" ry="10" fill="#1976d2" opacity="0.7" />
-                
-                {/* Florida */}
-                <path d="M 680 430 L 720 435 L 750 450 L 760 480 L 750 500 L 720 505 L 690 500 L 680 470 Z" fill="#f1f8e9" stroke="#2e7d32" strokeWidth="1" />
-                
-                {/* State Labels */}
-                <g fill="#1b5e20" fontSize="12" textAnchor="middle" fontWeight="bold">
-                  <text x="180" y="320">CA</text>
-                  <text x="260" y="350">NV</text>
-                  <text x="340" y="340">CO</text>
-                  <text x="420" y="370">TX</text>
-                  <text x="500" y="320">KS</text>
-                  <text x="580" y="300">IL</text>
-                  <text x="660" y="290">OH</text>
-                  <text x="740" y="270">NY</text>
-                  <text x="720" y="470">FL</text>
+                  {/* California */}
+                  <path d="M 20 180 L 50 160 L 80 170 L 90 200 L 95 250 L 90 300 L 85 350 L 80 400 L 70 430 L 50 440 L 30 435 L 25 420 L 15 380 L 10 340 L 15 300 L 20 260 L 25 220 Z" />
+                  
+                  {/* Texas */}
+                  <path d="M 280 320 L 380 310 L 420 320 L 460 330 L 480 350 L 490 390 L 480 430 L 460 460 L 420 470 L 380 465 L 340 460 L 310 450 L 290 430 L 280 400 L 275 380 L 280 350 Z" />
+                  
+                  {/* Florida */}
+                  <path d="M 620 430 L 670 425 L 710 430 L 740 440 L 760 460 L 770 480 L 780 510 L 770 530 L 750 540 L 720 545 L 690 540 L 660 535 L 640 520 L 625 500 L 620 480 L 618 455 Z" />
+                  
+                  {/* New York */}
+                  <path d="M 710 220 L 750 215 L 780 220 L 800 230 L 810 250 L 805 270 L 795 285 L 780 290 L 760 285 L 740 280 L 720 270 L 710 250 Z" />
+                  
+                  {/* Pennsylvania */}
+                  <path d="M 670 260 L 720 255 L 750 260 L 760 270 L 755 285 L 740 295 L 720 300 L 700 295 L 680 290 L 665 280 L 665 270 Z" />
+                  
+                  {/* Illinois */}
+                  <path d="M 520 260 L 550 255 L 570 260 L 575 280 L 580 310 L 575 340 L 570 360 L 565 380 L 550 385 L 530 380 L 520 360 L 515 340 L 520 310 L 525 280 Z" />
+                  
+                  {/* Ohio */}
+                  <path d="M 580 280 L 620 275 L 650 280 L 655 300 L 650 320 L 645 340 L 630 345 L 610 340 L 590 335 L 580 320 L 575 300 Z" />
+                  
+                  {/* Michigan */}
+                  <path d="M 540 220 L 570 215 L 590 220 L 600 240 L 595 260 L 580 270 L 560 265 L 545 250 L 540 235 Z" />
+                  <path d="M 580 180 L 600 175 L 610 185 L 605 200 L 590 205 L 580 195 Z" />
+                  
+                  {/* Georgia */}
+                  <path d="M 640 350 L 680 345 L 700 350 L 710 370 L 705 390 L 700 410 L 685 420 L 665 415 L 645 410 L 635 390 L 635 370 Z" />
+                  
+                  {/* North Carolina */}
+                  <path d="M 660 320 L 720 315 L 760 320 L 770 330 L 765 345 L 750 350 L 720 345 L 690 340 L 665 335 Z" />
+                  
+                  {/* Virginia */}
+                  <path d="M 680 300 L 730 295 L 750 300 L 755 315 L 740 320 L 715 315 L 690 310 L 680 305 Z" />
+                  
+                  {/* Arizona */}
+                  <path d="M 150 300 L 200 295 L 220 300 L 225 340 L 220 380 L 215 420 L 200 425 L 180 420 L 160 415 L 150 380 L 145 340 Z" />
+                  
+                  {/* Nevada */}
+                  <path d="M 100 220 L 150 215 L 170 220 L 175 260 L 170 300 L 165 340 L 150 345 L 130 340 L 115 320 L 105 280 L 100 240 Z" />
+                  
+                  {/* Colorado */}
+                  <path d="M 230 280 L 300 275 L 320 280 L 325 320 L 320 360 L 300 365 L 270 360 L 240 355 L 230 320 Z" />
+                  
+                  {/* New Mexico */}
+                  <path d="M 230 360 L 280 355 L 300 360 L 305 400 L 300 440 L 280 445 L 250 440 L 230 435 L 225 400 Z" />
+                  
+                  {/* Utah */}
+                  <path d="M 180 240 L 230 235 L 250 240 L 255 280 L 250 320 L 230 325 L 210 320 L 190 315 L 180 280 Z" />
+                  
+                  {/* Washington */}
+                  <path d="M 50 120 L 120 115 L 150 120 L 155 140 L 150 160 L 120 165 L 80 160 L 50 155 L 45 140 Z" />
+                  
+                  {/* Oregon */}
+                  <path d="M 50 160 L 120 155 L 150 160 L 155 180 L 150 200 L 120 205 L 80 200 L 50 195 L 45 180 Z" />
+                  
+                  {/* Idaho */}
+                  <path d="M 150 140 L 180 135 L 200 140 L 205 180 L 200 220 L 180 225 L 160 220 L 155 180 L 150 160 Z" />
+                  
+                  {/* Montana */}
+                  <path d="M 200 120 L 300 115 L 320 120 L 325 160 L 320 200 L 300 205 L 220 200 L 200 195 L 195 160 Z" />
+                  
+                  {/* Wyoming */}
+                  <path d="M 200 200 L 280 195 L 300 200 L 305 240 L 300 280 L 280 285 L 220 280 L 200 275 L 195 240 Z" />
+                  
+                  {/* North Dakota */}
+                  <path d="M 320 120 L 380 115 L 400 120 L 405 160 L 400 200 L 380 205 L 340 200 L 320 195 L 315 160 Z" />
+                  
+                  {/* South Dakota */}
+                  <path d="M 320 200 L 380 195 L 400 200 L 405 240 L 400 280 L 380 285 L 340 280 L 320 275 L 315 240 Z" />
+                  
+                  {/* Nebraska */}
+                  <path d="M 320 280 L 420 275 L 440 280 L 445 320 L 440 360 L 420 365 L 360 360 L 320 355 L 315 320 Z" />
+                  
+                  {/* Kansas */}
+                  <path d="M 340 360 L 440 355 L 460 360 L 465 400 L 460 440 L 440 445 L 380 440 L 340 435 L 335 400 Z" />
+                  
+                  {/* Oklahoma */}
+                  <path d="M 340 440 L 460 435 L 480 440 L 485 480 L 480 520 L 460 525 L 400 520 L 340 515 L 335 480 Z" />
+                  
+                  {/* Minnesota */}
+                  <path d="M 400 120 L 460 115 L 480 120 L 485 180 L 480 240 L 460 245 L 420 240 L 400 235 L 395 180 Z" />
+                  
+                  {/* Iowa */}
+                  <path d="M 440 280 L 500 275 L 520 280 L 525 320 L 520 360 L 500 365 L 460 360 L 440 355 L 435 320 Z" />
+                  
+                  {/* Missouri */}
+                  <path d="M 460 360 L 540 355 L 560 360 L 565 420 L 560 480 L 540 485 L 480 480 L 460 475 L 455 420 Z" />
+                  
+                  {/* Arkansas */}
+                  <path d="M 480 480 L 540 475 L 560 480 L 565 520 L 560 560 L 540 565 L 500 560 L 480 555 L 475 520 Z" />
+                  
+                  {/* Louisiana */}
+                  <path d="M 480 560 L 540 555 L 560 560 L 565 600 L 560 640 L 540 645 L 500 640 L 480 635 L 475 600 Z" />
+                  
+                  {/* Wisconsin */}
+                  <path d="M 520 200 L 560 195 L 580 200 L 585 260 L 580 320 L 560 325 L 540 320 L 520 315 L 515 260 Z" />
+                  
+                  {/* Indiana */}
+                  <path d="M 560 320 L 600 315 L 620 320 L 625 380 L 620 440 L 600 445 L 580 440 L 560 435 L 555 380 Z" />
+                  
+                  {/* Kentucky */}
+                  <path d="M 580 380 L 650 375 L 680 380 L 685 420 L 680 460 L 650 465 L 600 460 L 580 455 L 575 420 Z" />
+                  
+                  {/* Tennessee */}
+                  <path d="M 600 460 L 680 455 L 720 460 L 725 500 L 720 540 L 680 545 L 640 540 L 600 535 L 595 500 Z" />
+                  
+                  {/* Mississippi */}
+                  <path d="M 540 560 L 580 555 L 600 560 L 605 620 L 600 680 L 580 685 L 560 680 L 540 675 L 535 620 Z" />
+                  
+                  {/* Alabama */}
+                  <path d="M 600 540 L 640 535 L 660 540 L 665 600 L 660 660 L 640 665 L 620 660 L 600 655 L 595 600 Z" />
+                  
+                  {/* South Carolina */}
+                  <path d="M 720 380 L 760 375 L 780 380 L 785 420 L 780 460 L 760 465 L 740 460 L 720 455 L 715 420 Z" />
+                  
+                  {/* West Virginia */}
+                  <path d="M 680 320 L 720 315 L 740 320 L 745 360 L 740 400 L 720 405 L 700 400 L 680 395 L 675 360 Z" />
+                  
+                  {/* Maryland */}
+                  <path d="M 720 300 L 760 295 L 780 300 L 785 320 L 780 340 L 760 345 L 740 340 L 720 335 L 715 320 Z" />
+                  
+                  {/* Delaware */}
+                  <path d="M 760 300 L 780 295 L 785 315 L 780 335 L 775 340 L 765 335 L 760 315 Z" />
+                  
+                  {/* New Jersey */}
+                  <path d="M 760 260 L 790 255 L 795 295 L 790 335 L 785 340 L 765 335 L 760 295 Z" />
+                  
+                  {/* Connecticut */}
+                  <path d="M 780 240 L 810 235 L 815 255 L 810 275 L 805 280 L 785 275 L 780 255 Z" />
+                  
+                  {/* Rhode Island */}
+                  <path d="M 810 235 L 820 230 L 825 245 L 820 260 L 815 265 L 810 250 Z" />
+                  
+                  {/* Massachusetts */}
+                  <path d="M 780 220 L 830 215 L 835 235 L 830 255 L 825 260 L 785 255 L 780 235 Z" />
+                  
+                  {/* Vermont */}
+                  <path d="M 760 200 L 780 195 L 785 235 L 780 275 L 775 280 L 765 275 L 760 235 Z" />
+                  
+                  {/* New Hampshire */}
+                  <path d="M 780 180 L 810 175 L 815 215 L 810 255 L 805 260 L 785 255 L 780 215 Z" />
+                  
+                  {/* Maine */}
+                  <path d="M 810 140 L 850 135 L 855 195 L 850 255 L 845 260 L 815 255 L 810 195 Z" />
                 </g>
 
-                {/* Compass Rose */}
-                <g transform="translate(70,70)">
-                  <circle cx="0" cy="0" r="30" fill="white" stroke="#2e7d32" strokeWidth="2" opacity="0.9" />
-                  <path d="M 0,-25 L 6,0 L 0,25 L -6,0 Z" fill="#d32f2f" />
-                  <text x="0" y="-40" textAnchor="middle" fontSize="12" fill="#2e7d32" fontWeight="bold">N</text>
-                  <text x="40" y="5" textAnchor="middle" fontSize="10" fill="#2e7d32">E</text>
-                  <text x="0" y="55" textAnchor="middle" fontSize="10" fill="#2e7d32">S</text>
-                  <text x="-40" y="5" textAnchor="middle" fontSize="10" fill="#2e7d32">W</text>
+                {/* State Labels */}
+                <g fill="#8e8e93" fontSize="10" textAnchor="middle" fontWeight="normal">
+                  <text x="55" y="310">California</text>
+                  <text x="137" y="280">Nevada</text>
+                  <text x="265" y="330">Colorado</text>
+                  <text x="380" y="380">Texas</text>
+                  <text x="90" y="145">Washington</text>
+                  <text x="90" y="175">Oregon</text>
+                  <text x="250" y="145">Montana</text>
+                  <text x="390" y="380">New Mexico</text>
+                  <text x="185" y="285">Utah</text>
+                  <text x="175" y="175">Idaho</text>
+                  <text x="440" y="145">North Dakota</text>
+                  <text x="440" y="240">South Dakota</text>
+                  <text x="380" y="320">Nebraska</text>
+                  <text x="400" y="400">Kansas</text>
+                  <text x="400" y="480">Oklahoma</text>
+                  <text x="440" y="175">Minnesota</text>
+                  <text x="480" y="320">Iowa</text>
+                  <text x="510" y="420">Missouri</text>
+                  <text x="520" y="520">Arkansas</text>
+                  <text x="520" y="600">Louisiana</text>
+                  <text x="550" y="260">Wisconsin</text>
+                  <text x="590" y="380">Indiana</text>
+                  <text x="632" y="420">Kentucky</text>
+                  <text x="660" y="500">Tennessee</text>
+                  <text x="570" y="620">Mississippi</text>
+                  <text x="630" y="600">Alabama</text>
+                  <text x="672" y="380">Georgia</text>
+                  <text x="750" y="420">South Carolina</text>
+                  <text x="712" y="335">North Carolina</text>
+                  <text x="717" y="310">Virginia</text>
+                  <text x="710" y="360">West Virginia</text>
+                  <text x="617" y="310">Ohio</text>
+                  <text x="712" y="280">Pennsylvania</text>
+                  <text x="750" y="320">Maryland</text>
+                  <text x="772" y="318">DE</text>
+                  <text x="777" y="295">NJ</text>
+                  <text x="760" y="250">New York</text>
+                  <text x="797" y="245">CT</text>
+                  <text x="817" y="242">RI</text>
+                  <text x="807" y="235">Massachusetts</text>
+                  <text x="772" y="235">VT</text>
+                  <text x="797" y="215">NH</text>
+                  <text x="832" y="195">Maine</text>
+                  <text x="550" y="240">Michigan</text>
+                  <text x="720" y="470">Florida</text>
                 </g>
 
                 {/* Hawaii Inset */}
                 <g transform="translate(150,580)">
-                  <rect x="-5" y="-5" width="160" height="80" fill="white" stroke="#2e7d32" strokeWidth="1" opacity="0.95"/>
-                  <text x="75" y="12" fontSize="11" fill="#1b5e20" textAnchor="middle" fontWeight="bold">Hawaii</text>
-                  <circle cx="60" cy="40" r="4" fill="#f1f8e9" stroke="#2e7d32" />
-                  <circle cx="80" cy="35" r="5" fill="#f1f8e9" stroke="#2e7d32" />
-                  <circle cx="100" cy="38" r="3" fill="#f1f8e9" stroke="#2e7d32" />
-                  <circle cx="120" cy="42" r="6" fill="#f1f8e9" stroke="#2e7d32" />
-                  <text x="75" y="60" fontSize="8" fill="#1b5e20" textAnchor="middle">HI</text>
-                </g>
-
-                {/* Puerto Rico Inset */}
-                <g transform="translate(350,580)">
-                  <rect x="-5" y="-5" width="160" height="80" fill="white" stroke="#2e7d32" strokeWidth="1" opacity="0.95"/>
-                  <text x="75" y="12" fontSize="11" fill="#1b5e20" textAnchor="middle" fontWeight="bold">Puerto Rico</text>
-                  <ellipse cx="75" cy="40" rx="40" ry="8" fill="#f1f8e9" stroke="#2e7d32" />
-                  <text x="75" y="60" fontSize="8" fill="#1b5e20" textAnchor="middle">PR</text>
+                  <rect x="-5" y="-5" width="160" height="80" fill="#2a2a2a" stroke="#555" strokeWidth="1"/>
+                  <text x="75" y="12" fontSize="10" fill="#8e8e93" textAnchor="middle">Hawaii</text>
+                  <circle cx="60" cy="35" r="2" fill="none" stroke="#555" />
+                  <circle cx="75" cy="32" r="3" fill="none" stroke="#555" />
+                  <circle cx="90" cy="35" r="2" fill="none" stroke="#555" />
+                  <circle cx="105" cy="38" r="4" fill="none" stroke="#555" />
                 </g>
 
                 {/* Alaska Inset */}
+                <g transform="translate(350,580)">
+                  <rect x="-5" y="-5" width="160" height="80" fill="#2a2a2a" stroke="#555" strokeWidth="1"/>
+                  <text x="75" y="12" fontSize="10" fill="#8e8e93" textAnchor="middle">Alaska</text>
+                  <path d="M 30 25 L 80 20 L 120 25 L 130 40 L 120 55 L 80 60 L 40 55 L 25 40 Z" fill="none" stroke="#555" strokeWidth="1"/>
+                </g>
+
+                {/* Puerto Rico Inset */}
                 <g transform="translate(550,580)">
-                  <rect x="-5" y="-5" width="160" height="80" fill="white" stroke="#2e7d32" strokeWidth="1" opacity="0.95"/>
-                  <text x="75" y="12" fontSize="11" fill="#1b5e20" textAnchor="middle" fontWeight="bold">Alaska</text>
-                  <path d="M 30 25 L 80 20 L 120 25 L 130 40 L 120 55 L 80 60 L 40 55 L 25 40 Z" fill="#f1f8e9" stroke="#2e7d32" strokeWidth="1"/>
-                  <text x="75" y="60" fontSize="8" fill="#1b5e20" textAnchor="middle">AK</text>
+                  <rect x="-5" y="-5" width="160" height="80" fill="#2a2a2a" stroke="#555" strokeWidth="1"/>
+                  <text x="75" y="12" fontSize="10" fill="#8e8e93" textAnchor="middle">Puerto Rico</text>
+                  <ellipse cx="75" cy="40" rx="35" ry="6" fill="none" stroke="#555" strokeWidth="1"/>
                 </g>
               </svg>
               
@@ -372,16 +510,11 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                     }}
                     data-testid={`map-marker-${vehicle.vin}`}
                   >
-                    {/* Pin Shape */}
-                    <svg width="24" height="32" viewBox="0 0 24 32" className="drop-shadow-lg">
-                      <path
-                        d="M12 0C5.373 0 0 5.373 0 12c0 9 12 20 12 20s12-11 12-20c0-6.627-5.373-12-12-12z"
-                        fill={status.color}
-                        stroke="white"
-                        strokeWidth="2"
-                      />
-                      <circle cx="12" cy="12" r="4" fill="white" />
-                    </svg>
+                    {/* Colored Circle Pin */}
+                    <div 
+                      className="w-3 h-3 rounded-full border border-white shadow-lg"
+                      style={{ backgroundColor: status.color }}
+                    ></div>
                     {/* Hover Tooltip */}
                     {hoveredVehicle?.vin === vehicle.vin && (
                       <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-black/90 text-white text-xs px-3 py-2 rounded-lg shadow-xl whitespace-nowrap z-30 pointer-events-none">
@@ -406,7 +539,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
             </div>
 
             {/* Map Info */}
-            <div className="absolute bottom-2 left-2 text-xs text-gray-600 bg-white/80 px-2 py-1 rounded">
+            <div className="absolute bottom-2 left-2 text-xs text-gray-400 bg-black/60 px-2 py-1 rounded">
               © 2025 Fleet Tracking • {filteredVehicles.length} vehicles • Click and drag to pan
             </div>
           </div>
