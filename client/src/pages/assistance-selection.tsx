@@ -8,11 +8,13 @@ import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings } from "l
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
+import { VehicleMap } from "@/components/vehicle-map";
 
 export default function AssistanceSelection() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
   const [isAssignUpdateDialogOpen, setIsAssignUpdateDialogOpen] = useState(false);
+  const [isMapOpen, setIsMapOpen] = useState(false);
 
   const assistanceOptions = [
     {
@@ -110,11 +112,15 @@ export default function AssistanceSelection() {
                   <p className="text-sm text-black">Active Vehicles</p>
                 </CardContent>
               </Card>
-              <Card className="bg-white">
+              <Card 
+                className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
+                onClick={() => setIsMapOpen(true)}
+                data-testid="card-vehicle-map"
+              >
                 <CardContent className="flex flex-col items-center text-center p-4">
                   <MapPin className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                  <p className="text-lg font-bold text-black" data-testid="text-locations-count">8</p>
-                  <p className="text-sm text-black">Locations</p>
+                  <p className="text-lg font-bold text-black" data-testid="text-map-button">MAP</p>
+                  <p className="text-sm text-black">View on Map</p>
                 </CardContent>
               </Card>
               <Card 
@@ -218,6 +224,9 @@ export default function AssistanceSelection() {
             </div>
           </DialogContent>
         </Dialog>
+        
+        {/* Vehicle Map Dialog */}
+        <VehicleMap open={isMapOpen} onOpenChange={setIsMapOpen} />
       </main>
     </MainContent>
   );
