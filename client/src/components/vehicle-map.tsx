@@ -99,9 +99,9 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
     return acc;
   }, {} as Record<string, number>);
 
-  // Get unique values for filters
-  const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding))).sort();
-  const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region))).sort();
+  // Get unique values for filters (filter out empty/null values)
+  const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding).filter(b => b && b.trim()))).sort();
+  const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region).filter(r => r && r.trim()))).sort();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
