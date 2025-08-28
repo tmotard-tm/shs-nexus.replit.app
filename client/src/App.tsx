@@ -29,9 +29,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="dev-watermark">
-          CONCEPT MODEL ONLY - DEVELOPMENT VERSION - NOT FOR PRODUCTION USE
-        </div>
         <div className="text-center">
           <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-muted-foreground">Loading...</p>
@@ -41,21 +38,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    return (
-      <>
-        <div className="dev-watermark">
-          CONCEPT MODEL ONLY - DEVELOPMENT VERSION - NOT FOR PRODUCTION USE
-        </div>
-        <Login />
-      </>
-    );
+    return <Login />;
   }
 
   return (
     <div className="min-h-screen bg-background flex">
-      <div className="dev-watermark">
-        CONCEPT MODEL ONLY - DEVELOPMENT VERSION - NOT FOR PRODUCTION USE
-      </div>
       <Sidebar />
       {children}
     </div>
