@@ -196,6 +196,19 @@ export default function AssistanceSelection() {
                 Would you like to assign a vehicle to an employee or update vehicle information?
               </DialogDescription>
             </DialogHeader>
+            
+            {/* Vehicle Status Summary */}
+            <div className="grid grid-cols-2 gap-4 my-4">
+              <div className="text-center p-3 bg-muted rounded-lg">
+                <p className="text-2xl font-bold text-green-600" data-testid="text-assigned-vehicles">{getAvailableVehicles().length}</p>
+                <p className="text-sm text-muted-foreground">Assigned Vehicles</p>
+              </div>
+              <div className="text-center p-3 bg-muted rounded-lg">
+                <p className="text-2xl font-bold text-orange-600" data-testid="text-unassigned-vehicles">{getUnassignedVehicles().length}</p>
+                <p className="text-sm text-muted-foreground">Unassigned Vehicles</p>
+              </div>
+            </div>
+
             <div className="space-y-3">
               <Button 
                 className="w-full justify-start" 
