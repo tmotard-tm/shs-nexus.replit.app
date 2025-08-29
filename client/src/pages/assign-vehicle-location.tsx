@@ -48,8 +48,8 @@ export default function AssignVehicleLocation() {
     return Math.abs(num1 - num2);
   };
 
-  const availableVehicles = getAvailableVehicles();
-  let filteredVehicles = availableVehicles.filter(vehicle => {
+  const unassignedVehicles = getUnassignedVehicles();
+  let filteredVehicles = unassignedVehicles.filter(vehicle => {
     const matchesSearch = !searchQuery || 
       vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
       vehicle.vehicleNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -76,7 +76,7 @@ export default function AssignVehicleLocation() {
   const handleVehicleAssignment = (e: React.FormEvent) => {
     e.preventDefault();
     const employee = employees.find(emp => emp.id === vehicleAssignment.employeeId);
-    const vehicle = availableVehicles.find(veh => veh.vin === vehicleAssignment.vehicleId);
+    const vehicle = unassignedVehicles.find(veh => veh.vin === vehicleAssignment.vehicleId);
     
     if (!employee || !vehicle) {
       toast({
@@ -104,7 +104,7 @@ export default function AssignVehicleLocation() {
   };
 
   const handleVehicleSelect = (vehicleVin: string) => {
-    const vehicle = availableVehicles.find(v => v.vin === vehicleVin);
+    const vehicle = unassignedVehicles.find(v => v.vin === vehicleVin);
     setSelectedVehicle(vehicle || null);
     setVehicleAssignment(prev => ({ ...prev, vehicleId: vehicleVin }));
     setIsAssignmentDialogOpen(true);
@@ -216,13 +216,14 @@ export default function AssignVehicleLocation() {
               <div className="grid gap-4">
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-semibold">
-                    Available Vehicles ({filteredVehicles.length})
+                    Unassigned Vehicles ({filteredVehicles.length})
                     {targetZipcode.trim() && (
                       <span className="text-sm font-normal text-muted-foreground ml-2">
                         - Sorted by distance to {targetZipcode}
                       </span>
                     )}
                   </h3>
+                  <p className="text-sm text-muted-foreground">Only showing vehicles available for assignment</p>
                 </div>
                 
                 <div className="grid gap-4">
