@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Car, Search, Calendar, MapPin, Settings } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
-import { getAvailableVehicles, getBrandingOptions, getInteriorOptions, getTuneStatusOptions, type FleetVehicle } from "@/data/fleetData";
+import { getAvailableVehicles, getBrandingOptions, getInteriorOptions, getTuneStatusOptions, getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
 
 export default function AssignVehicleLocation() {
   const { toast } = useToast();
@@ -183,6 +183,30 @@ export default function AssignVehicleLocation() {
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Vehicle Status Summary */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Vehicle Assignment Overview</CardTitle>
+                  <CardDescription>
+                    Current fleet assignment status
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                      <p className="text-3xl font-bold text-green-600 dark:text-green-400" data-testid="text-assigned-vehicles-count">{getAvailableVehicles().length}</p>
+                      <p className="text-sm text-green-700 dark:text-green-300">Assigned Vehicles</p>
+                      <p className="text-xs text-muted-foreground mt-1">Currently in use</p>
+                    </div>
+                    <div className="text-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                      <p className="text-3xl font-bold text-orange-600 dark:text-orange-400" data-testid="text-unassigned-vehicles-count">{getUnassignedVehicles().length}</p>
+                      <p className="text-sm text-orange-700 dark:text-orange-300">Unassigned Vehicles</p>
+                      <p className="text-xs text-muted-foreground mt-1">Available for assignment</p>
                     </div>
                   </div>
                 </CardContent>
