@@ -170,10 +170,10 @@ export default function CreateVehicle() {
                         <SelectValue placeholder="Select vehicle type" />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="sears-fleet" data-testid="option-sears-fleet">Sears Fleet</SelectItem>
                         <SelectItem value="byov" data-testid="option-byov">BYOV (Bring Your Own Vehicle)</SelectItem>
                         <SelectItem value="rental" data-testid="option-rental">Rental</SelectItem>
                         <SelectItem value="spare" data-testid="option-spare">Spare</SelectItem>
-                        <SelectItem value="sears-van" data-testid="option-sears-van">Sears Van</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
