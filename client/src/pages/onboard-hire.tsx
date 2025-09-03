@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { UserPlus, CheckCircle, Clock, Users } from "lucide-react";
+import { UserPlus, CheckCircle, Clock, Users, Package, Wrench } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 
 export default function OnboardHire() {
@@ -37,6 +37,11 @@ export default function OnboardHire() {
     { id: "documentation", label: "Documentation Completed", completed: false }
   ]);
 
+  const [supplyOrders, setSupplyOrders] = useState({
+    assetsSupplies: false,
+    ntaoPartsStock: false
+  });
+
   const departments = [
     "Human Resources",
     "Sales", 
@@ -56,9 +61,22 @@ export default function OnboardHire() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    const orderMessages = [];
+    if (supplyOrders.assetsSupplies) {
+      orderMessages.push("Assets & Supplies order triggered for Day 1 supplies");
+    }
+    if (supplyOrders.ntaoPartsStock) {
+      orderMessages.push("NTAO order triggered for parts stock");
+    }
+    
+    const description = orderMessages.length > 0 
+      ? `${employeeForm.firstName} ${employeeForm.lastName} has been onboarded. ${orderMessages.join(". ")}.`
+      : `${employeeForm.firstName} ${employeeForm.lastName} has been successfully added to the system`;
+    
     toast({
       title: "Employee Onboarded",
-      description: `${employeeForm.firstName} ${employeeForm.lastName} has been successfully added to the system`,
+      description,
     });
     
     setEmployeeForm({
@@ -76,6 +94,7 @@ export default function OnboardHire() {
     });
 
     setOnboardingTasks(tasks => tasks.map(task => ({ ...task, completed: false })));
+    setSupplyOrders({ assetsSupplies: false, ntaoPartsStock: false });
   };
 
   const toggleTask = (taskId: string) => {
@@ -256,6 +275,40 @@ export default function OnboardHire() {
                           placeholder="(555) 987-6543"
                           data-testid="input-emergency-phone"
                         />
+                      </div>
+                    </div>
+
+                    {/* Supply Order Triggers */}
+                    <div className="border-t pt-6">
+                      <h4 className="font-semibold mb-4 flex items-center gap-2">
+                        <Package className="h-4 w-4" />
+                        Day 1 Supply Orders
+                      </h4>
+                      <div className="space-y-3">
+                        <div className="flex items-center space-x-3">
+                          <Checkbox 
+                            id="assets-supplies"
+                            checked={supplyOrders.assetsSupplies}
+                            onCheckedChange={(checked) => setSupplyOrders(prev => ({ ...prev, assetsSupplies: !!checked }))}
+                            data-testid="checkbox-assets-supplies"
+                          />
+                          <Label htmlFor="assets-supplies" className="flex items-center gap-2">
+                            <Package className="h-4 w-4" />
+                            Trigger Assets & Supplies Order for Day 1 Supplies
+                          </Label>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <Checkbox 
+                            id="ntao-parts"
+                            checked={supplyOrders.ntaoPartsStock}
+                            onCheckedChange={(checked) => setSupplyOrders(prev => ({ ...prev, ntaoPartsStock: !!checked }))}
+                            data-testid="checkbox-ntao-parts"
+                          />
+                          <Label htmlFor="ntao-parts" className="flex items-center gap-2">
+                            <Wrench className="h-4 w-4" />
+                            Trigger NTAO Order for Parts Stock
+                          </Label>
+                        </div>
                       </div>
                     </div>
 

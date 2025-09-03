@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Car, Search, Calendar, MapPin, Settings } from "lucide-react";
+import { Car, Search, Calendar, MapPin, Settings, Package, Wrench } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { getAvailableVehicles, getBrandingOptions, getInteriorOptions, getTuneStatusOptions, getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
@@ -28,6 +28,10 @@ export default function AssignVehicleLocation() {
   const [interiorFilter, setInteriorFilter] = useState("all");
   const [targetZipcode, setTargetZipcode] = useState("");
   const [isAssignmentDialogOpen, setIsAssignmentDialogOpen] = useState(false);
+  const [supplyOrders, setSupplyOrders] = useState({
+    assetsSupplies: false,
+    ntaoPartsStock: false
+  });
 
   // Real data from CSV
   const employees = [
@@ -87,9 +91,21 @@ export default function AssignVehicleLocation() {
       return;
     }
     
+    const orderMessages = [];
+    if (supplyOrders.assetsSupplies) {
+      orderMessages.push("Assets & Supplies order triggered for Day 1 supplies");
+    }
+    if (supplyOrders.ntaoPartsStock) {
+      orderMessages.push("NTAO order triggered for parts stock");
+    }
+    
+    const description = orderMessages.length > 0 
+      ? `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) assigned to ${employee.name}. ${orderMessages.join(". ")}.`
+      : `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) has been assigned to ${employee.name}`;
+    
     toast({
       title: "Vehicle Assigned",
-      description: `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) has been assigned to ${employee.name}`,
+      description,
     });
     
     setVehicleAssignment({
@@ -101,6 +117,7 @@ export default function AssignVehicleLocation() {
     });
     setSelectedVehicle(null);
     setIsAssignmentDialogOpen(false);
+    setSupplyOrders({ assetsSupplies: false, ntaoPartsStock: false });
   };
 
   const handleVehicleSelect = (vehicleVin: string) => {
@@ -384,6 +401,44 @@ export default function AssignVehicleLocation() {
                       <SelectItem value="daily_operations" data-testid="dialog-option-daily-operations">Daily Operations</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                {/* Supply Order Triggers */}
+                <div className="border-t pt-4">
+                  <h4 className="font-semibold mb-3 flex items-center gap-2">
+                    <Package className="h-4 w-4" />
+                    Day 1 Supply Orders
+                  </h4>
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-3">
+                      <input 
+                        type="checkbox" 
+                        id="dialog-assets-supplies"
+                        checked={supplyOrders.assetsSupplies}
+                        onChange={(e) => setSupplyOrders(prev => ({ ...prev, assetsSupplies: e.target.checked }))}
+                        className="rounded border-gray-300"
+                        data-testid="dialog-checkbox-assets-supplies"
+                      />
+                      <Label htmlFor="dialog-assets-supplies" className="flex items-center gap-2 text-sm">
+                        <Package className="h-4 w-4" />
+                        Trigger Assets & Supplies Order
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      <input 
+                        type="checkbox" 
+                        id="dialog-ntao-parts"
+                        checked={supplyOrders.ntaoPartsStock}
+                        onChange={(e) => setSupplyOrders(prev => ({ ...prev, ntaoPartsStock: e.target.checked }))}
+                        className="rounded border-gray-300"
+                        data-testid="dialog-checkbox-ntao-parts"
+                      />
+                      <Label htmlFor="dialog-ntao-parts" className="flex items-center gap-2 text-sm">
+                        <Wrench className="h-4 w-4" />
+                        Trigger NTAO Order for Parts Stock
+                      </Label>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex gap-2 pt-4">
