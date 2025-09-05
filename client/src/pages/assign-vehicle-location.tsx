@@ -32,6 +32,11 @@ export default function AssignVehicleLocation() {
     assetsSupplies: false,
     ntaoPartsStock: false
   });
+  const [rentalInfo, setRentalInfo] = useState({
+    isRental: false,
+    rentalVanNumber: "",
+    assignmentReason: ""
+  });
 
   // Real data from CSV
   const employees = [
@@ -118,6 +123,7 @@ export default function AssignVehicleLocation() {
     setSelectedVehicle(null);
     setIsAssignmentDialogOpen(false);
     setSupplyOrders({ assetsSupplies: false, ntaoPartsStock: false });
+    setRentalInfo({ isRental: false, rentalVanNumber: "", assignmentReason: "" });
   };
 
   const handleVehicleSelect = (vehicleVin: string) => {
@@ -401,6 +407,54 @@ export default function AssignVehicleLocation() {
                       <SelectItem value="daily_operations" data-testid="dialog-option-daily-operations">Daily Operations</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                {/* Rental Vehicle Section */}
+                <div className="border-t pt-4">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <input 
+                      type="checkbox" 
+                      id="dialog-is-rental"
+                      checked={rentalInfo.isRental}
+                      onChange={(e) => setRentalInfo(prev => ({ ...prev, isRental: e.target.checked }))}
+                      className="rounded border-gray-300"
+                      data-testid="dialog-checkbox-is-rental"
+                    />
+                    <Label htmlFor="dialog-is-rental" className="font-semibold">
+                      This is a rental vehicle assignment
+                    </Label>
+                  </div>
+                  
+                  {rentalInfo.isRental && (
+                    <div className="space-y-3 ml-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="dialog-rental-van-number">Rental Van Number</Label>
+                        <Input
+                          id="dialog-rental-van-number"
+                          value={rentalInfo.rentalVanNumber}
+                          onChange={(e) => setRentalInfo(prev => ({ ...prev, rentalVanNumber: e.target.value }))}
+                          placeholder="Enter rental van number"
+                          data-testid="dialog-input-rental-van-number"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="dialog-assignment-reason">Reason for Rental Assignment</Label>
+                        <Select 
+                          value={rentalInfo.assignmentReason} 
+                          onValueChange={(value) => setRentalInfo(prev => ({ ...prev, assignmentReason: value }))}
+                          data-testid="dialog-select-assignment-reason"
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select reason for rental assignment" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="truck-breakdown-at-shop" data-testid="dialog-option-truck-breakdown">Truck Breakdown - At Shop</SelectItem>
+                            <SelectItem value="new-hire-temp-truck" data-testid="dialog-option-new-hire-temp">New Hire - Temp Truck</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Supply Order Triggers */}
