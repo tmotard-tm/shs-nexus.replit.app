@@ -76,8 +76,14 @@ export default function OnboardHire() {
   const findClosestVehicle = (targetZip: string): FleetVehicle | null => {
     if (!targetZip.trim()) return null;
     
+    // Get only truly unassigned vehicles (vehicles that are available for assignment)
     const unassignedVehicles = getUnassignedVehicles();
-    if (unassignedVehicles.length === 0) return null;
+    console.log(`Found ${unassignedVehicles.length} unassigned vehicles available for assignment`);
+    
+    if (unassignedVehicles.length === 0) {
+      console.log('No unassigned vehicles available for assignment');
+      return null;
+    }
     
     const vehiclesWithDistance = unassignedVehicles
       .map(vehicle => ({
@@ -86,7 +92,10 @@ export default function OnboardHire() {
       }))
       .sort((a, b) => a.distance - b.distance);
     
-    return vehiclesWithDistance[0] || null;
+    const closestVehicle = vehiclesWithDistance[0];
+    console.log(`Closest vehicle found: ${closestVehicle?.modelYear} ${closestVehicle?.makeName} ${closestVehicle?.modelName} at distance ${closestVehicle?.distance}`);
+    
+    return closestVehicle || null;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
