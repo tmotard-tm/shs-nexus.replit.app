@@ -9,7 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { UserPlus, CheckCircle, Clock, Users, Package, Wrench } from "lucide-react";
+import { UserPlus, CheckCircle, Clock, Users, Package, Wrench, MapPin } from "lucide-react";
+import { getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
 import { BackButton } from "@/components/ui/back-button";
 
 export default function OnboardHire() {
@@ -41,6 +42,10 @@ export default function OnboardHire() {
     assetsSupplies: false,
     ntaoPartsStock: false
   });
+  const [vehicleAssignment, setVehicleAssignment] = useState({
+    autoAssign: false,
+    workZipcode: ""
+  });
 
   const departments = [
     "Human Resources",
@@ -59,6 +64,31 @@ export default function OnboardHire() {
     { id: "4", name: "Robert Wilson", department: "Finance" }
   ];
 
+  // Simple distance calculation based on zip code numerical difference
+  const calculateZipDistance = (zip1: string, zip2: string): number => {
+    if (!zip1 || !zip2) return 9999;
+    const num1 = parseInt(zip1.replace(/\D/g, ''), 10);
+    const num2 = parseInt(zip2.replace(/\D/g, ''), 10);
+    if (isNaN(num1) || isNaN(num2)) return 9999;
+    return Math.abs(num1 - num2);
+  };
+
+  const findClosestVehicle = (targetZip: string): FleetVehicle | null => {
+    if (!targetZip.trim()) return null;
+    
+    const unassignedVehicles = getUnassignedVehicles();
+    if (unassignedVehicles.length === 0) return null;
+    
+    const vehiclesWithDistance = unassignedVehicles
+      .map(vehicle => ({
+        ...vehicle,
+        distance: calculateZipDistance(vehicle.zip, targetZip.trim())
+      }))
+      .sort((a, b) => a.distance - b.distance);
+    
+    return vehiclesWithDistance[0] || null;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -70,8 +100,21 @@ export default function OnboardHire() {
       orderMessages.push("NTAO order triggered for parts stock");
     }
     
-    const description = orderMessages.length > 0 
-      ? `${employeeForm.firstName} ${employeeForm.lastName} has been onboarded. ${orderMessages.join(". ")}.`
+    let vehicleMessage = "";
+    if (vehicleAssignment.autoAssign && vehicleAssignment.workZipcode) {
+      const closestVehicle = findClosestVehicle(vehicleAssignment.workZipcode);
+      if (closestVehicle) {
+        vehicleMessage = `Closest vehicle assigned: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName} (${closestVehicle.licensePlate}) located in ${closestVehicle.city}, ${closestVehicle.state}.`;
+      } else {
+        vehicleMessage = "No available vehicles found for assignment.";
+      }
+    }
+    
+    const allMessages = [...orderMessages];
+    if (vehicleMessage) allMessages.push(vehicleMessage);
+    
+    const description = allMessages.length > 0 
+      ? `${employeeForm.firstName} ${employeeForm.lastName} has been onboarded. ${allMessages.join(" ")}`
       : `${employeeForm.firstName} ${employeeForm.lastName} has been successfully added to the system`;
     
     toast({
@@ -95,6 +138,7 @@ export default function OnboardHire() {
 
     setOnboardingTasks(tasks => tasks.map(task => ({ ...task, completed: false })));
     setSupplyOrders({ assetsSupplies: false, ntaoPartsStock: false });
+    setVehicleAssignment({ autoAssign: false, workZipcode: "" });
   };
 
   const toggleTask = (taskId: string) => {
@@ -309,6 +353,42 @@ export default function OnboardHire() {
                             Trigger NTAO Order for Parts Stock
                           </Label>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Vehicle Assignment Section */}
+                    <div className="border-t pt-6">
+                      <h4 className="font-semibold mb-4 flex items-center gap-2">
+                        <MapPin className="h-4 w-4" />
+                        Vehicle Assignment
+                      </h4>
+                      <div className="space-y-3">
+                        <div className="flex items-center space-x-3">
+                          <Checkbox 
+                            id="auto-assign-vehicle"
+                            checked={vehicleAssignment.autoAssign}
+                            onCheckedChange={(checked) => setVehicleAssignment(prev => ({ ...prev, autoAssign: !!checked }))}
+                            data-testid="checkbox-auto-assign-vehicle"
+                          />
+                          <Label htmlFor="auto-assign-vehicle">
+                            Auto-assign closest available vehicle
+                          </Label>
+                        </div>
+                        {vehicleAssignment.autoAssign && (
+                          <div className="ml-6 space-y-2">
+                            <Label htmlFor="work-zipcode">Employee Work Location Zipcode</Label>
+                            <Input
+                              id="work-zipcode"
+                              value={vehicleAssignment.workZipcode}
+                              onChange={(e) => setVehicleAssignment(prev => ({ ...prev, workZipcode: e.target.value }))}
+                              placeholder="Enter work location zipcode (e.g., 10001)"
+                              data-testid="input-work-zipcode"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              System will find and assign the closest unassigned vehicle
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
 
