@@ -626,9 +626,6 @@ export default function AssignVehicleLocation() {
                         data-testid="dialog-input-tech-id"
                       />
                     </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div className="space-y-2">
                       <Label htmlFor="dialog-proposedRouteStartDate">Proposed Route Start Date</Label>
                       <Input
@@ -639,6 +636,9 @@ export default function AssignVehicleLocation() {
                         data-testid="dialog-input-proposed-route-start-date"
                       />
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 mb-4">
                     <div className="space-y-2">
                       <Label>Specialties *</Label>
                       <div className="grid grid-cols-2 gap-2">

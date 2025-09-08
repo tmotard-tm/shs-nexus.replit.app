@@ -460,9 +460,6 @@ export default function OnboardHire() {
                             data-testid="input-tech-id"
                           />
                         </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div className="space-y-2">
                           <Label htmlFor="proposedRouteStartDate">Proposed Route Start Date</Label>
                           <Input
@@ -473,6 +470,9 @@ export default function OnboardHire() {
                             data-testid="input-proposed-route-start-date"
                           />
                         </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 mb-4">
                         <div className="space-y-2">
                           <Label htmlFor="specialties">Specialties *</Label>
                           <div className="space-y-3">
