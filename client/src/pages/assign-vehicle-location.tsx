@@ -386,7 +386,7 @@ export default function AssignVehicleLocation() {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <User className="h-5 w-5" />
-                  Vehicle Assignment & Employee Details
+                  Vehicle Assignment & Additional Information
                 </DialogTitle>
                 <DialogDescription>
                   Assign the selected vehicle and manage complete employee information
