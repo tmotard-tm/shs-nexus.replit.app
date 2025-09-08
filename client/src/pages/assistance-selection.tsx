@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
-import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings } from "lucide-react";
+import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
@@ -117,7 +117,7 @@ export default function AssistanceSelection() {
                 data-testid="card-vehicle-map"
               >
                 <CardContent className="flex flex-col items-center text-center p-4">
-                  <MapPin className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                  <Map className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                   <p className="text-lg font-bold text-black" data-testid="text-map-button">MAP</p>
                   <p className="text-sm text-black">View on Map</p>
                 </CardContent>
