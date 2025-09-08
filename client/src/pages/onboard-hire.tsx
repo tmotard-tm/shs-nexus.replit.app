@@ -29,7 +29,15 @@ export default function OnboardHire() {
     manager: "",
     employeeId: "",
     emergencyContact: "",
-    emergencyPhone: ""
+    emergencyPhone: "",
+    region: "",
+    district: "",
+    requisitionId: "",
+    enterpriseId: "",
+    techId: "",
+    proposedRouteStartDate: "",
+    offer: "",
+    specialties: [] as string[]
   });
 
   const [onboardingTasks, setOnboardingTasks] = useState([
@@ -58,6 +66,24 @@ export default function OnboardHire() {
     "Finance",
     "IT",
     "Customer Service"
+  ];
+
+  const specialtyOptions = [
+    "Cooking",
+    "Microwave",
+    "Laundry",
+    "Dishwasher",
+    "Refrigerator",
+    "HA PM Check"
+  ];
+
+  const regions = [
+    "Northeast",
+    "Southeast",
+    "Midwest",
+    "Southwest",
+    "West Coast",
+    "Central"
   ];
 
   const managers = [
@@ -112,7 +138,7 @@ export default function OnboardHire() {
       if (supplyOrders.assetsSupplies) {
         const assetsRequest = await apiRequest("POST", "/api/requests", {
           title: `Day 1 Assets & Supplies for ${employeeForm.firstName} ${employeeForm.lastName}`,
-          description: `Request for Day 1 supplies and assets for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Start date: ${employeeForm.startDate}`,
+          description: `Request for Day 1 supplies and assets for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${employeeForm.specialties.join(', ') || 'None specified'}. Enterprise ID: ${employeeForm.enterpriseId}`,
           type: "system_config",
           priority: "high",
           targetApi: "Assets & Supplies Team",
@@ -126,7 +152,7 @@ export default function OnboardHire() {
       if (supplyOrders.ntaoPartsStock) {
         const ntaoRequest = await apiRequest("POST", "/api/requests", {
           title: `NTAO Parts Stock Request for ${employeeForm.firstName} ${employeeForm.lastName}`,
-          description: `Request for parts stock allocation for new technician ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Work location: ${vehicleAssignment.workZipcode || 'TBD'}`,
+          description: `Request for parts stock allocation for new technician ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Work location: ${vehicleAssignment.workZipcode || 'TBD'}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${employeeForm.specialties.join(', ') || 'None specified'}. Tech ID: ${employeeForm.techId || 'TBD'}. Enterprise ID: ${employeeForm.enterpriseId}`,
           type: "system_config",
           priority: "medium",
           targetApi: "NTAO Parts Team",
@@ -193,7 +219,15 @@ export default function OnboardHire() {
       manager: "",
       employeeId: "",
       emergencyContact: "",
-      emergencyPhone: ""
+      emergencyPhone: "",
+      region: "",
+      district: "",
+      requisitionId: "",
+      enterpriseId: "",
+      techId: "",
+      proposedRouteStartDate: "",
+      offer: "",
+      specialties: [] as string[]
     });
 
     setOnboardingTasks(tasks => tasks.map(task => ({ ...task, completed: false })));
@@ -356,6 +390,144 @@ export default function OnboardHire() {
                           placeholder="EMP-001"
                           data-testid="input-employee-id"
                         />
+                      </div>
+                    </div>
+
+                    {/* Additional Employee Information */}
+                    <div className="border-t pt-6">
+                      <h4 className="font-semibold mb-4 text-lg">Additional Information</h4>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="region">Region *</Label>
+                          <Select 
+                            value={employeeForm.region} 
+                            onValueChange={(value) => setEmployeeForm(prev => ({ ...prev, region: value }))}
+                            data-testid="select-region"
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select region" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {regions.map(region => (
+                                <SelectItem key={region} value={region} data-testid={`option-${region.toLowerCase().replace(/\s+/g, '-')}`}>
+                                  {region}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="district">District *</Label>
+                          <Input
+                            id="district"
+                            value={employeeForm.district}
+                            onChange={(e) => setEmployeeForm(prev => ({ ...prev, district: e.target.value }))}
+                            placeholder="e.g., District 25"
+                            data-testid="input-district"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="requisitionId">Requisition ID *</Label>
+                          <Input
+                            id="requisitionId"
+                            value={employeeForm.requisitionId}
+                            onChange={(e) => setEmployeeForm(prev => ({ ...prev, requisitionId: e.target.value }))}
+                            placeholder="REQ-2024-001"
+                            data-testid="input-requisition-id"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="enterpriseId">Enterprise ID *</Label>
+                          <Input
+                            id="enterpriseId"
+                            value={employeeForm.enterpriseId}
+                            onChange={(e) => setEmployeeForm(prev => ({ ...prev, enterpriseId: e.target.value }))}
+                            placeholder="ENT1234"
+                            data-testid="input-enterprise-id"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="techId">Tech ID</Label>
+                          <Input
+                            id="techId"
+                            value={employeeForm.techId}
+                            onChange={(e) => setEmployeeForm(prev => ({ ...prev, techId: e.target.value }))}
+                            placeholder="TECH-001"
+                            data-testid="input-tech-id"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="offer">Offer</Label>
+                          <Input
+                            id="offer"
+                            value={employeeForm.offer}
+                            onChange={(e) => setEmployeeForm(prev => ({ ...prev, offer: e.target.value }))}
+                            placeholder="Offer details"
+                            data-testid="input-offer"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="proposedRouteStartDate">Proposed Route Start Date</Label>
+                          <Input
+                            id="proposedRouteStartDate"
+                            type="date"
+                            value={employeeForm.proposedRouteStartDate}
+                            onChange={(e) => setEmployeeForm(prev => ({ ...prev, proposedRouteStartDate: e.target.value }))}
+                            data-testid="input-proposed-route-start-date"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="specialties">Specialties *</Label>
+                          <div className="space-y-3">
+                            {specialtyOptions.map(specialty => (
+                              <div key={specialty} className="flex items-center space-x-3">
+                                <Checkbox 
+                                  id={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                                  checked={employeeForm.specialties.includes(specialty)}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setEmployeeForm(prev => ({ 
+                                        ...prev, 
+                                        specialties: [...prev.specialties, specialty]
+                                      }));
+                                    } else {
+                                      setEmployeeForm(prev => ({ 
+                                        ...prev, 
+                                        specialties: prev.specialties.filter(s => s !== specialty)
+                                      }));
+                                    }
+                                  }}
+                                  data-testid={`checkbox-specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                                />
+                                <Label 
+                                  htmlFor={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                                  className="text-sm font-normal cursor-pointer"
+                                >
+                                  {specialty}
+                                </Label>
+                              </div>
+                            ))}
+                          </div>
+                          {employeeForm.specialties.length > 0 && (
+                            <div className="mt-2 p-3 bg-muted rounded-lg">
+                              <p className="text-sm font-medium mb-2">Selected Specialties:</p>
+                              <div className="flex flex-wrap gap-1">
+                                {employeeForm.specialties.map(specialty => (
+                                  <span key={specialty} className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
+                                    {specialty}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
 
