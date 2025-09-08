@@ -173,7 +173,6 @@ export default function CreateVehicle() {
                         <SelectItem value="sears-fleet" data-testid="option-sears-fleet">Sears Fleet</SelectItem>
                         <SelectItem value="byov" data-testid="option-byov">BYOV (Bring Your Own Vehicle)</SelectItem>
                         <SelectItem value="rental" data-testid="option-rental">Rental</SelectItem>
-                        <SelectItem value="spare" data-testid="option-spare">Spare</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
