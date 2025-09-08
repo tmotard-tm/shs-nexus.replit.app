@@ -7,11 +7,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Request } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { useState } from "react";
-import { Search, Calendar, User, Target, AlertCircle, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Search, Calendar, User, Target, AlertCircle, CheckCircle, XCircle, Clock, CalendarIcon } from "lucide-react";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
 export default function RequestsPage() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -19,6 +23,8 @@ export default function RequestsPage() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [selectedRequest, setSelectedRequest] = useState<Request | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [fromDate, setFromDate] = useState<Date | undefined>(undefined);
+  const [toDate, setToDate] = useState<Date | undefined>(undefined);
 
   const { data: allRequests, isLoading } = useQuery({
     queryKey: ["/api/requests"],
@@ -49,7 +55,19 @@ export default function RequestsPage() {
       }
     }
     
-    return matchesSearch && matchesStatus && matchesType;
+    // Date range filtering
+    let matchesDateRange = true;
+    if (fromDate || toDate) {
+      const requestDate = new Date(request.createdAt);
+      if (fromDate && requestDate < fromDate) {
+        matchesDateRange = false;
+      }
+      if (toDate && requestDate > toDate) {
+        matchesDateRange = false;
+      }
+    }
+    
+    return matchesSearch && matchesStatus && matchesType && matchesDateRange;
   }) || [];
 
   const requestStats = {
@@ -125,7 +143,7 @@ export default function RequestsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
                 <Input
@@ -159,7 +177,142 @@ export default function RequestsPage() {
                   <SelectItem value="decommission" data-testid="option-decommission">Decommission Requests</SelectItem>
                 </SelectContent>
               </Select>
+              
+              {/* From Date Picker */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "justify-start text-left font-normal",
+                      !fromDate && "text-muted-foreground"
+                    )}
+                    data-testid="button-from-date"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {fromDate ? format(fromDate, "PPP") : "From date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={fromDate}
+                    onSelect={setFromDate}
+                    initialFocus
+                  />
+                  {fromDate && (
+                    <div className="p-3 border-t">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setFromDate(undefined)}
+                        className="w-full"
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
+              
+              {/* To Date Picker */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "justify-start text-left font-normal",
+                      !toDate && "text-muted-foreground"
+                    )}
+                    data-testid="button-to-date"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {toDate ? format(toDate, "PPP") : "To date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={toDate}
+                    onSelect={setToDate}
+                    initialFocus
+                  />
+                  {toDate && (
+                    <div className="p-3 border-t">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setToDate(undefined)}
+                        className="w-full"
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
             </div>
+            
+            {/* Active Filters Display */}
+            {(fromDate || toDate || searchTerm || statusFilter !== "all" || typeFilter !== "all") && (
+              <div className="flex items-center gap-2 mt-4 pt-4 border-t">
+                <span className="text-sm text-muted-foreground">Active filters:</span>
+                {searchTerm && (
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    Search: "{searchTerm}"
+                    <button onClick={() => setSearchTerm("")} className="ml-1 hover:bg-muted rounded-full">
+                      ×
+                    </button>
+                  </Badge>
+                )}
+                {statusFilter !== "all" && (
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    Status: {statusFilter}
+                    <button onClick={() => setStatusFilter("all")} className="ml-1 hover:bg-muted rounded-full">
+                      ×
+                    </button>
+                  </Badge>
+                )}
+                {typeFilter !== "all" && (
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    Category: {typeFilter === "vehicle_assignment" ? "Van Assignment" : typeFilter === "assets_supplies" ? "Assets & Supplies" : typeFilter}
+                    <button onClick={() => setTypeFilter("all")} className="ml-1 hover:bg-muted rounded-full">
+                      ×
+                    </button>
+                  </Badge>
+                )}
+                {fromDate && (
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    From: {format(fromDate, "MMM d, yyyy")}
+                    <button onClick={() => setFromDate(undefined)} className="ml-1 hover:bg-muted rounded-full">
+                      ×
+                    </button>
+                  </Badge>
+                )}
+                {toDate && (
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    To: {format(toDate, "MMM d, yyyy")}
+                    <button onClick={() => setToDate(undefined)} className="ml-1 hover:bg-muted rounded-full">
+                      ×
+                    </button>
+                  </Badge>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSearchTerm("");
+                    setStatusFilter("all");
+                    setTypeFilter("all");
+                    setFromDate(undefined);
+                    setToDate(undefined);
+                  }}
+                  className="text-xs"
+                >
+                  Clear all
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 
