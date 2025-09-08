@@ -171,13 +171,25 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
         }).setView([39.8, -98.5], 4);
 
         console.log('Map created, adding tiles...');
-
-        // Use CartoDB Dark Matter for professional dark appearance
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          attribution: '© OpenStreetMap contributors © CARTO',
+        
+        // Add tile layer with error handling
+        const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors',
           maxZoom: 19,
-          minZoom: 3
-        }).addTo(map);
+          errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+        });
+        
+        tileLayer.on('tileerror', (e) => {
+          console.error('Tile loading error:', e);
+        });
+        
+        tileLayer.on('tileload', () => {
+          console.log('Tile loaded successfully');
+        });
+        
+        tileLayer.addTo(map);
+        console.log('Tiles added to map');
+
 
         console.log('Tiles added, creating controls...');
 
