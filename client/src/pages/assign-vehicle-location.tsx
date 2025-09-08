@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Car, Search, Calendar, MapPin, Settings, Package, Wrench } from "lucide-react";
+import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { getAvailableVehicles, getBrandingOptions, getInteriorOptions, getTuneStatusOptions, getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
@@ -21,6 +22,26 @@ export default function AssignVehicleLocation() {
     startDate: "",
     endDate: "",
     purpose: ""
+  });
+  
+  const [employeeData, setEmployeeData] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    department: "",
+    position: "",
+    manager: "",
+    enterpriseId: "",
+    region: "",
+    district: "",
+    requisitionId: "",
+    techId: "",
+    proposedRouteStartDate: "",
+    offer: "",
+    specialties: [] as string[],
+    emergencyContact: "",
+    emergencyPhone: ""
   });
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -45,6 +66,41 @@ export default function AssignVehicleLocation() {
     { id: "3", name: "Mike Johnson", department: "Operations", region: "Midwest" },
     { id: "4", name: "Sarah Williams", department: "Service", region: "West Coast" },
     { id: "5", name: "David Brown", department: "Field Service", region: "Southwest" }
+  ];
+  
+  const departments = [
+    "Human Resources",
+    "Sales", 
+    "Marketing",
+    "Operations",
+    "Finance",
+    "IT",
+    "Customer Service"
+  ];
+
+  const specialtyOptions = [
+    "Cooking",
+    "Microwave",
+    "Laundry",
+    "Dishwasher",
+    "Refrigerator",
+    "HA PM Check"
+  ];
+
+  const regions = [
+    "Northeast",
+    "Southeast",
+    "Midwest",
+    "Southwest",
+    "West Coast",
+    "Central"
+  ];
+  
+  const managers = [
+    { id: "1", name: "Sarah Johnson", department: "Sales" },
+    { id: "2", name: "Mike Chen", department: "Operations" },
+    { id: "3", name: "Emily Davis", department: "Marketing" },
+    { id: "4", name: "Robert Wilson", department: "Finance" }
   ];
 
   // Simple distance calculation based on zip code numerical difference
@@ -326,35 +382,331 @@ export default function AssignVehicleLocation() {
           
           {/* Assignment Dialog */}
           <Dialog open={isAssignmentDialogOpen} onOpenChange={setIsAssignmentDialogOpen}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Complete the Assignment Details</DialogTitle>
+                <DialogTitle className="flex items-center gap-2">
+                  <User className="h-5 w-5" />
+                  Vehicle Assignment & Employee Details
+                </DialogTitle>
                 <DialogDescription>
-                  Assign the selected vehicle to an employee
+                  Assign the selected vehicle and manage complete employee information
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={(e) => {
                 handleVehicleAssignment(e);
-              }} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="dialog-employeeId">Employee *</Label>
-                  <Select 
-                    value={vehicleAssignment.employeeId} 
-                    onValueChange={(value) => setVehicleAssignment(prev => ({ ...prev, employeeId: value }))}
-                    data-testid="dialog-select-employee"
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select employee" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {employees.map(employee => (
-                        <SelectItem key={employee.id} value={employee.id} data-testid={`dialog-option-employee-${employee.id}`}>
-                          {employee.name}
-                          <span className="text-muted-foreground ml-2">({employee.department} - {employee.region})</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              }} className="space-y-6">
+                {/* Basic Assignment Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-employeeId">Employee *</Label>
+                    <Select 
+                      value={vehicleAssignment.employeeId} 
+                      onValueChange={(value) => setVehicleAssignment(prev => ({ ...prev, employeeId: value }))}
+                      data-testid="dialog-select-employee"
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select employee" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {employees.map(employee => (
+                          <SelectItem key={employee.id} value={employee.id} data-testid={`dialog-option-employee-${employee.id}`}>
+                            {employee.name}
+                            <span className="text-muted-foreground ml-2">({employee.department} - {employee.region})</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-purpose">Assignment Purpose</Label>
+                    <Select 
+                      value={vehicleAssignment.purpose} 
+                      onValueChange={(value) => setVehicleAssignment(prev => ({ ...prev, purpose: value }))}
+                      data-testid="dialog-select-purpose"
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select purpose" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="field_service" data-testid="dialog-option-field-service">Field Service</SelectItem>
+                        <SelectItem value="delivery" data-testid="dialog-option-delivery">Acquisition/Transport</SelectItem>
+                        <SelectItem value="maintenance" data-testid="dialog-option-maintenance">Maintenance Work</SelectItem>
+                        <SelectItem value="business_travel" data-testid="dialog-option-business-travel">Business Travel</SelectItem>
+                        <SelectItem value="daily_operations" data-testid="dialog-option-daily-operations">Daily Operations</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-startDate">Start Date *</Label>
+                    <Input
+                      id="dialog-startDate"
+                      type="date"
+                      value={vehicleAssignment.startDate}
+                      onChange={(e) => setVehicleAssignment(prev => ({ ...prev, startDate: e.target.value }))}
+                      data-testid="dialog-input-start-date"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-endDate">End Date</Label>
+                    <Input
+                      id="dialog-endDate"
+                      type="date"
+                      value={vehicleAssignment.endDate}
+                      onChange={(e) => setVehicleAssignment(prev => ({ ...prev, endDate: e.target.value }))}
+                      data-testid="dialog-input-end-date"
+                    />
+                  </div>
+                </div>
+
+                {/* Employee Information Section */}
+                <div className="border-t pt-6">
+                  <h4 className="font-semibold mb-4 text-lg">Employee Information</h4>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-firstName">First Name *</Label>
+                      <Input
+                        id="dialog-firstName"
+                        value={employeeData.firstName}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, firstName: e.target.value }))}
+                        placeholder="John"
+                        data-testid="dialog-input-first-name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-lastName">Last Name *</Label>
+                      <Input
+                        id="dialog-lastName"
+                        value={employeeData.lastName}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, lastName: e.target.value }))}
+                        placeholder="Doe"
+                        data-testid="dialog-input-last-name"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-email">Email *</Label>
+                      <Input
+                        id="dialog-email"
+                        type="email"
+                        value={employeeData.email}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, email: e.target.value }))}
+                        placeholder="john.doe@company.com"
+                        data-testid="dialog-input-email"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-phone">Phone</Label>
+                      <Input
+                        id="dialog-phone"
+                        value={employeeData.phone}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, phone: e.target.value }))}
+                        placeholder="(555) 123-4567"
+                        data-testid="dialog-input-phone"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-department">Department *</Label>
+                      <Select 
+                        value={employeeData.department} 
+                        onValueChange={(value) => setEmployeeData(prev => ({ ...prev, department: value }))}
+                        data-testid="dialog-select-department"
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select department" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {departments.map(dept => (
+                            <SelectItem key={dept} value={dept} data-testid={`dialog-option-${dept.toLowerCase().replace(/\s+/g, '-')}`}>
+                              {dept}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-position">Position *</Label>
+                      <Input
+                        id="dialog-position"
+                        value={employeeData.position}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, position: e.target.value }))}
+                        placeholder="e.g., Technician"
+                        data-testid="dialog-input-position"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-manager">Manager *</Label>
+                      <Select 
+                        value={employeeData.manager} 
+                        onValueChange={(value) => setEmployeeData(prev => ({ ...prev, manager: value }))}
+                        data-testid="dialog-select-manager"
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select manager" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {managers.map(manager => (
+                            <SelectItem key={manager.id} value={manager.id} data-testid={`dialog-option-manager-${manager.id}`}>
+                              {manager.name} ({manager.department})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Additional Employee Information */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-region">Region *</Label>
+                      <Select 
+                        value={employeeData.region} 
+                        onValueChange={(value) => setEmployeeData(prev => ({ ...prev, region: value }))}
+                        data-testid="dialog-select-region"
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select region" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {regions.map(region => (
+                            <SelectItem key={region} value={region} data-testid={`dialog-option-${region.toLowerCase().replace(/\s+/g, '-')}`}>
+                              {region}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-district">District *</Label>
+                      <Input
+                        id="dialog-district"
+                        value={employeeData.district}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, district: e.target.value }))}
+                        placeholder="e.g., District 25"
+                        data-testid="dialog-input-district"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-requisitionId">Requisition ID *</Label>
+                      <Input
+                        id="dialog-requisitionId"
+                        value={employeeData.requisitionId}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, requisitionId: e.target.value }))}
+                        placeholder="REQ-2024-001"
+                        data-testid="dialog-input-requisition-id"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-enterpriseId">Enterprise ID *</Label>
+                      <Input
+                        id="dialog-enterpriseId"
+                        value={employeeData.enterpriseId}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, enterpriseId: e.target.value }))}
+                        placeholder="ENT1234"
+                        data-testid="dialog-input-enterprise-id"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-techId">Tech ID</Label>
+                      <Input
+                        id="dialog-techId"
+                        value={employeeData.techId}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, techId: e.target.value }))}
+                        placeholder="TECH-001"
+                        data-testid="dialog-input-tech-id"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-offer">Offer</Label>
+                      <Input
+                        id="dialog-offer"
+                        value={employeeData.offer}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, offer: e.target.value }))}
+                        placeholder="Offer details"
+                        data-testid="dialog-input-offer"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-proposedRouteStartDate">Proposed Route Start Date</Label>
+                      <Input
+                        id="dialog-proposedRouteStartDate"
+                        type="date"
+                        value={employeeData.proposedRouteStartDate}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, proposedRouteStartDate: e.target.value }))}
+                        data-testid="dialog-input-proposed-route-start-date"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Specialties *</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {specialtyOptions.map(specialty => (
+                          <div key={specialty} className="flex items-center space-x-2">
+                            <Checkbox 
+                              id={`dialog-specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                              checked={employeeData.specialties.includes(specialty)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setEmployeeData(prev => ({ 
+                                    ...prev, 
+                                    specialties: [...prev.specialties, specialty]
+                                  }));
+                                } else {
+                                  setEmployeeData(prev => ({ 
+                                    ...prev, 
+                                    specialties: prev.specialties.filter(s => s !== specialty)
+                                  }));
+                                }
+                              }}
+                              data-testid={`dialog-checkbox-specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                            />
+                            <Label 
+                              htmlFor={`dialog-specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                              className="text-sm font-normal cursor-pointer"
+                            >
+                              {specialty}
+                            </Label>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-emergencyContact">Emergency Contact</Label>
+                      <Input
+                        id="dialog-emergencyContact"
+                        value={employeeData.emergencyContact}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, emergencyContact: e.target.value }))}
+                        placeholder="Jane Doe"
+                        data-testid="dialog-input-emergency-contact"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-emergencyPhone">Emergency Phone</Label>
+                      <Input
+                        id="dialog-emergencyPhone"
+                        value={employeeData.emergencyPhone}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, emergencyPhone: e.target.value }))}
+                        placeholder="(555) 987-6543"
+                        data-testid="dialog-input-emergency-phone"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {selectedVehicle && (
