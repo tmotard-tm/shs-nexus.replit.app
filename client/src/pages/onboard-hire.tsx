@@ -395,7 +395,7 @@ export default function OnboardHire() {
 
                     {/* Additional Employee Information */}
                     <div className="border-t pt-6">
-                      <h4 className="font-semibold mb-4 text-lg">Additional Information</h4>
+                      <h4 className="font-semibold mb-4 text-lg">Employee Route details</h4>
                       
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                         <div className="space-y-2">
