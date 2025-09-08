@@ -51,7 +51,6 @@ export default function CreateVehicle() {
     requisitionId: "",
     techId: "",
     proposedRouteStartDate: "",
-    offer: "",
     specialties: [] as string[],
     emergencyContact: "",
     emergencyPhone: ""
@@ -561,16 +560,6 @@ export default function CreateVehicle() {
                         onChange={(e) => setEmployeeData(prev => ({ ...prev, techId: e.target.value }))}
                         placeholder="TECH-001"
                         data-testid="input-tech-id"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="offer">Offer</Label>
-                      <Input
-                        id="offer"
-                        value={employeeData.offer}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, offer: e.target.value }))}
-                        placeholder="Offer details"
-                        data-testid="input-offer"
                       />
                     </div>
                   </div>

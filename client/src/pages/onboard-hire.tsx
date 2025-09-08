@@ -36,7 +36,7 @@ export default function OnboardHire() {
     enterpriseId: "",
     techId: "",
     proposedRouteStartDate: "",
-    offer: "",
+
     specialties: [] as string[]
   });
 
@@ -226,7 +226,7 @@ export default function OnboardHire() {
       enterpriseId: "",
       techId: "",
       proposedRouteStartDate: "",
-      offer: "",
+  
       specialties: [] as string[]
     });
 
@@ -458,16 +458,6 @@ export default function OnboardHire() {
                             onChange={(e) => setEmployeeForm(prev => ({ ...prev, techId: e.target.value }))}
                             placeholder="TECH-001"
                             data-testid="input-tech-id"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="offer">Offer</Label>
-                          <Input
-                            id="offer"
-                            value={employeeForm.offer}
-                            onChange={(e) => setEmployeeForm(prev => ({ ...prev, offer: e.target.value }))}
-                            placeholder="Offer details"
-                            data-testid="input-offer"
                           />
                         </div>
                       </div>

@@ -77,7 +77,6 @@ export default function UpdateVehicle() {
     requisitionId: "",
     techId: "",
     proposedRouteStartDate: "",
-    offer: "",
     specialties: [] as string[],
     emergencyContact: "",
     emergencyPhone: ""
@@ -756,16 +755,6 @@ export default function UpdateVehicle() {
                           onChange={(e) => setEmployeeData(prev => ({ ...prev, techId: e.target.value }))}
                           placeholder="TECH-001"
                           data-testid="dialog-input-tech-id"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="dialog-offer">Offer</Label>
-                        <Input
-                          id="dialog-offer"
-                          value={employeeData.offer}
-                          onChange={(e) => setEmployeeData(prev => ({ ...prev, offer: e.target.value }))}
-                          placeholder="Offer details"
-                          data-testid="dialog-input-offer"
                         />
                       </div>
                     </div>
