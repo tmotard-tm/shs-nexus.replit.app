@@ -11,10 +11,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, CheckCircle, Clock, Users, Package, Wrench, MapPin } from "lucide-react";
 import { getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
+import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 import { BackButton } from "@/components/ui/back-button";
 
 export default function OnboardHire() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [employeeForm, setEmployeeForm] = useState({
     firstName: "",
     lastName: "",
@@ -98,38 +101,86 @@ export default function OnboardHire() {
     return closestVehicle || null;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     const orderMessages = [];
-    if (supplyOrders.assetsSupplies) {
-      orderMessages.push("Assets & Supplies order triggered for Day 1 supplies");
-    }
-    if (supplyOrders.ntaoPartsStock) {
-      orderMessages.push("NTAO order triggered for parts stock");
-    }
+    const requestsCreated = [];
     
-    let vehicleMessage = "";
-    if (vehicleAssignment.autoAssign && vehicleAssignment.workZipcode) {
-      const closestVehicle = findClosestVehicle(vehicleAssignment.workZipcode);
-      if (closestVehicle) {
-        vehicleMessage = `Closest vehicle assigned: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName} (${closestVehicle.licensePlate}) located in ${closestVehicle.city}, ${closestVehicle.state}.`;
-      } else {
-        vehicleMessage = "No available vehicles found for assignment.";
+    try {
+      // Create Assets & Supplies request if triggered
+      if (supplyOrders.assetsSupplies) {
+        const assetsRequest = await apiRequest("POST", "/api/requests", {
+          title: `Day 1 Assets & Supplies for ${employeeForm.firstName} ${employeeForm.lastName}`,
+          description: `Request for Day 1 supplies and assets for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Start date: ${employeeForm.startDate}`,
+          type: "system_config",
+          priority: "high",
+          targetApi: "Assets & Supplies Team",
+          requesterId: user?.id || "system"
+        });
+        requestsCreated.push("Assets & Supplies order");
+        orderMessages.push("Assets & Supplies order triggered for Day 1 supplies");
       }
+      
+      // Create NTAO parts stock request if triggered
+      if (supplyOrders.ntaoPartsStock) {
+        const ntaoRequest = await apiRequest("POST", "/api/requests", {
+          title: `NTAO Parts Stock Request for ${employeeForm.firstName} ${employeeForm.lastName}`,
+          description: `Request for parts stock allocation for new technician ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Work location: ${vehicleAssignment.workZipcode || 'TBD'}`,
+          type: "system_config",
+          priority: "medium",
+          targetApi: "NTAO Parts Team",
+          requesterId: user?.id || "system"
+        });
+        requestsCreated.push("NTAO parts stock order");
+        orderMessages.push("NTAO order triggered for parts stock");
+      }
+      
+      // Handle vehicle assignment
+      let vehicleMessage = "";
+      if (vehicleAssignment.autoAssign && vehicleAssignment.workZipcode) {
+        const closestVehicle = findClosestVehicle(vehicleAssignment.workZipcode);
+        if (closestVehicle) {
+          // Create vehicle assignment request
+          const vehicleRequest = await apiRequest("POST", "/api/requests", {
+            title: `Vehicle Assignment: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName}`,
+            description: `Auto-assigned vehicle ${closestVehicle.licensePlate} to ${employeeForm.firstName} ${employeeForm.lastName}. Vehicle located in ${closestVehicle.city}, ${closestVehicle.state}. Distance score: ${calculateZipDistance(closestVehicle.zip, vehicleAssignment.workZipcode)}`,
+            type: "system_config",
+            priority: "medium",
+            targetApi: "Fleet Management",
+            requesterId: user?.id || "system"
+          });
+          requestsCreated.push("Vehicle assignment");
+          vehicleMessage = `Closest vehicle assigned: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName} (${closestVehicle.licensePlate}) located in ${closestVehicle.city}, ${closestVehicle.state}.`;
+        } else {
+          vehicleMessage = "No available vehicles found for assignment.";
+        }
+      }
+      
+      const allMessages = [...orderMessages];
+      if (vehicleMessage) allMessages.push(vehicleMessage);
+      
+      let description = `${employeeForm.firstName} ${employeeForm.lastName} has been onboarded.`;
+      if (requestsCreated.length > 0) {
+        description += ` ${requestsCreated.length} request(s) created: ${requestsCreated.join(", ")}.`;
+      }
+      if (allMessages.length > 0) {
+        description += ` ${allMessages.join(" ")}`;
+      }
+      
+      toast({
+        title: "Employee Onboarded",
+        description,
+      });
+      
+    } catch (error) {
+      console.error('Error creating requests:', error);
+      toast({
+        title: "Employee Onboarded",
+        description: `${employeeForm.firstName} ${employeeForm.lastName} has been onboarded, but there was an issue creating some requests. Please check the request system.`,
+        variant: "destructive"
+      });
     }
-    
-    const allMessages = [...orderMessages];
-    if (vehicleMessage) allMessages.push(vehicleMessage);
-    
-    const description = allMessages.length > 0 
-      ? `${employeeForm.firstName} ${employeeForm.lastName} has been onboarded. ${allMessages.join(" ")}`
-      : `${employeeForm.firstName} ${employeeForm.lastName} has been successfully added to the system`;
-    
-    toast({
-      title: "Employee Onboarded",
-      description,
-    });
     
     setEmployeeForm({
       firstName: "",
