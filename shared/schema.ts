@@ -47,6 +47,25 @@ export const activityLogs = pgTable("activity_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const queueItems = pgTable("queue_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workflowType: text("workflow_type").notNull(), // onboarding, offboarding, vehicle_assignment, decommission
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  status: text("status").notNull().default("pending"), // pending, in_progress, completed, failed, cancelled
+  priority: text("priority").notNull().default("medium"), // low, medium, high, critical
+  assignedTo: varchar("assigned_to"), // user ID of person assigned to work this item
+  requesterId: varchar("requester_id").notNull(), // user ID who created this queue item
+  data: text("data"), // JSON payload with workflow-specific data
+  metadata: text("metadata"), // Additional metadata for automation hooks
+  scheduledFor: timestamp("scheduled_for"), // For delayed processing
+  attempts: integer("attempts").notNull().default(0), // For retry logic
+  lastError: text("last_error"), // Error message from last failed attempt
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const vehicles = pgTable("vehicles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vin: varchar("vin", { length: 17 }).notNull().unique(),
@@ -108,6 +127,12 @@ export const insertVehicleSchema = createInsertSchema(vehicles).omit({
   updatedAt: true,
 });
 
+export const insertQueueItemSchema = createInsertSchema(queueItems).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -119,3 +144,5 @@ export type ActivityLog = typeof activityLogs.$inferSelect;
 export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
 export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = z.infer<typeof insertVehicleSchema>;
+export type QueueItem = typeof queueItems.$inferSelect;
+export type InsertQueueItem = z.infer<typeof insertQueueItemSchema>;
