@@ -3,7 +3,7 @@ import { RoleSelector } from "@/components/role-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { Button } from "@/components/ui/button";
-import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight } from "lucide-react";
+import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
@@ -16,6 +16,7 @@ export function Sidebar() {
   const navigation = [
     { name: "Home", href: "/", icon: Home },
     { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
+    { name: "Queue Management", href: "/queue", icon: Clock },
     { name: "Requests", href: "/requests", icon: FileText },
     { name: "Approvals", href: "/approvals", icon: CheckCircle },
     { name: "API Management", href: "/api-management", icon: Settings },

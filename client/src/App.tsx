@@ -20,6 +20,7 @@ import RequesterInterface from "@/pages/requester";
 import ApproverInterface from "@/pages/approver";
 import RequestsPage from "@/pages/requests";
 import ApiManagement from "@/pages/api-management";
+import QueueManagement from "@/pages/queue-management";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 
@@ -156,6 +157,12 @@ function Router() {
           <MainContent>
             <OffboardVehicleLocation />
           </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/queue">
+        <ProtectedRoute>
+          <QueueManagement />
         </ProtectedRoute>
       </Route>
 
