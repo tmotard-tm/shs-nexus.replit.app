@@ -28,8 +28,6 @@ export default function OnboardHire() {
     startDate: "",
     manager: "",
     employeeId: "",
-    emergencyContact: "",
-    emergencyPhone: "",
     region: "",
     district: "",
     requisitionId: "",
@@ -218,8 +216,6 @@ export default function OnboardHire() {
       startDate: "",
       manager: "",
       employeeId: "",
-      emergencyContact: "",
-      emergencyPhone: "",
       region: "",
       district: "",
       requisitionId: "",
@@ -521,28 +517,6 @@ export default function OnboardHire() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="emergencyContact">Emergency Contact</Label>
-                        <Input
-                          id="emergencyContact"
-                          value={employeeForm.emergencyContact}
-                          onChange={(e) => setEmployeeForm(prev => ({ ...prev, emergencyContact: e.target.value }))}
-                          placeholder="Jane Doe"
-                          data-testid="input-emergency-contact"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="emergencyPhone">Emergency Phone</Label>
-                        <Input
-                          id="emergencyPhone"
-                          value={employeeForm.emergencyPhone}
-                          onChange={(e) => setEmployeeForm(prev => ({ ...prev, emergencyPhone: e.target.value }))}
-                          placeholder="(555) 987-6543"
-                          data-testid="input-emergency-phone"
-                        />
-                      </div>
-                    </div>
 
                     {/* Automatic Supply Orders */}
                     <div className="border-t pt-6">
