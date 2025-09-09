@@ -565,6 +565,9 @@ export default function OnboardHire() {
                             NTAO Order for Parts Stock (Auto-triggered)
                           </Label>
                         </div>
+                        <p className="text-xs text-green-700 dark:text-green-300 mt-2 italic">
+                          *Triggered automatically when employee profile is created
+                        </p>
                       </div>
                     </div>
 
@@ -595,14 +598,33 @@ export default function OnboardHire() {
                             <p className="text-xs text-green-700 dark:text-green-300">
                               System will automatically find and assign the closest unassigned vehicle
                             </p>
+                            <p className="text-xs text-green-700 dark:text-green-300 mt-1 italic">
+                              *Assignment occurs when employee profile is created
+                            </p>
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    <Button type="submit" className="w-full" data-testid="button-submit-employee">
-                      Create Employee Profile
-                    </Button>
+                    <div className="border-t pt-6">
+                      <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                        <div className="flex items-start gap-2">
+                          <CheckCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                          <div className="text-sm">
+                            <p className="font-medium text-blue-800 dark:text-blue-200">Upon Profile Creation</p>
+                            <p className="text-blue-700 dark:text-blue-300">The following processes will be automatically triggered when you click "Create Employee Profile":</p>
+                            <ul className="mt-2 text-blue-600 dark:text-blue-400 list-disc list-inside text-xs space-y-1">
+                              <li>Assets & Supplies Order for Day 1 Supplies</li>
+                              <li>NTAO Order for Parts Stock</li>
+                              <li>Vehicle Assignment (closest available to work location)</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                      <Button type="submit" className="w-full" data-testid="button-submit-employee">
+                        Create Employee Profile & Trigger Automation
+                      </Button>
+                    </div>
                   </form>
                 </CardContent>
               </Card>
