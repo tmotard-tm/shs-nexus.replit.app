@@ -4,6 +4,8 @@ import { activeVehicles, FleetVehicle } from '@/data/fleetData';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { HawaiiMap } from './hawaii-map';
 import { PuertoRicoMap } from './puerto-rico-map';
 import { expandedCityCoordinates } from '@/data/expanded-city-coordinates';
@@ -16,6 +18,7 @@ interface MapFilters {
   branding: string;
   region: string;
   status: string;
+  zipCode: string;
 }
 
 // Vehicle status colors matching Tableau dashboard
@@ -41,7 +44,8 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
   const [filters, setFilters] = useState<MapFilters>({
     branding: 'all',
     region: 'all',
-    status: 'all'
+    status: 'all',
+    zipCode: ''
   });
   
   // Get unique filter options
@@ -74,6 +78,7 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
     if (filters.branding !== 'all' && vehicle.branding !== filters.branding) return false;
     if (filters.region !== 'all' && vehicle.region !== filters.region) return false;
     if (filters.status !== 'all' && vehicle.branding !== filters.status) return false;
+    if (filters.zipCode && !vehicle.zip.includes(filters.zipCode)) return false;
     return true;
   });
 
@@ -236,6 +241,27 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          
+          {/* Zip Code Filter */}
+          <div className="space-y-2">
+            <Label className="text-xs font-medium">Zip Code</Label>
+            <Input
+              className="h-8"
+              placeholder="Enter zip code..."
+              value={filters.zipCode}
+              onChange={(e) => setFilters(prev => ({ ...prev, zipCode: e.target.value }))}
+            />
+            {filters.zipCode && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full h-6 text-xs"
+                onClick={() => setFilters(prev => ({ ...prev, zipCode: '' }))}
+              >
+                Clear Zip Code
+              </Button>
+            )}
           </div>
           
           {/* Fleet Summary */}
