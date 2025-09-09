@@ -13,9 +13,9 @@ interface FilteredMapProps {
 }
 
 interface MapFilters {
-  status: string;
   branding: string;
   region: string;
+  status: string;
 }
 
 // Vehicle status colors matching Tableau dashboard
@@ -39,19 +39,30 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
   
   // Filter state
   const [filters, setFilters] = useState<MapFilters>({
-    status: 'all',
     branding: 'all',
-    region: 'all'
+    region: 'all',
+    status: 'all'
   });
   
   // Get unique filter options
   const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding).filter(Boolean))).sort();
   const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region).filter(Boolean))).sort();
   
+  // Status options matching your Tableau dashboard
+  const statusOptions = [
+    { value: 'AE Factory Service', label: 'Assigned to Tech', color: '#3B82F6' },
+    { value: 'Sears', label: 'Assigned to Tech', color: '#3B82F6' },
+    { value: 'Kenmore', label: 'In Use', color: '#10B981' },
+    { value: 'DieHard', label: 'Declined Repair', color: '#F59E0B' },
+    { value: 'Craftsman', label: 'In Repair', color: '#EF4444' },
+    { value: 'PartsDirect', label: 'Spare', color: '#8B5CF6' }
+  ];
+  
   // Filter vehicles based on current filters
   const filteredVehicles = activeVehicles.filter(vehicle => {
     if (filters.branding !== 'all' && vehicle.branding !== filters.branding) return false;
     if (filters.region !== 'all' && vehicle.region !== filters.region) return false;
+    if (filters.status !== 'all' && vehicle.branding !== filters.status) return false;
     return true;
   });
 
@@ -160,6 +171,30 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
           <CardTitle className="text-sm">Filter Options</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Status Filter */}
+          <div className="space-y-2">
+            <Label className="text-xs font-medium">Truck Status</Label>
+            <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
+              <SelectTrigger className="h-8">
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                {statusOptions.map(status => (
+                  <SelectItem key={status.value} value={status.value}>
+                    <div className="flex items-center gap-2">
+                      <div 
+                        className="w-3 h-3 rounded-full" 
+                        style={{ backgroundColor: status.color }}
+                      ></div>
+                      {status.label}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          
           {/* Branding Filter */}
           <div className="space-y-2">
             <Label className="text-xs font-medium">Branding</Label>
