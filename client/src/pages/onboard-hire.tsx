@@ -35,7 +35,9 @@ export default function OnboardHire() {
     techId: "",
     proposedRouteStartDate: "",
 
-    specialties: [] as string[]
+    primarySpecialty: "",
+    secondarySpecialty: "",
+    tertiarySpecialty: ""
   });
 
   const [onboardingTasks, setOnboardingTasks] = useState([
@@ -128,6 +130,28 @@ export default function OnboardHire() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Validate required specialty fields
+    if (!employeeForm.primarySpecialty || !employeeForm.secondarySpecialty || !employeeForm.tertiarySpecialty) {
+      toast({
+        title: "Validation Error",
+        description: "All three specialties (Primary, Secondary, and Tertiary) are required.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check for duplicate specialties
+    const specialties = [employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty];
+    const uniqueSpecialties = new Set(specialties);
+    if (uniqueSpecialties.size !== specialties.length) {
+      toast({
+        title: "Validation Error", 
+        description: "Each specialty must be different. Please select three different specialties.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     const orderMessages = [];
     const requestsCreated = [];
     
@@ -136,7 +160,7 @@ export default function OnboardHire() {
       if (supplyOrders.assetsSupplies) {
         const assetsRequest = await apiRequest("POST", "/api/requests", {
           title: `Day 1 Assets & Supplies for ${employeeForm.firstName} ${employeeForm.lastName}`,
-          description: `Request for Day 1 supplies and assets for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${employeeForm.specialties.join(', ') || 'None specified'}. Enterprise ID: ${employeeForm.enterpriseId}`,
+          description: `Request for Day 1 supplies and assets for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).join(', ') || 'None specified'}. Enterprise ID: ${employeeForm.enterpriseId}`,
           type: "system_config",
           priority: "high",
           targetApi: "Assets & Supplies Team",
@@ -150,7 +174,7 @@ export default function OnboardHire() {
       if (supplyOrders.ntaoPartsStock) {
         const ntaoRequest = await apiRequest("POST", "/api/requests", {
           title: `NTAO Parts Stock Request for ${employeeForm.firstName} ${employeeForm.lastName}`,
-          description: `Request for parts stock allocation for new technician ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Work location: ${vehicleAssignment.workZipcode || 'TBD'}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${employeeForm.specialties.join(', ') || 'None specified'}. Tech ID: ${employeeForm.techId || 'TBD'}. Enterprise ID: ${employeeForm.enterpriseId}`,
+          description: `Request for parts stock allocation for new technician ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Work location: ${vehicleAssignment.workZipcode || 'TBD'}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).join(', ') || 'None specified'}. Tech ID: ${employeeForm.techId || 'TBD'}. Enterprise ID: ${employeeForm.enterpriseId}`,
           type: "system_config",
           priority: "medium",
           targetApi: "NTAO Parts Team",
@@ -223,7 +247,9 @@ export default function OnboardHire() {
       techId: "",
       proposedRouteStartDate: "",
   
-      specialties: [] as string[]
+      primarySpecialty: "",
+      secondarySpecialty: "",
+      tertiarySpecialty: ""
     });
 
     setOnboardingTasks(tasks => tasks.map(task => ({ ...task, completed: false })));
@@ -468,53 +494,78 @@ export default function OnboardHire() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-4 mb-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        {/* Primary Specialty */}
                         <div className="space-y-2">
-                          <Label htmlFor="specialties">Specialties *</Label>
-                          <div className="space-y-3">
-                            {specialtyOptions.map(specialty => (
-                              <div key={specialty} className="flex items-center space-x-3">
-                                <Checkbox 
-                                  id={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
-                                  checked={employeeForm.specialties.includes(specialty)}
-                                  onCheckedChange={(checked) => {
-                                    if (checked) {
-                                      setEmployeeForm(prev => ({ 
-                                        ...prev, 
-                                        specialties: [...prev.specialties, specialty]
-                                      }));
-                                    } else {
-                                      setEmployeeForm(prev => ({ 
-                                        ...prev, 
-                                        specialties: prev.specialties.filter(s => s !== specialty)
-                                      }));
-                                    }
-                                  }}
-                                  data-testid={`checkbox-specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
-                                />
-                                <Label 
-                                  htmlFor={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
-                                  className="text-sm font-normal cursor-pointer"
-                                >
-                                  {specialty}
-                                </Label>
-                              </div>
-                            ))}
-                          </div>
-                          {employeeForm.specialties.length > 0 && (
-                            <div className="mt-2 p-3 bg-muted rounded-lg">
-                              <p className="text-sm font-medium mb-2">Selected Specialties:</p>
-                              <div className="flex flex-wrap gap-1">
-                                {employeeForm.specialties.map(specialty => (
-                                  <span key={specialty} className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
-                                    {specialty}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                          <Label htmlFor="primarySpecialty">Primary Specialty *</Label>
+                          <Select 
+                            value={employeeForm.primarySpecialty} 
+                            onValueChange={(value) => setEmployeeForm(prev => ({ ...prev, primarySpecialty: value }))}
+                          >
+                            <SelectTrigger data-testid="select-primary-specialty">
+                              <SelectValue placeholder="Select specialty" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {specialtyOptions.map(specialty => (
+                                <SelectItem key={specialty} value={specialty}>{specialty}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Secondary Specialty */}
+                        <div className="space-y-2">
+                          <Label htmlFor="secondarySpecialty">Secondary Specialty *</Label>
+                          <Select 
+                            value={employeeForm.secondarySpecialty} 
+                            onValueChange={(value) => setEmployeeForm(prev => ({ ...prev, secondarySpecialty: value }))}
+                          >
+                            <SelectTrigger data-testid="select-secondary-specialty">
+                              <SelectValue placeholder="Select specialty" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {specialtyOptions.filter(option => option !== employeeForm.primarySpecialty).map(specialty => (
+                                <SelectItem key={specialty} value={specialty}>{specialty}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Tertiary Specialty */}
+                        <div className="space-y-2">
+                          <Label htmlFor="tertiarySpecialty">Tertiary Specialty *</Label>
+                          <Select 
+                            value={employeeForm.tertiarySpecialty} 
+                            onValueChange={(value) => setEmployeeForm(prev => ({ ...prev, tertiarySpecialty: value }))}
+                          >
+                            <SelectTrigger data-testid="select-tertiary-specialty">
+                              <SelectValue placeholder="Select specialty" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {specialtyOptions.filter(option => 
+                                option !== employeeForm.primarySpecialty && 
+                                option !== employeeForm.secondarySpecialty
+                              ).map(specialty => (
+                                <SelectItem key={specialty} value={specialty}>{specialty}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
+
+                      {/* Selected Specialties Display */}
+                      {(employeeForm.primarySpecialty || employeeForm.secondarySpecialty || employeeForm.tertiarySpecialty) && (
+                        <div className="mb-4 p-3 bg-muted rounded-lg">
+                          <p className="text-sm font-medium mb-2">Selected Specialties:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).map((specialty, index) => (
+                              <span key={specialty} className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
+                                {index === 0 ? 'Primary' : index === 1 ? 'Secondary' : 'Tertiary'}: {specialty}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
 
