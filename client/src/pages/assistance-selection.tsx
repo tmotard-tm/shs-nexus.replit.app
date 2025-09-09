@@ -248,14 +248,42 @@ export default function AssistanceSelection() {
         {/* Vehicle Map Dialog */}
         {/* Fleet Map Dialog */}
         <Dialog open={isMapOpen} onOpenChange={setIsMapOpen}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
+          <DialogContent className="max-w-6xl max-h-[90vh] overflow-auto">
             <DialogHeader>
-              <DialogTitle>TRUCK STATUS - Fleet Vehicle Map</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                <Map className="h-5 w-5" />
+                TRUCK STATUS - Fleet Vehicle Map
+              </DialogTitle>
               <DialogDescription>
-                Interactive fleet tracking with real-time status updates
+                Interactive fleet tracking with real-time status updates • {getActiveVehicleCount()} Active Vehicles
               </DialogDescription>
             </DialogHeader>
-            <SimpleMap isOpen={isMapOpen} />
+            <div className="space-y-4">
+              {/* Status Legend */}
+              <div className="flex flex-wrap gap-4 p-3 bg-muted/50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                  <span className="text-sm">Assigned to Tech</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                  <span className="text-sm">In Use</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-orange-500"></div>
+                  <span className="text-sm">Declined Repair</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                  <span className="text-sm">In Repair</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-purple-500"></div>
+                  <span className="text-sm">Spare</span>
+                </div>
+              </div>
+              <SimpleMap isOpen={isMapOpen} />
+            </div>
           </DialogContent>
         </Dialog>
       </main>
