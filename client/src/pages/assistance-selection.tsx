@@ -8,7 +8,7 @@ import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map } fr
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
-import { SimpleMap } from "@/components/vehicle-map-simple";
+import { FilteredMap } from "@/components/vehicle-map-filters";
 
 export default function AssistanceSelection() {
   const { user } = useAuth();
@@ -282,7 +282,7 @@ export default function AssistanceSelection() {
                   <span className="text-sm">Spare</span>
                 </div>
               </div>
-              <SimpleMap isOpen={isMapOpen} />
+              <FilteredMap isOpen={isMapOpen} />
             </div>
           </DialogContent>
         </Dialog>
