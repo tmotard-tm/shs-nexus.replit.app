@@ -186,7 +186,7 @@ export default function OffboardVehicleLocation() {
                             <p className="font-medium text-yellow-800 dark:text-yellow-200">Automatic Notifications</p>
                             <p className="text-yellow-700 dark:text-yellow-300">Upon submission, the following departments will be automatically notified:</p>
                             <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
-                              <li>NTAO (Network Technology and Operations)</li>
+                              <li>NTAO</li>
                               <li>Assets Management</li>
                               <li>Inventory Control</li>
                               <li>Fleet Management</li>
