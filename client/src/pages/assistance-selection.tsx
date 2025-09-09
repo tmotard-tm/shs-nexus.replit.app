@@ -105,57 +105,56 @@ export default function AssistanceSelection() {
             </p>
           </div>
 
-          <div className="flex gap-8">
-            {/* Left side stats */}
-            <div className="flex flex-col gap-4 w-32">
-              <Card 
-                className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-                onClick={() => setLocation("/active-vehicles")}
-                data-testid="card-active-vehicles"
-              >
-                <CardContent className="flex flex-col items-center text-center p-4">
-                  <Car className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                  <p className="text-lg font-bold text-black" data-testid="text-vehicles-count">{getActiveVehicleCount()}</p>
-                  <p className="text-sm text-black">Active Vehicles</p>
-                </CardContent>
-              </Card>
-              <Card 
-                className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-                onClick={() => setIsMapOpen(true)}
-                data-testid="card-vehicle-map"
-              >
-                <CardContent className="flex flex-col items-center text-center p-4">
-                  <Map className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                  <p className="text-lg font-bold text-black" data-testid="text-map-button">MAP</p>
-                  <p className="text-sm text-black">View on Map</p>
-                </CardContent>
-              </Card>
-              <Card 
-                className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-                onClick={() => setLocation("/active-vehicles?filter=assigned")}
-                data-testid="card-assigned-vehicles"
-              >
-                <CardContent className="flex flex-col items-center text-center p-4">
-                  <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                  <p className="text-lg font-bold text-black" data-testid="text-assigned-count">{getAvailableVehicles().length}</p>
-                  <p className="text-sm text-black">Assigned Vehicles</p>
-                </CardContent>
-              </Card>
-              <Card 
-                className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-                onClick={() => setLocation("/active-vehicles?filter=unassigned")}
-                data-testid="card-unassigned-vehicles"
-              >
-                <CardContent className="flex flex-col items-center text-center p-4">
-                  <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                  <p className="text-lg font-bold text-black" data-testid="text-unassigned-count">{getUnassignedVehicles().length}</p>
-                  <p className="text-sm text-black">Unassigned Vehicles</p>
-                </CardContent>
-              </Card>
-            </div>
+          {/* Top horizontal stats bar */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <Card 
+              className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
+              onClick={() => setLocation("/active-vehicles")}
+              data-testid="card-active-vehicles"
+            >
+              <CardContent className="flex flex-col items-center text-center p-4">
+                <Car className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                <p className="text-lg font-bold text-black" data-testid="text-vehicles-count">{getActiveVehicleCount()}</p>
+                <p className="text-sm text-black">Active Vehicles</p>
+              </CardContent>
+            </Card>
+            <Card 
+              className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
+              onClick={() => setIsMapOpen(true)}
+              data-testid="card-vehicle-map"
+            >
+              <CardContent className="flex flex-col items-center text-center p-4">
+                <Map className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                <p className="text-lg font-bold text-black" data-testid="text-map-button">MAP</p>
+                <p className="text-sm text-black">View on Map</p>
+              </CardContent>
+            </Card>
+            <Card 
+              className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
+              onClick={() => setLocation("/active-vehicles?filter=assigned")}
+              data-testid="card-assigned-vehicles"
+            >
+              <CardContent className="flex flex-col items-center text-center p-4">
+                <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                <p className="text-lg font-bold text-black" data-testid="text-assigned-count">{getAvailableVehicles().length}</p>
+                <p className="text-sm text-black">Assigned Vehicles</p>
+              </CardContent>
+            </Card>
+            <Card 
+              className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
+              onClick={() => setLocation("/active-vehicles?filter=unassigned")}
+              data-testid="card-unassigned-vehicles"
+            >
+              <CardContent className="flex flex-col items-center text-center p-4">
+                <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                <p className="text-lg font-bold text-black" data-testid="text-unassigned-count">{getUnassignedVehicles().length}</p>
+                <p className="text-sm text-black">Unassigned Vehicles</p>
+              </CardContent>
+            </Card>
+          </div>
 
-            {/* Right side main options */}
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {/* Main options grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {assistanceOptions.map((option) => {
               const Icon = option.icon;
               return (
@@ -193,10 +192,10 @@ export default function AssistanceSelection() {
               })}
             </div>
           </div>
-        </div>
-        
-        {/* Assign/Update Selection Dialog */}
-        <Dialog open={isAssignUpdateDialogOpen} onOpenChange={setIsAssignUpdateDialogOpen}>
+      </main>
+
+      {/* Assign/Update Selection Dialog */}
+      <Dialog open={isAssignUpdateDialogOpen} onOpenChange={setIsAssignUpdateDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Choose Action</DialogTitle>
@@ -243,11 +242,11 @@ export default function AssistanceSelection() {
               </Button>
             </div>
           </DialogContent>
-        </Dialog>
-        
-        {/* Vehicle Map Dialog */}
-        {/* Fleet Map Dialog */}
-        <Dialog open={isMapOpen} onOpenChange={setIsMapOpen}>
+      </Dialog>
+
+      {/* Vehicle Map Dialog */}
+      {/* Fleet Map Dialog */}
+      <Dialog open={isMapOpen} onOpenChange={setIsMapOpen}>
           <DialogContent className="max-w-6xl max-h-[90vh] overflow-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -285,8 +284,7 @@ export default function AssistanceSelection() {
               <FilteredMap isOpen={isMapOpen} />
             </div>
           </DialogContent>
-        </Dialog>
-      </main>
+      </Dialog>
     </MainContent>
   );
 }
