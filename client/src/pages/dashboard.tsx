@@ -13,7 +13,12 @@ import { useAuth } from "@/hooks/use-auth";
 export default function Dashboard() {
   const { user } = useAuth();
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats, isLoading: statsLoading } = useQuery<{
+    pendingRequests: number;
+    inProgressRequests: number;
+    completedRequests: number;
+    activeUsers: number;
+  }>({
     queryKey: ["/api/dashboard/stats"],
   });
 
@@ -21,7 +26,7 @@ export default function Dashboard() {
     queryKey: ["/api/requests"],
   });
 
-  const { data: apiConfigurations } = useQuery({
+  const { data: apiConfigurations } = useQuery<Array<{ isActive: boolean }>>({
     queryKey: ["/api/configurations"],
   });
 
@@ -80,22 +85,22 @@ export default function Dashboard() {
             testId="stats-pending"
           />
           <StatsCard
-            title="Approved Today"
-            value={statsLoading ? "..." : stats?.approvedToday || 0}
-            icon="fas fa-check"
+            title="In Progress Requests"
+            value={statsLoading ? "..." : stats?.inProgressRequests || 0}
+            icon="fas fa-spinner"
             color="2"
-            change="+8%"
-            changeLabel="from yesterday"
-            testId="stats-approved"
+            change="Active"
+            changeLabel="being processed"
+            testId="stats-in-progress"
           />
           <StatsCard
-            title="API Connections"
-            value={statsLoading ? "..." : stats?.activeConnections || 0}
-            icon="fas fa-plug"
+            title="Completed Requests"
+            value={statsLoading ? "..." : stats?.completedRequests || 0}
+            icon="fas fa-check"
             color="3"
-            change="Active"
-            changeLabel="all healthy"
-            testId="stats-connections"
+            change="+8%"
+            changeLabel="this week"
+            testId="stats-completed"
           />
           <StatsCard
             title="Active Users"
