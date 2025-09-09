@@ -16,15 +16,9 @@ const statusColors = {
   'default': '#6B7280'
 };
 
-const puertoRicoCoordinates: Record<string, [number, number]> = {
-  'SAN JUAN': [18.4655, -66.1057],
-  'BAYAMON': [18.3833, -66.1500],
-  'CAROLINA': [18.3833, -65.9500],
-  'PONCE': [18.0111, -66.6141],
-  'CAGUAS': [18.2342, -66.0356],
-  'ARECIBO': [18.4667, -66.7167],
-  'MAYAGUEZ': [18.2011, -67.1397]
-};
+import { expandedCityCoordinates } from '@/data/expanded-city-coordinates';
+
+const puertoRicoCoordinates = expandedCityCoordinates;
 
 export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);

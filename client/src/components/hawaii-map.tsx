@@ -16,13 +16,9 @@ const statusColors = {
   'default': '#6B7280'
 };
 
-const hawaiiCoordinates: Record<string, [number, number]> = {
-  'HONOLULU': [21.3099, -157.8581],
-  'HILO': [19.7297, -155.0900],
-  'KAILUA': [21.4022, -157.7394],
-  'PEARL CITY': [21.3972, -157.9731],
-  'WAIPAHU': [21.3867, -158.0094]
-};
+import { expandedCityCoordinates } from '@/data/expanded-city-coordinates';
+
+const hawaiiCoordinates = expandedCityCoordinates;
 
 export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
