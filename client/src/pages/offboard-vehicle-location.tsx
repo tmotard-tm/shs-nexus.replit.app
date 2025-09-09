@@ -51,6 +51,8 @@ export default function OffboardVehicleLocation() {
   ];
 
   const offboardReasons = [
+    "Involuntary Termination",
+    "Voluntary Termination",
     "End of lease",
     "Vehicle sold",
     "Damaged beyond repair",
@@ -251,7 +253,7 @@ export default function OffboardVehicleLocation() {
                                 <SelectValue placeholder="Select reason" />
                               </SelectTrigger>
                               <SelectContent>
-                                {offboardReasons.slice(0, 4).map(reason => (
+                                {offboardReasons.map(reason => (
                                   <SelectItem key={reason} value={reason} data-testid={`option-${reason.toLowerCase().replace(/\s+/g, '-')}`}>
                                     {reason}
                                   </SelectItem>
