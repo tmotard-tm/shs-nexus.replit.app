@@ -59,9 +59,9 @@ export default function QueueManagement() {
     queryFn: async () => {
       // Since we don't have a users endpoint yet, we'll use mock data
       return [
-        { id: "1", username: "ENT1234", email: "requester@sears.com", role: "requester" },
-        { id: "2", username: "ENT1235", email: "approver@sears.com", role: "approver" },
-        { id: "3", username: "ADMIN123", email: "admin@sears.com", role: "admin" },
+        { id: "1", username: "ENT1234", email: "requester@sears.com", password: "", role: "requester", createdAt: new Date() },
+        { id: "2", username: "ENT1235", email: "approver@sears.com", password: "", role: "approver", createdAt: new Date() },
+        { id: "3", username: "ADMIN123", email: "admin@sears.com", password: "", role: "admin", createdAt: new Date() },
       ];
     },
   });

@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
+import { apiRequest } from "@/lib/queryClient";
 import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
@@ -16,6 +18,7 @@ import { getAvailableVehicles, getBrandingOptions, getInteriorOptions, getTuneSt
 
 export default function AssignVehicleLocation() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [vehicleAssignment, setVehicleAssignment] = useState({
     employeeId: "",
     vehicleId: "",
@@ -137,7 +140,7 @@ export default function AssignVehicleLocation() {
   }
 
 
-  const handleVehicleAssignment = (e: React.FormEvent) => {
+  const handleVehicleAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
     const employee = employees.find(emp => emp.id === vehicleAssignment.employeeId);
     const vehicle = unassignedVehicles.find(veh => veh.vin === vehicleAssignment.vehicleId);
@@ -163,6 +166,39 @@ export default function AssignVehicleLocation() {
       ? `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) assigned to ${employee.name}. ${orderMessages.join(". ")}.`
       : `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) has been assigned to ${employee.name}`;
     
+    // Create queue item for vehicle assignment
+    try {
+      await apiRequest("POST", "/api/queue", {
+        workflowType: "vehicle_assignment",
+        title: `Assign Vehicle to ${employee.name}`,
+        description: `Assign ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) to ${employee.name}. ${orderMessages.length > 0 ? `Orders: ${orderMessages.join(", ")}.` : ""}`,
+        priority: "medium",
+        requesterId: user?.id || "system",
+        data: JSON.stringify({
+          employee: {
+            id: employee.id,
+            name: employee.name,
+            enterpriseId: employee.enterpriseId,
+            specialties: employee.specialties
+          },
+          vehicle: {
+            id: vehicle.id,
+            vin: vehicle.vin,
+            year: vehicle.modelYear,
+            make: vehicle.makeName,
+            model: vehicle.modelName,
+            licensePlate: vehicle.licensePlate,
+            location: `${vehicle.city}, ${vehicle.state}`
+          },
+          supplyOrders,
+          orderMessages,
+          assignmentDate: new Date().toISOString()
+        })
+      });
+    } catch (queueError) {
+      console.error('Error creating queue item:', queueError);
+    }
+
     toast({
       title: "Vehicle Assigned",
       description,

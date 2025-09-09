@@ -215,6 +215,26 @@ export default function OnboardHire() {
       if (allMessages.length > 0) {
         description += ` ${allMessages.join(" ")}`;
       }
+
+      // Create queue item for onboarding process
+      try {
+        await apiRequest("POST", "/api/queue", {
+          workflowType: "onboarding",
+          title: `Onboard New Employee - ${employeeForm.firstName} ${employeeForm.lastName}`,
+          description: `Complete onboarding process for ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). ${requestsCreated.length > 0 ? `Requests created: ${requestsCreated.join(", ")}.` : ""}`,
+          priority: "high",
+          requesterId: user?.id || "system",
+          data: JSON.stringify({
+            employee: employeeForm,
+            vehicleAssignment,
+            supplyOrders,
+            requestsCreated,
+            onboardingDate: new Date().toISOString()
+          })
+        });
+      } catch (queueError) {
+        console.error('Error creating queue item:', queueError);
+      }
       
       toast({
         title: "Employee Onboarded",

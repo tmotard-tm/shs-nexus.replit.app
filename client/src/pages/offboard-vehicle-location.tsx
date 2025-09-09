@@ -9,11 +9,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
+import { apiRequest } from "@/lib/queryClient";
 import { Car, MapPin, AlertTriangle, Trash2, Archive } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 
 export default function OffboardVehicleLocation() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [vehicleOffboard, setVehicleOffboard] = useState({
     vehicleId: "",
     techRacfId: "",
@@ -69,7 +72,7 @@ export default function OffboardVehicleLocation() {
     "Other"
   ];
 
-  const handleVehicleOffboard = (e: React.FormEvent) => {
+  const handleVehicleOffboard = async (e: React.FormEvent) => {
     e.preventDefault();
     const vehicle = vehicles.find(veh => veh.id === vehicleOffboard.vehicleId);
     
@@ -87,6 +90,33 @@ export default function OffboardVehicleLocation() {
       timestamp: new Date().toISOString()
     });
     
+    // Create queue item for offboarding process
+    try {
+      await apiRequest("POST", "/api/queue", {
+        workflowType: "offboarding",
+        title: `Offboard Employee - ${vehicleOffboard.techName}`,
+        description: `Process offboarding for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}`,
+        priority: "high",
+        requesterId: user?.id || "system",
+        data: JSON.stringify({
+          technician: {
+            name: vehicleOffboard.techName,
+            racfId: vehicleOffboard.techRacfId,
+            lastDayWorked: vehicleOffboard.lastDayWorked,
+            reason: vehicleOffboard.reason
+          },
+          vehicle: {
+            number: vehicleOffboard.vehicleNumber,
+            name: vehicle?.name || vehicleOffboard.vehicleNumber
+          },
+          departments: notificationDepartments,
+          offboardingDate: new Date().toISOString()
+        })
+      });
+    } catch (queueError) {
+      console.error('Error creating queue item:', queueError);
+    }
+
     toast({
       title: "Vehicle Offboarded Successfully",
       description: `${vehicle?.name} removed from fleet. Notifications sent to: ${notificationDepartments.join(', ')}`,
