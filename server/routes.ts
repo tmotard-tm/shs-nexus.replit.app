@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema } from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -234,6 +234,127 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to test API connection" });
+    }
+  });
+
+  // Queue Item routes
+  app.get("/api/queue", async (req, res) => {
+    try {
+      const { status, workflowType, assignedTo, userId } = req.query;
+      
+      let queueItems;
+      if (status) {
+        queueItems = await storage.getQueueItemsByStatus(status as string);
+      } else if (workflowType) {
+        queueItems = await storage.getQueueItemsByWorkflowType(workflowType as string);
+      } else if (assignedTo) {
+        queueItems = await storage.getQueueItemsByAssignee(assignedTo as string);
+      } else if (userId) {
+        queueItems = await storage.getMyQueueItems(userId as string);
+      } else {
+        queueItems = await storage.getQueueItems();
+      }
+      
+      res.json(queueItems);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch queue items" });
+    }
+  });
+
+  app.get("/api/queue/:id", async (req, res) => {
+    try {
+      const queueItem = await storage.getQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch queue item" });
+    }
+  });
+
+  app.post("/api/queue", async (req, res) => {
+    try {
+      const queueItemData = insertQueueItemSchema.parse(req.body);
+      const queueItem = await storage.createQueueItem(queueItemData);
+      res.status(201).json(queueItem);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create queue item" });
+    }
+  });
+
+  app.patch("/api/queue/:id", async (req, res) => {
+    try {
+      const updates = req.body;
+      const queueItem = await storage.updateQueueItem(req.params.id, updates);
+      
+      if (!queueItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update queue item" });
+    }
+  });
+
+  app.patch("/api/queue/:id/assign", async (req, res) => {
+    try {
+      const { assigneeId } = req.body;
+      if (!assigneeId) {
+        return res.status(400).json({ message: "Assignee ID is required" });
+      }
+
+      const queueItem = await storage.assignQueueItem(req.params.id, assigneeId);
+      
+      if (!queueItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to assign queue item" });
+    }
+  });
+
+  app.patch("/api/queue/:id/complete", async (req, res) => {
+    try {
+      const { completedBy } = req.body;
+      if (!completedBy) {
+        return res.status(400).json({ message: "Completed by user ID is required" });
+      }
+
+      const queueItem = await storage.completeQueueItem(req.params.id, completedBy);
+      
+      if (!queueItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to complete queue item" });
+    }
+  });
+
+  app.patch("/api/queue/:id/cancel", async (req, res) => {
+    try {
+      const { reason } = req.body;
+      if (!reason) {
+        return res.status(400).json({ message: "Cancellation reason is required" });
+      }
+
+      const queueItem = await storage.cancelQueueItem(req.params.id, reason);
+      
+      if (!queueItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to cancel queue item" });
     }
   });
 
