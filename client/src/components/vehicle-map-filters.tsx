@@ -48,15 +48,26 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
   const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding).filter(Boolean))).sort();
   const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region).filter(Boolean))).sort();
   
-  // Status options matching your Tableau dashboard
-  const statusOptions = [
-    { value: 'AE Factory Service', label: 'Assigned to Tech', color: '#3B82F6' },
-    { value: 'Sears', label: 'Assigned to Tech', color: '#3B82F6' },
-    { value: 'Kenmore', label: 'In Use', color: '#10B981' },
-    { value: 'DieHard', label: 'Declined Repair', color: '#F59E0B' },
-    { value: 'Craftsman', label: 'In Repair', color: '#EF4444' },
-    { value: 'PartsDirect', label: 'Spare', color: '#8B5CF6' }
-  ];
+  // Get actual status options from real branding data
+  const actualBrandingValues = Array.from(new Set(activeVehicles.map(v => v.branding).filter(Boolean))).sort();
+  const statusOptions = actualBrandingValues.map(branding => {
+    switch(branding) {
+      case 'AE Factory Service':
+        return { value: branding, label: 'Assigned to Tech', color: '#3B82F6' };
+      case 'Sears':
+        return { value: branding, label: 'Assigned to Tech', color: '#3B82F6' };
+      case 'Kenmore':
+        return { value: branding, label: 'In Use', color: '#10B981' };
+      case 'DieHard':
+        return { value: branding, label: 'Declined Repair', color: '#F59E0B' };
+      case 'Craftsman':
+        return { value: branding, label: 'In Repair', color: '#EF4444' };
+      case 'PartsDirect':
+        return { value: branding, label: 'Spare', color: '#8B5CF6' };
+      default:
+        return { value: branding, label: branding, color: '#6B7280' };
+    }
+  });
   
   // Filter vehicles based on current filters
   const filteredVehicles = activeVehicles.filter(vehicle => {

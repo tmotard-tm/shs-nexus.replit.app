@@ -29,6 +29,51 @@ export interface FleetVehicle {
 
 // All active vehicles from CSV (vehicles without sale date)
 export const activeVehicles: FleetVehicle[] = [
+  // Demo vehicles with different statuses
+  {
+    vin: "DEMO00000000001",
+    vehicleNumber: "DEMO01",
+    deliveryDate: "1/1/2024", outOfServiceDate: "", saleDate: "",
+    modelYear: 2024, makeName: "FORD", modelName: "TRANSIT",
+    licenseState: "CA", licensePlate: "DEMO001", regRenewalDate: "12/31/2025",
+    color: "White", branding: "Kenmore", interior: "Gray", tuneStatus: "Active",
+    region: "West Coast", district: "Los Angeles", odometerDelivery: 5000,
+    deliveryAddress: "123 Demo St", city: "LOS ANGELES", state: "CA", zip: "90210",
+    mis: "DEMO", remainingBookValue: 45000, leaseEndDate: "12/31/2027"
+  },
+  {
+    vin: "DEMO00000000002",
+    vehicleNumber: "DEMO02", 
+    deliveryDate: "1/1/2024", outOfServiceDate: "", saleDate: "",
+    modelYear: 2024, makeName: "CHEVROLET", modelName: "EXPRESS",
+    licenseState: "TX", licensePlate: "DEMO002", regRenewalDate: "12/31/2025",
+    color: "Blue", branding: "Craftsman", interior: "Black", tuneStatus: "Repair",
+    region: "Southwest", district: "Dallas", odometerDelivery: 8000,
+    deliveryAddress: "456 Demo Ave", city: "DALLAS", state: "TX", zip: "75201",
+    mis: "DEMO", remainingBookValue: 42000, leaseEndDate: "12/31/2027"
+  },
+  {
+    vin: "DEMO00000000003",
+    vehicleNumber: "DEMO03",
+    deliveryDate: "1/1/2024", outOfServiceDate: "", saleDate: "", 
+    modelYear: 2024, makeName: "RAM", modelName: "PROMASTER",
+    licenseState: "FL", licensePlate: "DEMO003", regRenewalDate: "12/31/2025",
+    color: "Orange", branding: "DieHard", interior: "Gray", tuneStatus: "Declined",
+    region: "Southeast", district: "Miami", odometerDelivery: 12000,
+    deliveryAddress: "789 Demo Blvd", city: "MIAMI", state: "FL", zip: "33101",
+    mis: "DEMO", remainingBookValue: 40000, leaseEndDate: "12/31/2027"
+  },
+  {
+    vin: "DEMO00000000004",
+    vehicleNumber: "DEMO04",
+    deliveryDate: "1/1/2024", outOfServiceDate: "", saleDate: "",
+    modelYear: 2024, makeName: "MERCEDES", modelName: "SPRINTER",
+    licenseState: "NY", licensePlate: "DEMO004", regRenewalDate: "12/31/2025",
+    color: "Purple", branding: "PartsDirect", interior: "Black", tuneStatus: "Spare",
+    region: "Northeast", district: "New York", odometerDelivery: 2000,
+    deliveryAddress: "321 Demo Dr", city: "NEW YORK", state: "NY", zip: "10001",
+    mis: "DEMO", remainingBookValue: 48000, leaseEndDate: "12/31/2027"
+  },
   {
     vin: "1FTNE1EW5EDA44473",
     vehicleNumber: "46743",
