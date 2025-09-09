@@ -1,4 +1,15 @@
 @import 'leaflet/dist/leaflet.css';
+
+/* Ensure Leaflet containers have proper sizing */
+.leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 400px !important;
+}
+
+.leaflet-tile-pane {
+  filter: none !important;
+}
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

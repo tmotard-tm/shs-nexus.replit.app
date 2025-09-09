@@ -151,58 +151,61 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding).filter(b => b && b.trim()))).sort();
   const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region).filter(r => r && r.trim()))).sort();
 
-  // Initialize professional OpenStreetMap
+  // Initialize OpenStreetMap with simplified approach
   useEffect(() => {
     if (!mapRef.current || leafletMapRef.current || !open) return;
 
-    console.log('Initializing map...', { vehicleCount: filteredVehicles.length });
+    console.log('🗺️ Initializing map...', { 
+      mapRefExists: !!mapRef.current, 
+      leafletExists: !!leafletMapRef.current,
+      isOpen: open,
+      vehicleCount: filteredVehicles.length 
+    });
 
     const timer = setTimeout(() => {
-      if (!mapRef.current) return;
+      if (!mapRef.current) {
+        console.error('❌ Map ref is null');
+        return;
+      }
 
       try {
-        console.log('Creating Leaflet map...');
+        console.log('🚀 Creating Leaflet map...');
         
-        // Create map with professional dark-themed tiles
+        // Force clear the container first
+        mapRef.current.innerHTML = '';
+        
+        // Create basic map
         const map = L.map(mapRef.current, {
-          zoomControl: false,
-          attributionControl: true,
-          preferCanvas: true
-        }).setView([39.8, -98.5], 4);
+          center: [39.8, -98.5],
+          zoom: 4,
+          zoomControl: true,
+          attributionControl: true
+        });
 
-        console.log('Map created, adding tiles...');
+        console.log('✅ Map instance created');
         
-        // Add tile layer with error handling
-        const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // Add basic OpenStreetMap tiles
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '© OpenStreetMap contributors',
-          maxZoom: 19,
-          errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
-        });
+          maxZoom: 19
+        }).addTo(map);
         
-        tileLayer.on('tileerror', (e) => {
-          console.error('Tile loading error:', e);
-        });
-        
-        tileLayer.on('tileload', () => {
-          console.log('Tile loaded successfully');
-        });
-        
-        tileLayer.addTo(map);
-        console.log('Tiles added to map');
+        console.log('🗺️ Tiles added to map');
 
-
-        console.log('Tiles added, creating controls...');
-
-        // Add professional zoom control with custom styling
-        const zoomControl = L.control.zoom({ position: 'topleft' }).addTo(map);
 
         // Create markers layer
         const markersLayer = L.layerGroup().addTo(map);
+        
+        // Force map size invalidation
+        setTimeout(() => {
+          map.invalidateSize();
+          console.log('📐 Map size invalidated');
+        }, 100);
 
         leafletMapRef.current = map;
         markersRef.current = markersLayer;
 
-        console.log('Map initialization complete');
+        console.log('✅ Map initialization complete');
 
         // Add markers immediately after map is created
         console.log('Adding markers to map...', filteredVehicles.length);
@@ -499,14 +502,20 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
             {/* Leaflet Map */}
             <div 
               ref={mapRef} 
-              className="w-full h-full"
+              className="w-full h-full bg-gray-200 border-2 border-dashed border-gray-400"
               style={{ 
                 zIndex: 1,
                 minHeight: '600px',
                 width: '100%',
-                height: '100%'
+                height: '100%',
+                position: 'relative'
               }}
-            />
+            >
+              {/* Fallback content to show if map doesn't load */}
+              <div className="absolute inset-0 flex items-center justify-center text-gray-500">
+                Loading map...
+              </div>
+            </div>
           </div>
 
           {/* Filter Panel */}
