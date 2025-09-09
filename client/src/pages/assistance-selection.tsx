@@ -8,7 +8,7 @@ import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map } fr
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
-import { VehicleMap } from "@/components/vehicle-map";
+import { SimpleMap } from "@/components/vehicle-map-simple";
 
 export default function AssistanceSelection() {
   const { user } = useAuth();
@@ -238,7 +238,18 @@ export default function AssistanceSelection() {
         </Dialog>
         
         {/* Vehicle Map Dialog */}
-        <VehicleMap open={isMapOpen} onOpenChange={setIsMapOpen} />
+        {/* Temporary Simple Map for Testing */}
+        <Dialog open={isMapOpen} onOpenChange={setIsMapOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
+            <DialogHeader>
+              <DialogTitle>Fleet Vehicle Map (Test)</DialogTitle>
+              <DialogDescription>
+                Simple test map to verify Leaflet functionality
+              </DialogDescription>
+            </DialogHeader>
+            <SimpleMap isOpen={isMapOpen} />
+          </DialogContent>
+        </Dialog>
       </main>
     </MainContent>
   );

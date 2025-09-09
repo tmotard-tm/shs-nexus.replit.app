@@ -151,61 +151,31 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding).filter(b => b && b.trim()))).sort();
   const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region).filter(r => r && r.trim()))).sort();
 
-  // Initialize OpenStreetMap with simplified approach
+  // Initialize OpenStreetMap
   useEffect(() => {
-    if (!mapRef.current || leafletMapRef.current || !open) return;
-
-    console.log('🗺️ Initializing map...', { 
-      mapRefExists: !!mapRef.current, 
-      leafletExists: !!leafletMapRef.current,
-      isOpen: open,
-      vehicleCount: filteredVehicles.length 
-    });
+    if (!open || !mapRef.current || leafletMapRef.current) return;
 
     const timer = setTimeout(() => {
-      if (!mapRef.current) {
-        console.error('❌ Map ref is null');
-        return;
-      }
+      if (!mapRef.current) return;
 
       try {
         console.log('🚀 Creating Leaflet map...');
         
-        // Force clear the container first
-        mapRef.current.innerHTML = '';
-        
-        // Create basic map
         const map = L.map(mapRef.current, {
           center: [39.8, -98.5],
-          zoom: 4,
-          zoomControl: true,
-          attributionControl: true
+          zoom: 4
         });
 
-        console.log('✅ Map instance created');
-        
-        // Add basic OpenStreetMap tiles
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap contributors',
-          maxZoom: 19
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors'
         }).addTo(map);
         
-        console.log('🗺️ Tiles added to map');
-
-
-        // Create markers layer
         const markersLayer = L.layerGroup().addTo(map);
-        
-        // Force map size invalidation
-        setTimeout(() => {
-          map.invalidateSize();
-          console.log('📐 Map size invalidated');
-        }, 100);
 
         leafletMapRef.current = map;
         markersRef.current = markersLayer;
 
-        console.log('✅ Map initialization complete');
+        console.log('✅ Map initialized successfully');
 
         // Add markers immediately after map is created
         console.log('Adding markers to map...', filteredVehicles.length);
@@ -502,20 +472,13 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
             {/* Leaflet Map */}
             <div 
               ref={mapRef} 
-              className="w-full h-full bg-gray-200 border-2 border-dashed border-gray-400"
+              className="w-full h-full"
               style={{ 
-                zIndex: 1,
                 minHeight: '600px',
                 width: '100%',
-                height: '100%',
-                position: 'relative'
+                height: '100%'
               }}
-            >
-              {/* Fallback content to show if map doesn't load */}
-              <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-                Loading map...
-              </div>
-            </div>
+            />
           </div>
 
           {/* Filter Panel */}
