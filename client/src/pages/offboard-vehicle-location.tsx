@@ -16,6 +16,11 @@ export default function OffboardVehicleLocation() {
   const { toast } = useToast();
   const [vehicleOffboard, setVehicleOffboard] = useState({
     vehicleId: "",
+    techRacfId: "",
+    techName: "",
+    lastDayWorked: "",
+    vehicleNumber: "",
+    vehicleLocation: "",
     reason: "",
     effectiveDate: "",
     notes: "",
@@ -73,6 +78,11 @@ export default function OffboardVehicleLocation() {
     
     setVehicleOffboard({
       vehicleId: "",
+      techRacfId: "",
+      techName: "",
+      lastDayWorked: "",
+      vehicleNumber: "",
+      vehicleLocation: "",
       reason: "",
       effectiveDate: "",
       notes: "",
@@ -170,6 +180,63 @@ export default function OffboardVehicleLocation() {
                               ))}
                             </SelectContent>
                           </Select>
+                        </div>
+
+                        {/* Employee Information Section */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="techRacfId">Tech RacfId *</Label>
+                            <Input
+                              id="techRacfId"
+                              value={vehicleOffboard.techRacfId}
+                              onChange={(e) => setVehicleOffboard(prev => ({ ...prev, techRacfId: e.target.value }))}
+                              placeholder="Enter tech RacfId"
+                              data-testid="input-tech-racfid"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="techName">Tech Name *</Label>
+                            <Input
+                              id="techName"
+                              value={vehicleOffboard.techName}
+                              onChange={(e) => setVehicleOffboard(prev => ({ ...prev, techName: e.target.value }))}
+                              placeholder="Enter tech name"
+                              data-testid="input-tech-name"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="lastDayWorked">Last Day Worked *</Label>
+                            <Input
+                              id="lastDayWorked"
+                              type="date"
+                              value={vehicleOffboard.lastDayWorked}
+                              onChange={(e) => setVehicleOffboard(prev => ({ ...prev, lastDayWorked: e.target.value }))}
+                              data-testid="input-last-day-worked"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="vehicleNumber">Vehicle Number *</Label>
+                            <Input
+                              id="vehicleNumber"
+                              value={vehicleOffboard.vehicleNumber}
+                              onChange={(e) => setVehicleOffboard(prev => ({ ...prev, vehicleNumber: e.target.value }))}
+                              placeholder="Enter vehicle number"
+                              data-testid="input-vehicle-number"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="vehicleLocation">Vehicle Location *</Label>
+                            <Input
+                              id="vehicleLocation"
+                              value={vehicleOffboard.vehicleLocation}
+                              onChange={(e) => setVehicleOffboard(prev => ({ ...prev, vehicleLocation: e.target.value }))}
+                              placeholder="Enter current location"
+                              data-testid="input-vehicle-location"
+                            />
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
