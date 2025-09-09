@@ -50,6 +50,14 @@ export default function AssistanceSelection() {
       action: () => setLocation("/offboard-vehicle-location")
     },
     {
+      id: "truck-status",
+      title: "TRUCK STATUS",
+      description: "Interactive fleet tracking with real-time status updates",
+      icon: Map,
+      color: "chart-4",
+      action: () => setIsMapOpen(true)
+    },
+    {
       id: "other",
       title: "Other",
       description: "Access Additional Tools and Features",
@@ -238,13 +246,13 @@ export default function AssistanceSelection() {
         </Dialog>
         
         {/* Vehicle Map Dialog */}
-        {/* Temporary Simple Map for Testing */}
+        {/* Fleet Map Dialog */}
         <Dialog open={isMapOpen} onOpenChange={setIsMapOpen}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
             <DialogHeader>
-              <DialogTitle>Fleet Vehicle Map (Test)</DialogTitle>
+              <DialogTitle>TRUCK STATUS - Fleet Vehicle Map</DialogTitle>
               <DialogDescription>
-                Simple test map to verify Leaflet functionality
+                Interactive fleet tracking with real-time status updates
               </DialogDescription>
             </DialogHeader>
             <SimpleMap isOpen={isMapOpen} />
