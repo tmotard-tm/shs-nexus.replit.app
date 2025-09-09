@@ -4,6 +4,8 @@ import { activeVehicles, FleetVehicle } from '@/data/fleetData';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { HawaiiMap } from './hawaii-map';
+import { PuertoRicoMap } from './puerto-rico-map';
 
 interface FilteredMapProps {
   isOpen: boolean;
@@ -83,7 +85,7 @@ const cityCoordinates: Record<string, [number, number]> = {
 export function FilteredMap({ isOpen }: FilteredMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
-  const markersRef = useRef<L.Marker[]>([]);
+  const markersRef = useRef<L.CircleMarker[]>([]);
   
   // Filter state
   const [filters, setFilters] = useState<MapFilters>({
@@ -239,15 +241,28 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
         </CardContent>
       </Card>
       
-      {/* Map Container */}
-      <div 
-        ref={mapRef} 
-        className="flex-1 bg-gray-100 rounded-lg"
-        style={{ 
-          height: '500px',
-          minHeight: '400px'
-        }}
-      />
+      {/* Multi-Region Maps */}
+      <div className="flex-1 space-y-4">
+        {/* Main Continental US Map */}
+        <div className="bg-gray-100 rounded-lg overflow-hidden">
+          <div className="bg-gray-800 text-white px-3 py-1 text-sm font-medium">
+            Continental United States
+          </div>
+          <div 
+            ref={mapRef} 
+            style={{ 
+              height: '400px',
+              width: '100%'
+            }}
+          />
+        </div>
+        
+        {/* Hawaii and Puerto Rico Maps */}
+        <div className="grid grid-cols-2 gap-4">
+          <HawaiiMap filteredVehicles={filteredVehicles} />
+          <PuertoRicoMap filteredVehicles={filteredVehicles} />
+        </div>
+      </div>
     </div>
   );
 }
