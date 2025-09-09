@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
-import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map } from "lucide-react";
+import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map, ArrowRight } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
@@ -153,44 +156,269 @@ export default function AssistanceSelection() {
             </Card>
           </div>
 
-          {/* Main options grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {assistanceOptions.map((option) => {
-              const Icon = option.icon;
-              return (
-                <Card 
-                  key={option.id} 
-                  className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105 backdrop-blur-sm border-white/20"
-                  style={{ backgroundColor: 'rgba(108, 117, 125, 0.2)' }}
-                  data-testid={`card-${option.id}`}
+          {/* Main Form Modules Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            
+            {/* Create Vehicle Form Module */}
+            <Card 
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
+              data-testid="form-create-vehicle"
+            >
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
+                    <Car className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg text-gray-800">Create a New Vehicle</CardTitle>
+                    <CardDescription className="text-gray-600">Add New Vehicles to the System</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">Vehicle Type</Label>
+                    <Select disabled>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select type..." />
+                      </SelectTrigger>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">License Plate</Label>
+                    <Input placeholder="ABC-1234" disabled className="h-9" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">Make/Model</Label>
+                    <Input placeholder="Ford Transit" disabled className="h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">Year</Label>
+                    <Input placeholder="2024" disabled className="h-9" />
+                  </div>
+                </div>
+                <Button 
+                  onClick={() => setLocation("/create-vehicle-location")}
+                  className="w-full mt-4"
+                  data-testid="button-create-vehicle"
                 >
-                    <CardHeader className="text-center">
-                      <div 
-                        className={`w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 bg-gray-500`}
-                        data-testid={`icon-${option.id}`}
-                      >
-                        <Icon className="h-8 w-8" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                      </div>
-                      <CardTitle className="text-lg font-bold" style={{ color: '#01effc', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid={`title-${option.id}`}>
-                        {option.title}
-                      </CardTitle>
-                      <CardDescription className="font-medium" style={{ color: '#01effc', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid={`description-${option.id}`}>
-                        {option.description}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <Button 
-                        onClick={option.action}
-                        className="w-full"
-                        data-testid={`button-${option.id}`}
-                      >
-                        Get Started
-                      </Button>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
+                  Start Vehicle Creation <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Assign Vehicle Form Module */}
+            <Card 
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
+              data-testid="form-assign-vehicle"
+            >
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 rounded-lg bg-green-500 flex items-center justify-center">
+                    <MapPin className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg text-gray-800">Assign or Update a Vehicle</CardTitle>
+                    <CardDescription className="text-gray-600">Assign Existing Vehicles to Users</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">Employee</Label>
+                    <Select disabled>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select employee..." />
+                      </SelectTrigger>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">Vehicle</Label>
+                    <Select disabled>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select vehicle..." />
+                      </SelectTrigger>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">Start Date</Label>
+                    <Input type="date" disabled className="h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">Assignment Type</Label>
+                    <Select disabled>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Permanent" />
+                      </SelectTrigger>
+                    </Select>
+                  </div>
+                </div>
+                <Button 
+                  onClick={() => setIsAssignUpdateDialogOpen(true)}
+                  className="w-full mt-4"
+                  data-testid="button-assign-vehicle"
+                >
+                  Start Assignment <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Onboarding Form Module */}
+            <Card 
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
+              data-testid="form-onboarding"
+            >
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 rounded-lg bg-purple-500 flex items-center justify-center">
+                    <UserPlus className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg text-gray-800">Onboarding</CardTitle>
+                    <CardDescription className="text-gray-600">Process New Employee Onboarding</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">First Name</Label>
+                    <Input placeholder="John" disabled className="h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">Last Name</Label>
+                    <Input placeholder="Doe" disabled className="h-9" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">Department</Label>
+                    <Select disabled>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select department..." />
+                      </SelectTrigger>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">Start Date</Label>
+                    <Input type="date" disabled className="h-9" />
+                  </div>
+                </div>
+                <Button 
+                  onClick={() => setLocation("/onboard-hire")}
+                  className="w-full mt-4"
+                  data-testid="button-onboarding"
+                >
+                  Start Onboarding <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Offboarding Form Module */}
+            <Card 
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
+              data-testid="form-offboarding"
+            >
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 rounded-lg bg-red-500 flex items-center justify-center">
+                    <UserMinus className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg text-gray-800">Offboarding</CardTitle>
+                    <CardDescription className="text-gray-600">Remove Vehicles or Locations from the System</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">Employee Name</Label>
+                    <Input placeholder="Employee name..." disabled className="h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">RACF ID</Label>
+                    <Input placeholder="RACF123" disabled className="h-9" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">Last Day Worked</Label>
+                    <Input type="date" disabled className="h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">Reason</Label>
+                    <Select disabled>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select reason..." />
+                      </SelectTrigger>
+                    </Select>
+                  </div>
+                </div>
+                <Button 
+                  onClick={() => setLocation("/offboard-vehicle-location")}
+                  className="w-full mt-4"
+                  data-testid="button-offboarding"
+                >
+                  Start Offboarding <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
+
+          </div>
+
+          {/* Additional Tools Section */}
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card 
+              className="cursor-pointer hover:shadow-lg transition-all duration-200 backdrop-blur-sm border-white/20"
+              style={{ backgroundColor: 'rgba(255, 255, 255, 0.9)' }}
+              onClick={() => setIsMapOpen(true)}
+              data-testid="card-truck-status"
+            >
+              <CardHeader className="text-center pb-3">
+                <div className="w-12 h-12 rounded-lg bg-indigo-500 flex items-center justify-center mx-auto mb-3">
+                  <Map className="h-6 w-6 text-white" />
+                </div>
+                <CardTitle className="text-lg text-gray-800">TRUCK STATUS</CardTitle>
+                <CardDescription className="text-gray-600">Interactive fleet tracking with real-time status updates</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button className="w-full" data-testid="button-truck-status">
+                  View Fleet Map <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card 
+              className="cursor-pointer hover:shadow-lg transition-all duration-200 backdrop-blur-sm border-white/20"
+              style={{ backgroundColor: 'rgba(255, 255, 255, 0.9)' }}
+              onClick={() => setLocation("/dashboard")}
+              data-testid="card-other"
+            >
+              <CardHeader className="text-center pb-3">
+                <div className="w-12 h-12 rounded-lg bg-gray-500 flex items-center justify-center mx-auto mb-3">
+                  <HelpCircle className="h-6 w-6 text-white" />
+                </div>
+                <CardTitle className="text-lg text-gray-800">Other</CardTitle>
+                <CardDescription className="text-gray-600">Access Additional Tools and Features</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button variant="outline" className="w-full" data-testid="button-other">
+                  Explore Tools <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
           </div>
       </main>
 
