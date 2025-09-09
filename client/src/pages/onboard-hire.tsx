@@ -50,11 +50,11 @@ export default function OnboardHire() {
   ]);
 
   const [supplyOrders, setSupplyOrders] = useState({
-    assetsSupplies: false,
-    ntaoPartsStock: false
+    assetsSupplies: true,  // Automatically enabled
+    ntaoPartsStock: true   // Automatically enabled
   });
   const [vehicleAssignment, setVehicleAssignment] = useState({
-    autoAssign: false,
+    autoAssign: true,      // Automatically enabled
     workZipcode: ""
   });
 
@@ -544,73 +544,59 @@ export default function OnboardHire() {
                       </div>
                     </div>
 
-                    {/* Supply Order Triggers */}
+                    {/* Automatic Supply Orders */}
                     <div className="border-t pt-6">
                       <h4 className="font-semibold mb-4 flex items-center gap-2">
                         <Package className="h-4 w-4" />
-                        Day 1 Supply Orders
+                        Day 1 Supply Orders (Automatic)
                       </h4>
-                      <div className="space-y-3">
+                      <div className="space-y-3 bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-800">
                         <div className="flex items-center space-x-3">
-                          <Checkbox 
-                            id="assets-supplies"
-                            checked={supplyOrders.assetsSupplies}
-                            onCheckedChange={(checked) => setSupplyOrders(prev => ({ ...prev, assetsSupplies: !!checked }))}
-                            data-testid="checkbox-assets-supplies"
-                          />
-                          <Label htmlFor="assets-supplies" className="flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          <Label className="flex items-center gap-2 text-green-800 dark:text-green-200">
                             <Package className="h-4 w-4" />
-                            Trigger Assets & Supplies Order for Day 1 Supplies
+                            Assets & Supplies Order for Day 1 Supplies (Auto-triggered)
                           </Label>
                         </div>
                         <div className="flex items-center space-x-3">
-                          <Checkbox 
-                            id="ntao-parts"
-                            checked={supplyOrders.ntaoPartsStock}
-                            onCheckedChange={(checked) => setSupplyOrders(prev => ({ ...prev, ntaoPartsStock: !!checked }))}
-                            data-testid="checkbox-ntao-parts"
-                          />
-                          <Label htmlFor="ntao-parts" className="flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          <Label className="flex items-center gap-2 text-green-800 dark:text-green-200">
                             <Wrench className="h-4 w-4" />
-                            Trigger NTAO Order for Parts Stock
+                            NTAO Order for Parts Stock (Auto-triggered)
                           </Label>
                         </div>
                       </div>
                     </div>
 
-                    {/* Vehicle Assignment Section */}
+                    {/* Automatic Vehicle Assignment */}
                     <div className="border-t pt-6">
                       <h4 className="font-semibold mb-4 flex items-center gap-2">
                         <MapPin className="h-4 w-4" />
-                        Vehicle Assignment
+                        Vehicle Assignment (Automatic)
                       </h4>
                       <div className="space-y-3">
-                        <div className="flex items-center space-x-3">
-                          <Checkbox 
-                            id="auto-assign-vehicle"
-                            checked={vehicleAssignment.autoAssign}
-                            onCheckedChange={(checked) => setVehicleAssignment(prev => ({ ...prev, autoAssign: !!checked }))}
-                            data-testid="checkbox-auto-assign-vehicle"
-                          />
-                          <Label htmlFor="auto-assign-vehicle">
-                            Auto-assign closest available vehicle
-                          </Label>
-                        </div>
-                        {vehicleAssignment.autoAssign && (
-                          <div className="ml-6 space-y-2">
-                            <Label htmlFor="work-zipcode">Employee Work Location Zipcode</Label>
+                        <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-800">
+                          <div className="flex items-center space-x-3 mb-3">
+                            <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                            <Label className="text-green-800 dark:text-green-200 font-medium">
+                              Auto-assign closest available vehicle
+                            </Label>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="work-zipcode">Employee Work Location Zipcode *</Label>
                             <Input
                               id="work-zipcode"
                               value={vehicleAssignment.workZipcode}
                               onChange={(e) => setVehicleAssignment(prev => ({ ...prev, workZipcode: e.target.value }))}
                               placeholder="Enter work location zipcode (e.g., 10001)"
                               data-testid="input-work-zipcode"
+                              required
                             />
-                            <p className="text-xs text-muted-foreground">
-                              System will find and assign the closest unassigned vehicle
+                            <p className="text-xs text-green-700 dark:text-green-300">
+                              System will automatically find and assign the closest unassigned vehicle
                             </p>
                           </div>
-                        )}
+                        </div>
                       </div>
                     </div>
 
