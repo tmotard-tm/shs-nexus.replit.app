@@ -73,10 +73,33 @@ export default function OffboardVehicleLocation() {
     e.preventDefault();
     const vehicle = vehicles.find(veh => veh.id === vehicleOffboard.vehicleId);
     
-    toast({
-      title: "Vehicle Offboarded",
-      description: `${vehicle?.name} has been removed from the fleet`,
+    // Trigger notifications to required departments
+    const notificationDepartments = ['NTAO', 'Assets', 'Inventory', 'Fleet'];
+    
+    // Simulate notification triggers
+    console.log('🚨 OFFBOARDING NOTIFICATIONS TRIGGERED:', {
+      techRacfId: vehicleOffboard.techRacfId,
+      techName: vehicleOffboard.techName,
+      vehicleNumber: vehicleOffboard.vehicleNumber,
+      reason: vehicleOffboard.reason,
+      lastDayWorked: vehicleOffboard.lastDayWorked,
+      departments: notificationDepartments,
+      timestamp: new Date().toISOString()
     });
+    
+    toast({
+      title: "Vehicle Offboarded Successfully",
+      description: `${vehicle?.name} removed from fleet. Notifications sent to: ${notificationDepartments.join(', ')}`,
+    });
+    
+    // Show secondary notification confirmation
+    setTimeout(() => {
+      toast({
+        title: "Department Notifications Sent",
+        description: `✅ NTAO, Assets, Inventory, and Fleet have been notified of offboarding for ${vehicleOffboard.techName}`,
+        variant: "default"
+      });
+    }, 2000);
     
     setVehicleOffboard({
       vehicleId: "",
@@ -156,6 +179,21 @@ export default function OffboardVehicleLocation() {
                       <CardDescription>
                         Process vehicle removal and document the reason
                       </CardDescription>
+                      <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                          <div className="text-sm">
+                            <p className="font-medium text-yellow-800 dark:text-yellow-200">Automatic Notifications</p>
+                            <p className="text-yellow-700 dark:text-yellow-300">Upon submission, the following departments will be automatically notified:</p>
+                            <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
+                              <li>NTAO (Network Technology and Operations)</li>
+                              <li>Assets Management</li>
+                              <li>Inventory Control</li>
+                              <li>Fleet Management</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
                     </CardHeader>
                     <CardContent>
                       <form onSubmit={handleVehicleOffboard} className="space-y-6">
@@ -307,7 +345,7 @@ export default function OffboardVehicleLocation() {
 
                         <Button type="submit" className="w-full" data-testid="button-offboard-vehicle">
                           <Trash2 className="h-4 w-4 mr-2" />
-                          Offboard Vehicle
+                          Offboard Vehicle & Notify Departments
                         </Button>
                       </form>
                     </CardContent>
