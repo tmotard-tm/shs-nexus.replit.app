@@ -21,6 +21,7 @@ export default function OffboardVehicleLocation() {
     vehicleId: "",
     techRacfId: "",
     techName: "",
+    employeeId: "",
     lastDayWorked: "",
     vehicleNumber: "",
     vehicleLocation: "",
@@ -86,6 +87,7 @@ export default function OffboardVehicleLocation() {
         employee: {
           name: vehicleOffboard.techName,
           racfId: vehicleOffboard.techRacfId,
+          employeeId: vehicleOffboard.employeeId,
           lastDayWorked: vehicleOffboard.lastDayWorked,
           enterpriseId: vehicleOffboard.techRacfId
         },
@@ -213,6 +215,7 @@ export default function OffboardVehicleLocation() {
       vehicleId: "",
       techRacfId: "",
       techName: "",
+      employeeId: "",
       lastDayWorked: "",
       vehicleNumber: "",
       vehicleLocation: "",
@@ -307,7 +310,17 @@ export default function OffboardVehicleLocation() {
                     <CardContent>
                       <form onSubmit={handleVehicleOffboard} className="space-y-6">
                         {/* Employee Information Section */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="employeeId">Employee ID *</Label>
+                            <Input
+                              id="employeeId"
+                              value={vehicleOffboard.employeeId}
+                              onChange={(e) => setVehicleOffboard(prev => ({ ...prev, employeeId: e.target.value }))}
+                              placeholder="EMP-001"
+                              data-testid="input-employee-id"
+                            />
+                          </div>
                           <div className="space-y-2">
                             <Label htmlFor="techRacfId">Tech RacfId *</Label>
                             <Input
