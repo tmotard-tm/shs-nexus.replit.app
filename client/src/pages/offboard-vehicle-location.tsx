@@ -411,6 +411,7 @@ export default function OffboardVehicleLocation() {
                               <SelectItem value="fair" data-testid="option-fair">Fair</SelectItem>
                               <SelectItem value="poor" data-testid="option-poor">Poor</SelectItem>
                               <SelectItem value="damaged" data-testid="option-damaged">Damaged</SelectItem>
+                              <SelectItem value="unknown" data-testid="option-unknown">Unknown</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
