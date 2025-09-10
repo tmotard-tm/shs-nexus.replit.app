@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { BackButton } from "@/components/ui/back-button";
 import { Request } from "@shared/schema";
 import { useAuth } from "@/hooks/use-auth";
+import { Car, UserPlus, UserMinus, Plus, ArrowRight } from "lucide-react";
+import { Link } from "wouter";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -17,7 +19,6 @@ export default function Dashboard() {
     onboarding: { pending: number; inProgress: number; completed: number };
     vehicleAssignment: { pending: number; inProgress: number; completed: number };
     offboarding: { pending: number; inProgress: number; completed: number };
-    decommission: { pending: number; inProgress: number; completed: number };
     activeUsers: number;
   }>({
     queryKey: ["/api/dashboard/stats"],
@@ -166,35 +167,123 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Decommission */}
+          {/* Active Users */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <i className="fas fa-trash text-[hsl(var(--chart-4))]"></i>
-                Decommission
+                <i className="fas fa-users text-[hsl(var(--chart-4))]"></i>
+                Active Users
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Pending:</span>
-                <span className="font-medium text-[hsl(var(--chart-1))]" data-testid="decommission-pending">
-                  {statsLoading ? "..." : stats?.decommission?.pending || 0}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">In Progress:</span>
-                <span className="font-medium text-[hsl(var(--chart-2))]" data-testid="decommission-in-progress">
-                  {statsLoading ? "..." : stats?.decommission?.inProgress || 0}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Completed:</span>
-                <span className="font-medium text-[hsl(var(--chart-3))]" data-testid="decommission-completed">
-                  {statsLoading ? "..." : stats?.decommission?.completed || 0}
+                <span className="text-muted-foreground">Total:</span>
+                <span className="font-medium text-[hsl(var(--chart-4))]" data-testid="active-users-count">
+                  {statsLoading ? "..." : stats?.activeUsers || 0}
                 </span>
               </div>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Main Workflow Actions */}
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold mb-4" data-testid="text-workflow-actions-title">
+            Main Workflow Actions
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Create a New Vehicle */}
+            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="p-3 rounded-lg bg-blue-100 dark:bg-blue-900/20">
+                    <Plus className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                </div>
+                <h3 className="text-lg font-semibold mb-2" data-testid="text-create-vehicle-title">
+                  Create a New Vehicle
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4" data-testid="text-create-vehicle-description">
+                  Add New Vehicles to the System
+                </p>
+                <Link href="/create-vehicle-location">
+                  <Button className="w-full group-hover:bg-blue-600 transition-colors" data-testid="button-start-vehicle-creation">
+                    Start Vehicle Creation
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+
+            {/* Assign or Update a Vehicle */}
+            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="p-3 rounded-lg bg-green-100 dark:bg-green-900/20">
+                    <Car className="h-6 w-6 text-green-600 dark:text-green-400" />
+                  </div>
+                </div>
+                <h3 className="text-lg font-semibold mb-2" data-testid="text-assign-vehicle-title">
+                  Assign or Update a Vehicle
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4" data-testid="text-assign-vehicle-description">
+                  Assign Existing Vehicles to Users
+                </p>
+                <Link href="/assign-vehicle-location">
+                  <Button className="w-full group-hover:bg-green-600 transition-colors" data-testid="button-start-assignment">
+                    Start Assignment
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+
+            {/* Onboarding */}
+            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="p-3 rounded-lg bg-purple-100 dark:bg-purple-900/20">
+                    <UserPlus className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+                  </div>
+                </div>
+                <h3 className="text-lg font-semibold mb-2" data-testid="text-onboarding-title">
+                  Onboarding
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4" data-testid="text-onboarding-description">
+                  Process New Employee Onboarding
+                </p>
+                <Link href="/onboard-hire">
+                  <Button className="w-full group-hover:bg-purple-600 transition-colors" data-testid="button-start-onboarding">
+                    Start Onboarding
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+
+            {/* Offboarding */}
+            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="p-3 rounded-lg bg-red-100 dark:bg-red-900/20">
+                    <UserMinus className="h-6 w-6 text-red-600 dark:text-red-400" />
+                  </div>
+                </div>
+                <h3 className="text-lg font-semibold mb-2" data-testid="text-offboarding-title">
+                  Offboarding
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4" data-testid="text-offboarding-description">
+                  Remove Vehicles or Locations from the System
+                </p>
+                <Link href="/offboard-vehicle-location">
+                  <Button className="w-full group-hover:bg-red-600 transition-colors" data-testid="button-start-offboarding">
+                    Start Offboarding
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
