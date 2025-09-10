@@ -9,15 +9,24 @@ const sessions = new Map<string, { userId: string; username: string; expiresAt: 
 
 // Authentication middleware
 function requireAuth(req: any, res: any, next: any): any {
-  const sessionId = req.headers.cookie?.match(/sessionId=([^;]+)/)?.[1];
+  const cookieHeader = req.headers.cookie;
+  console.log('Cookie header:', cookieHeader);
+  const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
+  console.log('Extracted sessionId:', sessionId);
+  console.log('Active sessions:', Array.from(sessions.keys()));
   
   if (!sessionId) {
-    return res.status(401).json({ message: "Authentication required" });
+    return res.status(401).json({ message: "Authentication required - no session cookie" });
   }
   
   const session = sessions.get(sessionId);
   if (!session || session.expiresAt < new Date()) {
-    sessions.delete(sessionId);
+    if (session) {
+      console.log('Session expired:', session.expiresAt, 'vs', new Date());
+      sessions.delete(sessionId);
+    } else {
+      console.log('Session not found for sessionId:', sessionId);
+    }
     return res.status(401).json({ message: "Session expired" });
   }
   
@@ -46,6 +55,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         expiresAt
       });
 
+      console.log('Created session:', sessionId, 'for user:', user.username);
+      console.log('Session expires at:', expiresAt);
+
       // Set httpOnly cookie
       res.cookie('sessionId', sessionId, {
         httpOnly: true,
@@ -53,6 +65,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sameSite: 'lax',
         expires: expiresAt
       });
+
+      console.log('Set cookie for user:', user.username);
 
       res.json({ user: { ...user, password: undefined } });
     } catch (error) {
