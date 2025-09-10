@@ -1122,6 +1122,22 @@ export class MemStorage implements IStorage {
           break;
       }
       
+      // Filter to only show department-specific auto-triggered tasks
+      items = items.filter(item => {
+        try {
+          if (item.data) {
+            const data = JSON.parse(item.data);
+            // Only show tasks that are auto-triggered for departments or have explicit department notifications
+            return data.autoTriggered === true || 
+                   data.notificationType === "Employee Onboarding" ||
+                   data.triggeredBy === "employee_onboarding";
+          }
+          return false; // Hide tasks without proper data structure
+        } catch (e) {
+          return false; // Hide tasks with invalid data structure
+        }
+      });
+      
       // Add module annotation and filter by status if provided
       items.forEach(item => {
         if (!status || item.status === status) {
