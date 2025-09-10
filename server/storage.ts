@@ -49,7 +49,6 @@ export interface IStorage {
     onboarding: { pending: number; inProgress: number; completed: number };
     vehicleAssignment: { pending: number; inProgress: number; completed: number };
     offboarding: { pending: number; inProgress: number; completed: number };
-    decommission: { pending: number; inProgress: number; completed: number };
     activeUsers: number;
   }>;
 
@@ -85,7 +84,7 @@ export interface IStorage {
   assignFleetQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
   completeFleetQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
 
-  // Decommissions Queue Module
+  // Queue operations
   cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined>;
 
   // Unified Queue Aggregator
@@ -202,16 +201,6 @@ export class MemStorage implements IStorage {
         department: "Fleet Management",
         createdAt: new Date(),
         accessibleQueues: ['fleet'],
-      },
-      {
-        id: randomUUID(),
-        username: "DECOM001",
-        email: "decommissions@sears.com",
-        password: "passwords", // In real app, this would be hashed
-        role: "approver",
-        department: "Decommissions",
-        createdAt: new Date(),
-        accessibleQueues: [],
       },
       {
         id: randomUUID(),
@@ -412,8 +401,6 @@ export class MemStorage implements IStorage {
         case "Fleet Management":
           this.fleetQueueItems.set(item.id, item);
           break;
-        case "Decommissions":
-          break;
         default:
           // Default to NTAO queue if no department specified
           this.ntaoQueueItems.set(item.id, item);
@@ -585,7 +572,6 @@ export class MemStorage implements IStorage {
     onboarding: { pending: number; inProgress: number; completed: number };
     vehicleAssignment: { pending: number; inProgress: number; completed: number };
     offboarding: { pending: number; inProgress: number; completed: number };
-    decommission: { pending: number; inProgress: number; completed: number };
     activeUsers: number;
   }> {
     // Combine all queue items from separate modules
@@ -611,7 +597,6 @@ export class MemStorage implements IStorage {
       onboarding: getWorkflowStats("onboarding"),
       vehicleAssignment: getWorkflowStats("vehicle_assignment"),
       offboarding: getWorkflowStats("offboarding"),
-      decommission: getWorkflowStats("decommission"),
       activeUsers,
     };
   }
