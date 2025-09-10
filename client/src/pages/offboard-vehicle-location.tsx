@@ -80,40 +80,44 @@ export default function OffboardVehicleLocation() {
     const workflowId = `offboard_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     try {
-      // Step 1: Create ONLY the NTAO task (stop truck stock replenishment)
-      // This is the first step in the sequential workflow
-      const ntaoTaskResponse = await apiRequest("POST", "/api/ntao-queue", {
+      // Create shared trigger data for all workflow tasks
+      const sharedTriggerData = {
+        workflowId: workflowId,
+        employee: {
+          name: vehicleOffboard.techName,
+          racfId: vehicleOffboard.techRacfId,
+          lastDayWorked: vehicleOffboard.lastDayWorked,
+          enterpriseId: vehicleOffboard.techRacfId
+        },
+        vehicle: {
+          vehicleNumber: vehicleOffboard.vehicleNumber,
+          vehicleName: vehicle?.name || vehicleOffboard.vehicleNumber,
+          reason: vehicleOffboard.reason,
+          location: vehicleOffboard.vehicleLocation,
+          condition: vehicleOffboard.returnCondition
+        },
+        submitter: {
+          name: user?.username || user?.email || "Unknown User",
+          submittedAt: new Date().toISOString()
+        }
+      };
+
+      // Step 1: Create NTAO task (stop truck stock replenishment)
+      await apiRequest("POST", "/api/ntao-queue", {
         workflowType: "offboarding",
         title: `Stop Truck Stock Replenishment - ${vehicleOffboard.techName}`,
         description: `Stop truck stock replenishment for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}. Complete this task once removed from truck replenishment system.`,
         priority: "high",
         requesterId: user?.id || "system",
         department: "NTAO",
-        // Workflow fields
         workflowId: workflowId,
         workflowStep: 1,
-        dependsOn: null, // First task has no dependencies
-        autoTrigger: false, // This task needs manual completion
+        dependsOn: null,
+        autoTrigger: false,
         data: JSON.stringify({
-          submitter: {
-            name: user?.username || user?.email || "Unknown User",
-            submittedAt: new Date().toISOString()
-          },
           workflowType: "offboarding_sequence",
           step: "ntao_stop_replenishment",
-          employee: {
-            name: vehicleOffboard.techName,
-            racfId: vehicleOffboard.techRacfId,
-            lastDayWorked: vehicleOffboard.lastDayWorked,
-            enterpriseId: vehicleOffboard.techRacfId
-          },
-          vehicle: {
-            vehicleNumber: vehicleOffboard.vehicleNumber,
-            vehicleName: vehicle?.name || vehicleOffboard.vehicleNumber,
-            reason: vehicleOffboard.reason,
-            location: vehicleOffboard.vehicleLocation,
-            condition: vehicleOffboard.returnCondition
-          },
+          ...sharedTriggerData,
           instructions: [
             "Access truck stock replenishment system",
             "Remove employee from active replenishment schedule", 
@@ -122,27 +126,63 @@ export default function OffboardVehicleLocation() {
             "Mark task complete when removed from system"
           ]
         }),
-        // Store data for next tasks to be auto-triggered
-        triggerData: JSON.stringify({
-          workflowId: workflowId,
-          employee: {
-            name: vehicleOffboard.techName,
-            racfId: vehicleOffboard.techRacfId,
-            lastDayWorked: vehicleOffboard.lastDayWorked,
-            enterpriseId: vehicleOffboard.techRacfId
-          },
-          vehicle: {
-            vehicleNumber: vehicleOffboard.vehicleNumber,
-            vehicleName: vehicle?.name || vehicleOffboard.vehicleNumber,
-            reason: vehicleOffboard.reason,
-            location: vehicleOffboard.vehicleLocation,
-            condition: vehicleOffboard.returnCondition
-          },
-          submitter: {
-            name: user?.username || user?.email || "Unknown User",
-            submittedAt: new Date().toISOString()
-          }
-        })
+        triggerData: JSON.stringify(sharedTriggerData)
+      });
+
+      // Step 2: Create Assets task (recover phone) - runs in parallel
+      await apiRequest("POST", "/api/assets-queue", {
+        workflowType: "offboarding",
+        title: `Recover Company Phone - ${vehicleOffboard.techName}`,
+        description: `Recover company phone from ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Contact employee to arrange pickup or return of company phone and any other mobile devices.`,
+        priority: "high",
+        requesterId: user?.id || "system",
+        department: "Assets Management",
+        workflowId: workflowId,
+        workflowStep: 2,
+        dependsOn: null,
+        autoTrigger: false,
+        data: JSON.stringify({
+          workflowType: "offboarding_sequence",
+          step: "assets_recover_phone",
+          ...sharedTriggerData,
+          instructions: [
+            "Contact employee to arrange phone return",
+            "Verify phone is company-issued device",
+            "Check for any accessories (charger, case)",
+            "Wipe device data per security protocol",
+            "Update asset management system",
+            "Mark task complete when phone recovered"
+          ]
+        }),
+        triggerData: JSON.stringify(sharedTriggerData)
+      });
+
+      // Step 3: Create Fleet task (move van to Pepboys) - runs in parallel, triggers final step when complete
+      await apiRequest("POST", "/api/fleet-queue", {
+        workflowType: "offboarding",
+        title: `Move Van to Pepboys for Prep - ${vehicleOffboard.vehicleNumber}`,
+        description: `Move van ${vehicleOffboard.vehicleNumber} to Pepboys for preparation. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Schedule transport and prep for next assignment.`,
+        priority: "high",
+        requesterId: user?.id || "system",
+        department: "Fleet Management",
+        workflowId: workflowId,
+        workflowStep: 3,
+        dependsOn: null,
+        autoTrigger: false,
+        data: JSON.stringify({
+          workflowType: "offboarding_sequence",
+          step: "fleet_move_to_pepboys",
+          ...sharedTriggerData,
+          instructions: [
+            "Schedule van pickup from employee location",
+            "Coordinate transport to Pepboys service center",
+            "Verify vehicle condition and mileage",
+            "Schedule maintenance and cleaning",
+            "Update fleet management system",
+            "Mark task complete when van at Pepboys"
+          ]
+        }),
+        triggerData: JSON.stringify(sharedTriggerData)
       });
 
     } catch (queueError) {
@@ -157,14 +197,14 @@ export default function OffboardVehicleLocation() {
 
     toast({
       title: "Offboarding Workflow Started",
-      description: `Sequential workflow initiated for ${vehicleOffboard.techName}. NTAO task created to stop truck stock replenishment.`,
+      description: `3 parallel tasks created for ${vehicleOffboard.techName}: NTAO, Assets, and Fleet Management.`,
     });
     
     // Show secondary notification about workflow sequence
     setTimeout(() => {
       toast({
         title: "Workflow Sequence",
-        description: `✅ Step 1: NTAO (Stop Replenishment) → Step 2: Assets (Recover Phone) → Step 3: Fleet (Move to Pepboys) → Step 4: Inventory (Parts Count)`,
+        description: `✅ NTAO (Stop Replenishment) + Assets (Recover Phone) + Fleet (Move to Pepboys) → Final: Inventory & Assets (Full Parts Count)`,
         variant: "default"
       });
     }, 2000);
@@ -251,14 +291,14 @@ export default function OffboardVehicleLocation() {
                         <div className="flex items-start gap-2">
                           <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
                           <div className="text-sm">
-                            <p className="font-medium text-yellow-800 dark:text-yellow-200">Automatic Notifications</p>
-                            <p className="text-yellow-700 dark:text-yellow-300">Upon submission, the following departments will be automatically notified:</p>
+                            <p className="font-medium text-yellow-800 dark:text-yellow-200">Workflow Sequence</p>
+                            <p className="text-yellow-700 dark:text-yellow-300">Upon submission, these departments will get immediate tasks:</p>
                             <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
-                              <li>NTAO</li>
-                              <li>Assets Management</li>
-                              <li>Inventory Control</li>
-                              <li>Fleet Management</li>
+                              <li>NTAO (Stop truck replenishment)</li>
+                              <li>Assets Management (Recover phone)</li>
+                              <li>Fleet Management (Move van to Pepboys)</li>
                             </ul>
+                            <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van: Inventory Control + Assets Management will get joint parts count task.</p>
                           </div>
                         </div>
                       </div>

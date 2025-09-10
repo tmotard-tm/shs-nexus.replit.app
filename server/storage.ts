@@ -890,123 +890,105 @@ export class MemStorage implements IStorage {
       const triggerData = completedItem.triggerData ? JSON.parse(completedItem.triggerData) : null;
       if (!triggerData) return;
 
-      const nextStep = completedItem.workflowStep + 1;
-      
-      // Define the offboarding workflow sequence
-      // Step 1: NTAO (stop truck replenishment) - completed
-      // Step 2: Assets Management (recover phone)
-      // Step 3: Fleet Management (move to Pepboys) 
-      // Step 4: Inventory Control (parts count)
-      
-      let nextTask: Partial<QueueItem> | null = null;
-      
-      switch (nextStep) {
-        case 2: // Assets Management - recover phone
-          nextTask = {
-            workflowType: "offboarding",
-            title: `Recover Company Phone - ${triggerData.employee.name}`,
-            description: `Recover company phone from ${triggerData.employee.name} (${triggerData.employee.racfId}). Vehicle: ${triggerData.vehicle.vehicleNumber}. Contact employee to arrange pickup or return of company phone and any other mobile devices.`,
-            priority: "high",
-            requesterId: "system",
-            department: "Assets Management",
-            workflowId: completedItem.workflowId,
-            workflowStep: 2,
-            dependsOn: completedItem.id,
-            autoTrigger: true,
-            data: JSON.stringify({
-              workflowType: "offboarding_sequence",
-              step: "assets_recover_phone",
-              employee: triggerData.employee,
-              vehicle: triggerData.vehicle,
-              submitter: triggerData.submitter,
-              instructions: [
-                "Contact employee to arrange phone return",
-                "Verify phone is company-issued device",
-                "Check for any accessories (charger, case)",
-                "Wipe device data per security protocol",
-                "Update asset management system",
-                "Mark task complete when phone recovered"
-              ]
-            }),
-            triggerData: completedItem.triggerData // Pass along for next step
-          };
-          await this.createAssetsQueueItem(nextTask as any);
-          break;
+      // Check for Fleet Management completion (step 3) to trigger final tasks
+      // Steps 1 (NTAO), 2 (Assets), and 3 (Fleet) run in parallel
+      // Only Fleet completion triggers the final combined Inventory/Assets task
+      if (completedItem.workflowStep === 3 && completedItem.department === "Fleet Management") {
+        
+        // Check for existing final tasks to prevent duplicates
+        const existingInventoryTasks = await this.getInventoryQueueItems();
+        const existingAssetsTasks = await this.getAssetsQueueItems();
+        
+        const duplicateInventoryTask = existingInventoryTasks.find(task => 
+          task.workflowId === completedItem.workflowId && 
+          task.workflowStep === 4 && 
+          task.data?.includes("combined_parts_count")
+        );
+        
+        const duplicateAssetsTask = existingAssetsTasks.find(task => 
+          task.workflowId === completedItem.workflowId && 
+          task.workflowStep === 4 && 
+          task.data?.includes("assist_parts_count")
+        );
 
-        case 3: // Fleet Management - move van to Pepboys
-          nextTask = {
-            workflowType: "offboarding",
-            title: `Move Van to Pepboys for Prep - ${triggerData.vehicle.vehicleNumber}`,
-            description: `Move van ${triggerData.vehicle.vehicleNumber} to Pepboys for preparation. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Schedule transport and prep for next assignment.`,
-            priority: "high",
-            requesterId: "system",
-            department: "Fleet Management",
-            workflowId: completedItem.workflowId,
-            workflowStep: 3,
-            dependsOn: completedItem.id,
-            autoTrigger: true,
-            data: JSON.stringify({
-              workflowType: "offboarding_sequence",
-              step: "fleet_move_to_pepboys",
-              employee: triggerData.employee,
-              vehicle: triggerData.vehicle,
-              submitter: triggerData.submitter,
-              instructions: [
-                "Schedule van pickup from employee location",
-                "Coordinate transport to Pepboys service center",
-                "Verify vehicle condition and mileage",
-                "Schedule maintenance and cleaning",
-                "Update fleet management system",
-                "Mark task complete when van at Pepboys"
-              ]
-            }),
-            triggerData: completedItem.triggerData // Pass along for next step
-          };
-          await this.createFleetQueueItem(nextTask as any);
-          break;
+        if (duplicateInventoryTask || duplicateAssetsTask) {
+          console.log(`Final workflow tasks already exist for workflow ${completedItem.workflowId}`);
+          return;
+        }
+        
+        // Create combined Inventory & Assets task for full parts count
+        const inventoryTask = {
+          workflowType: "offboarding",
+          title: `Full Parts and Tools Count - ${triggerData.vehicle.vehicleNumber}`,
+          description: `Perform full inventory count of parts and tools in van ${triggerData.vehicle.vehicleNumber} at Pepboys location. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Complete audit before van reassignment. Both Inventory Control and Assets Management teams should collaborate on this task.`,
+          priority: "medium",
+          requesterId: "system",
+          department: "Inventory Control", // Primary department, but Assets should also participate
+          workflowId: completedItem.workflowId,
+          workflowStep: 4,
+          dependsOn: completedItem.id,
+          autoTrigger: true,
+          data: JSON.stringify({
+            workflowType: "offboarding_sequence",
+            step: "combined_parts_count",
+            employee: triggerData.employee,
+            vehicle: triggerData.vehicle,
+            submitter: triggerData.submitter,
+            departments: ["Inventory Control", "Assets Management"], // Both departments involved
+            instructions: [
+              "Access van at Pepboys location (fleet has moved it)",
+              "Coordinate with Assets Management team for joint count",
+              "Perform complete inventory count of all parts",
+              "Count and verify all tools and equipment",
+              "Check all items against original manifest",
+              "Document any missing, damaged, or extra items",
+              "Update both inventory and asset management systems",
+              "Mark task complete when full count finished"
+            ],
+            finalStep: true // This is the last step in the workflow
+          }),
+          triggerData: null // Final step doesn't need to trigger anything else
+        };
+        
+        const assetsNotificationTask = {
+          workflowType: "offboarding",
+          title: `Assist with Parts Count - ${triggerData.vehicle.vehicleNumber}`,
+          description: `Assist Inventory Control with full parts and tools count for van ${triggerData.vehicle.vehicleNumber} at Pepboys. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Coordinate with Inventory team for complete audit.`,
+          priority: "medium",
+          requesterId: "system",
+          department: "Assets Management",
+          workflowId: completedItem.workflowId,
+          workflowStep: 4,
+          dependsOn: completedItem.id,
+          autoTrigger: true,
+          data: JSON.stringify({
+            workflowType: "offboarding_sequence",
+            step: "assist_parts_count",
+            employee: triggerData.employee,
+            vehicle: triggerData.vehicle,
+            submitter: triggerData.submitter,
+            primaryDepartment: "Inventory Control",
+            instructions: [
+              "Coordinate with Inventory Control team",
+              "Assist with asset identification and counting",
+              "Focus on company-owned equipment and tools",
+              "Verify serial numbers for tracked assets",
+              "Update asset management records",
+              "Support completion of joint inventory audit"
+            ],
+            finalStep: true
+          }),
+          triggerData: null
+        };
 
-        case 4: // Inventory Control - full parts count
-          nextTask = {
-            workflowType: "offboarding",
-            title: `Full Parts and Tools Count - ${triggerData.vehicle.vehicleNumber}`,
-            description: `Perform full inventory count of parts and tools in van ${triggerData.vehicle.vehicleNumber}. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Complete audit before van reassignment.`,
-            priority: "medium",
-            requesterId: "system",
-            department: "Inventory Control",
-            workflowId: completedItem.workflowId,
-            workflowStep: 4,
-            dependsOn: completedItem.id,
-            autoTrigger: true,
-            data: JSON.stringify({
-              workflowType: "offboarding_sequence",
-              step: "inventory_parts_count",
-              employee: triggerData.employee,
-              vehicle: triggerData.vehicle,
-              submitter: triggerData.submitter,
-              instructions: [
-                "Access van at Pepboys location",
-                "Perform complete inventory count",
-                "Check all parts against manifest",
-                "Verify tool condition and counts",
-                "Document any missing or damaged items",
-                "Update inventory management system",
-                "Mark task complete when count finished"
-              ],
-              finalStep: true // This is the last step in the workflow
-            }),
-            triggerData: null // Final step doesn't need to trigger anything else
-          };
-          await this.createInventoryQueueItem(nextTask as any);
-          break;
-
-        default:
-          // No more steps in the workflow
-          console.log(`Workflow ${completedItem.workflowId} completed at step ${completedItem.workflowStep}`);
-          break;
-      }
-
-      if (nextTask) {
-        console.log(`Auto-triggered workflow step ${nextStep} for workflow ${completedItem.workflowId}`);
+        // Create both final tasks
+        await this.createInventoryQueueItem(inventoryTask as any);
+        await this.createAssetsQueueItem(assetsNotificationTask as any);
+        
+        console.log(`Auto-triggered final workflow tasks for workflow ${completedItem.workflowId}: Inventory Control + Assets Management`);
+      } else {
+        // No more steps to trigger for other completed tasks
+        console.log(`Workflow task completed: ${completedItem.workflowId} step ${completedItem.workflowStep} (${completedItem.department})`);
       }
     } catch (error) {
       console.error('Error triggering next workflow step:', error);
