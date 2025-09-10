@@ -188,123 +188,118 @@ export default function Dashboard() {
 
         {/* Main Workflow Actions */}
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4" data-testid="text-workflow-actions-title">
+          <h2 className="text-xl font-semibold mb-6" data-testid="text-workflow-actions-title">
             Main Workflow Actions
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
             {/* Create a New Vehicle */}
-            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="p-3 rounded-lg bg-blue-100 dark:bg-blue-900/20">
-                    <Plus className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-                  </div>
+            <Card className="p-6 hover:shadow-md transition-shadow">
+              <div className="text-center space-y-4">
+                <div className="w-12 h-12 mx-auto rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center">
+                  <Plus className="h-6 w-6 text-blue-600 dark:text-blue-400" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2" data-testid="text-create-vehicle-title">
-                  Create a New Vehicle
-                </h3>
-                <p className="text-sm text-muted-foreground mb-4" data-testid="text-create-vehicle-description">
-                  Add New Vehicles to the System
-                </p>
+                <div>
+                  <h3 className="font-semibold text-sm mb-2" data-testid="text-create-vehicle-title">
+                    Create a New Vehicle
+                  </h3>
+                  <p className="text-xs text-muted-foreground mb-4" data-testid="text-create-vehicle-description">
+                    Add New Vehicles to the System
+                  </p>
+                </div>
                 <Link href="/create-vehicle-location">
-                  <Button className="w-full group-hover:bg-blue-600 transition-colors" data-testid="button-start-vehicle-creation">
+                  <Button size="sm" className="w-full" data-testid="button-start-vehicle-creation">
                     Start Vehicle Creation
-                    <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </Link>
-              </CardContent>
+              </div>
             </Card>
 
             {/* Assign or Update a Vehicle */}
-            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="p-3 rounded-lg bg-green-100 dark:bg-green-900/20">
-                    <Car className="h-6 w-6 text-green-600 dark:text-green-400" />
-                  </div>
+            <Card className="p-6 hover:shadow-md transition-shadow">
+              <div className="text-center space-y-4">
+                <div className="w-12 h-12 mx-auto rounded-full bg-green-100 dark:bg-green-900/20 flex items-center justify-center">
+                  <Car className="h-6 w-6 text-green-600 dark:text-green-400" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2" data-testid="text-assign-vehicle-title">
-                  Assign or Update a Vehicle
-                </h3>
-                <p className="text-sm text-muted-foreground mb-4" data-testid="text-assign-vehicle-description">
-                  Assign Existing Vehicles to Users
-                </p>
+                <div>
+                  <h3 className="font-semibold text-sm mb-2" data-testid="text-assign-vehicle-title">
+                    Assign or Update a Vehicle
+                  </h3>
+                  <p className="text-xs text-muted-foreground mb-4" data-testid="text-assign-vehicle-description">
+                    Assign Existing Vehicles to Users
+                  </p>
+                </div>
                 <Link href="/assign-vehicle-location">
-                  <Button className="w-full group-hover:bg-green-600 transition-colors" data-testid="button-start-assignment">
+                  <Button size="sm" className="w-full" data-testid="button-start-assignment">
                     Start Assignment
-                    <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </Link>
-              </CardContent>
+              </div>
             </Card>
 
             {/* Onboarding */}
-            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="p-3 rounded-lg bg-purple-100 dark:bg-purple-900/20">
-                    <UserPlus className="h-6 w-6 text-purple-600 dark:text-purple-400" />
-                  </div>
+            <Card className="p-6 hover:shadow-md transition-shadow">
+              <div className="text-center space-y-4">
+                <div className="w-12 h-12 mx-auto rounded-full bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center">
+                  <UserPlus className="h-6 w-6 text-purple-600 dark:text-purple-400" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2" data-testid="text-onboarding-title">
-                  Onboarding
-                </h3>
-                <p className="text-sm text-muted-foreground mb-4" data-testid="text-onboarding-description">
-                  Process New Employee Onboarding
-                </p>
+                <div>
+                  <h3 className="font-semibold text-sm mb-2" data-testid="text-onboarding-title">
+                    Onboarding
+                  </h3>
+                  <p className="text-xs text-muted-foreground mb-4" data-testid="text-onboarding-description">
+                    Process New Employee Onboarding
+                  </p>
+                </div>
                 <Link href="/onboard-hire">
-                  <Button className="w-full group-hover:bg-purple-600 transition-colors" data-testid="button-start-onboarding">
+                  <Button size="sm" className="w-full" data-testid="button-start-onboarding">
                     Start Onboarding
-                    <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </Link>
-              </CardContent>
+              </div>
             </Card>
 
             {/* Offboarding */}
-            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="p-3 rounded-lg bg-red-100 dark:bg-red-900/20">
-                    <UserMinus className="h-6 w-6 text-red-600 dark:text-red-400" />
-                  </div>
+            <Card className="p-6 hover:shadow-md transition-shadow">
+              <div className="text-center space-y-4">
+                <div className="w-12 h-12 mx-auto rounded-full bg-red-100 dark:bg-red-900/20 flex items-center justify-center">
+                  <UserMinus className="h-6 w-6 text-red-600 dark:text-red-400" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2" data-testid="text-offboarding-title">
-                  Offboarding
-                </h3>
-                <p className="text-sm text-muted-foreground mb-4" data-testid="text-offboarding-description">
-                  Remove Vehicles or Locations from the System
-                </p>
+                <div>
+                  <h3 className="font-semibold text-sm mb-2" data-testid="text-offboarding-title">
+                    Offboarding
+                  </h3>
+                  <p className="text-xs text-muted-foreground mb-4" data-testid="text-offboarding-description">
+                    Remove Vehicles or Locations from the System
+                  </p>
+                </div>
                 <Link href="/offboard-vehicle-location">
-                  <Button className="w-full group-hover:bg-red-600 transition-colors" data-testid="button-start-offboarding">
+                  <Button size="sm" className="w-full" data-testid="button-start-offboarding">
                     Start Offboarding
-                    <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </Link>
-              </CardContent>
+              </div>
             </Card>
 
             {/* Other */}
-            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="p-3 rounded-lg bg-gray-100 dark:bg-gray-900/20">
-                    <Settings className="h-6 w-6 text-gray-600 dark:text-gray-400" />
-                  </div>
+            <Card className="p-6 hover:shadow-md transition-shadow">
+              <div className="text-center space-y-4">
+                <div className="w-12 h-12 mx-auto rounded-full bg-gray-100 dark:bg-gray-900/20 flex items-center justify-center">
+                  <Settings className="h-6 w-6 text-gray-600 dark:text-gray-400" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2" data-testid="text-other-title">
-                  Other
-                </h3>
-                <p className="text-sm text-muted-foreground mb-4" data-testid="text-other-description">
-                  Access Additional Tools and Features
-                </p>
+                <div>
+                  <h3 className="font-semibold text-sm mb-2" data-testid="text-other-title">
+                    Other
+                  </h3>
+                  <p className="text-xs text-muted-foreground mb-4" data-testid="text-other-description">
+                    Access Additional Tools and Features
+                  </p>
+                </div>
                 <Link href="/queue-management">
-                  <Button variant="outline" className="w-full group-hover:bg-gray-50 transition-colors" data-testid="button-explore-tools">
+                  <Button variant="outline" size="sm" className="w-full" data-testid="button-explore-tools">
                     Explore Tools
-                    <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </Link>
-              </CardContent>
+              </div>
             </Card>
           </div>
         </div>
