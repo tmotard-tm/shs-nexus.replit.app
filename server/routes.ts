@@ -1,8 +1,29 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, QueueModule } from "@shared/schema";
 import { z } from "zod";
+
+// Simple session store for demo purposes
+const sessions = new Map<string, { userId: string; username: string; expiresAt: Date }>();
+
+// Authentication middleware
+function requireAuth(req: any, res: any, next: any): any {
+  const sessionId = req.headers.cookie?.match(/sessionId=([^;]+)/)?.[1];
+  
+  if (!sessionId) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  
+  const session = sessions.get(sessionId);
+  if (!session || session.expiresAt < new Date()) {
+    sessions.delete(sessionId);
+    return res.status(401).json({ message: "Session expired" });
+  }
+  
+  req.user = { id: session.userId, username: session.username };
+  return next();
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth routes
@@ -15,7 +36,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // In a real app, you'd use proper session management/JWT
+      // Create session
+      const sessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      
+      sessions.set(sessionId, {
+        userId: user.id,
+        username: user.username,
+        expiresAt
+      });
+
+      // Set httpOnly cookie
+      res.cookie('sessionId', sessionId, {
+        httpOnly: true,
+        secure: false, // Set to true in production with HTTPS
+        sameSite: 'lax',
+        expires: expiresAt
+      });
+
       res.json({ user: { ...user, password: undefined } });
     } catch (error) {
       res.status(500).json({ message: "Login failed" });
@@ -699,8 +737,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Unified Queue Aggregator API routes for multi-queue management
-  app.get("/api/queues", async (req, res) => {
+  app.get("/api/queues", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      
       const modulesParam = req.query.modules as string;
       const status = req.query.status as string;
       
@@ -708,18 +751,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "modules parameter is required" });
       }
       
-      const modules = modulesParam.split(',').map(m => m.trim()) as any[];
+      const requestedModules = modulesParam.split(',').map(m => m.trim()) as any[];
       
       // Validate modules
       const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
-      const invalidModules = modules.filter(m => !validModules.includes(m));
+      const invalidModules = requestedModules.filter(m => !validModules.includes(m));
       if (invalidModules.length > 0) {
         return res.status(400).json({ 
           message: `Invalid modules: ${invalidModules.join(', ')}. Valid modules: ${validModules.join(', ')}` 
         });
       }
       
-      const items = await storage.getUnifiedQueueItems(modules, status);
+      // Enforce access control
+      let allowedModules: string[];
+      if (currentUser.role === "superadmin") {
+        allowedModules = requestedModules; // Superadmin can access all
+      } else if (currentUser.accessibleQueues && currentUser.accessibleQueues.length > 0) {
+        allowedModules = requestedModules.filter(module => currentUser.accessibleQueues!.includes(module));
+      } else {
+        return res.status(403).json({ message: "No queue access permissions" });
+      }
+      
+      if (allowedModules.length === 0) {
+        return res.status(403).json({ message: "Access denied to requested queues" });
+      }
+      
+      const items = await storage.getUnifiedQueueItems(allowedModules as QueueModule[], status);
       res.json(items);
     } catch (error) {
       console.error('Error fetching unified queue items:', error);
@@ -727,26 +784,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.get("/api/queues/stats", async (req, res) => {
+  app.get("/api/queues/stats", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      
       const modulesParam = req.query.modules as string;
       
       if (!modulesParam) {
         return res.status(400).json({ message: "modules parameter is required" });
       }
       
-      const modules = modulesParam.split(',').map(m => m.trim()) as any[];
+      const requestedModules = modulesParam.split(',').map(m => m.trim()) as any[];
       
       // Validate modules
       const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
-      const invalidModules = modules.filter(m => !validModules.includes(m));
+      const invalidModules = requestedModules.filter(m => !validModules.includes(m));
       if (invalidModules.length > 0) {
         return res.status(400).json({ 
           message: `Invalid modules: ${invalidModules.join(', ')}. Valid modules: ${validModules.join(', ')}` 
         });
       }
       
-      const stats = await storage.getUnifiedQueueStats(modules);
+      // Enforce access control
+      let allowedModules: string[];
+      if (currentUser.role === "superadmin") {
+        allowedModules = requestedModules; // Superadmin can access all
+      } else if (currentUser.accessibleQueues && currentUser.accessibleQueues.length > 0) {
+        allowedModules = requestedModules.filter(module => currentUser.accessibleQueues!.includes(module));
+      } else {
+        return res.status(403).json({ message: "No queue access permissions" });
+      }
+      
+      if (allowedModules.length === 0) {
+        return res.status(403).json({ message: "Access denied to requested queues" });
+      }
+      
+      const stats = await storage.getUnifiedQueueStats(allowedModules as QueueModule[]);
       res.json(stats);
     } catch (error) {
       console.error('Error fetching unified queue stats:', error);
@@ -754,8 +830,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.patch("/api/queues/:module/:id/assign", async (req, res) => {
+  app.patch("/api/queues/:module/:id/assign", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      
       const { module, id } = req.params;
       const { assigneeId } = req.body;
       
@@ -770,6 +851,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
+      // Enforce access control
+      if (currentUser.role !== "superadmin" && 
+          (!currentUser.accessibleQueues || !currentUser.accessibleQueues.includes(module as any))) {
+        return res.status(403).json({ message: "Access denied to this queue" });
+      }
+      
       const updatedItem = await storage.assignUnifiedQueueItem(module as any, id, assigneeId);
       if (!updatedItem) {
         return res.status(404).json({ message: "Queue item not found" });
@@ -782,8 +869,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.patch("/api/queues/:module/:id/complete", async (req, res) => {
+  app.patch("/api/queues/:module/:id/complete", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      
       const { module, id } = req.params;
       const { completedBy } = req.body;
       
@@ -796,6 +888,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ 
           message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 
         });
+      }
+      
+      // Enforce access control
+      if (currentUser.role !== "superadmin" && 
+          (!currentUser.accessibleQueues || !currentUser.accessibleQueues.includes(module as any))) {
+        return res.status(403).json({ message: "Access denied to this queue" });
       }
       
       const updatedItem = await storage.completeUnifiedQueueItem(module as any, id, completedBy);

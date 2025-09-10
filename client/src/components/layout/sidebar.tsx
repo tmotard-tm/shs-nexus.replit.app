@@ -14,31 +14,15 @@ export function Sidebar() {
 
   if (!user) return null;
 
-  const getDepartmentQueueItem = () => {
-    if (user?.role === "superadmin") {
-      return { name: "All Queues", href: "/queue-management", icon: Clock };
-    }
-    
-    switch (user?.department) {
-      case "NTAO":
-        return { name: "NTAO Queue", href: "/ntao-queue", icon: Clock };
-      case "Assets Management":
-        return { name: "Assets Queue", href: "/assets-queue", icon: Clock };
-      case "Inventory Control":
-        return { name: "Inventory Queue", href: "/inventory-queue", icon: Clock };
-      case "Fleet Management":
-        return { name: "Fleet Queue", href: "/fleet-queue", icon: Clock };
-      case "Decommissions":
-        return { name: "Decommissions Queue", href: "/decommissions-queue", icon: Clock };
-      default:
-        return { name: "Queue Management", href: "/queue-management", icon: Clock };
-    }
+  const getQueueManagementItem = () => {
+    // Everyone now uses the unified queue management dashboard
+    return { name: "Queue Management", href: "/queue-management", icon: Clock };
   };
 
   const navigation = [
     { name: "Home", href: "/", icon: Home },
     { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
-    getDepartmentQueueItem(),
+    getQueueManagementItem(),
     { name: "Requests", href: "/requests", icon: FileText },
     { name: "Approvals", href: "/approvals", icon: CheckCircle },
     { name: "API Management", href: "/api-management", icon: Settings },
