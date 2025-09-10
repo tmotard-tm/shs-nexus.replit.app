@@ -262,11 +262,48 @@ export default function OnboardHire() {
               region: employeeForm.region,
               district: employeeForm.district,
               specialties: employeeForm.isGeneralist ? specialtyOptions.filter(s => s !== "HVAC") : employeeForm.specialties,
-              techId: employeeForm.techId
+              techId: employeeForm.techId,
+              address: {
+                street: employeeForm.street,
+                city: employeeForm.city,
+                state: employeeForm.state,
+                zipCode: employeeForm.zipCode
+              }
             },
             workLocation: vehicleAssignment.workZipcode || 'TBD',
             autoTriggered: true,
-            triggeredBy: "employee_onboarding"
+            triggeredBy: "employee_onboarding",
+            ...(dept === "Assets & Supplies" && {
+              checklist: [
+                {
+                  id: "phone_order",
+                  task: "Verify new phone order has been placed",
+                  description: "Confirm mobile phone order is submitted for new employee",
+                  completed: false,
+                  required: true
+                },
+                {
+                  id: "uniform_order", 
+                  task: "Verify new uniform order has been placed",
+                  description: "Confirm uniform/apparel order is submitted for new employee",
+                  completed: false,
+                  required: true
+                },
+                {
+                  id: "tpms_update",
+                  task: "Update TPMS with employee address and tech ID",
+                  description: `Update TPMS system with employee address: ${employeeForm.street}, ${employeeForm.city}, ${employeeForm.state} ${employeeForm.zipCode} and Tech ID: ${employeeForm.techId}`,
+                  completed: false,
+                  required: true
+                }
+              ],
+              instructions: [
+                "Complete all checklist items for new employee setup",
+                "Verify all orders are placed in appropriate systems", 
+                "Update TPMS with accurate employee information",
+                "Mark task complete only after all checklist items are verified"
+              ]
+            })
           })
         });
         requestsCreated.push(`${dept} ${taskType.toLowerCase()}`);
