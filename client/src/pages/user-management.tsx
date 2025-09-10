@@ -243,6 +243,24 @@ export default function UserManagement() {
                 )}
               </div>
               <div>
+                <Label htmlFor="department">Department</Label>
+                <Select value={form.watch("department") || ""} onValueChange={(value) => form.setValue("department", value || null)}>
+                  <SelectTrigger data-testid="select-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
+                    <SelectValue placeholder="Select department (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">No Department</SelectItem>
+                    <SelectItem value="NTAO">NTAO</SelectItem>
+                    <SelectItem value="Assets Management">Assets Management</SelectItem>
+                    <SelectItem value="Inventory Control">Inventory Control</SelectItem>
+                    <SelectItem value="Fleet Management">Fleet Management</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.formState.errors.department && (
+                  <p className="text-sm text-red-500">{form.formState.errors.department.message}</p>
+                )}
+              </div>
+              <div>
                 <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
@@ -337,6 +355,7 @@ export default function UserManagement() {
                   <TableHead>Username</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
+                  <TableHead>Department</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -352,6 +371,15 @@ export default function UserManagement() {
                         {user.role === 'superadmin' ? 'Super Admin' : user.role === 'agent' ? 'Agent' : 'Field User'}
                       </Badge>
                     </TableCell>
+                    <TableCell data-testid={`text-department-${user.id}`}>
+                      {user.department ? (
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900 dark:text-blue-100">
+                          {user.department}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">No Department</span>
+                      )}
+                    </TableCell>
                     <TableCell data-testid={`text-created-${user.id}`}>
                       {new Date(user.createdAt).toLocaleDateString()}
                     </TableCell>
@@ -366,6 +394,7 @@ export default function UserManagement() {
                               username: user.username,
                               email: user.email,
                               role: user.role,
+                              department: user.department,
                             });
                           }}
                           data-testid={`button-edit-${user.id}`}
@@ -430,6 +459,24 @@ export default function UserManagement() {
                   <SelectItem value="superadmin">Super Admin</SelectItem>
                   <SelectItem value="agent">Agent</SelectItem>
                   <SelectItem value="field">Field User</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="edit-department">Department</Label>
+              <Select 
+                value={editForm.watch("department") || ""} 
+                onValueChange={(value) => editForm.setValue("department", value || null)}
+              >
+                <SelectTrigger data-testid="select-edit-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
+                  <SelectValue placeholder="Select department (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">No Department</SelectItem>
+                  <SelectItem value="NTAO">NTAO</SelectItem>
+                  <SelectItem value="Assets Management">Assets Management</SelectItem>
+                  <SelectItem value="Inventory Control">Inventory Control</SelectItem>
+                  <SelectItem value="Fleet Management">Fleet Management</SelectItem>
                 </SelectContent>
               </Select>
             </div>
