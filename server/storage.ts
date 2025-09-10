@@ -131,6 +131,38 @@ export class MemStorage implements IStorage {
   private async initializeDefaultData() {
     // Create Enterprise ID users with new role system
     const enterpriseUsers: User[] = [
+      // Demo users matching login page credentials
+      {
+        id: randomUUID(),
+        username: "ENT1234",
+        email: "requester@sears.com",
+        password: "passwords", // In real app, this would be hashed
+        role: "requester",
+        department: "NTAO",
+        createdAt: new Date(),
+        accessibleQueues: ['ntao'],
+      },
+      {
+        id: randomUUID(),
+        username: "ENT1235",
+        email: "approver@sears.com",
+        password: "passwords", // In real app, this would be hashed
+        role: "approver",
+        department: "Assets Management",
+        createdAt: new Date(),
+        accessibleQueues: ['assets', 'fleet'],
+      },
+      {
+        id: randomUUID(),
+        username: "ADMIN123",
+        email: "admin@sears.com",
+        password: "passwords", // In real app, this would be hashed
+        role: "admin",
+        department: null,
+        createdAt: new Date(),
+        accessibleQueues: ['ntao', 'assets', 'inventory', 'fleet'],
+      },
+      // Additional role-specific users
       {
         id: randomUUID(),
         username: "FIELD001",
