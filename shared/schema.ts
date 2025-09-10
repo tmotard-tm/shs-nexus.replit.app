@@ -3,6 +3,9 @@ import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date } fr
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// Queue module types for unified queue access
+export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet' | 'decommissions';
+
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
@@ -137,7 +140,9 @@ export const insertQueueItemSchema = createInsertSchema(queueItems).omit({
 });
 
 // Types
-export type User = typeof users.$inferSelect;
+export type User = typeof users.$inferSelect & {
+  accessibleQueues?: QueueModule[];
+};
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Request = typeof requests.$inferSelect;
 export type InsertRequest = z.infer<typeof insertRequestSchema>;
@@ -149,3 +154,8 @@ export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = z.infer<typeof insertVehicleSchema>;
 export type QueueItem = typeof queueItems.$inferSelect;
 export type InsertQueueItem = z.infer<typeof insertQueueItemSchema>;
+
+// Combined queue item with module information for unified queue access
+export type CombinedQueueItem = QueueItem & {
+  module: QueueModule;
+};
