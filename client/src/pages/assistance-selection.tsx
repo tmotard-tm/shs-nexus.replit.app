@@ -301,7 +301,7 @@ export default function AssistanceSelection() {
             <h3 className="text-xl font-semibold mb-6 text-center" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>
               Main Workflow Actions
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 max-w-5xl mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 max-w-4xl mx-auto">
               {mainWorkflowOptions.map((option) => {
                 const Icon = option.icon;
                 return (
@@ -332,7 +332,7 @@ export default function AssistanceSelection() {
                           option.action();
                         }}
                       >
-                        {option.id === 'create-vehicle-location' ? 'Start Vehicle Creation' :
+                        {option.id === 'create-vehicle-location' ? 'Create Vehicle' :
                          option.id === 'assign-vehicle-location' ? 'Start Assignment' :
                          option.id === 'onboard-hire' ? 'Start Onboarding' :
                          option.id === 'offboard-vehicle-location' ? 'Start Offboarding' :
