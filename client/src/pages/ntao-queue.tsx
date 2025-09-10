@@ -465,9 +465,9 @@ function NotesSection({ item }: { item: QueueItem }) {
   // Update notes mutation
   const updateNotesMutation = useMutation({
     mutationFn: (newNotes: string) =>
-      apiRequest("PATCH", `/api/queue/${item.id}/notes`, { notes: newNotes }),
+      apiRequest("PATCH", `/api/ntao-queue/${item.id}/notes`, { notes: newNotes }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "NTAO"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ntao-queue"] });
       setIsEditing(false);
       toast({
         title: "Success",

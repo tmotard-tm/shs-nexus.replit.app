@@ -465,9 +465,9 @@ function NotesSection({ item }: { item: QueueItem }) {
   // Update notes mutation
   const updateNotesMutation = useMutation({
     mutationFn: (newNotes: string) =>
-      apiRequest("PATCH", `/api/queue/${item.id}/notes`, { notes: newNotes }),
+      apiRequest("PATCH", `/api/inventory-queue/${item.id}/notes`, { notes: newNotes }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "Inventory Control"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory-queue"] });
       setIsEditing(false);
       toast({
         title: "Success",
