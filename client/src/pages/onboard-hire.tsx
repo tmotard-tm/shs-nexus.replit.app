@@ -179,7 +179,7 @@ export default function OnboardHire() {
               startDate: employeeForm.startDate,
               region: employeeForm.region,
               district: employeeForm.district,
-              specialties: employeeForm.isGeneralist ? specialtyOptions : employeeForm.specialties,
+              specialties: employeeForm.isGeneralist ? specialtyOptions.filter(s => s !== "HVAC") : employeeForm.specialties,
               techId: employeeForm.techId
             },
             workLocation: vehicleAssignment.workZipcode || 'TBD',
@@ -527,19 +527,20 @@ export default function OnboardHire() {
                             id="generalist"
                             checked={employeeForm.isGeneralist}
                             onCheckedChange={(checked) => {
+                              const generalistSpecialties = specialtyOptions.filter(s => s !== "HVAC");
                               setEmployeeForm(prev => ({
                                 ...prev,
                                 isGeneralist: !!checked,
-                                specialties: checked ? specialtyOptions : []
+                                specialties: checked ? generalistSpecialties : []
                               }));
                             }}
                             data-testid="checkbox-generalist"
                           />
                           <Label htmlFor="generalist" className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                            Generalist (All Specialties)
+                            Generalist (All Specialties except HVAC)
                           </Label>
                           <span className="text-xs text-blue-600 dark:text-blue-300 ml-2">
-                            Check this if the employee handles all specialty types
+                            Check this if the employee handles all specialty types (HVAC requires separate selection)
                           </span>
                         </div>
 
@@ -579,7 +580,7 @@ export default function OnboardHire() {
                             <div className="flex flex-wrap gap-1">
                               {employeeForm.isGeneralist ? (
                                 <span className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 font-medium">
-                                  🌟 Generalist (All Specialties)
+                                  🌟 Generalist (All Specialties except HVAC)
                                 </span>
                               ) : (
                                 employeeForm.specialties.map((specialty) => (
