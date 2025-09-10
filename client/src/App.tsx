@@ -26,6 +26,7 @@ import NTAOQueuePage from "@/pages/ntao-queue";
 import AssetsQueuePage from "@/pages/assets-queue";
 import InventoryQueuePage from "@/pages/inventory-queue";
 import FleetQueuePage from "@/pages/fleet-queue";
+import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
@@ -193,6 +194,12 @@ function Router() {
       <Route path="/fleet-queue">
         <ProtectedRoute>
           <FleetQueuePage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/decommissions-queue">
+        <ProtectedRoute>
+          <DecommissionsQueuePage />
         </ProtectedRoute>
       </Route>
 

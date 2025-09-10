@@ -28,6 +28,8 @@ export function Sidebar() {
         return { name: "Inventory Queue", href: "/inventory-queue", icon: Clock };
       case "Fleet Management":
         return { name: "Fleet Queue", href: "/fleet-queue", icon: Clock };
+      case "Decommissions":
+        return { name: "Decommissions Queue", href: "/decommissions-queue", icon: Clock };
       default:
         return { name: "Queue Management", href: "/queue-management", icon: Clock };
     }
