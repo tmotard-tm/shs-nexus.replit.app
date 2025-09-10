@@ -209,7 +209,7 @@ export default function QueueManagement() {
             <div>
               <Label className="text-muted-foreground text-sm">Filter by Agent:</Label>
               <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-                <SelectTrigger className="bg-background border-border">
+                <SelectTrigger className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                   <SelectValue placeholder="All Agents" />
                 </SelectTrigger>
                 <SelectContent>
@@ -227,7 +227,7 @@ export default function QueueManagement() {
                 placeholder="Request ID..."
                 value={searchRequestId}
                 onChange={(e) => setSearchRequestId(e.target.value)}
-                className="bg-background border-border"
+                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
               />
             </div>
             
@@ -237,14 +237,14 @@ export default function QueueManagement() {
                 placeholder="Service Order..."
                 value={searchServiceOrder}
                 onChange={(e) => setSearchServiceOrder(e.target.value)}
-                className="bg-background border-border"
+                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
               />
             </div>
             
             <div>
               <Label className="text-muted-foreground text-sm">Resolution:</Label>
               <Select value={selectedResolution} onValueChange={setSelectedResolution}>
-                <SelectTrigger className="bg-background border-border">
+                <SelectTrigger className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                   <SelectValue placeholder="All Resolutions" />
                 </SelectTrigger>
                 <SelectContent>
@@ -261,7 +261,7 @@ export default function QueueManagement() {
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="bg-background border-border"
+                className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100"
               />
             </div>
             
@@ -271,7 +271,7 @@ export default function QueueManagement() {
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="bg-background border-border"
+                className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100"
               />
             </div>
           </div>
@@ -613,7 +613,7 @@ function OnboardingFormData({ data }: { data: any }) {
 
 // Vehicle Assignment form data display
 function VehicleAssignmentFormData({ data }: { data: any }) {
-  const { employee, vehicle, supplyOrders, orderMessages } = data;
+  const { employee, vehicle, supplyOrders, orderMessages } = data || {};
 
   return (
     <div className="space-y-4">
@@ -623,16 +623,16 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Name</Label>
-            <p>{employee.name}</p>
+            <p>{employee?.name || 'N/A'}</p>
           </div>
           <div>
             <Label>Enterprise ID</Label>
-            <p>{employee.enterpriseId}</p>
+            <p>{employee?.enterpriseId || 'N/A'}</p>
           </div>
           <div className="col-span-2">
             <Label>Specialties</Label>
             <div className="flex flex-wrap gap-1 mt-1">
-              {employee.specialties && employee.specialties.map((specialty: string, index: number) => (
+              {employee?.specialties && employee.specialties.map((specialty: string, index: number) => (
                 <Badge key={index} variant="outline" className="text-xs">{specialty}</Badge>
               ))}
             </div>
@@ -646,19 +646,19 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Vehicle</Label>
-            <p>{vehicle.year} {vehicle.make} {vehicle.model}</p>
+            <p>{vehicle?.year || 'N/A'} {vehicle?.make || ''} {vehicle?.model || ''}</p>
           </div>
           <div>
             <Label>License Plate</Label>
-            <p>{vehicle.licensePlate}</p>
+            <p>{vehicle?.licensePlate || 'N/A'}</p>
           </div>
           <div>
             <Label>VIN</Label>
-            <p>{vehicle.vin}</p>
+            <p>{vehicle?.vin || 'N/A'}</p>
           </div>
           <div>
             <Label>Location</Label>
-            <p>{vehicle.location}</p>
+            <p>{vehicle?.location || 'N/A'}</p>
           </div>
         </div>
       </div>
