@@ -156,19 +156,33 @@ export default function OnboardHire() {
     const requestsCreated = [];
     
     try {
-      // Create Assets & Supplies queue task if triggered
+      // Create separate department tasks for onboarding
+      const onboardingDepartmentTasks = [];
+      
       if (supplyOrders.assetsSupplies) {
-        const assetsQueueItem = await apiRequest("POST", "/api/queue", {
-          workflowType: "assets_supplies",
-          title: `Assets & Supplies Order for Day 1 Supplies (Auto-triggered)`,
-          description: `Day 1 supplies and assets for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).join(', ') || 'None specified'}. Enterprise ID: ${employeeForm.enterpriseId}.`,
-          priority: "high",
+        onboardingDepartmentTasks.push({ dept: 'Assets & Supplies', priority: 'high', taskType: 'Day 1 Supplies' });
+      }
+      
+      if (supplyOrders.ntaoPartsStock) {
+        onboardingDepartmentTasks.push({ dept: 'NTAO', priority: 'medium', taskType: 'Parts Stock Allocation' });
+      }
+
+      // Create separate queue tasks for each department
+      for (const { dept, priority, taskType } of onboardingDepartmentTasks) {
+        const deptQueueItem = await apiRequest("POST", "/api/queue", {
+          workflowType: "department_notification",
+          title: `${dept} - Employee Onboarding Task (Auto-triggered)`,
+          description: `${taskType} task for ${dept} regarding new employee onboarding. Employee: ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}). Department: ${employeeForm.department}. Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}.`,
+          priority: priority,
           requesterId: user?.id || "system",
           data: JSON.stringify({
             submitter: {
-              name: user?.name || user?.enterpriseId || "Unknown User",
+              name: user?.username || user?.email || "Unknown User",
               submittedAt: new Date().toISOString()
             },
+            department: dept,
+            notificationType: "Employee Onboarding",
+            taskType: taskType,
             employee: {
               firstName: employeeForm.firstName,
               lastName: employeeForm.lastName,
@@ -177,48 +191,16 @@ export default function OnboardHire() {
               startDate: employeeForm.startDate,
               region: employeeForm.region,
               district: employeeForm.district,
-              specialties: [employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty]
-            },
-            orderType: "Day 1 Assets & Supplies",
-            autoTriggered: true,
-            triggeredBy: "onboarding"
-          })
-        });
-        requestsCreated.push("Assets & Supplies order");
-        orderMessages.push("Assets & Supplies order triggered for Day 1 supplies");
-      }
-      
-      // Create NTAO parts stock queue task if triggered
-      if (supplyOrders.ntaoPartsStock) {
-        const ntaoQueueItem = await apiRequest("POST", "/api/queue", {
-          workflowType: "ntao_parts",
-          title: `NTAO Order for Parts Stock (Auto-triggered)`,
-          description: `Parts stock allocation for new technician ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Work location: ${vehicleAssignment.workZipcode || 'TBD'}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).join(', ') || 'None specified'}. Tech ID: ${employeeForm.techId || 'TBD'}. Enterprise ID: ${employeeForm.enterpriseId}.`,
-          priority: "medium",
-          requesterId: user?.id || "system",
-          data: JSON.stringify({
-            submitter: {
-              name: user?.name || user?.enterpriseId || "Unknown User",
-              submittedAt: new Date().toISOString()
-            },
-            employee: {
-              firstName: employeeForm.firstName,
-              lastName: employeeForm.lastName,
-              enterpriseId: employeeForm.enterpriseId,
-              techId: employeeForm.techId,
-              department: employeeForm.department,
-              region: employeeForm.region,
-              district: employeeForm.district,
-              specialties: [employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty]
+              specialties: [employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty],
+              techId: employeeForm.techId
             },
             workLocation: vehicleAssignment.workZipcode || 'TBD',
-            orderType: "NTAO Parts Stock",
             autoTriggered: true,
-            triggeredBy: "onboarding"
+            triggeredBy: "employee_onboarding"
           })
         });
-        requestsCreated.push("NTAO parts stock order");
-        orderMessages.push("NTAO order triggered for parts stock");
+        requestsCreated.push(`${dept} ${taskType.toLowerCase()}`);
+        orderMessages.push(`${dept} task created for ${taskType.toLowerCase()}`);
       }
       
       // Handle vehicle assignment
