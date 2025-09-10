@@ -205,7 +205,7 @@ export default function QueueManagement() {
 
         {/* Filters */}
         <div className="bg-card rounded-lg p-4 mb-6 border border-border">
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
             <div>
               <Label className="text-muted-foreground text-sm">Filter by Agent:</Label>
               <Select value={selectedAgent} onValueChange={setSelectedAgent}>
@@ -219,26 +219,6 @@ export default function QueueManagement() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            
-            <div>
-              <Label className="text-muted-foreground text-sm">Search Request ID:</Label>
-              <Input
-                placeholder="Request ID..."
-                value={searchRequestId}
-                onChange={(e) => setSearchRequestId(e.target.value)}
-                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
-              />
-            </div>
-            
-            <div>
-              <Label className="text-muted-foreground text-sm">Service Order:</Label>
-              <Input
-                placeholder="Service Order..."
-                value={searchServiceOrder}
-                onChange={(e) => setSearchServiceOrder(e.target.value)}
-                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
-              />
             </div>
             
             <div>
@@ -282,8 +262,6 @@ export default function QueueManagement() {
               size="sm" 
               onClick={() => {
                 setSelectedAgent("all");
-                setSearchRequestId("");
-                setSearchServiceOrder("");
                 setSelectedResolution("all");
                 setDateFrom("");
                 setDateTo("");
