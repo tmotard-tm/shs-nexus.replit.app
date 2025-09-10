@@ -424,29 +424,6 @@ export default function AssistanceSelection() {
           </div>
 
           {/* Additional Tools Section */}
-          <div className="mt-8 flex justify-center">
-            <div className="w-full max-w-md">
-              <Card 
-                className="cursor-pointer hover:shadow-lg transition-all duration-200 backdrop-blur-sm border-white/20"
-                style={{ backgroundColor: 'rgba(255, 255, 255, 0.9)' }}
-                onClick={() => setLocation("/dashboard")}
-                data-testid="card-other"
-              >
-                <CardHeader className="text-center pb-3">
-                  <div className="w-12 h-12 rounded-lg bg-gray-500 flex items-center justify-center mx-auto mb-3">
-                    <HelpCircle className="h-6 w-6 text-white" />
-                  </div>
-                  <CardTitle className="text-lg text-gray-800">Other</CardTitle>
-                  <CardDescription className="text-gray-600">Access Additional Tools and Features</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button variant="outline" className="w-full" data-testid="button-other">
-                    Explore Tools <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
           </div>
       </main>
 
