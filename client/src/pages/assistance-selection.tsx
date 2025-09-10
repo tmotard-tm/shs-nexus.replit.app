@@ -105,8 +105,8 @@ export default function AssistanceSelection() {
             </p>
           </div>
 
-          {/* Top horizontal stats bar */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          {/* Analytics Dashboard */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
             <Card 
               className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
               onClick={() => setLocation("/active-vehicles")}
@@ -116,17 +116,6 @@ export default function AssistanceSelection() {
                 <Car className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                 <p className="text-lg font-bold text-black" data-testid="text-vehicles-count">{getActiveVehicleCount()}</p>
                 <p className="text-sm text-black">Active Vehicles</p>
-              </CardContent>
-            </Card>
-            <Card 
-              className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-              onClick={() => setIsMapOpen(true)}
-              data-testid="card-vehicle-map"
-            >
-              <CardContent className="flex flex-col items-center text-center p-4">
-                <Map className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                <p className="text-lg font-bold text-black" data-testid="text-map-button">MAP</p>
-                <p className="text-sm text-black">View on Map</p>
               </CardContent>
             </Card>
             <Card 
@@ -149,6 +138,17 @@ export default function AssistanceSelection() {
                 <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                 <p className="text-lg font-bold text-black" data-testid="text-unassigned-count">{getUnassignedVehicles().length}</p>
                 <p className="text-sm text-black">Unassigned Vehicles</p>
+              </CardContent>
+            </Card>
+            <Card 
+              className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
+              onClick={() => setIsMapOpen(true)}
+              data-testid="card-vehicle-map"
+            >
+              <CardContent className="flex flex-col items-center text-center p-4">
+                <Map className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
+                <p className="text-lg font-bold text-black" data-testid="text-map-button">MAP</p>
+                <p className="text-sm text-black">View on Map</p>
               </CardContent>
             </Card>
           </div>
