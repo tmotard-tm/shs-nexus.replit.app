@@ -288,7 +288,7 @@ export default function AssistanceSelection() {
                   </div>
                   <div>
                     <CardTitle className="text-lg text-gray-800">Offboarding</CardTitle>
-                    <CardDescription className="text-gray-600">Remove Vehicles or Locations from the System</CardDescription>
+                    <CardDescription className="text-gray-600">Offboard Employee from Vehicle or Complete Employee Offboarding</CardDescription>
                   </div>
                 </div>
               </CardHeader>
