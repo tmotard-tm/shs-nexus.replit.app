@@ -35,9 +35,8 @@ export default function OnboardHire() {
     techId: "",
     proposedRouteStartDate: "",
 
-    primarySpecialty: "",
-    secondarySpecialty: "",
-    tertiarySpecialty: ""
+    specialties: [] as string[],
+    isGeneralist: false
   });
 
   const [onboardingTasks, setOnboardingTasks] = useState([
@@ -130,23 +129,11 @@ export default function OnboardHire() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate required specialty fields
-    if (!employeeForm.primarySpecialty || !employeeForm.secondarySpecialty || !employeeForm.tertiarySpecialty) {
+    // Validate specialty fields
+    if (!employeeForm.isGeneralist && employeeForm.specialties.length === 0) {
       toast({
         title: "Validation Error",
-        description: "All three specialties (Primary, Secondary, and Tertiary) are required.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    // Check for duplicate specialties
-    const specialties = [employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty];
-    const uniqueSpecialties = new Set(specialties);
-    if (uniqueSpecialties.size !== specialties.length) {
-      toast({
-        title: "Validation Error", 
-        description: "Each specialty must be different. Please select three different specialties.",
+        description: "Please select at least one specialty or mark as generalist.",
         variant: "destructive"
       });
       return;
@@ -191,7 +178,7 @@ export default function OnboardHire() {
               startDate: employeeForm.startDate,
               region: employeeForm.region,
               district: employeeForm.district,
-              specialties: [employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty],
+              specialties: employeeForm.isGeneralist ? specialtyOptions : employeeForm.specialties,
               techId: employeeForm.techId
             },
             workLocation: vehicleAssignment.workZipcode || 'TBD',
@@ -281,9 +268,8 @@ export default function OnboardHire() {
       techId: "",
       proposedRouteStartDate: "",
   
-      primarySpecialty: "",
-      secondarySpecialty: "",
-      tertiarySpecialty: ""
+      specialties: [],
+      isGeneralist: false
     });
 
     setOnboardingTasks(tasks => tasks.map(task => ({ ...task, completed: false })));
@@ -528,78 +514,83 @@ export default function OnboardHire() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                        {/* Primary Specialty */}
-                        <div className="space-y-2">
-                          <Label htmlFor="primarySpecialty">Primary Specialty *</Label>
-                          <Select 
-                            value={employeeForm.primarySpecialty} 
-                            onValueChange={(value) => setEmployeeForm(prev => ({ ...prev, primarySpecialty: value }))}
-                          >
-                            <SelectTrigger data-testid="select-primary-specialty">
-                              <SelectValue placeholder="Select specialty" />
-                            </SelectTrigger>
-                            <SelectContent>
+                      {/* Employee Specialties */}
+                      <div className="space-y-4 mb-4">
+                        <div className="flex items-center space-x-3">
+                          <Label className="text-base font-medium">Employee Specialties *</Label>
+                        </div>
+                        
+                        {/* Generalist Option */}
+                        <div className="flex items-center space-x-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                          <Checkbox
+                            id="generalist"
+                            checked={employeeForm.isGeneralist}
+                            onCheckedChange={(checked) => {
+                              setEmployeeForm(prev => ({
+                                ...prev,
+                                isGeneralist: !!checked,
+                                specialties: checked ? specialtyOptions : []
+                              }));
+                            }}
+                            data-testid="checkbox-generalist"
+                          />
+                          <Label htmlFor="generalist" className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                            Generalist (All Specialties)
+                          </Label>
+                          <span className="text-xs text-blue-600 dark:text-blue-300 ml-2">
+                            Check this if the employee handles all specialty types
+                          </span>
+                        </div>
+
+                        {/* Individual Specialty Checkboxes */}
+                        {!employeeForm.isGeneralist && (
+                          <div className="space-y-2">
+                            <Label className="text-sm font-medium">Select Multiple Specialties:</Label>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                               {specialtyOptions.map(specialty => (
-                                <SelectItem key={specialty} value={specialty}>{specialty}</SelectItem>
+                                <div key={specialty} className="flex items-center space-x-2">
+                                  <Checkbox
+                                    id={`specialty-${specialty}`}
+                                    checked={employeeForm.specialties.includes(specialty)}
+                                    onCheckedChange={(checked) => {
+                                      setEmployeeForm(prev => ({
+                                        ...prev,
+                                        specialties: checked 
+                                          ? [...prev.specialties, specialty]
+                                          : prev.specialties.filter(s => s !== specialty)
+                                      }));
+                                    }}
+                                    data-testid={`checkbox-specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                                  />
+                                  <Label htmlFor={`specialty-${specialty}`} className="text-sm">
+                                    {specialty}
+                                  </Label>
+                                </div>
                               ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {/* Secondary Specialty */}
-                        <div className="space-y-2">
-                          <Label htmlFor="secondarySpecialty">Secondary Specialty *</Label>
-                          <Select 
-                            value={employeeForm.secondarySpecialty} 
-                            onValueChange={(value) => setEmployeeForm(prev => ({ ...prev, secondarySpecialty: value }))}
-                          >
-                            <SelectTrigger data-testid="select-secondary-specialty">
-                              <SelectValue placeholder="Select specialty" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {specialtyOptions.filter(option => option !== employeeForm.primarySpecialty).map(specialty => (
-                                <SelectItem key={specialty} value={specialty}>{specialty}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {/* Tertiary Specialty */}
-                        <div className="space-y-2">
-                          <Label htmlFor="tertiarySpecialty">Tertiary Specialty *</Label>
-                          <Select 
-                            value={employeeForm.tertiarySpecialty} 
-                            onValueChange={(value) => setEmployeeForm(prev => ({ ...prev, tertiarySpecialty: value }))}
-                          >
-                            <SelectTrigger data-testid="select-tertiary-specialty">
-                              <SelectValue placeholder="Select specialty" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {specialtyOptions.filter(option => 
-                                option !== employeeForm.primarySpecialty && 
-                                option !== employeeForm.secondarySpecialty
-                              ).map(specialty => (
-                                <SelectItem key={specialty} value={specialty}>{specialty}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      {/* Selected Specialties Display */}
-                      {(employeeForm.primarySpecialty || employeeForm.secondarySpecialty || employeeForm.tertiarySpecialty) && (
-                        <div className="mb-4 p-3 bg-muted rounded-lg">
-                          <p className="text-sm font-medium mb-2">Selected Specialties:</p>
-                          <div className="flex flex-wrap gap-1">
-                            {[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).map((specialty, index) => (
-                              <span key={specialty} className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
-                                {index === 0 ? 'Primary' : index === 1 ? 'Secondary' : 'Tertiary'}: {specialty}
-                              </span>
-                            ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+
+                        {/* Selected Specialties Display */}
+                        {(employeeForm.isGeneralist || employeeForm.specialties.length > 0) && (
+                          <div className="p-3 bg-muted rounded-lg">
+                            <p className="text-sm font-medium mb-2">Selected Specialties:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {employeeForm.isGeneralist ? (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 font-medium">
+                                  🌟 Generalist (All Specialties)
+                                </span>
+                              ) : (
+                                employeeForm.specialties.map((specialty) => (
+                                  <span key={specialty} className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
+                                    {specialty}
+                                  </span>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
 
