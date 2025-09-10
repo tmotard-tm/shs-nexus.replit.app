@@ -315,6 +315,65 @@ export default function OnboardHire() {
       if (vehicleAssignment.autoAssign && vehicleAssignment.workZipcode) {
         const closestVehicle = findClosestVehicle(vehicleAssignment.workZipcode);
         if (closestVehicle) {
+          // Create Fleet Management task for vehicle assignment
+          await apiRequest("POST", "/api/fleet-queue", {
+            workflowType: "vehicle_assignment",
+            title: `Vehicle Assignment - ${employeeForm.firstName} ${employeeForm.lastName}`,
+            description: `Complete vehicle assignment setup for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}). Vehicle: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName} (${closestVehicle.licensePlate}).`,
+            priority: "high",
+            requesterId: user?.id || "system",
+            data: JSON.stringify({
+              submitter: {
+                name: user?.username || user?.email || "Unknown User",
+                submittedAt: new Date().toISOString()
+              },
+              department: "Fleet Management",
+              notificationType: "Vehicle Assignment",
+              taskType: "Vehicle Setup",
+              employee: {
+                firstName: employeeForm.firstName,
+                lastName: employeeForm.lastName,
+                enterpriseId: employeeForm.enterpriseId,
+                techId: employeeForm.techId,
+                department: employeeForm.department,
+                startDate: employeeForm.startDate,
+                address: {
+                  street: employeeForm.street,
+                  city: employeeForm.city,
+                  state: employeeForm.state,
+                  zipCode: employeeForm.zipCode
+                }
+              },
+              vehicle: {
+                licensePlate: closestVehicle.licensePlate,
+                year: closestVehicle.modelYear,
+                make: closestVehicle.makeName,
+                model: closestVehicle.modelName,
+                city: closestVehicle.city,
+                state: closestVehicle.state,
+                zip: closestVehicle.zip
+              },
+              workLocation: vehicleAssignment.workZipcode,
+              autoTriggered: true,
+              triggeredBy: "employee_onboarding",
+              checklist: [
+                {
+                  id: "tpms_van_update",
+                  task: "Update TPMS with van number",
+                  description: `Update TPMS system with assigned van number: ${closestVehicle.licensePlate} for employee ${employeeForm.firstName} ${employeeForm.lastName} (Tech ID: ${employeeForm.techId})`,
+                  completed: false,
+                  required: true
+                }
+              ],
+              instructions: [
+                "Complete vehicle assignment setup for new employee",
+                "Update TPMS system with van number and employee assignment",
+                "Verify vehicle is properly registered to employee",
+                "Mark task complete only after TPMS is updated"
+              ]
+            })
+          });
+          
           requestsCreated.push("Vehicle assignment");
           vehicleMessage = `Closest vehicle assigned: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName} (${closestVehicle.licensePlate}) located in ${closestVehicle.city}, ${closestVehicle.state}.`;
         } else {
