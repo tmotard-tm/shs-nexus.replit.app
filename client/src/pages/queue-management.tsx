@@ -606,7 +606,7 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
         </div>
         <div>
           <Label className="font-semibold">Created</Label>
-          <p className="text-sm">{formatDateTime(item.createdAt)}</p>
+          <p className="text-sm">{new Date(item.createdAt).toLocaleString()}</p>
         </div>
         <div>
           <Label className="font-semibold">Assigned To</Label>
