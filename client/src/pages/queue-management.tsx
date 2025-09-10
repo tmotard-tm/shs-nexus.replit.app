@@ -64,17 +64,11 @@ export default function UnifiedQueueManagement() {
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
-  // Update selected modules based on user's accessible queues
+  // Do not auto-select any queues - require manual selection
   useEffect(() => {
-    if (user?.accessibleQueues && user.accessibleQueues.length > 0) {
-      setSelectedModules(user.accessibleQueues);
-    } else if (user?.role === "superadmin") {
-      // Only superadmin gets access to all queues by default
-      setSelectedModules(['ntao', 'assets', 'inventory', 'fleet']);
-    } else {
-      // Regular users without accessible queues get no access
-      setSelectedModules([]);
-    }
+    // Always start with no queues selected, regardless of user role or permissions
+    // Users must manually select which queues they want to access
+    setSelectedModules([]);
   }, [user]);
 
   // Fetch unified queue items
