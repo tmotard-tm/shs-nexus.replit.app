@@ -58,6 +58,7 @@ export const queueItems = pgTable("queue_items", {
   requesterId: varchar("requester_id").notNull(), // user ID who created this queue item
   data: text("data"), // JSON payload with workflow-specific data
   metadata: text("metadata"), // Additional metadata for automation hooks
+  notes: text("notes"), // Agent notes for tracking work progress
   scheduledFor: timestamp("scheduled_for"), // For delayed processing
   attempts: integer("attempts").notNull().default(0), // For retry logic
   lastError: text("last_error"), // Error message from last failed attempt

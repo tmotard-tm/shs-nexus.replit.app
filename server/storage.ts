@@ -168,6 +168,7 @@ export class MemStorage implements IStorage {
           location: "Chicago, IL"
         }),
         metadata: null,
+        notes: null,
         scheduledFor: null,
         attempts: 0,
         lastError: null,
@@ -191,6 +192,7 @@ export class MemStorage implements IStorage {
           region: "Midwest"
         }),
         metadata: null,
+        notes: null,
         scheduledFor: null,
         attempts: 0,
         lastError: null,
@@ -215,6 +217,7 @@ export class MemStorage implements IStorage {
           reason: "resignation"
         }),
         metadata: null,
+        notes: null,
         scheduledFor: null,
         attempts: 0,
         lastError: null,
@@ -458,6 +461,7 @@ export class MemStorage implements IStorage {
       assignedTo: insertItem.assignedTo || null,
       data: insertItem.data || null,
       metadata: insertItem.metadata || null,
+      notes: insertItem.notes || null,
       scheduledFor: insertItem.scheduledFor || null,
       attempts: insertItem.attempts || 0,
       lastError: insertItem.lastError || null,

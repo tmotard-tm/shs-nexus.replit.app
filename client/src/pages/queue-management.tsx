@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, User, CheckCircle, XCircle, AlertCircle, Filter, Plus, Eye, Settings, List, Calendar } from "lucide-react";
+import { Clock, User, CheckCircle, XCircle, AlertCircle, Filter, Plus, Eye, Settings, List, Calendar, Save } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import type { QueueItem, InsertQueueItem, User as UserType } from "@shared/schema";
@@ -343,7 +343,17 @@ export default function QueueManagement() {
                               size="sm" 
                               variant="outline" 
                               className="bg-primary text-primary-foreground hover:bg-primary/90"
-                              onClick={() => assignMutation.mutate({ queueItemId: item.id, assigneeId: user?.id || "" })}
+                              onClick={() => {
+                                assignMutation.mutate(
+                                  { queueItemId: item.id, assigneeId: user?.id || "" },
+                                  {
+                                    onSuccess: () => {
+                                      // Auto-open details modal after successful assignment
+                                      setViewQueueItem(item);
+                                    }
+                                  }
+                                );
+                              }}
                             >
                               Pick Up
                             </Button>
@@ -404,6 +414,100 @@ export default function QueueManagement() {
         </Dialog>
       </div>
     </MainContent>
+  );
+}
+
+// Notes Section Component
+function NotesSection({ item }: { item: QueueItem }) {
+  const [notes, setNotes] = useState(item.notes || "");
+  const [isEditing, setIsEditing] = useState(false);
+  const { toast } = useToast();
+
+  // Update notes mutation
+  const updateNotesMutation = useMutation({
+    mutationFn: (newNotes: string) =>
+      apiRequest("PATCH", `/api/queue/${item.id}/notes`, { notes: newNotes }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/queue"] });
+      setIsEditing(false);
+      toast({
+        title: "Success",
+        description: "Notes updated successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSave = () => {
+    updateNotesMutation.mutate(notes);
+  };
+
+  const handleCancel = () => {
+    setNotes(item.notes || "");
+    setIsEditing(false);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <Label className="font-semibold">Notes</Label>
+        {!isEditing ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsEditing(true)}
+            data-testid="button-edit-notes"
+          >
+            Edit Notes
+          </Button>
+        ) : (
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCancel}
+              disabled={updateNotesMutation.isPending}
+              data-testid="button-cancel-notes"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={updateNotesMutation.isPending}
+              data-testid="button-save-notes"
+            >
+              <Save className="h-4 w-4 mr-1" />
+              {updateNotesMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        )}
+      </div>
+      
+      {isEditing ? (
+        <Textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Add notes about your work on this item..."
+          className="min-h-[100px] bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
+          data-testid="textarea-notes"
+        />
+      ) : (
+        <div className="p-3 bg-muted rounded border min-h-[100px]" data-testid="display-notes">
+          {item.notes ? (
+            <p className="text-sm whitespace-pre-wrap">{item.notes}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground italic">No notes added yet.</p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -491,6 +595,9 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
           )}
         </div>
       )}
+
+      {/* Notes Section */}
+      <NotesSection item={item} />
 
       {/* Raw Data (for debugging) */}
       {parsedData && (

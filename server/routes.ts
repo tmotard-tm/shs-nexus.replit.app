@@ -464,6 +464,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/queue/:id/notes", async (req, res) => {
+    try {
+      const { notes } = req.body;
+      
+      const queueItem = await storage.updateQueueItem(req.params.id, { notes });
+      
+      if (!queueItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update notes" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
