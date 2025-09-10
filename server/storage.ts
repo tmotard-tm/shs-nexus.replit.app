@@ -17,8 +17,10 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUsers(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
+  deleteUser(id: string): Promise<boolean>;
   
   // Requests
   getRequest(id: string): Promise<Request | undefined>;
@@ -82,30 +84,30 @@ export class MemStorage implements IStorage {
   }
 
   private async initializeDefaultData() {
-    // Create Enterprise ID users
+    // Create Enterprise ID users with new role system
     const enterpriseUsers: User[] = [
       {
         id: randomUUID(),
-        username: "ENT1234",
-        email: "requester@sears.com",
+        username: "FIELD001",
+        email: "field@sears.com",
         password: "passwords", // In real app, this would be hashed
-        role: "requester",
+        role: "field",
         createdAt: new Date(),
       },
       {
         id: randomUUID(),
-        username: "ENT1235",
-        email: "approver@sears.com",
+        username: "AGENT001",
+        email: "agent@sears.com",
         password: "passwords", // In real app, this would be hashed
-        role: "approver",
+        role: "agent",
         createdAt: new Date(),
       },
       {
         id: randomUUID(),
-        username: "ADMIN123",
-        email: "admin@sears.com",
+        username: "SUPER001",
+        email: "superadmin@sears.com",
         password: "passwords", // In real app, this would be hashed
-        role: "admin",
+        role: "superadmin",
         createdAt: new Date(),
       },
     ];
@@ -238,11 +240,15 @@ export class MemStorage implements IStorage {
     return Array.from(this.users.values()).find(user => user.email === email);
   }
 
+  async getUsers(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
     const user: User = { 
       ...insertUser,
-      role: insertUser.role || "requester",
+      role: insertUser.role || "field",
       id, 
       createdAt: new Date(),
     };
@@ -257,6 +263,10 @@ export class MemStorage implements IStorage {
     const updatedUser = { ...user, ...updates };
     this.users.set(id, updatedUser);
     return updatedUser;
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    return this.users.delete(id);
   }
 
   // Requests
