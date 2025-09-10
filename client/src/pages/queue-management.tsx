@@ -694,17 +694,17 @@ function OnboardingFormData({ data }: { data: any }) {
 
       {/* Vehicle Assignment */}
       {vehicleAssignment && (
-        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-          <h4 className="font-semibold mb-3 text-slate-200">Vehicle Assignment</h4>
+        <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+          <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Vehicle Assignment</h4>
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <Label>Auto Assign</Label>
-              <p>{vehicleAssignment.autoAssign ? 'Yes' : 'No'}</p>
+              <Label className="text-blue-700 dark:text-blue-300">Auto Assign</Label>
+              <p className="text-blue-900 dark:text-blue-100">{vehicleAssignment.autoAssign ? 'Yes' : 'No'}</p>
             </div>
             {vehicleAssignment.workZipcode && (
               <div>
-                <Label>Work Zipcode</Label>
-                <p>{vehicleAssignment.workZipcode}</p>
+                <Label className="text-blue-700 dark:text-blue-300">Work Zipcode</Label>
+                <p className="text-blue-900 dark:text-blue-100">{vehicleAssignment.workZipcode}</p>
               </div>
             )}
           </div>
@@ -713,16 +713,16 @@ function OnboardingFormData({ data }: { data: any }) {
 
       {/* Supply Orders */}
       {supplyOrders && (
-        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-          <h4 className="font-semibold mb-3 text-slate-200">Supply Orders</h4>
+        <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+          <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Supply Orders</h4>
           <div className="flex gap-4 text-sm">
             <div>
-              <Label>Assets & Supplies</Label>
-              <p>{supplyOrders.assetsSupplies ? 'Requested' : 'Not Requested'}</p>
+              <Label className="text-blue-700 dark:text-blue-300">Assets & Supplies</Label>
+              <p className="text-blue-900 dark:text-blue-100">{supplyOrders.assetsSupplies ? 'Requested' : 'Not Requested'}</p>
             </div>
             <div>
-              <Label>NTAO Parts Stock</Label>
-              <p>{supplyOrders.ntaoPartsStock ? 'Requested' : 'Not Requested'}</p>
+              <Label className="text-blue-700 dark:text-blue-300">NTAO Parts Stock</Label>
+              <p className="text-blue-900 dark:text-blue-100">{supplyOrders.ntaoPartsStock ? 'Requested' : 'Not Requested'}</p>
             </div>
           </div>
         </div>
@@ -730,8 +730,8 @@ function OnboardingFormData({ data }: { data: any }) {
 
       {/* Requests Created */}
       {requestsCreated && requestsCreated.length > 0 && (
-        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-          <h4 className="font-semibold mb-3 text-slate-200">Triggered Requests</h4>
+        <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+          <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Triggered Requests</h4>
           <div className="flex flex-wrap gap-2">
             {requestsCreated.map((request: string, index: number) => (
               <Badge key={index} variant="secondary">{request}</Badge>
@@ -799,16 +799,16 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
 
       {/* Supply Orders */}
       {supplyOrders && (
-        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-          <h4 className="font-semibold mb-3 text-slate-200">Supply Orders</h4>
+        <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+          <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Supply Orders</h4>
           <div className="flex gap-4 text-sm">
             <div>
-              <Label>Assets & Supplies</Label>
-              <p>{supplyOrders.assetsSupplies ? 'Requested' : 'Not Requested'}</p>
+              <Label className="text-blue-700 dark:text-blue-300">Assets & Supplies</Label>
+              <p className="text-blue-900 dark:text-blue-100">{supplyOrders.assetsSupplies ? 'Requested' : 'Not Requested'}</p>
             </div>
             <div>
-              <Label>NTAO Parts Stock</Label>
-              <p>{supplyOrders.ntaoPartsStock ? 'Requested' : 'Not Requested'}</p>
+              <Label className="text-blue-700 dark:text-blue-300">NTAO Parts Stock</Label>
+              <p className="text-blue-900 dark:text-blue-100">{supplyOrders.ntaoPartsStock ? 'Requested' : 'Not Requested'}</p>
             </div>
           </div>
         </div>
@@ -816,11 +816,11 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
 
       {/* Order Messages */}
       {orderMessages && orderMessages.length > 0 && (
-        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-          <h4 className="font-semibold mb-3 text-slate-200">Order Messages</h4>
+        <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+          <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Order Messages</h4>
           <div className="space-y-1 text-sm">
             {orderMessages.map((message: string, index: number) => (
-              <p key={index}>• {message}</p>
+              <p key={index} className="text-blue-900 dark:text-blue-100">• {message}</p>
             ))}
           </div>
         </div>
