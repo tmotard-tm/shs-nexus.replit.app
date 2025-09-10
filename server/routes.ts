@@ -346,7 +346,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Queue Item routes
   app.get("/api/queue", async (req, res) => {
     try {
-      const { status, workflowType, assignedTo, userId } = req.query;
+      const { status, workflowType, assignedTo, userId, department } = req.query;
       
       let queueItems;
       if (status) {
@@ -357,6 +357,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         queueItems = await storage.getQueueItemsByAssignee(assignedTo as string);
       } else if (userId) {
         queueItems = await storage.getMyQueueItems(userId as string);
+      } else if (department) {
+        queueItems = await storage.getQueueItemsByDepartment(department as string);
       } else {
         queueItems = await storage.getQueueItems();
       }

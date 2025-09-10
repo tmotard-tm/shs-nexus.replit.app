@@ -56,6 +56,7 @@ export interface IStorage {
   getQueueItems(): Promise<QueueItem[]>;
   getQueueItemsByStatus(status: string): Promise<QueueItem[]>;
   getQueueItemsByWorkflowType(workflowType: string): Promise<QueueItem[]>;
+  getQueueItemsByDepartment(department: string): Promise<QueueItem[]>;
   getQueueItemsByAssignee(userId: string): Promise<QueueItem[]>;
   getMyQueueItems(userId: string): Promise<QueueItem[]>; // Items user created or assigned to
   createQueueItem(item: InsertQueueItem): Promise<QueueItem>;
@@ -498,6 +499,12 @@ export class MemStorage implements IStorage {
   async getQueueItemsByWorkflowType(workflowType: string): Promise<QueueItem[]> {
     return Array.from(this.queueItems.values())
       .filter(item => item.workflowType === workflowType)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getQueueItemsByDepartment(department: string): Promise<QueueItem[]> {
+    return Array.from(this.queueItems.values())
+      .filter(item => item.department === department)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
