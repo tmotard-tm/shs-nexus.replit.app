@@ -162,6 +162,10 @@ export class MemStorage implements IStorage {
         assignedTo: null,
         requesterId: enterpriseUsers[0].id, // ENT1234
         data: JSON.stringify({
+          submitter: {
+            name: "FIELD001",
+            submittedAt: new Date().toISOString()
+          },
           employee: {
             firstName: "John",
             lastName: "Smith",
@@ -204,6 +208,10 @@ export class MemStorage implements IStorage {
         assignedTo: enterpriseUsers[1].id, // ENT1235
         requesterId: enterpriseUsers[0].id,
         data: JSON.stringify({
+          submitter: {
+            name: "AGENT001",
+            submittedAt: new Date().toISOString()
+          },
           employee: {
             name: "Sarah Johnson",
             enterpriseId: "T12345",
@@ -242,6 +250,10 @@ export class MemStorage implements IStorage {
         assignedTo: null,
         requesterId: enterpriseUsers[2].id, // ADMIN123
         data: JSON.stringify({
+          submitter: {
+            name: "SUPER001",
+            submittedAt: new Date().toISOString()
+          },
           employee: {
             racfId: "mwilson",
             name: "Mike Wilson",

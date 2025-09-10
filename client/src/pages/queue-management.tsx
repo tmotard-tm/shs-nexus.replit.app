@@ -578,6 +578,23 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
         <div className="space-y-4">
           <h3 className="text-lg font-semibold border-b pb-2">Original Form Submission</h3>
           
+          {/* Submitter Information */}
+          {parsedData.submitter && (
+            <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+              <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Form Submitter</h4>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <Label className="text-blue-700 dark:text-blue-300">Submitted By</Label>
+                  <p className="font-medium text-blue-900 dark:text-blue-100">{parsedData.submitter.name}</p>
+                </div>
+                <div>
+                  <Label className="text-blue-700 dark:text-blue-300">Submitted At</Label>
+                  <p className="text-blue-900 dark:text-blue-100">{new Date(parsedData.submitter.submittedAt).toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {item.workflowType === "onboarding" && (
             <OnboardingFormData data={parsedData} />
           )}
