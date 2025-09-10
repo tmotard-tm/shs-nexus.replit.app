@@ -204,7 +204,7 @@ export default function OffboardVehicleLocation() {
     setTimeout(() => {
       toast({
         title: "Workflow Sequence",
-        description: `✅ NTAO (Stop Replenishment) + Assets (Recover Phone) + Fleet (Move to Pepboys) → Final: Inventory & Assets (Full Parts Count)`,
+        description: `✅ NTAO + Assets + Fleet (parallel) → Inventory & Assets (parts count) → Fleet (vehicle readiness)`,
         variant: "default"
       });
     }, 2000);
@@ -299,6 +299,7 @@ export default function OffboardVehicleLocation() {
                               <li>Fleet Management (Move van to Pepboys)</li>
                             </ul>
                             <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van: Inventory Control + Assets Management will get joint parts count task.</p>
+                            <p className="text-yellow-700 dark:text-yellow-300 mt-1 text-xs">After parts count: Fleet Management will get final vehicle readiness verification task.</p>
                           </div>
                         </div>
                       </div>

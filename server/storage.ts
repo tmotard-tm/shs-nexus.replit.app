@@ -802,6 +802,10 @@ export class MemStorage implements IStorage {
       updatedAt: new Date() 
     };
     this.inventoryQueueItems.set(id, updatedItem);
+
+    // Check if this completes a workflow step and trigger next step
+    await this.triggerNextWorkflowStep(updatedItem);
+    
     return updatedItem;
   }
 
@@ -985,7 +989,82 @@ export class MemStorage implements IStorage {
         await this.createInventoryQueueItem(inventoryTask as any);
         await this.createAssetsQueueItem(assetsNotificationTask as any);
         
-        console.log(`Auto-triggered final workflow tasks for workflow ${completedItem.workflowId}: Inventory Control + Assets Management`);
+        console.log(`Auto-triggered step 4 workflow tasks for workflow ${completedItem.workflowId}: Inventory Control + Assets Management`);
+      } 
+      
+      // Check if both Inventory Control and Assets Management step 4 tasks are completed to trigger final Fleet task
+      else if (completedItem.workflowStep === 4 && 
+               (completedItem.department === "Inventory Control" || completedItem.department === "Assets Management")) {
+        
+        // Get all tasks for this workflow at step 4
+        const allInventoryTasks = await this.getInventoryQueueItems();
+        const allAssetsTasks = await this.getAssetsQueueItems();
+        
+        const inventoryStep4Task = allInventoryTasks.find(task => 
+          task.workflowId === completedItem.workflowId && 
+          task.workflowStep === 4 && 
+          task.data?.includes("combined_parts_count")
+        );
+        
+        const assetsStep4Task = allAssetsTasks.find(task => 
+          task.workflowId === completedItem.workflowId && 
+          task.workflowStep === 4 && 
+          task.data?.includes("assist_parts_count")
+        );
+
+        // Check if BOTH step 4 tasks are completed
+        const bothTasksCompleted = inventoryStep4Task?.status === "completed" && 
+                                   assetsStep4Task?.status === "completed";
+
+        if (bothTasksCompleted) {
+          // Check for existing final Fleet task to prevent duplicates
+          const existingFleetTasks = await this.getFleetQueueItems();
+          const duplicateFleetTask = existingFleetTasks.find(task => 
+            task.workflowId === completedItem.workflowId && 
+            task.workflowStep === 5 && 
+            task.data?.includes("vehicle_readiness")
+          );
+
+          if (!duplicateFleetTask) {
+            // Create final Fleet task for vehicle readiness verification
+            const finalFleetTask = {
+              workflowType: "offboarding",
+              title: `Vehicle Readiness Verification - ${triggerData.vehicle.vehicleNumber}`,
+              description: `Verify van ${triggerData.vehicle.vehicleNumber} is prepped and ready for assignment. Parts count completed by Inventory and Assets teams. Complete final readiness checklist and mark as ready for assignment.`,
+              priority: "medium",
+              requesterId: "system",
+              department: "Fleet Management",
+              workflowId: completedItem.workflowId,
+              workflowStep: 5,
+              dependsOn: completedItem.id,
+              autoTrigger: true,
+              data: JSON.stringify({
+                workflowType: "offboarding_sequence",
+                step: "vehicle_readiness",
+                employee: triggerData.employee,
+                vehicle: triggerData.vehicle,
+                submitter: triggerData.submitter,
+                partsCountCompleted: true,
+                checklist: [
+                  "Clean vehicle interior and exterior",
+                  "Assess condition of truck, all equipment", 
+                  "Identify items requiring repair, replacement, or reassignment",
+                  "Verify all parts and tools are properly organized",
+                  "Confirm vehicle is operationally ready",
+                  "Update fleet management system status",
+                  "Mark vehicle as ready for assignment"
+                ],
+                finalStep: true // This is the last step in the workflow
+              }),
+              triggerData: null
+            };
+
+            await this.createFleetQueueItem(finalFleetTask as any);
+            console.log(`Auto-triggered final Fleet readiness task for workflow ${completedItem.workflowId}`);
+          }
+        } else {
+          console.log(`Step 4 task completed for workflow ${completedItem.workflowId}, waiting for other step 4 task to complete`);
+        }
       } else {
         // No more steps to trigger for other completed tasks
         console.log(`Workflow task completed: ${completedItem.workflowId} step ${completedItem.workflowStep} (${completedItem.department})`);
