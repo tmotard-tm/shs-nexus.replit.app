@@ -144,15 +144,6 @@ export default function OnboardHire() {
       return;
     }
     
-    // Validate Tech RACF ID (must be exactly 7 alphanumeric characters)
-    if (!/^[a-zA-Z0-9]{7}$/.test(employeeForm.techId)) {
-      toast({
-        title: "Validation Error",
-        description: "Tech RACF ID must be exactly 7 characters (letters and numbers only).",
-        variant: "destructive"
-      });
-      return;
-    }
     
     // Validate required address fields
     if (!employeeForm.street.trim()) {
