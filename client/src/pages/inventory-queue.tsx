@@ -8,15 +8,19 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 import type { QueueItem, User } from "@shared/schema";
-import { Clock, User as UserIcon, Save } from "lucide-react";
+import { Clock, User as UserIcon, Save, Eye, PickUpTruck } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
 
 export default function InventoryQueuePage() {
   const [viewQueueItem, setViewQueueItem] = useState<QueueItem | null>(null);
+  const [workingOnItem, setWorkingOnItem] = useState<QueueItem | null>(null);
   const { toast } = useToast();
+  const { user } = useAuth();
 
   // Fetch Inventory Control queue items only
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
@@ -29,22 +33,22 @@ export default function InventoryQueuePage() {
     queryKey: ["/api/users"],
   });
 
-  // Get current user (you might need to modify this based on your auth implementation)
-  const { data: user } = useQuery<User>({
-    queryKey: ["/api/user"],
-  });
-
   // Only show Inventory Control users in assignment
   const inventoryUsers = users.filter(u => u.department === "Inventory Control" || u.role === "superadmin");
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>
       apiRequest("PATCH", `/api/inventory-queue/${queueItemId}/assign`, { assigneeId }),
-    onSuccess: () => {
+    onSuccess: (_, { queueItemId }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory-queue"] });
+      // Find the assigned item and open it automatically
+      const assignedItem = queueItems.find(item => item.id === queueItemId);
+      if (assignedItem) {
+        setWorkingOnItem(assignedItem);
+      }
       toast({
-        title: "Success",
-        description: "Queue item assigned successfully.",
+        title: "Task Picked Up",
+        description: "You've been assigned to this task. The work module is now open.",
       });
     },
     onError: (error: Error) => {
@@ -113,6 +117,18 @@ export default function InventoryQueuePage() {
   const pendingItems = queueItems.filter(item => item.status === "pending");
   const inProgressItems = queueItems.filter(item => item.status === "in_progress");
   const completedItems = queueItems.filter(item => item.status === "completed");
+
+  // Extract relevant data from queue item metadata
+  const getItemDetails = (item: QueueItem) => {
+    const data = item.data ? (typeof item.data === 'string' ? JSON.parse(item.data) : item.data) : {};
+    return {
+      techId: data.techRacfId || data.techId || "N/A",
+      district: data.district || data.location || "N/A", 
+      serviceOrder: data.serviceOrder || data.vehicleNumber || "N/A",
+      amount: data.amount || "$0.00",
+      reason: data.reason || item.description || "N/A"
+    };
+  };
 
   if (isLoading) {
     return (
@@ -191,191 +207,91 @@ export default function InventoryQueuePage() {
           </Card>
         </div>
 
-        <Tabs defaultValue="pending" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="pending">Pending ({pendingItems.length})</TabsTrigger>
-            <TabsTrigger value="in_progress">In Progress ({inProgressItems.length})</TabsTrigger>
-            <TabsTrigger value="completed">Completed ({completedItems.length})</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="pending" className="space-y-4">
-            {pendingItems.length === 0 ? (
-              <Card>
-                <CardContent className="flex items-center justify-center h-32">
-                  <p className="text-muted-foreground">No pending items</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4">
-                {pendingItems.map((item) => {
+        {/* Table View */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
+              Inventory Control
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Submitted</TableHead>
+                  <TableHead>Tech ID</TableHead>
+                  <TableHead>District</TableHead>
+                  <TableHead>Service Order</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Assigned To</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {queueItems.map((item) => {
+                  const details = getItemDetails(item);
                   const assignedUser = users.find(user => user.id === item.assignedTo);
+                  const itemNumber = item.id.slice(-2); // Use last 2 chars for display ID
+                  
                   return (
-                    <Card key={item.id} className="hover:shadow-md transition-shadow cursor-pointer"
-                          onClick={() => setViewQueueItem(item)}>
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <span className="text-2xl">{getWorkflowIcon(item.workflowType)}</span>
-                              <div>
-                                <h3 className="font-semibold">{item.title}</h3>
-                                <p className="text-sm text-muted-foreground">{item.description}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                              <div className="flex items-center gap-1">
-                                <Clock className="h-4 w-4" />
-                                {new Date(item.createdAt).toLocaleDateString()}
-                              </div>
-                              {assignedUser && (
-                                <div className="flex items-center gap-1">
-                                  <UserIcon className="h-4 w-4" />
-                                  {assignedUser.username}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-end gap-2">
-                            <div className="flex gap-2">
-                              <Badge variant={getPriorityColor(item.priority)}>{item.priority}</Badge>
-                              <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
-                            </div>
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium">#{itemNumber}</TableCell>
+                      <TableCell>{new Date(item.createdAt).toLocaleDateString()} {new Date(item.createdAt).toLocaleTimeString()}</TableCell>
+                      <TableCell>{details.techId}</TableCell>
+                      <TableCell>{details.district}</TableCell>
+                      <TableCell>{details.serviceOrder}</TableCell>
+                      <TableCell>{details.amount}</TableCell>
+                      <TableCell>
+                        {assignedUser ? (
+                          <Badge variant={item.status === 'in_progress' ? 'default' : 'secondary'}>
+                            {assignedUser.username}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate">{details.reason}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          {item.status === "pending" && (
                             <Button
                               size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                assignMutation.mutate({ queueItemId: item.id, assigneeId: user?.id || "" });
-                              }}
+                              onClick={() => assignMutation.mutate({ 
+                                queueItemId: item.id, 
+                                assigneeId: user?.id || "" 
+                              })}
                               disabled={assignMutation.isPending}
+                              data-testid={`button-pickup-${item.id}`}
                             >
-                              Assign to Me
+                              Pick Up
                             </Button>
-                          </div>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setViewQueueItem(item)}
+                            data-testid={`button-view-${item.id}`}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View
+                          </Button>
                         </div>
-                      </CardContent>
-                    </Card>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
+              </TableBody>
+            </Table>
+            {queueItems.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">
+                No inventory tasks available
               </div>
             )}
-          </TabsContent>
-
-          <TabsContent value="in_progress" className="space-y-4">
-            {inProgressItems.length === 0 ? (
-              <Card>
-                <CardContent className="flex items-center justify-center h-32">
-                  <p className="text-muted-foreground">No items in progress</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4">
-                {inProgressItems.map((item) => {
-                  const assignedUser = users.find(user => user.id === item.assignedTo);
-                  return (
-                    <Card key={item.id} className="hover:shadow-md transition-shadow cursor-pointer"
-                          onClick={() => setViewQueueItem(item)}>
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <span className="text-2xl">{getWorkflowIcon(item.workflowType)}</span>
-                              <div>
-                                <h3 className="font-semibold">{item.title}</h3>
-                                <p className="text-sm text-muted-foreground">{item.description}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                              <div className="flex items-center gap-1">
-                                <Clock className="h-4 w-4" />
-                                {new Date(item.createdAt).toLocaleDateString()}
-                              </div>
-                              {assignedUser && (
-                                <div className="flex items-center gap-1">
-                                  <UserIcon className="h-4 w-4" />
-                                  {assignedUser.username}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-end gap-2">
-                            <div className="flex gap-2">
-                              <Badge variant={getPriorityColor(item.priority)}>{item.priority}</Badge>
-                              <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
-                            </div>
-                            {item.assignedTo === user?.id && (
-                              <Button
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  completeMutation.mutate(item.id);
-                                }}
-                                disabled={completeMutation.isPending}
-                              >
-                                Mark Complete
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="completed" className="space-y-4">
-            {completedItems.length === 0 ? (
-              <Card>
-                <CardContent className="flex items-center justify-center h-32">
-                  <p className="text-muted-foreground">No completed items</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4">
-                {completedItems.map((item) => {
-                  const assignedUser = users.find(user => user.id === item.assignedTo);
-                  return (
-                    <Card key={item.id} className="hover:shadow-md transition-shadow cursor-pointer"
-                          onClick={() => setViewQueueItem(item)}>
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <span className="text-2xl">{getWorkflowIcon(item.workflowType)}</span>
-                              <div>
-                                <h3 className="font-semibold">{item.title}</h3>
-                                <p className="text-sm text-muted-foreground">{item.description}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                              <div className="flex items-center gap-1">
-                                <Clock className="h-4 w-4" />
-                                {new Date(item.createdAt).toLocaleDateString()}
-                              </div>
-                              {assignedUser && (
-                                <div className="flex items-center gap-1">
-                                  <UserIcon className="h-4 w-4" />
-                                  {assignedUser.username}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-end gap-2">
-                            <div className="flex gap-2">
-                              <Badge variant={getPriorityColor(item.priority)}>{item.priority}</Badge>
-                              <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
+          </CardContent>
+        </Card>
 
         {/* View Queue Item Dialog */}
         <Dialog open={!!viewQueueItem} onOpenChange={() => setViewQueueItem(null)}>
@@ -436,7 +352,7 @@ export default function InventoryQueuePage() {
                     })}
                     disabled={assignMutation.isPending}
                   >
-                    Assign to Me
+                    Pick Up Task
                   </Button>
                 )}
                 {viewQueueItem.status === "in_progress" && viewQueueItem.assignedTo === user?.id && (
@@ -447,6 +363,72 @@ export default function InventoryQueuePage() {
                     Mark Complete
                   </Button>
                 )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Work Module Dialog - Opens automatically when user picks up a task */}
+        <Dialog open={!!workingOnItem} onOpenChange={() => setWorkingOnItem(null)}>
+          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Working on Task - Inventory Control</DialogTitle>
+              <DialogDescription>
+                Complete your assigned task and add notes about your work
+              </DialogDescription>
+            </DialogHeader>
+            {workingOnItem && (
+              <div className="space-y-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 dark:bg-blue-900/20 dark:border-blue-800">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge variant="default">In Progress</Badge>
+                    <span className="text-sm font-medium">Task #{workingOnItem.id.slice(-2)}</span>
+                  </div>
+                  <h3 className="font-semibold text-lg">{workingOnItem.title}</h3>
+                  <p className="text-sm text-muted-foreground mt-1">{workingOnItem.description}</p>
+                </div>
+
+                {/* Task Details */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="font-semibold">Tech ID</Label>
+                    <p className="text-sm">{getItemDetails(workingOnItem).techId}</p>
+                  </div>
+                  <div>
+                    <Label className="font-semibold">District</Label>
+                    <p className="text-sm">{getItemDetails(workingOnItem).district}</p>
+                  </div>
+                  <div>
+                    <Label className="font-semibold">Service Order</Label>
+                    <p className="text-sm">{getItemDetails(workingOnItem).serviceOrder}</p>
+                  </div>
+                  <div>
+                    <Label className="font-semibold">Amount</Label>
+                    <p className="text-sm">{getItemDetails(workingOnItem).amount}</p>
+                  </div>
+                </div>
+
+                {/* Work Notes Section */}
+                <NotesSection item={workingOnItem} />
+
+                <div className="flex gap-3 pt-4 border-t">
+                  <Button 
+                    onClick={() => {
+                      completeMutation.mutate(workingOnItem.id);
+                      setWorkingOnItem(null);
+                    }}
+                    disabled={completeMutation.isPending}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    Complete Task
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    onClick={() => setWorkingOnItem(null)}
+                  >
+                    Save Progress & Close
+                  </Button>
+                </div>
               </div>
             )}
           </DialogContent>
