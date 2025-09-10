@@ -162,10 +162,28 @@ export class MemStorage implements IStorage {
         assignedTo: null,
         requesterId: enterpriseUsers[0].id, // ENT1234
         data: JSON.stringify({
-          employeeName: "John Smith",
-          department: "Field Services",
-          startDate: "2024-01-15",
-          location: "Chicago, IL"
+          employee: {
+            firstName: "John",
+            lastName: "Smith",
+            enterpriseId: "ENT12345",
+            department: "Field Services",
+            startDate: "2024-01-15",
+            region: "Midwest",
+            district: "Chicago",
+            primarySpecialty: "HVAC Systems",
+            secondarySpecialty: "Electrical",
+            tertiarySpecialty: "Appliance Repair"
+          },
+          vehicleAssignment: {
+            vehicleNumber: "SV-2341",
+            makeModel: "2023 Ford Transit",
+            region: "Midwest"
+          },
+          supplyOrders: {
+            assetsSupplies: true,
+            ntaoPartsStock: true
+          },
+          requestsCreated: ["Vehicle Assignment", "Tool Kit Setup", "Safety Training"]
         }),
         metadata: null,
         notes: null,
@@ -186,10 +204,24 @@ export class MemStorage implements IStorage {
         assignedTo: enterpriseUsers[1].id, // ENT1235
         requesterId: enterpriseUsers[0].id,
         data: JSON.stringify({
-          techName: "Sarah Johnson",
-          techId: "T12345",
-          vehicleType: "Service Van",
-          region: "Midwest"
+          employee: {
+            name: "Sarah Johnson",
+            enterpriseId: "T12345",
+            specialties: ["HVAC", "Electrical", "Appliance Repair"]
+          },
+          vehicle: {
+            year: "2023",
+            make: "Ford",
+            model: "Transit Van",
+            licensePlate: "SV-1234",
+            vin: "1FTBW2CM5NKA12345",
+            location: "Chicago Service Center"
+          },
+          supplyOrders: {
+            assetsSupplies: true,
+            ntaoPartsStock: false
+          },
+          orderMessages: ["Vehicle assignment for route coverage", "Complete safety inspection required"]
         }),
         metadata: null,
         notes: null,
@@ -210,11 +242,21 @@ export class MemStorage implements IStorage {
         assignedTo: null,
         requesterId: enterpriseUsers[2].id, // ADMIN123
         data: JSON.stringify({
-          techName: "Mike Wilson",
-          techId: "T67890",
-          lastDayWorked: "2024-01-30",
-          vehicleNumber: "SV-4891",
-          reason: "resignation"
+          employee: {
+            racfId: "mwilson",
+            name: "Mike Wilson",
+            enterpriseId: "T67890",
+            lastDayWorked: "2024-01-30",
+            departments: ["Field Services", "NTAO", "Fleet Management"]
+          },
+          vehicle: {
+            vehicleNumber: "SV-4891",
+            reason: "Employee Departure - Resignation"
+          },
+          notifications: {
+            departments: ["NTAO", "Assets", "Inventory", "Fleet"],
+            timestamp: new Date().toISOString()
+          }
         }),
         metadata: null,
         notes: null,
