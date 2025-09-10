@@ -51,6 +51,7 @@ type User = typeof users.$inferSelect;
 export default function UserManagement() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [departmentFilter, setDepartmentFilter] = useState<string>("all");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -174,12 +175,28 @@ export default function UserManagement() {
     }
   };
 
+  // Filter users by department
+  const filteredUsers = departmentFilter === "all" 
+    ? allUsers 
+    : departmentFilter === "no-department"
+    ? allUsers.filter((u: User) => !u.department)
+    : allUsers.filter((u: User) => u.department === departmentFilter);
+
   // Statistics
   const userStats = {
     total: allUsers.length,
     superadmin: allUsers.filter((u: User) => u.role === 'superadmin').length,
     agent: allUsers.filter((u: User) => u.role === 'agent').length,
     field: allUsers.filter((u: User) => u.role === 'field').length,
+  };
+
+  // Department statistics
+  const departmentStats = {
+    ntao: allUsers.filter((u: User) => u.department === 'NTAO').length,
+    assets: allUsers.filter((u: User) => u.department === 'Assets Management').length,
+    inventory: allUsers.filter((u: User) => u.department === 'Inventory Control').length,
+    fleet: allUsers.filter((u: User) => u.department === 'Fleet Management').length,
+    noDepartment: allUsers.filter((u: User) => !u.department).length,
   };
 
   return (
@@ -299,7 +316,7 @@ export default function UserManagement() {
         </Dialog>
       </div>
 
-      {/* Statistics Cards */}
+      {/* Role Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -339,11 +356,92 @@ export default function UserManagement() {
         </Card>
       </div>
 
+      {/* Team Access Statistics */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Team Access Overview</CardTitle>
+          <CardDescription>Users by department assignment</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">NTAO</CardTitle>
+                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-600" data-testid="stat-ntao-users">{departmentStats.ntao}</div>
+                <p className="text-xs text-muted-foreground">team members</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Assets</CardTitle>
+                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600" data-testid="stat-assets-users">{departmentStats.assets}</div>
+                <p className="text-xs text-muted-foreground">team members</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Inventory</CardTitle>
+                <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-purple-600" data-testid="stat-inventory-users">{departmentStats.inventory}</div>
+                <p className="text-xs text-muted-foreground">team members</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Fleet</CardTitle>
+                <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-orange-600" data-testid="stat-fleet-users">{departmentStats.fleet}</div>
+                <p className="text-xs text-muted-foreground">team members</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">No Dept</CardTitle>
+                <div className="w-3 h-3 bg-gray-500 rounded-full"></div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-gray-600" data-testid="stat-no-dept-users">{departmentStats.noDepartment}</div>
+                <p className="text-xs text-muted-foreground">unassigned</p>
+              </CardContent>
+            </Card>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Users Table */}
       <Card>
         <CardHeader>
-          <CardTitle>All Users</CardTitle>
-          <CardDescription>Manage user accounts and permissions</CardDescription>
+          <div className="flex justify-between items-center">
+            <div>
+              <CardTitle>All Users</CardTitle>
+              <CardDescription>Manage user accounts and permissions</CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                <SelectTrigger className="w-48" data-testid="select-department-filter">
+                  <SelectValue placeholder="Filter by department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Departments</SelectItem>
+                  <SelectItem value="NTAO">NTAO</SelectItem>
+                  <SelectItem value="Assets Management">Assets Management</SelectItem>
+                  <SelectItem value="Inventory Control">Inventory Control</SelectItem>
+                  <SelectItem value="Fleet Management">Fleet Management</SelectItem>
+                  <SelectItem value="no-department">No Department</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -361,7 +459,7 @@ export default function UserManagement() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {allUsers.map((user: User) => (
+                {filteredUsers.map((user: User) => (
                   <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
                     <TableCell className="font-medium" data-testid={`text-username-${user.id}`}>{user.username}</TableCell>
                     <TableCell data-testid={`text-email-${user.id}`}>{user.email}</TableCell>
