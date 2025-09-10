@@ -16,7 +16,7 @@ export function Sidebar() {
   const navigation = [
     { name: "Home", href: "/", icon: Home },
     { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
-    { name: "Queue Management", href: "/queue", icon: Clock },
+    { name: "Queue Management", href: "/queue-management", icon: Clock },
     { name: "Requests", href: "/requests", icon: FileText },
     { name: "Approvals", href: "/approvals", icon: CheckCircle },
     { name: "API Management", href: "/api-management", icon: Settings },

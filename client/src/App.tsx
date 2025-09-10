@@ -160,7 +160,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/queue">
+      <Route path="/queue-management">
         <ProtectedRoute>
           <QueueManagement />
         </ProtectedRoute>
