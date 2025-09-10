@@ -11,7 +11,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useAuth } from "@/hooks/use-auth";
 import type { QueueItem, User } from "@shared/schema";
 import { Clock, User as UserIcon, Save, Eye, PickUpTruck } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
@@ -20,7 +19,6 @@ export default function InventoryQueuePage() {
   const [viewQueueItem, setViewQueueItem] = useState<QueueItem | null>(null);
   const [workingOnItem, setWorkingOnItem] = useState<QueueItem | null>(null);
   const { toast } = useToast();
-  const { user } = useAuth();
 
   // Fetch Inventory Control queue items only
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
@@ -31,6 +29,11 @@ export default function InventoryQueuePage() {
   // Fetch users for assignee names
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
+  });
+
+  // Get current user (you might need to modify this based on your auth implementation)
+  const { data: user } = useQuery<User>({
+    queryKey: ["/api/user"],
   });
 
   // Only show Inventory Control users in assignment
