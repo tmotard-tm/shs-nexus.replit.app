@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
-import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map, ArrowRight } from "lucide-react";
+import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map, ArrowRight, Plus } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
@@ -19,29 +19,32 @@ export default function AssistanceSelection() {
   const [isAssignUpdateDialogOpen, setIsAssignUpdateDialogOpen] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
 
-  const assistanceOptions = [
+  const mainWorkflowOptions = [
     {
       id: "create-vehicle-location",
       title: "Create a New Vehicle",
       description: "Add New Vehicles to the System",
-      icon: Car,
-      color: "chart-1",
+      icon: Plus,
+      bgColor: "bg-blue-100 dark:bg-blue-900/20",
+      iconColor: "text-blue-600 dark:text-blue-400",
       action: () => setLocation("/create-vehicle-location")
     },
     {
       id: "assign-vehicle-location", 
       title: "Assign or Update a Vehicle",
       description: "Assign Existing Vehicles to Users",
-      icon: MapPin,
-      color: "chart-2", 
-      action: () => setIsAssignUpdateDialogOpen(true)
+      icon: Car,
+      bgColor: "bg-green-100 dark:bg-green-900/20",
+      iconColor: "text-green-600 dark:text-green-400", 
+      action: () => setLocation("/assign-vehicle-location")
     },
     {
       id: "onboard-hire",
       title: "Onboarding",
       description: "Process New Employee Onboarding",
       icon: UserPlus,
-      color: "chart-3",
+      bgColor: "bg-purple-100 dark:bg-purple-900/20",
+      iconColor: "text-purple-600 dark:text-purple-400",
       action: () => setLocation("/onboard-hire")
     },
     {
@@ -49,24 +52,18 @@ export default function AssistanceSelection() {
       title: "Offboarding", 
       description: "Remove Vehicles or Locations from the System",
       icon: UserMinus,
-      color: "chart-4",
+      bgColor: "bg-red-100 dark:bg-red-900/20",
+      iconColor: "text-red-600 dark:text-red-400",
       action: () => setLocation("/offboard-vehicle-location")
-    },
-    {
-      id: "truck-status",
-      title: "TRUCK STATUS",
-      description: "Interactive fleet tracking with real-time status updates",
-      icon: Map,
-      color: "chart-4",
-      action: () => setIsMapOpen(true)
     },
     {
       id: "other",
       title: "Other",
       description: "Access Additional Tools and Features",
-      icon: HelpCircle,
-      color: "chart-5",
-      action: () => setLocation("/dashboard")
+      icon: Settings,
+      bgColor: "bg-gray-100 dark:bg-gray-900/20",
+      iconColor: "text-gray-600 dark:text-gray-400",
+      action: () => setLocation("/queue-management")
     }
   ];
 
@@ -156,8 +153,57 @@ export default function AssistanceSelection() {
             </Card>
           </div>
 
-          {/* Main Form Modules Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          {/* Main Workflow Actions */}
+          <div className="mb-8">
+            <h3 className="text-xl font-semibold mb-6 text-center" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>
+              Main Workflow Actions
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 max-w-5xl mx-auto">
+              {mainWorkflowOptions.map((option) => {
+                const Icon = option.icon;
+                return (
+                  <Card 
+                    key={option.id} 
+                    className="p-6 hover:shadow-md transition-shadow bg-white/95 cursor-pointer" 
+                    onClick={option.action}
+                    data-testid={`card-${option.id}`}
+                  >
+                    <div className="text-center space-y-4">
+                      <div className={`w-12 h-12 mx-auto rounded-full ${option.bgColor} flex items-center justify-center`}>
+                        <Icon className={`h-6 w-6 ${option.iconColor}`} />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-sm mb-2 text-gray-800">
+                          {option.title}
+                        </h3>
+                        <p className="text-xs text-gray-600 mb-4">
+                          {option.description}
+                        </p>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        className={`w-full ${option.id === 'other' ? 'border' : ''}`}
+                        variant={option.id === 'other' ? 'outline' : 'default'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          option.action();
+                        }}
+                      >
+                        {option.id === 'create-vehicle-location' ? 'Start Vehicle Creation' :
+                         option.id === 'assign-vehicle-location' ? 'Start Assignment' :
+                         option.id === 'onboard-hire' ? 'Start Onboarding' :
+                         option.id === 'offboard-vehicle-location' ? 'Start Offboarding' :
+                         'Explore Tools'}
+                      </Button>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+          
+          {/* Legacy Form Grid - Hidden */}
+          <div className="hidden">
             
             {/* Create Vehicle Form Module */}
             <Card 
