@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { BackButton } from "@/components/ui/back-button";
 import { Request } from "@shared/schema";
 import { useAuth } from "@/hooks/use-auth";
-import { Car, UserPlus, UserMinus, Plus, ArrowRight } from "lucide-react";
+import { Car, UserPlus, UserMinus, Plus, ArrowRight, Settings } from "lucide-react";
 import { Link } from "wouter";
 
 export default function Dashboard() {
@@ -191,7 +191,7 @@ export default function Dashboard() {
           <h2 className="text-xl font-semibold mb-4" data-testid="text-workflow-actions-title">
             Main Workflow Actions
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
             {/* Create a New Vehicle */}
             <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
               <CardContent className="p-6">
@@ -278,6 +278,29 @@ export default function Dashboard() {
                 <Link href="/offboard-vehicle-location">
                   <Button className="w-full group-hover:bg-red-600 transition-colors" data-testid="button-start-offboarding">
                     Start Offboarding
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+
+            {/* Other */}
+            <Card className="relative overflow-hidden group hover:shadow-lg transition-shadow duration-300">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="p-3 rounded-lg bg-gray-100 dark:bg-gray-900/20">
+                    <Settings className="h-6 w-6 text-gray-600 dark:text-gray-400" />
+                  </div>
+                </div>
+                <h3 className="text-lg font-semibold mb-2" data-testid="text-other-title">
+                  Other
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4" data-testid="text-other-description">
+                  Access Additional Tools and Features
+                </p>
+                <Link href="/queue-management">
+                  <Button variant="outline" className="w-full group-hover:bg-gray-50 transition-colors" data-testid="button-explore-tools">
+                    Explore Tools
                     <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </Link>
