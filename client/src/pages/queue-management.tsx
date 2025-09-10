@@ -338,14 +338,26 @@ export default function QueueManagement() {
                           </Badge>
                         </div>
                         <div className="flex gap-2">
-                          <Button 
-                            size="sm" 
-                            variant="outline" 
-                            className="bg-primary text-primary-foreground hover:bg-primary/90"
-                            onClick={() => assignMutation.mutate({ queueItemId: item.id, assigneeId: user?.id || "" })}
-                          >
-                            Pick Up
-                          </Button>
+                          {item.status === 'pending' && (
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="bg-primary text-primary-foreground hover:bg-primary/90"
+                              onClick={() => assignMutation.mutate({ queueItemId: item.id, assigneeId: user?.id || "" })}
+                            >
+                              Pick Up
+                            </Button>
+                          )}
+                          {item.status === 'in_progress' && item.assignedTo === user?.id && (
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="bg-green-600 text-white hover:bg-green-700"
+                              onClick={() => completeMutation.mutate(item.id)}
+                            >
+                              Complete
+                            </Button>
+                          )}
                           <Button 
                             size="sm" 
                             variant="outline"
