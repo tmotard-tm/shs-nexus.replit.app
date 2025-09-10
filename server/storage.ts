@@ -8,7 +8,9 @@ import {
   type ActivityLog,
   type InsertActivityLog,
   type QueueItem,
-  type InsertQueueItem
+  type InsertQueueItem,
+  type QueueModule,
+  type CombinedQueueItem
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -91,6 +93,17 @@ export interface IStorage {
   assignDecommissionsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
   completeDecommissionsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
   cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined>;
+
+  // Unified Queue Aggregator
+  getUnifiedQueueItems(modules: QueueModule[], status?: string): Promise<CombinedQueueItem[]>;
+  getUnifiedQueueStats(modules: QueueModule[]): Promise<{
+    pending: number;
+    in_progress: number; 
+    completed: number;
+    total: number;
+  }>;
+  assignUnifiedQueueItem(module: QueueModule, id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  completeUnifiedQueueItem(module: QueueModule, id: string, completedBy: string): Promise<QueueItem | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -961,6 +974,95 @@ export class MemStorage implements IStorage {
     }
     
     return undefined;
+  }
+
+  // Unified Queue Aggregator Implementation
+  async getUnifiedQueueItems(modules: QueueModule[], status?: string): Promise<CombinedQueueItem[]> {
+    const combinedItems: CombinedQueueItem[] = [];
+    
+    for (const module of modules) {
+      let items: QueueItem[] = [];
+      
+      switch (module) {
+        case 'ntao':
+          items = await this.getNTAOQueueItems();
+          break;
+        case 'assets':
+          items = await this.getAssetsQueueItems();
+          break;
+        case 'inventory':
+          items = await this.getInventoryQueueItems();
+          break;
+        case 'fleet':
+          items = await this.getFleetQueueItems();
+          break;
+        case 'decommissions':
+          items = await this.getDecommissionsQueueItems();
+          break;
+      }
+      
+      // Add module annotation and filter by status if provided
+      items.forEach(item => {
+        if (!status || item.status === status) {
+          combinedItems.push({ ...item, module });
+        }
+      });
+    }
+    
+    // Sort by createdAt descending (newest first)
+    return combinedItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+  
+  async getUnifiedQueueStats(modules: QueueModule[]): Promise<{
+    pending: number;
+    in_progress: number; 
+    completed: number;
+    total: number;
+  }> {
+    const allItems = await this.getUnifiedQueueItems(modules);
+    
+    const stats = {
+      pending: allItems.filter(item => item.status === 'pending').length,
+      in_progress: allItems.filter(item => item.status === 'in_progress').length,
+      completed: allItems.filter(item => item.status === 'completed').length,
+      total: allItems.length
+    };
+    
+    return stats;
+  }
+  
+  async assignUnifiedQueueItem(module: QueueModule, id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    switch (module) {
+      case 'ntao':
+        return this.assignNTAOQueueItem(id, assigneeId);
+      case 'assets':
+        return this.assignAssetsQueueItem(id, assigneeId);
+      case 'inventory':
+        return this.assignInventoryQueueItem(id, assigneeId);
+      case 'fleet':
+        return this.assignFleetQueueItem(id, assigneeId);
+      case 'decommissions':
+        return this.assignDecommissionsQueueItem(id, assigneeId);
+      default:
+        return undefined;
+    }
+  }
+  
+  async completeUnifiedQueueItem(module: QueueModule, id: string, completedBy: string): Promise<QueueItem | undefined> {
+    switch (module) {
+      case 'ntao':
+        return this.completeNTAOQueueItem(id, completedBy);
+      case 'assets':
+        return this.completeAssetsQueueItem(id, completedBy);
+      case 'inventory':
+        return this.completeInventoryQueueItem(id, completedBy);
+      case 'fleet':
+        return this.completeFleetQueueItem(id, completedBy);
+      case 'decommissions':
+        return this.completeDecommissionsQueueItem(id, completedBy);
+      default:
+        return undefined;
+    }
   }
 }
 

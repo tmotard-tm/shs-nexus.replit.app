@@ -698,6 +698,118 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Unified Queue Aggregator API routes for multi-queue management
+  app.get("/api/queues", async (req, res) => {
+    try {
+      const modulesParam = req.query.modules as string;
+      const status = req.query.status as string;
+      
+      if (!modulesParam) {
+        return res.status(400).json({ message: "modules parameter is required" });
+      }
+      
+      const modules = modulesParam.split(',').map(m => m.trim()) as any[];
+      
+      // Validate modules
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
+      const invalidModules = modules.filter(m => !validModules.includes(m));
+      if (invalidModules.length > 0) {
+        return res.status(400).json({ 
+          message: `Invalid modules: ${invalidModules.join(', ')}. Valid modules: ${validModules.join(', ')}` 
+        });
+      }
+      
+      const items = await storage.getUnifiedQueueItems(modules, status);
+      res.json(items);
+    } catch (error) {
+      console.error('Error fetching unified queue items:', error);
+      res.status(500).json({ message: "Failed to fetch queue items" });
+    }
+  });
+  
+  app.get("/api/queues/stats", async (req, res) => {
+    try {
+      const modulesParam = req.query.modules as string;
+      
+      if (!modulesParam) {
+        return res.status(400).json({ message: "modules parameter is required" });
+      }
+      
+      const modules = modulesParam.split(',').map(m => m.trim()) as any[];
+      
+      // Validate modules
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
+      const invalidModules = modules.filter(m => !validModules.includes(m));
+      if (invalidModules.length > 0) {
+        return res.status(400).json({ 
+          message: `Invalid modules: ${invalidModules.join(', ')}. Valid modules: ${validModules.join(', ')}` 
+        });
+      }
+      
+      const stats = await storage.getUnifiedQueueStats(modules);
+      res.json(stats);
+    } catch (error) {
+      console.error('Error fetching unified queue stats:', error);
+      res.status(500).json({ message: "Failed to fetch queue stats" });
+    }
+  });
+  
+  app.patch("/api/queues/:module/:id/assign", async (req, res) => {
+    try {
+      const { module, id } = req.params;
+      const { assigneeId } = req.body;
+      
+      if (!assigneeId) {
+        return res.status(400).json({ message: "assigneeId is required" });
+      }
+      
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
+      if (!validModules.includes(module)) {
+        return res.status(400).json({ 
+          message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 
+        });
+      }
+      
+      const updatedItem = await storage.assignUnifiedQueueItem(module as any, id, assigneeId);
+      if (!updatedItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+      
+      res.json({ ...updatedItem, module });
+    } catch (error) {
+      console.error('Error assigning unified queue item:', error);
+      res.status(500).json({ message: "Failed to assign queue item" });
+    }
+  });
+  
+  app.patch("/api/queues/:module/:id/complete", async (req, res) => {
+    try {
+      const { module, id } = req.params;
+      const { completedBy } = req.body;
+      
+      if (!completedBy) {
+        return res.status(400).json({ message: "completedBy is required" });
+      }
+      
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
+      if (!validModules.includes(module)) {
+        return res.status(400).json({ 
+          message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 
+        });
+      }
+      
+      const updatedItem = await storage.completeUnifiedQueueItem(module as any, id, completedBy);
+      if (!updatedItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+      
+      res.json({ ...updatedItem, module });
+    } catch (error) {
+      console.error('Error completing unified queue item:', error);
+      res.status(500).json({ message: "Failed to complete queue item" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
