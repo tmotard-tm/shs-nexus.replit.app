@@ -55,8 +55,6 @@ export default function UnifiedQueueManagement() {
   const [selectedWorkflowType, setSelectedWorkflowType] = useState<string>("all");
   const [selectedAgent, setSelectedAgent] = useState<string>("all");
   const [selectedDepartment, setSelectedDepartment] = useState<string>("all");
-  const [searchRequestId, setSearchRequestId] = useState<string>("");
-  const [searchServiceOrder, setSearchServiceOrder] = useState<string>("");
   const [searchVehicleNumber, setSearchVehicleNumber] = useState<string>("");
   const [searchEmployeeName, setSearchEmployeeName] = useState<string>("");
   const [searchEmployeeId, setSearchEmployeeId] = useState<string>("");
@@ -255,19 +253,6 @@ export default function UnifiedQueueManagement() {
     }
 
     // Apply search filters
-    if (searchRequestId.trim()) {
-      filtered = filtered.filter(item => 
-        item.id.toLowerCase().includes(searchRequestId.toLowerCase())
-      );
-    }
-
-    if (searchServiceOrder.trim()) {
-      filtered = filtered.filter(item => 
-        item.title.toLowerCase().includes(searchServiceOrder.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchServiceOrder.toLowerCase())
-      );
-    }
-
     if (searchVehicleNumber.trim()) {
       filtered = filtered.filter(item => {
         try {
@@ -520,28 +505,6 @@ export default function UnifiedQueueManagement() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <Label htmlFor="search-request-id">Request ID</Label>
-                  <Input
-                    id="search-request-id"
-                    placeholder="Search by request ID..."
-                    value={searchRequestId}
-                    onChange={(e) => setSearchRequestId(e.target.value)}
-                    data-testid="input-search-request-id"
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="search-service-order">Service Order</Label>
-                  <Input
-                    id="search-service-order"
-                    placeholder="Search by service order..."
-                    value={searchServiceOrder}
-                    onChange={(e) => setSearchServiceOrder(e.target.value)}
-                    data-testid="input-search-service-order"
-                  />
-                </div>
-
                 <div>
                   <Label htmlFor="search-vehicle-number">Vehicle Number</Label>
                   <Input
