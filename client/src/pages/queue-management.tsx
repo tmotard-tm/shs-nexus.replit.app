@@ -463,8 +463,6 @@ export default function UnifiedQueueManagement() {
                       <SelectItem value="onboarding">Onboarding</SelectItem>
                       <SelectItem value="offboarding">Offboarding</SelectItem>
                       <SelectItem value="vehicle_assignment">Vehicle Assignment</SelectItem>
-                      <SelectItem value="decommission">Decommission</SelectItem>
-                      <SelectItem value="department_notification">Department Notification</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -498,7 +496,6 @@ export default function UnifiedQueueManagement() {
                       <SelectItem value="Assets Management">Assets Management</SelectItem>
                       <SelectItem value="Inventory Control">Inventory Control</SelectItem>
                       <SelectItem value="Fleet Management">Fleet Management</SelectItem>
-                      <SelectItem value="Decommissions">Decommissions</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
