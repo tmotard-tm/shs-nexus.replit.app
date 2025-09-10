@@ -9,6 +9,7 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
   role: text("role").notNull().default("field"), // superadmin, agent, field
+  department: text("department"), // NTAO, Assets Management, Inventory Control, Fleet Management
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -56,6 +57,7 @@ export const queueItems = pgTable("queue_items", {
   priority: text("priority").notNull().default("medium"), // low, medium, high, critical
   assignedTo: varchar("assigned_to"), // user ID of person assigned to work this item
   requesterId: varchar("requester_id").notNull(), // user ID who created this queue item
+  department: text("department"), // NTAO, Assets Management, Inventory Control, Fleet Management - which department this queue item belongs to
   data: text("data"), // JSON payload with workflow-specific data
   metadata: text("metadata"), // Additional metadata for automation hooks
   notes: text("notes"), // Agent notes for tracking work progress

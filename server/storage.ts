@@ -92,6 +92,7 @@ export class MemStorage implements IStorage {
         email: "field@sears.com",
         password: "passwords", // In real app, this would be hashed
         role: "field",
+        department: "NTAO",
         createdAt: new Date(),
       },
       {
@@ -100,6 +101,7 @@ export class MemStorage implements IStorage {
         email: "agent@sears.com",
         password: "passwords", // In real app, this would be hashed
         role: "agent",
+        department: "Assets Management",
         createdAt: new Date(),
       },
       {
@@ -108,6 +110,7 @@ export class MemStorage implements IStorage {
         email: "superadmin@sears.com",
         password: "passwords", // In real app, this would be hashed
         role: "superadmin",
+        department: null,
         createdAt: new Date(),
       },
     ];
@@ -161,6 +164,7 @@ export class MemStorage implements IStorage {
         priority: "high",
         assignedTo: null,
         requesterId: enterpriseUsers[0].id, // ENT1234
+        department: "NTAO",
         data: JSON.stringify({
           submitter: {
             name: "FIELD001",
@@ -207,6 +211,7 @@ export class MemStorage implements IStorage {
         priority: "medium",
         assignedTo: enterpriseUsers[1].id, // ENT1235
         requesterId: enterpriseUsers[0].id,
+        department: "Fleet Management",
         data: JSON.stringify({
           submitter: {
             name: "AGENT001",
@@ -249,6 +254,7 @@ export class MemStorage implements IStorage {
         priority: "high",
         assignedTo: null,
         requesterId: enterpriseUsers[2].id, // ADMIN123
+        department: "Assets Management",
         data: JSON.stringify({
           submitter: {
             name: "SUPER001",
@@ -306,6 +312,7 @@ export class MemStorage implements IStorage {
     const user: User = { 
       ...insertUser,
       role: insertUser.role || "field",
+      department: insertUser.department || null,
       id, 
       createdAt: new Date(),
     };
@@ -513,6 +520,7 @@ export class MemStorage implements IStorage {
       status: insertItem.status || "pending",
       priority: insertItem.priority || "medium",
       assignedTo: insertItem.assignedTo || null,
+      department: insertItem.department || null,
       data: insertItem.data || null,
       metadata: insertItem.metadata || null,
       notes: insertItem.notes || null,
