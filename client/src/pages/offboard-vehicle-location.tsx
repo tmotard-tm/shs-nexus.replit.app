@@ -89,7 +89,24 @@ export default function OffboardVehicleLocation() {
     try {
       // Create separate queue tasks for each department
       for (const { dept, priority } of departmentTasks) {
-        const deptQueueItem = await apiRequest("POST", "/api/queue", {
+        // Route to correct department-specific queue
+        let queueEndpoint = "/api/queue"; // fallback
+        switch (dept) {
+          case "NTAO":
+            queueEndpoint = "/api/ntao-queue";
+            break;
+          case "Assets Management":
+            queueEndpoint = "/api/assets-queue";
+            break;
+          case "Inventory Control":
+            queueEndpoint = "/api/inventory-queue";
+            break;
+          case "Fleet Management":
+            queueEndpoint = "/api/fleet-queue";
+            break;
+        }
+        
+        const deptQueueItem = await apiRequest("POST", queueEndpoint, {
           workflowType: "department_notification",
           title: `${dept} - Vehicle Offboarding Notification (Auto-triggered)`,
           description: `Notification for ${dept} regarding vehicle offboarding. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}`,
@@ -120,7 +137,7 @@ export default function OffboardVehicleLocation() {
         tasksCreated.push(dept);
       }
       
-      // Create main queue item for offboarding process
+      // Create main queue item for offboarding process (goes to general queue management)
       await apiRequest("POST", "/api/queue", {
         workflowType: "offboarding",
         title: `Offboard Employee - ${vehicleOffboard.techName}`,

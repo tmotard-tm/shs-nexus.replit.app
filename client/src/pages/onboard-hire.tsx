@@ -157,7 +157,28 @@ export default function OnboardHire() {
 
       // Create separate queue tasks for each department
       for (const { dept, priority, taskType } of onboardingDepartmentTasks) {
-        const deptQueueItem = await apiRequest("POST", "/api/queue", {
+        // Route to correct department-specific queue
+        let queueEndpoint = "/api/queue"; // fallback
+        switch (dept) {
+          case "NTAO":
+            queueEndpoint = "/api/ntao-queue";
+            break;
+          case "Assets Management":
+          case "Assets & Supplies":
+            queueEndpoint = "/api/assets-queue";
+            break;
+          case "Inventory Control":
+            queueEndpoint = "/api/inventory-queue";
+            break;
+          case "Fleet Management":
+            queueEndpoint = "/api/fleet-queue";
+            break;
+          case "Decommissions":
+            queueEndpoint = "/api/decommissions-queue";
+            break;
+        }
+        
+        const deptQueueItem = await apiRequest("POST", queueEndpoint, {
           workflowType: "department_notification",
           title: `${dept} - Employee Onboarding Task (Auto-triggered)`,
           description: `${taskType} task for ${dept} regarding new employee onboarding. Employee: ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}). Department: ${employeeForm.department}. Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}.`,
