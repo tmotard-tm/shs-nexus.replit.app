@@ -76,111 +76,95 @@ export default function OffboardVehicleLocation() {
     e.preventDefault();
     const vehicle = vehicles.find(veh => veh.id === vehicleOffboard.vehicleId);
     
-    // Departments that need separate tasks
-    const departmentTasks = [
-      { dept: 'NTAO', priority: 'high' },
-      { dept: 'Assets Management', priority: 'high' },
-      { dept: 'Inventory Control', priority: 'medium' },
-      { dept: 'Fleet Management', priority: 'high' }
-    ];
-    
-    const tasksCreated: string[] = [];
+    // Generate unique workflow ID for this offboarding sequence
+    const workflowId = `offboard_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     try {
-      // Create separate queue tasks for each department
-      for (const { dept, priority } of departmentTasks) {
-        // Route to correct department-specific queue
-        let queueEndpoint = "/api/queue"; // fallback
-        switch (dept) {
-          case "NTAO":
-            queueEndpoint = "/api/ntao-queue";
-            break;
-          case "Assets Management":
-            queueEndpoint = "/api/assets-queue";
-            break;
-          case "Inventory Control":
-            queueEndpoint = "/api/inventory-queue";
-            break;
-          case "Fleet Management":
-            queueEndpoint = "/api/fleet-queue";
-            break;
-        }
-        
-        const deptQueueItem = await apiRequest("POST", queueEndpoint, {
-          workflowType: "department_notification",
-          title: `${dept} - Vehicle Offboarding Notification (Auto-triggered)`,
-          description: `Notification for ${dept} regarding vehicle offboarding. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}`,
-          priority: priority,
-          requesterId: user?.id || "system",
-          data: JSON.stringify({
-            submitter: {
-              name: user?.username || user?.email || "Unknown User",
-              submittedAt: new Date().toISOString()
-            },
-            department: dept,
-            notificationType: "Vehicle Offboarding",
-            employee: {
-              name: vehicleOffboard.techName,
-              racfId: vehicleOffboard.techRacfId,
-              lastDayWorked: vehicleOffboard.lastDayWorked,
-              enterpriseId: vehicleOffboard.techRacfId
-            },
-            vehicle: {
-              vehicleNumber: vehicleOffboard.vehicleNumber,
-              vehicleName: vehicle?.name || vehicleOffboard.vehicleNumber,
-              reason: vehicleOffboard.reason
-            },
-            autoTriggered: true,
-            triggeredBy: "vehicle_offboarding"
-          })
-        });
-        tasksCreated.push(dept);
-      }
-      
-      // Create main queue item for offboarding process (goes to general queue management)
-      await apiRequest("POST", "/api/queue", {
+      // Step 1: Create ONLY the NTAO task (stop truck stock replenishment)
+      // This is the first step in the sequential workflow
+      const ntaoTaskResponse = await apiRequest("POST", "/api/ntao-queue", {
         workflowType: "offboarding",
-        title: `Offboard Employee - ${vehicleOffboard.techName}`,
-        description: `Process offboarding for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}. ${tasksCreated.length} department notifications created.`,
+        title: `Stop Truck Stock Replenishment - ${vehicleOffboard.techName}`,
+        description: `Stop truck stock replenishment for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}. Complete this task once removed from truck replenishment system.`,
         priority: "high",
         requesterId: user?.id || "system",
+        department: "NTAO",
+        // Workflow fields
+        workflowId: workflowId,
+        workflowStep: 1,
+        dependsOn: null, // First task has no dependencies
+        autoTrigger: false, // This task needs manual completion
         data: JSON.stringify({
           submitter: {
             name: user?.username || user?.email || "Unknown User",
             submittedAt: new Date().toISOString()
           },
+          workflowType: "offboarding_sequence",
+          step: "ntao_stop_replenishment",
           employee: {
             name: vehicleOffboard.techName,
             racfId: vehicleOffboard.techRacfId,
             lastDayWorked: vehicleOffboard.lastDayWorked,
-            enterpriseId: vehicleOffboard.techRacfId,
-            departments: ["Field Services", "NTAO", "Fleet Management"]
+            enterpriseId: vehicleOffboard.techRacfId
           },
           vehicle: {
             vehicleNumber: vehicleOffboard.vehicleNumber,
-            reason: vehicleOffboard.reason
+            vehicleName: vehicle?.name || vehicleOffboard.vehicleNumber,
+            reason: vehicleOffboard.reason,
+            location: vehicleOffboard.vehicleLocation,
+            condition: vehicleOffboard.returnCondition
           },
-          notifications: {
-            departments: tasksCreated,
-            timestamp: new Date().toISOString()
+          instructions: [
+            "Access truck stock replenishment system",
+            "Remove employee from active replenishment schedule", 
+            "Update employee status to 'offboarded'",
+            "Confirm no pending stock orders",
+            "Mark task complete when removed from system"
+          ]
+        }),
+        // Store data for next tasks to be auto-triggered
+        triggerData: JSON.stringify({
+          workflowId: workflowId,
+          employee: {
+            name: vehicleOffboard.techName,
+            racfId: vehicleOffboard.techRacfId,
+            lastDayWorked: vehicleOffboard.lastDayWorked,
+            enterpriseId: vehicleOffboard.techRacfId
           },
-          offboardingDate: new Date().toISOString()
+          vehicle: {
+            vehicleNumber: vehicleOffboard.vehicleNumber,
+            vehicleName: vehicle?.name || vehicleOffboard.vehicleNumber,
+            reason: vehicleOffboard.reason,
+            location: vehicleOffboard.vehicleLocation,
+            condition: vehicleOffboard.returnCondition
+          },
+          submitter: {
+            name: user?.username || user?.email || "Unknown User",
+            submittedAt: new Date().toISOString()
+          }
         })
       });
+
     } catch (queueError) {
-      console.error('Error creating queue items:', queueError);
+      console.error('Error creating NTAO workflow task:', queueError);
+      toast({
+        title: "Error",
+        description: "Failed to create offboarding workflow. Please try again.",
+        variant: "destructive"
+      });
+      return;
     }
 
     toast({
-      title: "Vehicle Offboarded Successfully",
-      description: `${vehicle?.name} removed from fleet. ${tasksCreated.length} department tasks created: ${tasksCreated.join(', ')}`,
+      title: "Offboarding Workflow Started",
+      description: `Sequential workflow initiated for ${vehicleOffboard.techName}. NTAO task created to stop truck stock replenishment.`,
     });
     
-    // Show secondary notification confirmation
+    // Show secondary notification about workflow sequence
     setTimeout(() => {
       toast({
-        title: "Department Tasks Created",
-        description: `✅ ${tasksCreated.join(', ')} teams have been assigned tasks for ${vehicleOffboard.techName}'s offboarding`,
+        title: "Workflow Sequence",
+        description: `✅ Step 1: NTAO (Stop Replenishment) → Step 2: Assets (Recover Phone) → Step 3: Fleet (Move to Pepboys) → Step 4: Inventory (Parts Count)`,
         variant: "default"
       });
     }, 2000);

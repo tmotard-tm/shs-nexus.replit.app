@@ -68,6 +68,12 @@ export const queueItems = pgTable("queue_items", {
   attempts: integer("attempts").notNull().default(0), // For retry logic
   lastError: text("last_error"), // Error message from last failed attempt
   completedAt: timestamp("completed_at"),
+  // Workflow dependency fields
+  workflowId: varchar("workflow_id"), // Groups related tasks in a workflow sequence
+  workflowStep: integer("workflow_step"), // Order/step number in the workflow (1, 2, 3, 4)
+  dependsOn: varchar("depends_on"), // ID of task that must be completed before this one
+  autoTrigger: boolean("auto_trigger").notNull().default(false), // Whether this task should auto-trigger when dependencies complete
+  triggerData: text("trigger_data"), // Data for auto-triggered tasks
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

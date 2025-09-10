@@ -652,6 +652,10 @@ export class MemStorage implements IStorage {
       updatedAt: new Date() 
     };
     this.ntaoQueueItems.set(id, updatedItem);
+
+    // Check if this completes a workflow step and trigger next step
+    await this.triggerNextWorkflowStep(updatedItem);
+    
     return updatedItem;
   }
 
@@ -723,6 +727,10 @@ export class MemStorage implements IStorage {
       updatedAt: new Date() 
     };
     this.assetsQueueItems.set(id, updatedItem);
+
+    // Check if this completes a workflow step and trigger next step
+    await this.triggerNextWorkflowStep(updatedItem);
+    
     return updatedItem;
   }
 
@@ -865,6 +873,10 @@ export class MemStorage implements IStorage {
       updatedAt: new Date() 
     };
     this.fleetQueueItems.set(id, updatedItem);
+
+    // Check if this completes a workflow step and trigger next step
+    await this.triggerNextWorkflowStep(updatedItem);
+    
     return updatedItem;
   }
 
