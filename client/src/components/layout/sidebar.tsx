@@ -22,6 +22,7 @@ export function Sidebar() {
   const navigation = [
     { name: "Home", href: "/", icon: Home },
     { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
+    { name: "Analytics Board", href: "/analytics", icon: Activity },
     getQueueManagementItem(),
     { name: "Requests", href: "/requests", icon: FileText },
     { name: "Approvals", href: "/approvals", icon: CheckCircle },

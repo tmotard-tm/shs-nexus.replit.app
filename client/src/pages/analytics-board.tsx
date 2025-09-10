@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useLocation } from 'wouter';
 import { useQuery } from '@tanstack/react-query';
 import { 
@@ -13,23 +12,20 @@ import {
   Users,
   BarChart3
 } from 'lucide-react';
-import FilteredMap from '@/components/FilteredMap';
-import type { Vehicle, Location } from '@shared/schema';
+import type { Vehicle } from '@shared/schema';
 
 export default function AnalyticsBoard() {
   const [, setLocation] = useLocation();
-  const [isMapOpen, setIsMapOpen] = useState(false);
   
   // Data fetching hooks
   const { data: vehicles = [] } = useQuery<Vehicle[]>({ queryKey: ['/api/vehicles'] });
-  const { data: locations = [] } = useQuery<Location[]>({ queryKey: ['/api/locations'] });
 
   // Helper functions for vehicle statistics
   const getActiveVehicleCount = () => vehicles.length;
   
   const getAvailableVehicles = () => vehicles.filter(v => v.status === 'available');
   
-  const getUnassignedVehicles = () => vehicles.filter(v => !v.assignedLocation);
+  const getUnassignedVehicles = () => vehicles.filter(v => v.status === 'available');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-6">
@@ -89,13 +85,13 @@ export default function AnalyticsBoard() {
             
             <Card 
               className="bg-white cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-              onClick={() => setIsMapOpen(true)}
-              data-testid="card-vehicle-map"
+              onClick={() => setLocation("/active-vehicles")}
+              data-testid="card-vehicle-summary"
             >
               <CardContent className="flex flex-col items-center text-center p-4">
                 <Map className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                <p className="text-lg font-bold text-black" data-testid="text-map-button">MAP</p>
-                <p className="text-sm text-black">View on Map</p>
+                <p className="text-lg font-bold text-black" data-testid="text-summary-button">SUMMARY</p>
+                <p className="text-sm text-black">View All Vehicles</p>
               </CardContent>
             </Card>
           </div>
@@ -243,12 +239,6 @@ export default function AnalyticsBoard() {
           </div>
         </div>
 
-        {/* Map Dialog */}
-        <Dialog open={isMapOpen} onOpenChange={setIsMapOpen}>
-          <DialogContent className="max-w-4xl max-h-[80vh]">
-            <FilteredMap vehicles={vehicles} locations={locations} />
-          </DialogContent>
-        </Dialog>
       </div>
     </div>
   );
