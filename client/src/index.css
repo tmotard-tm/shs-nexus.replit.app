@@ -15,38 +15,39 @@
 @tailwind utilities;
 
 :root {
-  --background: hsl(0, 0%, 98%);
-  --foreground: hsl(0, 0%, 15%);
+  /* Sears Light Theme - Blue & White Color Palette */
+  --background: hsl(210, 25%, 98%);
+  --foreground: hsl(210, 15%, 20%);
   --card: hsl(0, 0%, 100%);
-  --card-foreground: hsl(0, 0%, 15%);
+  --card-foreground: hsl(210, 15%, 25%);
   --popover: hsl(0, 0%, 100%);
-  --popover-foreground: hsl(0, 0%, 15%);
-  --primary: hsl(215, 85%, 45%);
+  --popover-foreground: hsl(210, 15%, 25%);
+  --primary: hsl(208, 100%, 47%);
   --primary-foreground: hsl(0, 0%, 100%);
-  --secondary: hsl(210, 60%, 95%);
-  --secondary-foreground: hsl(0, 0%, 20%);
-  --muted: hsl(0, 0%, 96%);
-  --muted-foreground: hsl(0, 0%, 45%);
-  --accent: hsl(210, 60%, 92%);
-  --accent-foreground: hsl(215, 85%, 45%);
-  --destructive: hsl(0, 85%, 55%);
+  --secondary: hsl(208, 50%, 96%);
+  --secondary-foreground: hsl(210, 15%, 30%);
+  --muted: hsl(208, 30%, 97%);
+  --muted-foreground: hsl(210, 10%, 50%);
+  --accent: hsl(208, 40%, 94%);
+  --accent-foreground: hsl(208, 100%, 47%);
+  --destructive: hsl(0, 84%, 55%);
   --destructive-foreground: hsl(0, 0%, 100%);
-  --border: hsl(0, 0%, 88%);
-  --input: hsl(0, 0%, 96%);
-  --ring: hsl(215, 85%, 45%);
-  --chart-1: hsl(215, 85%, 45%);
-  --chart-2: hsl(210, 85%, 55%);
-  --chart-3: hsl(200, 75%, 45%);
-  --chart-4: hsl(220, 80%, 50%);
-  --chart-5: hsl(230, 70%, 55%);
-  --sidebar: hsl(215, 85%, 45%);
+  --border: hsl(208, 20%, 90%);
+  --input: hsl(208, 30%, 97%);
+  --ring: hsl(208, 100%, 47%);
+  --chart-1: hsl(208, 100%, 47%);
+  --chart-2: hsl(200, 85%, 55%);
+  --chart-3: hsl(192, 75%, 50%);
+  --chart-4: hsl(216, 80%, 55%);
+  --chart-5: hsl(224, 70%, 60%);
+  --sidebar: hsl(208, 100%, 47%);
   --sidebar-foreground: hsl(0, 0%, 100%);
-  --sidebar-primary: hsl(210, 85%, 55%);
-  --sidebar-primary-foreground: hsl(0, 0%, 15%);
-  --sidebar-accent: hsl(215, 75%, 55%);
+  --sidebar-primary: hsl(208, 80%, 55%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(208, 60%, 60%);
   --sidebar-accent-foreground: hsl(0, 0%, 100%);
-  --sidebar-border: hsl(215, 60%, 35%);
-  --sidebar-ring: hsl(210, 85%, 55%);
+  --sidebar-border: hsl(208, 60%, 40%);
+  --sidebar-ring: hsl(208, 80%, 55%);
   --font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   --font-heading: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   --font-serif: Georgia, serif;
@@ -176,7 +177,7 @@
 
 /* Development Banner */
 .dev-banner {
-  background: linear-gradient(90deg, #dc2626, #ef4444);
+  background: linear-gradient(90deg, hsl(208, 100%, 47%), hsl(200, 85%, 55%));
   color: white;
   padding: 8px 16px;
   text-align: center;
