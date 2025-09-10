@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, QueueModule } from "@shared/schema";
 import { z } from "zod";
+import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 
 // Simple session store for demo purposes
 const sessions = new Map<string, { userId: string; username: string; expiresAt: Date }>();
@@ -840,6 +841,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error completing unified queue item:', error);
       res.status(500).json({ message: "Failed to complete queue item" });
+    }
+  });
+
+  // Email notification endpoint for credit card deactivation
+  app.post("/api/send-deactivation-email", async (req, res) => {
+    try {
+      const { employeeName, employeeId, racfId, lastDayWorked, reason } = req.body;
+      
+      // Validate required fields
+      if (!employeeName || !employeeId || !racfId || !lastDayWorked || !reason) {
+        return res.status(400).json({ message: "Missing required employee information" });
+      }
+
+      const emailParams = createCreditCardDeactivationEmail({
+        name: employeeName,
+        employeeId: employeeId,
+        racfId: racfId,
+        lastDayWorked: lastDayWorked,
+        reason: reason
+      });
+
+      const emailSent = await sendEmail(emailParams);
+      
+      if (emailSent) {
+        res.json({ message: "Credit card deactivation notification logged (no email service configured)", recipient: "onecardhelpdesk@transformco.com" });
+      } else {
+        res.status(500).json({ message: "Failed to log credit card deactivation notification" });
+      }
+    } catch (error) {
+      console.error('Error in send-deactivation-email endpoint:', error);
+      res.status(500).json({ message: "Failed to process credit card deactivation notification" });
     }
   });
 

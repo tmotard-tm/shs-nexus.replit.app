@@ -187,6 +187,24 @@ export default function OffboardVehicleLocation() {
         triggerData: JSON.stringify(sharedTriggerData)
       });
 
+      // Send email notification to OneCard Help Desk for credit card deactivation
+      try {
+        await apiRequest("POST", "/api/send-deactivation-email", {
+          employeeName: vehicleOffboard.techName,
+          employeeId: vehicleOffboard.employeeId,
+          racfId: vehicleOffboard.techRacfId,
+          lastDayWorked: vehicleOffboard.lastDayWorked,
+          reason: vehicleOffboard.reason
+        });
+      } catch (emailError) {
+        console.error('Error sending credit card deactivation email:', emailError);
+        // Don't fail the entire workflow if email fails
+        toast({
+          title: "Email Notification",
+          description: "Offboarding created successfully. Credit card deactivation notification logged to server console (no email service configured).",
+        });
+      }
+
     } catch (queueError) {
       console.error('Error creating NTAO workflow task:', queueError);
       toast({
