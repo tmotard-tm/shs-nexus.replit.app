@@ -23,6 +23,10 @@ export default function OnboardHire() {
     lastName: "",
     email: "",
     phone: "",
+    street: "",
+    city: "",
+    state: "",
+    zipCode: "",
     department: "",
     position: "",
     startDate: "",
@@ -145,6 +149,43 @@ export default function OnboardHire() {
       toast({
         title: "Validation Error",
         description: "Tech RACF ID must be exactly 7 characters (letters and numbers only).",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Validate required address fields
+    if (!employeeForm.street.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Street address is required.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    if (!employeeForm.city.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "City is required.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    if (!employeeForm.state) {
+      toast({
+        title: "Validation Error",
+        description: "State is required.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    if (!/^\d{5}$/.test(employeeForm.zipCode)) {
+      toast({
+        title: "Validation Error",
+        description: "ZIP code must be exactly 5 digits.",
         variant: "destructive"
       });
       return;
@@ -298,6 +339,10 @@ export default function OnboardHire() {
       lastName: "",
       email: "",
       phone: "",
+      street: "",
+      city: "",
+      state: "",
+      zipCode: "",
       department: "",
       position: "",
       startDate: "",
@@ -400,6 +445,114 @@ export default function OnboardHire() {
                           placeholder="(555) 123-4567"
                           data-testid="input-phone"
                         />
+                      </div>
+                    </div>
+
+                    {/* Employee Address Information */}
+                    <div className="border-t pt-6">
+                      <h4 className="font-semibold mb-4 text-lg">Employee Address</h4>
+                      
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="street">Street Address *</Label>
+                          <Input
+                            id="street"
+                            value={employeeForm.street}
+                            onChange={(e) => setEmployeeForm(prev => ({ ...prev, street: e.target.value }))}
+                            placeholder="123 Main Street, Apt 4B"
+                            data-testid="input-street"
+                          />
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="city">City *</Label>
+                            <Input
+                              id="city"
+                              value={employeeForm.city}
+                              onChange={(e) => setEmployeeForm(prev => ({ ...prev, city: e.target.value }))}
+                              placeholder="Chicago"
+                              data-testid="input-city"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="state">State *</Label>
+                            <Select 
+                              value={employeeForm.state} 
+                              onValueChange={(value) => setEmployeeForm(prev => ({ ...prev, state: value }))}
+                              data-testid="select-state"
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select state" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="AL">Alabama</SelectItem>
+                                <SelectItem value="AK">Alaska</SelectItem>
+                                <SelectItem value="AZ">Arizona</SelectItem>
+                                <SelectItem value="AR">Arkansas</SelectItem>
+                                <SelectItem value="CA">California</SelectItem>
+                                <SelectItem value="CO">Colorado</SelectItem>
+                                <SelectItem value="CT">Connecticut</SelectItem>
+                                <SelectItem value="DE">Delaware</SelectItem>
+                                <SelectItem value="FL">Florida</SelectItem>
+                                <SelectItem value="GA">Georgia</SelectItem>
+                                <SelectItem value="HI">Hawaii</SelectItem>
+                                <SelectItem value="ID">Idaho</SelectItem>
+                                <SelectItem value="IL">Illinois</SelectItem>
+                                <SelectItem value="IN">Indiana</SelectItem>
+                                <SelectItem value="IA">Iowa</SelectItem>
+                                <SelectItem value="KS">Kansas</SelectItem>
+                                <SelectItem value="KY">Kentucky</SelectItem>
+                                <SelectItem value="LA">Louisiana</SelectItem>
+                                <SelectItem value="ME">Maine</SelectItem>
+                                <SelectItem value="MD">Maryland</SelectItem>
+                                <SelectItem value="MA">Massachusetts</SelectItem>
+                                <SelectItem value="MI">Michigan</SelectItem>
+                                <SelectItem value="MN">Minnesota</SelectItem>
+                                <SelectItem value="MS">Mississippi</SelectItem>
+                                <SelectItem value="MO">Missouri</SelectItem>
+                                <SelectItem value="MT">Montana</SelectItem>
+                                <SelectItem value="NE">Nebraska</SelectItem>
+                                <SelectItem value="NV">Nevada</SelectItem>
+                                <SelectItem value="NH">New Hampshire</SelectItem>
+                                <SelectItem value="NJ">New Jersey</SelectItem>
+                                <SelectItem value="NM">New Mexico</SelectItem>
+                                <SelectItem value="NY">New York</SelectItem>
+                                <SelectItem value="NC">North Carolina</SelectItem>
+                                <SelectItem value="ND">North Dakota</SelectItem>
+                                <SelectItem value="OH">Ohio</SelectItem>
+                                <SelectItem value="OK">Oklahoma</SelectItem>
+                                <SelectItem value="OR">Oregon</SelectItem>
+                                <SelectItem value="PA">Pennsylvania</SelectItem>
+                                <SelectItem value="RI">Rhode Island</SelectItem>
+                                <SelectItem value="SC">South Carolina</SelectItem>
+                                <SelectItem value="SD">South Dakota</SelectItem>
+                                <SelectItem value="TN">Tennessee</SelectItem>
+                                <SelectItem value="TX">Texas</SelectItem>
+                                <SelectItem value="UT">Utah</SelectItem>
+                                <SelectItem value="VT">Vermont</SelectItem>
+                                <SelectItem value="VA">Virginia</SelectItem>
+                                <SelectItem value="WA">Washington</SelectItem>
+                                <SelectItem value="WV">West Virginia</SelectItem>
+                                <SelectItem value="WI">Wisconsin</SelectItem>
+                                <SelectItem value="WY">Wyoming</SelectItem>
+                                <SelectItem value="DC">Washington DC</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="zipCode">ZIP Code *</Label>
+                            <Input
+                              id="zipCode"
+                              value={employeeForm.zipCode}
+                              onChange={(e) => setEmployeeForm(prev => ({ ...prev, zipCode: e.target.value }))}
+                              placeholder="60601"
+                              maxLength={5}
+                              pattern="[0-9]{5}"
+                              data-testid="input-zip-code"
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
 
