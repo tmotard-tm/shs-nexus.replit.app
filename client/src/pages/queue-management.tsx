@@ -23,6 +23,7 @@ export default function QueueManagement() {
   const [selectedFilter, setSelectedFilter] = useState<string>("all");
   const [selectedWorkflowType, setSelectedWorkflowType] = useState<string>("all");
   const [selectedAgent, setSelectedAgent] = useState<string>("all");
+  const [selectedDepartment, setSelectedDepartment] = useState<string>("all");
   const [searchRequestId, setSearchRequestId] = useState<string>("");
   const [searchServiceOrder, setSearchServiceOrder] = useState<string>("");
   const [selectedResolution, setSelectedResolution] = useState<string>("all");
@@ -34,7 +35,7 @@ export default function QueueManagement() {
 
   // Fetch queue items
   const { data: queueItems = [], isLoading } = useQuery({
-    queryKey: ["/api/queue", selectedFilter, selectedWorkflowType],
+    queryKey: ["/api/queue", selectedFilter, selectedWorkflowType, selectedDepartment],
     queryFn: async () => {
       let url = "/api/queue";
       const params = new URLSearchParams();
@@ -131,6 +132,15 @@ export default function QueueManagement() {
       matches = false;
     }
     
+    // Department filter
+    if (selectedDepartment !== "all") {
+      const itemData = item.data ? JSON.parse(item.data) : {};
+      const department = itemData.department || '';
+      if (department.toLowerCase() !== selectedDepartment.toLowerCase()) {
+        matches = false;
+      }
+    }
+    
     return matches;
   });
 
@@ -205,7 +215,24 @@ export default function QueueManagement() {
 
         {/* Filters */}
         <div className="bg-card rounded-lg p-4 mb-6 border border-border">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+            <div>
+              <Label className="text-muted-foreground text-sm">Department:</Label>
+              <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
+                <SelectTrigger className="bg-green-50 border-green-300 text-green-900 dark:bg-green-900 dark:border-green-600 dark:text-green-100">
+                  <SelectValue placeholder="All Departments" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Departments</SelectItem>
+                  <SelectItem value="ntao">NTAO</SelectItem>
+                  <SelectItem value="assets & supplies">Assets & Supplies</SelectItem>
+                  <SelectItem value="assets management">Assets Management</SelectItem>
+                  <SelectItem value="inventory control">Inventory Control</SelectItem>
+                  <SelectItem value="fleet management">Fleet Management</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
             <div>
               <Label className="text-muted-foreground text-sm">Filter by Agent:</Label>
               <Select value={selectedAgent} onValueChange={setSelectedAgent}>
@@ -298,10 +325,11 @@ export default function QueueManagement() {
             <TabsContent value={activeTab} className="mt-0">
               <div className="p-4">
                 {/* Table Header */}
-                <div className="grid grid-cols-9 gap-4 text-muted-foreground text-sm font-medium border-b border-border pb-2 mb-4">
+                <div className="grid grid-cols-10 gap-4 text-muted-foreground text-sm font-medium border-b border-border pb-2 mb-4">
                   <div>ID</div>
                   <div>Submitted</div>
                   <div>Type</div>
+                  <div>Department</div>
                   <div>Title</div>
                   <div>Priority</div>
                   <div>Assigned To</div>
@@ -318,25 +346,38 @@ export default function QueueManagement() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {filteredQueueItems.map((item: QueueItem) => (
-                      <div key={item.id} className="grid grid-cols-9 gap-4 text-sm bg-muted/50 rounded p-3 hover:bg-muted transition-colors">
-                        <div className="text-muted-foreground">#{item.id.slice(0, 8)}...</div>
-                        <div className="text-muted-foreground">{new Date(item.createdAt).toLocaleDateString()}</div>
-                        <div className="text-muted-foreground capitalize">{item.workflowType.replace('_', ' ')}</div>
-                        <div className="text-foreground font-medium truncate">{item.title}</div>
-                        <div>
-                          <Badge variant={item.priority === 'high' ? 'destructive' : item.priority === 'medium' ? 'default' : 'secondary'}>
-                            {item.priority}
-                          </Badge>
-                        </div>
-                        <div className="text-muted-foreground">
-                          {item.assignedTo ? users.find(u => u.id === item.assignedTo)?.username || 'Unknown' : '-'}
-                        </div>
-                        <div>
-                          <Badge variant={item.status === 'completed' ? 'secondary' : item.status === 'in_progress' ? 'default' : 'outline'}>
-                            {item.status === 'in_progress' ? 'In Progress' : item.status}
-                          </Badge>
-                        </div>
+                    {filteredQueueItems.map((item: QueueItem) => {
+                      const itemData = item.data ? JSON.parse(item.data) : {};
+                      const department = itemData.department || '-';
+                      
+                      return (
+                        <div key={item.id} className="grid grid-cols-10 gap-4 text-sm bg-muted/50 rounded p-3 hover:bg-muted transition-colors">
+                          <div className="text-muted-foreground">#{item.id.slice(0, 8)}...</div>
+                          <div className="text-muted-foreground">{new Date(item.createdAt).toLocaleDateString()}</div>
+                          <div className="text-muted-foreground capitalize">{item.workflowType.replace('_', ' ')}</div>
+                          <div className="text-muted-foreground">
+                            {department !== '-' ? (
+                              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-600">
+                                {department}
+                              </Badge>
+                            ) : (
+                              '-'
+                            )}
+                          </div>
+                          <div className="text-foreground font-medium truncate">{item.title}</div>
+                          <div>
+                            <Badge variant={item.priority === 'high' ? 'destructive' : item.priority === 'medium' ? 'default' : 'secondary'}>
+                              {item.priority}
+                            </Badge>
+                          </div>
+                          <div className="text-muted-foreground">
+                            {item.assignedTo ? users.find(u => u.id === item.assignedTo)?.username || 'Unknown' : '-'}
+                          </div>
+                          <div>
+                            <Badge variant={item.status === 'completed' ? 'secondary' : item.status === 'in_progress' ? 'default' : 'outline'}>
+                              {item.status === 'in_progress' ? 'In Progress' : item.status}
+                            </Badge>
+                          </div>
                         <div className="flex gap-2">
                           {item.status === 'pending' && (
                             <Button 
@@ -378,7 +419,8 @@ export default function QueueManagement() {
                         </div>
                         <div></div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
