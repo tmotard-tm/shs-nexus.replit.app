@@ -42,9 +42,10 @@ export interface IStorage {
   
   // Dashboard Stats
   getDashboardStats(): Promise<{
-    pendingRequests: number;
-    inProgressRequests: number;
-    completedRequests: number;
+    onboarding: { pending: number; inProgress: number; completed: number };
+    vehicleAssignment: { pending: number; inProgress: number; completed: number };
+    offboarding: { pending: number; inProgress: number; completed: number };
+    decommission: { pending: number; inProgress: number; completed: number };
     activeUsers: number;
   }>;
 
@@ -375,24 +376,30 @@ export class MemStorage implements IStorage {
 
   // Dashboard Stats
   async getDashboardStats(): Promise<{
-    pendingRequests: number;
-    inProgressRequests: number;
-    completedRequests: number;
+    onboarding: { pending: number; inProgress: number; completed: number };
+    vehicleAssignment: { pending: number; inProgress: number; completed: number };
+    offboarding: { pending: number; inProgress: number; completed: number };
+    decommission: { pending: number; inProgress: number; completed: number };
     activeUsers: number;
   }> {
-    const requests = Array.from(this.requests.values());
-    const pendingRequests = requests.filter(r => r.status === "pending").length;
-    // Since requests only have pending/approved/denied, we'll use denied as "in_progress" 
-    // or create a new interpretation. For now, let's count denied as in_progress for the requirement
-    const inProgressRequests = requests.filter(r => r.status === "denied").length;
-    const completedRequests = requests.filter(r => r.status === "approved").length;
+    const queueItems = Array.from(this.queueItems.values());
+    
+    const getWorkflowStats = (workflowType: string) => {
+      const items = queueItems.filter(item => item.workflowType === workflowType);
+      return {
+        pending: items.filter(item => item.status === "pending").length,
+        inProgress: items.filter(item => item.status === "in_progress").length,
+        completed: items.filter(item => item.status === "completed").length,
+      };
+    };
     
     const activeUsers = this.users.size;
 
     return {
-      pendingRequests,
-      inProgressRequests,
-      completedRequests,
+      onboarding: getWorkflowStats("onboarding"),
+      vehicleAssignment: getWorkflowStats("vehicle_assignment"),
+      offboarding: getWorkflowStats("offboarding"),
+      decommission: getWorkflowStats("decommission"),
       activeUsers,
     };
   }

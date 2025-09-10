@@ -14,9 +14,10 @@ export default function Dashboard() {
   const { user } = useAuth();
 
   const { data: stats, isLoading: statsLoading } = useQuery<{
-    pendingRequests: number;
-    inProgressRequests: number;
-    completedRequests: number;
+    onboarding: { pending: number; inProgress: number; completed: number };
+    vehicleAssignment: { pending: number; inProgress: number; completed: number };
+    offboarding: { pending: number; inProgress: number; completed: number };
+    decommission: { pending: number; inProgress: number; completed: number };
     activeUsers: number;
   }>({
     queryKey: ["/api/dashboard/stats"],
@@ -73,44 +74,127 @@ export default function Dashboard() {
       
       <main className="p-6">
         <BackButton href="/" />
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <StatsCard
-            title="Pending Requests"
-            value={statsLoading ? "..." : stats?.pendingRequests || 0}
-            icon="fas fa-clock"
-            color="1"
-            change="+12%"
-            changeLabel="from last week"
-            testId="stats-pending"
-          />
-          <StatsCard
-            title="In Progress Requests"
-            value={statsLoading ? "..." : stats?.inProgressRequests || 0}
-            icon="fas fa-spinner"
-            color="2"
-            change="Active"
-            changeLabel="being processed"
-            testId="stats-in-progress"
-          />
-          <StatsCard
-            title="Completed Requests"
-            value={statsLoading ? "..." : stats?.completedRequests || 0}
-            icon="fas fa-check"
-            color="3"
-            change="+8%"
-            changeLabel="this week"
-            testId="stats-completed"
-          />
-          <StatsCard
-            title="Active Users"
-            value={statsLoading ? "..." : stats?.activeUsers || 0}
-            icon="fas fa-users"
-            color="4"
-            change="+5"
-            changeLabel="new this week"
-            testId="stats-users"
-          />
+        {/* Workflow Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
+          {/* Onboarding */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <i className="fas fa-user-plus text-[hsl(var(--chart-1))]"></i>
+                Onboarding
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Pending:</span>
+                <span className="font-medium text-[hsl(var(--chart-1))]" data-testid="onboarding-pending">
+                  {statsLoading ? "..." : stats?.onboarding?.pending || 0}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">In Progress:</span>
+                <span className="font-medium text-[hsl(var(--chart-2))]" data-testid="onboarding-in-progress">
+                  {statsLoading ? "..." : stats?.onboarding?.inProgress || 0}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Completed:</span>
+                <span className="font-medium text-[hsl(var(--chart-3))]" data-testid="onboarding-completed">
+                  {statsLoading ? "..." : stats?.onboarding?.completed || 0}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Vehicle Assignment */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <i className="fas fa-car text-[hsl(var(--chart-2))]"></i>
+                Vehicle Assignment
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Pending:</span>
+                <span className="font-medium text-[hsl(var(--chart-1))]" data-testid="vehicle-pending">
+                  {statsLoading ? "..." : stats?.vehicleAssignment?.pending || 0}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">In Progress:</span>
+                <span className="font-medium text-[hsl(var(--chart-2))]" data-testid="vehicle-in-progress">
+                  {statsLoading ? "..." : stats?.vehicleAssignment?.inProgress || 0}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Completed:</span>
+                <span className="font-medium text-[hsl(var(--chart-3))]" data-testid="vehicle-completed">
+                  {statsLoading ? "..." : stats?.vehicleAssignment?.completed || 0}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Offboarding */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <i className="fas fa-user-minus text-[hsl(var(--chart-3))]"></i>
+                Offboarding
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Pending:</span>
+                <span className="font-medium text-[hsl(var(--chart-1))]" data-testid="offboarding-pending">
+                  {statsLoading ? "..." : stats?.offboarding?.pending || 0}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">In Progress:</span>
+                <span className="font-medium text-[hsl(var(--chart-2))]" data-testid="offboarding-in-progress">
+                  {statsLoading ? "..." : stats?.offboarding?.inProgress || 0}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Completed:</span>
+                <span className="font-medium text-[hsl(var(--chart-3))]" data-testid="offboarding-completed">
+                  {statsLoading ? "..." : stats?.offboarding?.completed || 0}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Decommission */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <i className="fas fa-trash text-[hsl(var(--chart-4))]"></i>
+                Decommission
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Pending:</span>
+                <span className="font-medium text-[hsl(var(--chart-1))]" data-testid="decommission-pending">
+                  {statsLoading ? "..." : stats?.decommission?.pending || 0}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">In Progress:</span>
+                <span className="font-medium text-[hsl(var(--chart-2))]" data-testid="decommission-in-progress">
+                  {statsLoading ? "..." : stats?.decommission?.inProgress || 0}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Completed:</span>
+                <span className="font-medium text-[hsl(var(--chart-3))]" data-testid="decommission-completed">
+                  {statsLoading ? "..." : stats?.decommission?.completed || 0}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
