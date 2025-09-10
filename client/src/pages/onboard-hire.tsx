@@ -130,6 +130,26 @@ export default function OnboardHire() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Validate Employee ID (must be exactly 11 digits)
+    if (!/^\d{11}$/.test(employeeForm.employeeId)) {
+      toast({
+        title: "Validation Error",
+        description: "Employee ID must be exactly 11 digits.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Validate Tech RACF ID (must be exactly 7 alphanumeric characters)
+    if (!/^[a-zA-Z0-9]{7}$/.test(employeeForm.techId)) {
+      toast({
+        title: "Validation Error",
+        description: "Tech RACF ID must be exactly 7 characters (letters and numbers only).",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     // Validate specialty fields
     if (!employeeForm.isGeneralist && employeeForm.specialties.length === 0) {
       toast({
@@ -245,7 +265,7 @@ export default function OnboardHire() {
           requesterId: user?.id || "system",
           data: JSON.stringify({
             submitter: {
-              name: user?.name || user?.enterpriseId || "Unknown User",
+              name: user?.username || user?.email || "Unknown User",
               submittedAt: new Date().toISOString()
             },
             employee: employeeForm,

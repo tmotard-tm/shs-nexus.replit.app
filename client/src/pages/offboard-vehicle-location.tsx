@@ -75,6 +75,27 @@ export default function OffboardVehicleLocation() {
 
   const handleVehicleOffboard = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate Employee ID (must be exactly 11 digits)
+    if (!/^\d{11}$/.test(vehicleOffboard.employeeId)) {
+      toast({
+        title: "Validation Error",
+        description: "Employee ID must be exactly 11 digits.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Validate Tech RACF ID (must be exactly 7 alphanumeric characters)
+    if (!/^[a-zA-Z0-9]{7}$/.test(vehicleOffboard.techRacfId)) {
+      toast({
+        title: "Validation Error",
+        description: "Tech RACF ID must be exactly 7 characters (letters and numbers only).",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     const vehicle = vehicles.find(veh => veh.id === vehicleOffboard.vehicleId);
     
     // Generate unique workflow ID for this offboarding sequence
