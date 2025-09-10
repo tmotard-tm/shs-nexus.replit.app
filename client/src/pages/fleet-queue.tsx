@@ -20,8 +20,8 @@ export default function FleetQueuePage() {
 
   // Fetch Fleet Management queue items only
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
-    queryKey: ["/api/queue", "Fleet Management"],
-    queryFn: () => apiRequest("GET", "/api/queue?department=Fleet Management").then(res => res.json()),
+    queryKey: ["/api/fleet-queue"],
+    queryFn: () => apiRequest("GET", "/api/fleet-queue").then(res => res.json()),
   });
 
   // Fetch users for assignee names
@@ -39,9 +39,9 @@ export default function FleetQueuePage() {
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/assign`, { assigneeId }),
+      apiRequest("PATCH", `/api/fleet-queue/${queueItemId}/assign`, { assigneeId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "Fleet Management"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fleet-queue"] });
       toast({
         title: "Success",
         description: "Queue item assigned successfully.",
@@ -58,9 +58,9 @@ export default function FleetQueuePage() {
 
   const completeMutation = useMutation({
     mutationFn: (queueItemId: string) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/complete`, { completedBy: user?.id }),
+      apiRequest("PATCH", `/api/fleet-queue/${queueItemId}/complete`, { completedBy: user?.id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "Fleet Management"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fleet-queue"] });
       toast({
         title: "Success",
         description: "Queue item marked as complete.",

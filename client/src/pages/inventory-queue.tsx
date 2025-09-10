@@ -20,8 +20,8 @@ export default function InventoryQueuePage() {
 
   // Fetch Inventory Control queue items only
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
-    queryKey: ["/api/queue", "Inventory Control"],
-    queryFn: () => apiRequest("GET", "/api/queue?department=Inventory Control").then(res => res.json()),
+    queryKey: ["/api/inventory-queue"],
+    queryFn: () => apiRequest("GET", "/api/inventory-queue").then(res => res.json()),
   });
 
   // Fetch users for assignee names
@@ -39,9 +39,9 @@ export default function InventoryQueuePage() {
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/assign`, { assigneeId }),
+      apiRequest("PATCH", `/api/inventory-queue/${queueItemId}/assign`, { assigneeId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "Inventory Control"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory-queue"] });
       toast({
         title: "Success",
         description: "Queue item assigned successfully.",
@@ -58,9 +58,9 @@ export default function InventoryQueuePage() {
 
   const completeMutation = useMutation({
     mutationFn: (queueItemId: string) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/complete`, { completedBy: user?.id }),
+      apiRequest("PATCH", `/api/inventory-queue/${queueItemId}/complete`, { completedBy: user?.id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "Inventory Control"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory-queue"] });
       toast({
         title: "Success",
         description: "Queue item marked as complete.",

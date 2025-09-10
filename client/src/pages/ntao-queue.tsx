@@ -20,8 +20,8 @@ export default function NTAOQueuePage() {
 
   // Fetch NTAO queue items only
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
-    queryKey: ["/api/queue", "NTAO"],
-    queryFn: () => apiRequest("GET", "/api/queue?department=NTAO").then(res => res.json()),
+    queryKey: ["/api/ntao-queue"],
+    queryFn: () => apiRequest("GET", "/api/ntao-queue").then(res => res.json()),
   });
 
   // Fetch users for assignee names
@@ -39,9 +39,9 @@ export default function NTAOQueuePage() {
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/assign`, { assigneeId }),
+      apiRequest("PATCH", `/api/ntao-queue/${queueItemId}/assign`, { assigneeId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "NTAO"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ntao-queue"] });
       toast({
         title: "Success",
         description: "Queue item assigned successfully.",
@@ -58,9 +58,9 @@ export default function NTAOQueuePage() {
 
   const completeMutation = useMutation({
     mutationFn: (queueItemId: string) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/complete`, { completedBy: user?.id }),
+      apiRequest("PATCH", `/api/ntao-queue/${queueItemId}/complete`, { completedBy: user?.id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "NTAO"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/ntao-queue"] });
       toast({
         title: "Success",
         description: "Queue item marked as complete.",

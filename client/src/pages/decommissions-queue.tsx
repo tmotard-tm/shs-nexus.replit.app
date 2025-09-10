@@ -20,8 +20,8 @@ export default function DecommissionsQueuePage() {
 
   // Fetch Decommissions queue items only
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
-    queryKey: ["/api/queue", "Decommissions"],
-    queryFn: () => apiRequest("GET", "/api/queue?department=Decommissions").then(res => res.json()),
+    queryKey: ["/api/decommissions-queue"],
+    queryFn: () => apiRequest("GET", "/api/decommissions-queue").then(res => res.json()),
   });
 
   // Fetch users for assignee names
@@ -39,9 +39,9 @@ export default function DecommissionsQueuePage() {
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/assign`, { assigneeId }),
+      apiRequest("PATCH", `/api/decommissions-queue/${queueItemId}/assign`, { assigneeId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "Decommissions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/decommissions-queue"] });
       toast({
         title: "Success",
         description: "Queue item assigned successfully.",
@@ -58,9 +58,9 @@ export default function DecommissionsQueuePage() {
 
   const completeMutation = useMutation({
     mutationFn: (queueItemId: string) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/complete`, { completedBy: user?.id }),
+      apiRequest("PATCH", `/api/decommissions-queue/${queueItemId}/complete`, { completedBy: user?.id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "Decommissions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/decommissions-queue"] });
       toast({
         title: "Success",
         description: "Queue item marked as complete.",

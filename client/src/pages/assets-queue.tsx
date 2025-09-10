@@ -20,8 +20,8 @@ export default function AssetsQueuePage() {
 
   // Fetch Assets Management queue items only
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
-    queryKey: ["/api/queue", "Assets Management"],
-    queryFn: () => apiRequest("GET", "/api/queue?department=Assets Management").then(res => res.json()),
+    queryKey: ["/api/assets-queue"],
+    queryFn: () => apiRequest("GET", "/api/assets-queue").then(res => res.json()),
   });
 
   // Fetch users for assignee names
@@ -39,9 +39,9 @@ export default function AssetsQueuePage() {
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/assign`, { assigneeId }),
+      apiRequest("PATCH", `/api/assets-queue/${queueItemId}/assign`, { assigneeId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "Assets Management"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/assets-queue"] });
       toast({
         title: "Success",
         description: "Queue item assigned successfully.",
@@ -58,9 +58,9 @@ export default function AssetsQueuePage() {
 
   const completeMutation = useMutation({
     mutationFn: (queueItemId: string) =>
-      apiRequest("PATCH", `/api/queue/${queueItemId}/complete`, { completedBy: user?.id }),
+      apiRequest("PATCH", `/api/assets-queue/${queueItemId}/complete`, { completedBy: user?.id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queue", "Assets Management"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/assets-queue"] });
       toast({
         title: "Success",
         description: "Queue item marked as complete.",
