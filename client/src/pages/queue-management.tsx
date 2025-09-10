@@ -610,6 +610,14 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
           {item.workflowType === "decommission" && (
             <DecommissionFormData data={parsedData} />
           )}
+          
+          {item.workflowType === "assets_supplies" && (
+            <AssetsSuppliesFormData data={parsedData} />
+          )}
+          
+          {item.workflowType === "ntao_parts" && (
+            <NTAOPartsFormData data={parsedData} />
+          )}
         </div>
       )}
 
@@ -811,57 +819,78 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
 
 // Offboarding form data display
 function OffboardingFormData({ data }: { data: any }) {
-  const { technician, vehicle, departments } = data;
+  const { employee, vehicle, notifications } = data || {};
 
   return (
     <div className="space-y-4">
-      {/* Technician Information */}
-      <div className="bg-muted p-4 rounded-lg border border-border">
-        <h4 className="font-semibold mb-3">Technician Information</h4>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <Label>Name</Label>
-            <p>{technician.name}</p>
+      {/* Employee Information */}
+      {employee && (
+        <div className="bg-muted p-4 rounded-lg border border-border">
+          <h4 className="font-semibold mb-3">Employee Information</h4>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <Label>Name</Label>
+              <p>{employee.name || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>RACF ID</Label>
+              <p>{employee.racfId || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Enterprise ID</Label>
+              <p>{employee.enterpriseId || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Last Day Worked</Label>
+              <p>{employee.lastDayWorked || 'N/A'}</p>
+            </div>
           </div>
-          <div>
-            <Label>RACF ID</Label>
-            <p>{technician.racfId}</p>
-          </div>
-          <div>
-            <Label>Last Day Worked</Label>
-            <p>{technician.lastDayWorked}</p>
-          </div>
-          <div>
-            <Label>Reason</Label>
-            <p>{technician.reason}</p>
-          </div>
+          
+          {/* Departments */}
+          {employee.departments && employee.departments.length > 0 && (
+            <div className="mt-4">
+              <Label>Departments</Label>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {employee.departments.map((dept: string, index: number) => (
+                  <Badge key={index} variant="outline" className="text-xs">{dept}</Badge>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Vehicle Information */}
-      <div className="bg-muted p-4 rounded-lg border border-border">
-        <h4 className="font-semibold mb-3">Vehicle Information</h4>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <Label>Vehicle Number</Label>
-            <p>{vehicle.number}</p>
-          </div>
-          <div>
-            <Label>Vehicle Name</Label>
-            <p>{vehicle.name}</p>
+      {vehicle && (
+        <div className="bg-muted p-4 rounded-lg border border-border">
+          <h4 className="font-semibold mb-3">Vehicle Information</h4>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <Label>Vehicle Number</Label>
+              <p>{vehicle.vehicleNumber || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Reason</Label>
+              <p>{vehicle.reason || 'N/A'}</p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Departments Notified */}
-      {departments && departments.length > 0 && (
-        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-          <h4 className="font-semibold mb-3 text-slate-200">Departments Notified</h4>
+      {notifications && notifications.departments && notifications.departments.length > 0 && (
+        <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+          <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Departments Notified</h4>
           <div className="flex flex-wrap gap-2">
-            {departments.map((dept: string, index: number) => (
+            {notifications.departments.map((dept: string, index: number) => (
               <Badge key={index} variant="secondary">{dept}</Badge>
             ))}
           </div>
+          {notifications.timestamp && (
+            <p className="text-xs text-blue-700 dark:text-blue-300 mt-2">
+              Notified at: {new Date(notifications.timestamp).toLocaleString()}
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -876,6 +905,156 @@ function DecommissionFormData({ data }: { data: any }) {
       <pre className="text-xs overflow-auto">
         {JSON.stringify(data, null, 2)}
       </pre>
+    </div>
+  );
+}
+
+// Assets & Supplies form data display
+function AssetsSuppliesFormData({ data }: { data: any }) {
+  const { employee, orderType, autoTriggered, triggeredBy } = data || {};
+
+  return (
+    <div className="space-y-4">
+      {/* Order Information */}
+      <div className="bg-muted p-4 rounded-lg border border-border">
+        <h4 className="font-semibold mb-3">Order Information</h4>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <Label>Order Type</Label>
+            <p>{orderType || 'N/A'}</p>
+          </div>
+          <div>
+            <Label>Auto Triggered</Label>
+            <p>{autoTriggered ? 'Yes' : 'No'}</p>
+          </div>
+          <div>
+            <Label>Triggered By</Label>
+            <p>{triggeredBy || 'N/A'}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Employee Information */}
+      {employee && (
+        <div className="bg-muted p-4 rounded-lg border border-border">
+          <h4 className="font-semibold mb-3">Employee Information</h4>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <Label>Name</Label>
+              <p>{employee.firstName} {employee.lastName}</p>
+            </div>
+            <div>
+              <Label>Enterprise ID</Label>
+              <p>{employee.enterpriseId || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Department</Label>
+              <p>{employee.department || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Start Date</Label>
+              <p>{employee.startDate || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Region</Label>
+              <p>{employee.region || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>District</Label>
+              <p>{employee.district || 'N/A'}</p>
+            </div>
+          </div>
+
+          {/* Specialties */}
+          {employee.specialties && employee.specialties.length > 0 && (
+            <div className="mt-4">
+              <Label>Specialties</Label>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {employee.specialties.map((specialty: string, index: number) => (
+                  <Badge key={index} variant="outline" className="text-xs">{specialty}</Badge>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// NTAO Parts form data display
+function NTAOPartsFormData({ data }: { data: any }) {
+  const { employee, orderType, autoTriggered, triggeredBy, workLocation } = data || {};
+
+  return (
+    <div className="space-y-4">
+      {/* Order Information */}
+      <div className="bg-muted p-4 rounded-lg border border-border">
+        <h4 className="font-semibold mb-3">Order Information</h4>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <Label>Order Type</Label>
+            <p>{orderType || 'N/A'}</p>
+          </div>
+          <div>
+            <Label>Auto Triggered</Label>
+            <p>{autoTriggered ? 'Yes' : 'No'}</p>
+          </div>
+          <div>
+            <Label>Triggered By</Label>
+            <p>{triggeredBy || 'N/A'}</p>
+          </div>
+          <div>
+            <Label>Work Location</Label>
+            <p>{workLocation || 'N/A'}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Employee Information */}
+      {employee && (
+        <div className="bg-muted p-4 rounded-lg border border-border">
+          <h4 className="font-semibold mb-3">Technician Information</h4>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <Label>Name</Label>
+              <p>{employee.firstName} {employee.lastName}</p>
+            </div>
+            <div>
+              <Label>Enterprise ID</Label>
+              <p>{employee.enterpriseId || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Tech ID</Label>
+              <p>{employee.techId || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Department</Label>
+              <p>{employee.department || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Region</Label>
+              <p>{employee.region || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>District</Label>
+              <p>{employee.district || 'N/A'}</p>
+            </div>
+          </div>
+
+          {/* Specialties */}
+          {employee.specialties && employee.specialties.length > 0 && (
+            <div className="mt-4">
+              <Label>Specialties</Label>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {employee.specialties.map((specialty: string, index: number) => (
+                  <Badge key={index} variant="outline" className="text-xs">{specialty}</Badge>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

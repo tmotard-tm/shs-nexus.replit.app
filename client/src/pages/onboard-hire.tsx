@@ -156,31 +156,66 @@ export default function OnboardHire() {
     const requestsCreated = [];
     
     try {
-      // Create Assets & Supplies request if triggered
+      // Create Assets & Supplies queue task if triggered
       if (supplyOrders.assetsSupplies) {
-        const assetsRequest = await apiRequest("POST", "/api/requests", {
-          title: `Day 1 Assets & Supplies for ${employeeForm.firstName} ${employeeForm.lastName}`,
-          description: `Request for Day 1 supplies and assets for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).join(', ') || 'None specified'}. Enterprise ID: ${employeeForm.enterpriseId}. Submitted by: ${user?.name || user?.enterpriseId || "Unknown User"}`,
-          type: "system_config",
+        const assetsQueueItem = await apiRequest("POST", "/api/queue", {
+          workflowType: "assets_supplies",
+          title: `Assets & Supplies Order for Day 1 Supplies (Auto-triggered)`,
+          description: `Day 1 supplies and assets for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).join(', ') || 'None specified'}. Enterprise ID: ${employeeForm.enterpriseId}.`,
           priority: "high",
-          targetApi: "Assets & Supplies Team",
           requesterId: user?.id || "system",
-          submittedBy: user?.name || user?.enterpriseId || "Unknown User"
+          data: JSON.stringify({
+            submitter: {
+              name: user?.name || user?.enterpriseId || "Unknown User",
+              submittedAt: new Date().toISOString()
+            },
+            employee: {
+              firstName: employeeForm.firstName,
+              lastName: employeeForm.lastName,
+              enterpriseId: employeeForm.enterpriseId,
+              department: employeeForm.department,
+              startDate: employeeForm.startDate,
+              region: employeeForm.region,
+              district: employeeForm.district,
+              specialties: [employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty]
+            },
+            orderType: "Day 1 Assets & Supplies",
+            autoTriggered: true,
+            triggeredBy: "onboarding"
+          })
         });
         requestsCreated.push("Assets & Supplies order");
         orderMessages.push("Assets & Supplies order triggered for Day 1 supplies");
       }
       
-      // Create NTAO parts stock request if triggered
+      // Create NTAO parts stock queue task if triggered
       if (supplyOrders.ntaoPartsStock) {
-        const ntaoRequest = await apiRequest("POST", "/api/requests", {
-          title: `NTAO Parts Stock Request for ${employeeForm.firstName} ${employeeForm.lastName}`,
-          description: `Request for parts stock allocation for new technician ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Work location: ${vehicleAssignment.workZipcode || 'TBD'}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).join(', ') || 'None specified'}. Tech ID: ${employeeForm.techId || 'TBD'}. Enterprise ID: ${employeeForm.enterpriseId}. Submitted by: ${user?.name || user?.enterpriseId || "Unknown User"}`,
-          type: "system_config",
+        const ntaoQueueItem = await apiRequest("POST", "/api/queue", {
+          workflowType: "ntao_parts",
+          title: `NTAO Order for Parts Stock (Auto-triggered)`,
+          description: `Parts stock allocation for new technician ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). Work location: ${vehicleAssignment.workZipcode || 'TBD'}. Region: ${employeeForm.region}, District: ${employeeForm.district}. Specialties: ${[employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty].filter(Boolean).join(', ') || 'None specified'}. Tech ID: ${employeeForm.techId || 'TBD'}. Enterprise ID: ${employeeForm.enterpriseId}.`,
           priority: "medium",
-          targetApi: "NTAO Parts Team",
           requesterId: user?.id || "system",
-          submittedBy: user?.name || user?.enterpriseId || "Unknown User"
+          data: JSON.stringify({
+            submitter: {
+              name: user?.name || user?.enterpriseId || "Unknown User",
+              submittedAt: new Date().toISOString()
+            },
+            employee: {
+              firstName: employeeForm.firstName,
+              lastName: employeeForm.lastName,
+              enterpriseId: employeeForm.enterpriseId,
+              techId: employeeForm.techId,
+              department: employeeForm.department,
+              region: employeeForm.region,
+              district: employeeForm.district,
+              specialties: [employeeForm.primarySpecialty, employeeForm.secondarySpecialty, employeeForm.tertiarySpecialty]
+            },
+            workLocation: vehicleAssignment.workZipcode || 'TBD',
+            orderType: "NTAO Parts Stock",
+            autoTriggered: true,
+            triggeredBy: "onboarding"
+          })
         });
         requestsCreated.push("NTAO parts stock order");
         orderMessages.push("NTAO order triggered for parts stock");
@@ -191,16 +226,6 @@ export default function OnboardHire() {
       if (vehicleAssignment.autoAssign && vehicleAssignment.workZipcode) {
         const closestVehicle = findClosestVehicle(vehicleAssignment.workZipcode);
         if (closestVehicle) {
-          // Create vehicle assignment request
-          const vehicleRequest = await apiRequest("POST", "/api/requests", {
-            title: `Vehicle Assignment: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName}`,
-            description: `Auto-assigned vehicle ${closestVehicle.licensePlate} to ${employeeForm.firstName} ${employeeForm.lastName}. Vehicle located in ${closestVehicle.city}, ${closestVehicle.state}. Distance score: ${calculateZipDistance(closestVehicle.zip, vehicleAssignment.workZipcode)}. Submitted by: ${user?.name || user?.enterpriseId || "Unknown User"}`,
-            type: "system_config",
-            priority: "medium",
-            targetApi: "Fleet Management",
-            requesterId: user?.id || "system",
-            submittedBy: user?.name || user?.enterpriseId || "Unknown User"
-          });
           requestsCreated.push("Vehicle assignment");
           vehicleMessage = `Closest vehicle assigned: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName} (${closestVehicle.licensePlate}) located in ${closestVehicle.city}, ${closestVehicle.state}.`;
         } else {
