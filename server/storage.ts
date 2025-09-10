@@ -924,7 +924,7 @@ export class MemStorage implements IStorage {
         const inventoryTask = {
           workflowType: "offboarding",
           title: `Full Parts and Tools Count - ${triggerData.vehicle.vehicleNumber}`,
-          description: `Perform full inventory count of parts and tools in van ${triggerData.vehicle.vehicleNumber} at Pepboys location. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Complete audit before van reassignment. Both Inventory Control and Assets Management teams should collaborate on this task.`,
+          description: `Perform full inventory count of parts and tools in van ${triggerData.vehicle.vehicleNumber} at central location/shop. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Complete audit before van reassignment. Both Inventory Control and Assets Management teams should collaborate on this task.`,
           priority: "medium",
           requesterId: "system",
           department: "Inventory Control", // Primary department, but Assets should also participate
@@ -940,7 +940,7 @@ export class MemStorage implements IStorage {
             submitter: triggerData.submitter,
             departments: ["Inventory Control", "Assets Management"], // Both departments involved
             instructions: [
-              "Access van at Pepboys location (fleet has moved it)",
+              "Access van at central location/shop (fleet has moved it)",
               "Coordinate with Assets Management team for joint count",
               "Perform complete inventory count of all parts",
               "Count and verify all tools and equipment",
@@ -957,7 +957,7 @@ export class MemStorage implements IStorage {
         const assetsNotificationTask = {
           workflowType: "offboarding",
           title: `Assist with Parts Count - ${triggerData.vehicle.vehicleNumber}`,
-          description: `Assist Inventory Control with full parts and tools count for van ${triggerData.vehicle.vehicleNumber} at Pepboys. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Coordinate with Inventory team for complete audit.`,
+          description: `Assist Inventory Control with full parts and tools count for van ${triggerData.vehicle.vehicleNumber} at central location/shop. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Coordinate with Inventory team for complete audit.`,
           priority: "medium",
           requesterId: "system",
           department: "Assets Management",

@@ -157,11 +157,11 @@ export default function OffboardVehicleLocation() {
         triggerData: JSON.stringify(sharedTriggerData)
       });
 
-      // Step 3: Create Fleet task (move van to Pepboys) - runs in parallel, triggers final step when complete
+      // Step 3: Create Fleet task (move van to central location/shop) - runs in parallel, triggers final step when complete
       await apiRequest("POST", "/api/fleet-queue", {
         workflowType: "offboarding",
-        title: `Move Van to Pepboys for Prep - ${vehicleOffboard.vehicleNumber}`,
-        description: `Move van ${vehicleOffboard.vehicleNumber} to Pepboys for preparation. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Schedule transport and prep for next assignment.`,
+        title: `Move Van to Central Location/Shop for Prep - ${vehicleOffboard.vehicleNumber}`,
+        description: `Move van ${vehicleOffboard.vehicleNumber} to central location/shop for preparation. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Schedule transport and prep for next assignment.`,
         priority: "high",
         requesterId: user?.id || "system",
         department: "Fleet Management",
@@ -175,11 +175,11 @@ export default function OffboardVehicleLocation() {
           ...sharedTriggerData,
           instructions: [
             "Schedule van pickup from employee location",
-            "Coordinate transport to Pepboys service center",
+            "Coordinate transport to central location/shop",
             "Verify vehicle condition and mileage",
             "Schedule maintenance and cleaning",
             "Update fleet management system",
-            "Mark task complete when van at Pepboys"
+            "Mark task complete when van at central location/shop"
           ]
         }),
         triggerData: JSON.stringify(sharedTriggerData)
@@ -296,7 +296,7 @@ export default function OffboardVehicleLocation() {
                             <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
                               <li>NTAO (Stop truck replenishment)</li>
                               <li>Assets Management (Recover phone)</li>
-                              <li>Fleet Management (Move van to Pepboys)</li>
+                              <li>Fleet Management (Move van to central location/shop)</li>
                             </ul>
                             <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van: Inventory Control + Assets Management will get joint parts count task.</p>
                             <p className="text-yellow-700 dark:text-yellow-300 mt-1 text-xs">After parts count: Fleet Management will get final vehicle readiness verification task.</p>
