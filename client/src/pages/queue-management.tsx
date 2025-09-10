@@ -149,7 +149,7 @@ export default function QueueManagement() {
 
   return (
     <MainContent>
-      <div className="min-h-screen bg-slate-900 text-white p-6">
+      <div className="min-h-screen bg-background text-foreground p-6">
         <BackButton href="/" />
         
         {/* Status Cards */}
@@ -204,12 +204,12 @@ export default function QueueManagement() {
         </div>
 
         {/* Filters */}
-        <div className="bg-slate-800 rounded-lg p-4 mb-6">
+        <div className="bg-card rounded-lg p-4 mb-6 border border-border">
           <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4">
             <div>
-              <Label className="text-slate-300 text-sm">Filter by Agent:</Label>
+              <Label className="text-muted-foreground text-sm">Filter by Agent:</Label>
               <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-                <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
+                <SelectTrigger className="bg-background border-border">
                   <SelectValue placeholder="All Agents" />
                 </SelectTrigger>
                 <SelectContent>
@@ -222,29 +222,29 @@ export default function QueueManagement() {
             </div>
             
             <div>
-              <Label className="text-slate-300 text-sm">Search Request ID:</Label>
+              <Label className="text-muted-foreground text-sm">Search Request ID:</Label>
               <Input
                 placeholder="Request ID..."
                 value={searchRequestId}
                 onChange={(e) => setSearchRequestId(e.target.value)}
-                className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
+                className="bg-background border-border"
               />
             </div>
             
             <div>
-              <Label className="text-slate-300 text-sm">Service Order:</Label>
+              <Label className="text-muted-foreground text-sm">Service Order:</Label>
               <Input
                 placeholder="Service Order..."
                 value={searchServiceOrder}
                 onChange={(e) => setSearchServiceOrder(e.target.value)}
-                className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
+                className="bg-background border-border"
               />
             </div>
             
             <div>
-              <Label className="text-slate-300 text-sm">Resolution:</Label>
+              <Label className="text-muted-foreground text-sm">Resolution:</Label>
               <Select value={selectedResolution} onValueChange={setSelectedResolution}>
-                <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
+                <SelectTrigger className="bg-background border-border">
                   <SelectValue placeholder="All Resolutions" />
                 </SelectTrigger>
                 <SelectContent>
@@ -256,22 +256,22 @@ export default function QueueManagement() {
             </div>
             
             <div>
-              <Label className="text-slate-300 text-sm">From:</Label>
+              <Label className="text-muted-foreground text-sm">From:</Label>
               <Input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="bg-slate-700 border-slate-600 text-white"
+                className="bg-background border-border"
               />
             </div>
             
             <div>
-              <Label className="text-slate-300 text-sm">To:</Label>
+              <Label className="text-muted-foreground text-sm">To:</Label>
               <Input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="bg-slate-700 border-slate-600 text-white"
+                className="bg-background border-border"
               />
             </div>
           </div>
@@ -288,7 +288,7 @@ export default function QueueManagement() {
                 setDateFrom("");
                 setDateTo("");
               }}
-              className="text-slate-300 border-slate-600 hover:bg-slate-700"
+              className="text-muted-foreground border-border hover:bg-muted"
             >
               Clear Filters
             </Button>
@@ -296,9 +296,9 @@ export default function QueueManagement() {
         </div>
 
         {/* Tabs */}
-        <div className="bg-slate-800 rounded-lg">
+        <div className="bg-card rounded-lg border border-border">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="w-full bg-slate-700 grid grid-cols-4">
+            <TabsList className="w-full bg-muted grid grid-cols-4">
               <TabsTrigger value="new" className="data-[state=active]:bg-orange-500">
                 <Clock className="h-4 w-4 mr-2" />
                 New Tasks ({newTasksCount})
@@ -320,7 +320,7 @@ export default function QueueManagement() {
             <TabsContent value={activeTab} className="mt-0">
               <div className="p-4">
                 {/* Table Header */}
-                <div className="grid grid-cols-9 gap-4 text-slate-300 text-sm font-medium border-b border-slate-700 pb-2 mb-4">
+                <div className="grid grid-cols-9 gap-4 text-muted-foreground text-sm font-medium border-b border-border pb-2 mb-4">
                   <div>ID</div>
                   <div>Submitted</div>
                   <div>Type</div>
@@ -334,24 +334,24 @@ export default function QueueManagement() {
 
                 {/* Table Content */}
                 {filteredQueueItems.length === 0 ? (
-                  <div className="text-center py-8 text-slate-400">
+                  <div className="text-center py-8 text-muted-foreground">
                     <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
                     <p>No items found for the current filter</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
                     {filteredQueueItems.map((item: QueueItem) => (
-                      <div key={item.id} className="grid grid-cols-9 gap-4 text-sm bg-slate-700/50 rounded p-3 hover:bg-slate-700 transition-colors">
-                        <div className="text-slate-300">#{item.id.slice(0, 8)}...</div>
-                        <div className="text-slate-300">{new Date(item.createdAt).toLocaleDateString()}</div>
-                        <div className="text-slate-300 capitalize">{item.workflowType.replace('_', ' ')}</div>
-                        <div className="text-white font-medium truncate">{item.title}</div>
+                      <div key={item.id} className="grid grid-cols-9 gap-4 text-sm bg-muted/50 rounded p-3 hover:bg-muted transition-colors">
+                        <div className="text-muted-foreground">#{item.id.slice(0, 8)}...</div>
+                        <div className="text-muted-foreground">{new Date(item.createdAt).toLocaleDateString()}</div>
+                        <div className="text-muted-foreground capitalize">{item.workflowType.replace('_', ' ')}</div>
+                        <div className="text-foreground font-medium truncate">{item.title}</div>
                         <div>
                           <Badge variant={item.priority === 'high' ? 'destructive' : item.priority === 'medium' ? 'default' : 'secondary'}>
                             {item.priority}
                           </Badge>
                         </div>
-                        <div className="text-slate-300">
+                        <div className="text-muted-foreground">
                           {item.assignedTo ? users.find(u => u.id === item.assignedTo)?.username || 'Unknown' : '-'}
                         </div>
                         <div>
@@ -363,7 +363,7 @@ export default function QueueManagement() {
                           <Button 
                             size="sm" 
                             variant="outline" 
-                            className="bg-blue-600 text-white border-blue-500 hover:bg-blue-700"
+                            className="bg-primary text-primary-foreground hover:bg-primary/90"
                             onClick={() => assignMutation.mutate({ queueItemId: item.id, assigneeId: user?.id || "" })}
                           >
                             Pick Up
@@ -439,7 +439,7 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
   return (
     <div className="space-y-6">
       {/* Basic Info */}
-      <div className="grid grid-cols-2 gap-4 p-4 bg-slate-800 rounded-lg">
+      <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg">
         <div>
           <Label className="font-semibold">Request ID</Label>
           <p className="text-sm">{item.id}</p>
@@ -475,8 +475,8 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
       </div>
 
       <div>
-        <Label className="font-semibold text-slate-300">Description</Label>
-        <p className="text-sm mt-1 p-3 bg-slate-800 rounded text-slate-300">{item.description}</p>
+        <Label className="font-semibold">Description</Label>
+        <p className="text-sm mt-1 p-3 bg-muted rounded">{item.description}</p>
       </div>
 
       {/* Form Data Based on Workflow Type */}
@@ -504,7 +504,7 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
 
       {/* Raw Data (for debugging) */}
       {parsedData && (
-        <details className="bg-slate-800 rounded p-3 border border-slate-600">
+        <details className="bg-muted rounded p-3 border border-border">
           <summary className="cursor-pointer font-medium">Raw Data (Developer View)</summary>
           <pre className="text-xs mt-2 overflow-auto">
             {JSON.stringify(parsedData, null, 2)}
@@ -517,44 +517,44 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
 
 // Onboarding form data display
 function OnboardingFormData({ data }: { data: any }) {
-  const { employee, vehicleAssignment, supplyOrders, requestsCreated } = data;
+  const { employee, vehicleAssignment, supplyOrders, requestsCreated } = data || {};
 
   return (
     <div className="space-y-4">
       {/* Employee Information */}
-      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-        <h4 className="font-semibold mb-3 text-slate-200">Employee Information</h4>
+      <div className="bg-muted p-4 rounded-lg border border-border">
+        <h4 className="font-semibold mb-3">Employee Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Name</Label>
-            <p>{employee.firstName} {employee.lastName}</p>
+            <p>{employee?.firstName || 'N/A'} {employee?.lastName || ''}</p>
           </div>
           <div>
             <Label>Enterprise ID</Label>
-            <p>{employee.enterpriseId}</p>
+            <p>{employee?.enterpriseId || 'N/A'}</p>
           </div>
           <div>
             <Label>Department</Label>
-            <p>{employee.department}</p>
+            <p>{employee?.department || 'N/A'}</p>
           </div>
           <div>
             <Label>Start Date</Label>
-            <p>{employee.startDate}</p>
+            <p>{employee?.startDate || 'N/A'}</p>
           </div>
           <div>
             <Label>Region</Label>
-            <p>{employee.region}</p>
+            <p>{employee?.region || 'N/A'}</p>
           </div>
           <div>
             <Label>District</Label>
-            <p>{employee.district}</p>
+            <p>{employee?.district || 'N/A'}</p>
           </div>
           <div className="col-span-2">
             <Label>Specialties</Label>
             <div className="flex gap-2 mt-1">
-              <Badge variant="outline">Primary: {employee.primarySpecialty}</Badge>
-              <Badge variant="outline">Secondary: {employee.secondarySpecialty}</Badge>
-              <Badge variant="outline">Tertiary: {employee.tertiarySpecialty}</Badge>
+              <Badge variant="outline">Primary: {employee?.primarySpecialty || 'N/A'}</Badge>
+              <Badge variant="outline">Secondary: {employee?.secondarySpecialty || 'N/A'}</Badge>
+              <Badge variant="outline">Tertiary: {employee?.tertiarySpecialty || 'N/A'}</Badge>
             </div>
           </div>
         </div>
@@ -618,8 +618,8 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
   return (
     <div className="space-y-4">
       {/* Employee Information */}
-      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-        <h4 className="font-semibold mb-3 text-slate-200">Employee Information</h4>
+      <div className="bg-muted p-4 rounded-lg border border-border">
+        <h4 className="font-semibold mb-3">Employee Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Name</Label>
@@ -641,8 +641,8 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
       </div>
 
       {/* Vehicle Information */}
-      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-        <h4 className="font-semibold mb-3 text-slate-200">Vehicle Information</h4>
+      <div className="bg-muted p-4 rounded-lg border border-border">
+        <h4 className="font-semibold mb-3">Vehicle Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Vehicle</Label>
@@ -702,8 +702,8 @@ function OffboardingFormData({ data }: { data: any }) {
   return (
     <div className="space-y-4">
       {/* Technician Information */}
-      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-        <h4 className="font-semibold mb-3 text-slate-200">Technician Information</h4>
+      <div className="bg-muted p-4 rounded-lg border border-border">
+        <h4 className="font-semibold mb-3">Technician Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Name</Label>
@@ -725,8 +725,8 @@ function OffboardingFormData({ data }: { data: any }) {
       </div>
 
       {/* Vehicle Information */}
-      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
-        <h4 className="font-semibold mb-3 text-slate-200">Vehicle Information</h4>
+      <div className="bg-muted p-4 rounded-lg border border-border">
+        <h4 className="font-semibold mb-3">Vehicle Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Vehicle Number</Label>

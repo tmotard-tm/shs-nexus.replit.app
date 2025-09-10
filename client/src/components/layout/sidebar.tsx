@@ -3,6 +3,7 @@ import { RoleSelector } from "@/components/role-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -93,9 +94,15 @@ export function Sidebar() {
       </div>
 
       <div className={cn(
-        "absolute bottom-0 left-0 right-0 p-6 border-t border-border",
+        "absolute bottom-0 left-0 right-0 p-6 border-t border-border space-y-3",
         isCollapsed && "p-3"
       )}>
+        {/* Theme Toggle */}
+        <div className={cn("flex", isCollapsed ? "justify-center" : "justify-end")}>
+          <ThemeToggle />
+        </div>
+        
+        {/* User Section */}
         <div className={cn("flex items-center gap-3", isCollapsed && "justify-center")}>
           <div className="w-8 h-8 bg-secondary rounded-full flex items-center justify-center">
             <Users className="h-4 w-4 text-secondary-foreground" />
