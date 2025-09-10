@@ -22,6 +22,10 @@ import ApproverInterface from "@/pages/approver";
 import RequestsPage from "@/pages/requests";
 import ApiManagement from "@/pages/api-management";
 import QueueManagement from "@/pages/queue-management";
+import NTAOQueuePage from "@/pages/ntao-queue";
+import AssetsQueuePage from "@/pages/assets-queue";
+import InventoryQueuePage from "@/pages/inventory-queue";
+import FleetQueuePage from "@/pages/fleet-queue";
 import UserManagement from "@/pages/user-management";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
@@ -165,6 +169,30 @@ function Router() {
       <Route path="/queue-management">
         <ProtectedRoute>
           <QueueManagement />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/ntao-queue">
+        <ProtectedRoute>
+          <NTAOQueuePage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/assets-queue">
+        <ProtectedRoute>
+          <AssetsQueuePage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/inventory-queue">
+        <ProtectedRoute>
+          <InventoryQueuePage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/fleet-queue">
+        <ProtectedRoute>
+          <FleetQueuePage />
         </ProtectedRoute>
       </Route>
 
