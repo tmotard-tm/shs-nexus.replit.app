@@ -343,110 +343,342 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Queue Item routes
-  app.get("/api/queue", async (req, res) => {
+  // NTAO Queue Module routes
+  app.get("/api/ntao-queue", async (req, res) => {
     try {
-      const { status, workflowType, assignedTo, userId, department } = req.query;
-      
-      let queueItems;
-      if (status) {
-        queueItems = await storage.getQueueItemsByStatus(status as string);
-      } else if (workflowType) {
-        queueItems = await storage.getQueueItemsByWorkflowType(workflowType as string);
-      } else if (assignedTo) {
-        queueItems = await storage.getQueueItemsByAssignee(assignedTo as string);
-      } else if (userId) {
-        queueItems = await storage.getMyQueueItems(userId as string);
-      } else if (department) {
-        queueItems = await storage.getQueueItemsByDepartment(department as string);
-      } else {
-        queueItems = await storage.getQueueItems();
-      }
-      
+      const queueItems = await storage.getNTAOQueueItems();
       res.json(queueItems);
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch queue items" });
+      res.status(500).json({ message: "Failed to fetch NTAO queue items" });
     }
   });
 
-  app.get("/api/queue/:id", async (req, res) => {
+  app.get("/api/ntao-queue/:id", async (req, res) => {
     try {
-      const queueItem = await storage.getQueueItem(req.params.id);
+      const queueItem = await storage.getNTAOQueueItem(req.params.id);
       if (!queueItem) {
-        return res.status(404).json({ message: "Queue item not found" });
+        return res.status(404).json({ message: "NTAO queue item not found" });
       }
       res.json(queueItem);
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch queue item" });
+      res.status(500).json({ message: "Failed to fetch NTAO queue item" });
     }
   });
 
-  app.post("/api/queue", async (req, res) => {
+  app.post("/api/ntao-queue", async (req, res) => {
     try {
       const queueItemData = insertQueueItemSchema.parse(req.body);
-      const queueItem = await storage.createQueueItem(queueItemData);
+      const queueItem = await storage.createNTAOQueueItem(queueItemData);
       res.status(201).json(queueItem);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to create queue item" });
+      res.status(500).json({ message: "Failed to create NTAO queue item" });
     }
   });
 
-  app.patch("/api/queue/:id", async (req, res) => {
-    try {
-      const updates = req.body;
-      const queueItem = await storage.updateQueueItem(req.params.id, updates);
-      
-      if (!queueItem) {
-        return res.status(404).json({ message: "Queue item not found" });
-      }
-
-      res.json(queueItem);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update queue item" });
-    }
-  });
-
-  app.patch("/api/queue/:id/assign", async (req, res) => {
+  app.patch("/api/ntao-queue/:id/assign", async (req, res) => {
     try {
       const { assigneeId } = req.body;
       if (!assigneeId) {
         return res.status(400).json({ message: "Assignee ID is required" });
       }
-
-      const queueItem = await storage.assignQueueItem(req.params.id, assigneeId);
-      
+      const queueItem = await storage.assignNTAOQueueItem(req.params.id, assigneeId);
       if (!queueItem) {
-        return res.status(404).json({ message: "Queue item not found" });
+        return res.status(404).json({ message: "NTAO queue item not found" });
       }
-
       res.json(queueItem);
     } catch (error) {
-      res.status(500).json({ message: "Failed to assign queue item" });
+      res.status(500).json({ message: "Failed to assign NTAO queue item" });
     }
   });
 
-  app.patch("/api/queue/:id/complete", async (req, res) => {
+  app.patch("/api/ntao-queue/:id/complete", async (req, res) => {
     try {
       const { completedBy } = req.body;
       if (!completedBy) {
         return res.status(400).json({ message: "Completed by user ID is required" });
       }
-
-      const queueItem = await storage.completeQueueItem(req.params.id, completedBy);
-      
+      const queueItem = await storage.completeNTAOQueueItem(req.params.id, completedBy);
       if (!queueItem) {
-        return res.status(404).json({ message: "Queue item not found" });
+        return res.status(404).json({ message: "NTAO queue item not found" });
       }
-
       res.json(queueItem);
     } catch (error) {
-      res.status(500).json({ message: "Failed to complete queue item" });
+      res.status(500).json({ message: "Failed to complete NTAO queue item" });
     }
   });
 
+  // Assets Queue Module routes
+  app.get("/api/assets-queue", async (req, res) => {
+    try {
+      const queueItems = await storage.getAssetsQueueItems();
+      res.json(queueItems);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Assets queue items" });
+    }
+  });
+
+  app.get("/api/assets-queue/:id", async (req, res) => {
+    try {
+      const queueItem = await storage.getAssetsQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Assets queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Assets queue item" });
+    }
+  });
+
+  app.post("/api/assets-queue", async (req, res) => {
+    try {
+      const queueItemData = insertQueueItemSchema.parse(req.body);
+      const queueItem = await storage.createAssetsQueueItem(queueItemData);
+      res.status(201).json(queueItem);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create Assets queue item" });
+    }
+  });
+
+  app.patch("/api/assets-queue/:id/assign", async (req, res) => {
+    try {
+      const { assigneeId } = req.body;
+      if (!assigneeId) {
+        return res.status(400).json({ message: "Assignee ID is required" });
+      }
+      const queueItem = await storage.assignAssetsQueueItem(req.params.id, assigneeId);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Assets queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to assign Assets queue item" });
+    }
+  });
+
+  app.patch("/api/assets-queue/:id/complete", async (req, res) => {
+    try {
+      const { completedBy } = req.body;
+      if (!completedBy) {
+        return res.status(400).json({ message: "Completed by user ID is required" });
+      }
+      const queueItem = await storage.completeAssetsQueueItem(req.params.id, completedBy);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Assets queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to complete Assets queue item" });
+    }
+  });
+
+  // Inventory Queue Module routes
+  app.get("/api/inventory-queue", async (req, res) => {
+    try {
+      const queueItems = await storage.getInventoryQueueItems();
+      res.json(queueItems);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Inventory queue items" });
+    }
+  });
+
+  app.get("/api/inventory-queue/:id", async (req, res) => {
+    try {
+      const queueItem = await storage.getInventoryQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Inventory queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Inventory queue item" });
+    }
+  });
+
+  app.post("/api/inventory-queue", async (req, res) => {
+    try {
+      const queueItemData = insertQueueItemSchema.parse(req.body);
+      const queueItem = await storage.createInventoryQueueItem(queueItemData);
+      res.status(201).json(queueItem);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create Inventory queue item" });
+    }
+  });
+
+  app.patch("/api/inventory-queue/:id/assign", async (req, res) => {
+    try {
+      const { assigneeId } = req.body;
+      if (!assigneeId) {
+        return res.status(400).json({ message: "Assignee ID is required" });
+      }
+      const queueItem = await storage.assignInventoryQueueItem(req.params.id, assigneeId);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Inventory queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to assign Inventory queue item" });
+    }
+  });
+
+  app.patch("/api/inventory-queue/:id/complete", async (req, res) => {
+    try {
+      const { completedBy } = req.body;
+      if (!completedBy) {
+        return res.status(400).json({ message: "Completed by user ID is required" });
+      }
+      const queueItem = await storage.completeInventoryQueueItem(req.params.id, completedBy);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Inventory queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to complete Inventory queue item" });
+    }
+  });
+
+  // Fleet Queue Module routes
+  app.get("/api/fleet-queue", async (req, res) => {
+    try {
+      const queueItems = await storage.getFleetQueueItems();
+      res.json(queueItems);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Fleet queue items" });
+    }
+  });
+
+  app.get("/api/fleet-queue/:id", async (req, res) => {
+    try {
+      const queueItem = await storage.getFleetQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Fleet queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Fleet queue item" });
+    }
+  });
+
+  app.post("/api/fleet-queue", async (req, res) => {
+    try {
+      const queueItemData = insertQueueItemSchema.parse(req.body);
+      const queueItem = await storage.createFleetQueueItem(queueItemData);
+      res.status(201).json(queueItem);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create Fleet queue item" });
+    }
+  });
+
+  app.patch("/api/fleet-queue/:id/assign", async (req, res) => {
+    try {
+      const { assigneeId } = req.body;
+      if (!assigneeId) {
+        return res.status(400).json({ message: "Assignee ID is required" });
+      }
+      const queueItem = await storage.assignFleetQueueItem(req.params.id, assigneeId);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Fleet queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to assign Fleet queue item" });
+    }
+  });
+
+  app.patch("/api/fleet-queue/:id/complete", async (req, res) => {
+    try {
+      const { completedBy } = req.body;
+      if (!completedBy) {
+        return res.status(400).json({ message: "Completed by user ID is required" });
+      }
+      const queueItem = await storage.completeFleetQueueItem(req.params.id, completedBy);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Fleet queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to complete Fleet queue item" });
+    }
+  });
+
+  // Decommissions Queue Module routes
+  app.get("/api/decommissions-queue", async (req, res) => {
+    try {
+      const queueItems = await storage.getDecommissionsQueueItems();
+      res.json(queueItems);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Decommissions queue items" });
+    }
+  });
+
+  app.get("/api/decommissions-queue/:id", async (req, res) => {
+    try {
+      const queueItem = await storage.getDecommissionsQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Decommissions queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Decommissions queue item" });
+    }
+  });
+
+  app.post("/api/decommissions-queue", async (req, res) => {
+    try {
+      const queueItemData = insertQueueItemSchema.parse(req.body);
+      const queueItem = await storage.createDecommissionsQueueItem(queueItemData);
+      res.status(201).json(queueItem);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create Decommissions queue item" });
+    }
+  });
+
+  app.patch("/api/decommissions-queue/:id/assign", async (req, res) => {
+    try {
+      const { assigneeId } = req.body;
+      if (!assigneeId) {
+        return res.status(400).json({ message: "Assignee ID is required" });
+      }
+      const queueItem = await storage.assignDecommissionsQueueItem(req.params.id, assigneeId);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Decommissions queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to assign Decommissions queue item" });
+    }
+  });
+
+  app.patch("/api/decommissions-queue/:id/complete", async (req, res) => {
+    try {
+      const { completedBy } = req.body;
+      if (!completedBy) {
+        return res.status(400).json({ message: "Completed by user ID is required" });
+      }
+      const queueItem = await storage.completeDecommissionsQueueItem(req.params.id, completedBy);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Decommissions queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to complete Decommissions queue item" });
+    }
+  });
+
+  // Common queue operations (cancel works across all modules)
   app.patch("/api/queue/:id/cancel", async (req, res) => {
     try {
       const { reason } = req.body;
@@ -463,22 +695,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(queueItem);
     } catch (error) {
       res.status(500).json({ message: "Failed to cancel queue item" });
-    }
-  });
-
-  app.patch("/api/queue/:id/notes", async (req, res) => {
-    try {
-      const { notes } = req.body;
-      
-      const queueItem = await storage.updateQueueItem(req.params.id, { notes });
-      
-      if (!queueItem) {
-        return res.status(404).json({ message: "Queue item not found" });
-      }
-
-      res.json(queueItem);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update notes" });
     }
   });
 
