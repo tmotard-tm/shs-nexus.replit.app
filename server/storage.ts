@@ -86,12 +86,6 @@ export interface IStorage {
   completeFleetQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
 
   // Decommissions Queue Module
-  getDecommissionsQueueItem(id: string): Promise<QueueItem | undefined>;
-  getDecommissionsQueueItems(): Promise<QueueItem[]>;
-  createDecommissionsQueueItem(item: InsertQueueItem): Promise<QueueItem>;
-  updateDecommissionsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
-  assignDecommissionsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
-  completeDecommissionsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
   cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined>;
 
   // Unified Queue Aggregator
@@ -117,7 +111,6 @@ export class MemStorage implements IStorage {
   private assetsQueueItems: Map<string, QueueItem>;
   private inventoryQueueItems: Map<string, QueueItem>;
   private fleetQueueItems: Map<string, QueueItem>;
-  private decommissionsQueueItems: Map<string, QueueItem>;
 
   constructor() {
     this.users = new Map();
@@ -130,7 +123,6 @@ export class MemStorage implements IStorage {
     this.assetsQueueItems = new Map();
     this.inventoryQueueItems = new Map();
     this.fleetQueueItems = new Map();
-    this.decommissionsQueueItems = new Map();
     
     // Initialize with admin user
     this.initializeDefaultData();
@@ -187,7 +179,7 @@ export class MemStorage implements IStorage {
         role: "approver",
         department: "Decommissions",
         createdAt: new Date(),
-        accessibleQueues: ['decommissions'],
+        accessibleQueues: [],
       },
       {
         id: randomUUID(),
@@ -197,7 +189,7 @@ export class MemStorage implements IStorage {
         role: "superadmin",
         department: null,
         createdAt: new Date(),
-        accessibleQueues: ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'],
+        accessibleQueues: ['ntao', 'assets', 'inventory', 'fleet'],
       },
     ];
     
@@ -389,7 +381,6 @@ export class MemStorage implements IStorage {
           this.fleetQueueItems.set(item.id, item);
           break;
         case "Decommissions":
-          this.decommissionsQueueItems.set(item.id, item);
           break;
         default:
           // Default to NTAO queue if no department specified
@@ -570,8 +561,7 @@ export class MemStorage implements IStorage {
       ...Array.from(this.ntaoQueueItems.values()),
       ...Array.from(this.assetsQueueItems.values()),
       ...Array.from(this.inventoryQueueItems.values()),
-      ...Array.from(this.fleetQueueItems.values()),
-      ...Array.from(this.decommissionsQueueItems.values())
+      ...Array.from(this.fleetQueueItems.values())
     ];
     
     const getWorkflowStats = (workflowType: string) => {
@@ -878,76 +868,6 @@ export class MemStorage implements IStorage {
     return updatedItem;
   }
 
-  // Decommissions Queue Module
-  async getDecommissionsQueueItem(id: string): Promise<QueueItem | undefined> {
-    return this.decommissionsQueueItems.get(id);
-  }
-
-  async getDecommissionsQueueItems(): Promise<QueueItem[]> {
-    return Array.from(this.decommissionsQueueItems.values()).sort((a, b) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-  }
-
-  async createDecommissionsQueueItem(insertItem: InsertQueueItem): Promise<QueueItem> {
-    const id = randomUUID();
-    const item: QueueItem = {
-      ...insertItem,
-      status: insertItem.status || "pending",
-      priority: insertItem.priority || "medium",
-      assignedTo: insertItem.assignedTo || null,
-      department: "Decommissions",
-      data: insertItem.data || null,
-      metadata: insertItem.metadata || null,
-      notes: insertItem.notes || null,
-      scheduledFor: insertItem.scheduledFor || null,
-      attempts: insertItem.attempts || 0,
-      lastError: insertItem.lastError || null,
-      completedAt: insertItem.completedAt || null,
-      id,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    this.decommissionsQueueItems.set(id, item);
-    return item;
-  }
-
-  async updateDecommissionsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
-    const item = this.decommissionsQueueItems.get(id);
-    if (!item) return undefined;
-    
-    const updatedItem = { ...item, ...updates, updatedAt: new Date() };
-    this.decommissionsQueueItems.set(id, updatedItem);
-    return updatedItem;
-  }
-
-  async assignDecommissionsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
-    const item = this.decommissionsQueueItems.get(id);
-    if (!item) return undefined;
-    
-    const updatedItem = { 
-      ...item, 
-      assignedTo: assigneeId,
-      status: "in_progress",
-      updatedAt: new Date() 
-    };
-    this.decommissionsQueueItems.set(id, updatedItem);
-    return updatedItem;
-  }
-
-  async completeDecommissionsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
-    const item = this.decommissionsQueueItems.get(id);
-    if (!item) return undefined;
-    
-    const updatedItem = { 
-      ...item, 
-      status: "completed",
-      completedAt: new Date(),
-      updatedAt: new Date() 
-    };
-    this.decommissionsQueueItems.set(id, updatedItem);
-    return updatedItem;
-  }
 
   async cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined> {
     // Search across all queue modules to find the item
@@ -955,8 +875,7 @@ export class MemStorage implements IStorage {
       this.ntaoQueueItems,
       this.assetsQueueItems,
       this.inventoryQueueItems,
-      this.fleetQueueItems,
-      this.decommissionsQueueItems
+      this.fleetQueueItems
     ];
     
     for (const queueMap of allMaps) {
@@ -995,9 +914,6 @@ export class MemStorage implements IStorage {
           break;
         case 'fleet':
           items = await this.getFleetQueueItems();
-          break;
-        case 'decommissions':
-          items = await this.getDecommissionsQueueItems();
           break;
       }
       
@@ -1041,8 +957,6 @@ export class MemStorage implements IStorage {
         return this.assignInventoryQueueItem(id, assigneeId);
       case 'fleet':
         return this.assignFleetQueueItem(id, assigneeId);
-      case 'decommissions':
-        return this.assignDecommissionsQueueItem(id, assigneeId);
       default:
         return undefined;
     }
@@ -1058,8 +972,6 @@ export class MemStorage implements IStorage {
         return this.completeInventoryQueueItem(id, completedBy);
       case 'fleet':
         return this.completeFleetQueueItem(id, completedBy);
-      case 'decommissions':
-        return this.completeDecommissionsQueueItem(id, completedBy);
       default:
         return undefined;
     }

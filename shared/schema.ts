@@ -4,7 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Queue module types for unified queue access
-export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet' | 'decommissions';
+export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet';
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

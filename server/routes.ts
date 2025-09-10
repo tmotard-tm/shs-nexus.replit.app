@@ -10,23 +10,15 @@ const sessions = new Map<string, { userId: string; username: string; expiresAt: 
 // Authentication middleware
 function requireAuth(req: any, res: any, next: any): any {
   const cookieHeader = req.headers.cookie;
-  console.log('Cookie header:', cookieHeader);
   const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
-  console.log('Extracted sessionId:', sessionId);
-  console.log('Active sessions:', Array.from(sessions.keys()));
   
   if (!sessionId) {
-    return res.status(401).json({ message: "Authentication required - no session cookie" });
+    return res.status(401).json({ message: "Authentication required" });
   }
   
   const session = sessions.get(sessionId);
   if (!session || session.expiresAt < new Date()) {
-    if (session) {
-      console.log('Session expired:', session.expiresAt, 'vs', new Date());
-      sessions.delete(sessionId);
-    } else {
-      console.log('Session not found for sessionId:', sessionId);
-    }
+    sessions.delete(sessionId);
     return res.status(401).json({ message: "Session expired" });
   }
   
@@ -55,9 +47,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         expiresAt
       });
 
-      console.log('Created session:', sessionId, 'for user:', user.username);
-      console.log('Session expires at:', expiresAt);
-
       // Set httpOnly cookie
       res.cookie('sessionId', sessionId, {
         httpOnly: true,
@@ -65,8 +54,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sameSite: 'lax',
         expires: expiresAt
       });
-
-      console.log('Set cookie for user:', user.username);
 
       res.json({ user: { ...user, password: undefined } });
     } catch (error) {
@@ -663,72 +650,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Decommissions Queue Module routes
-  app.get("/api/decommissions-queue", async (req, res) => {
-    try {
-      const queueItems = await storage.getDecommissionsQueueItems();
-      res.json(queueItems);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch Decommissions queue items" });
-    }
-  });
-
-  app.get("/api/decommissions-queue/:id", async (req, res) => {
-    try {
-      const queueItem = await storage.getDecommissionsQueueItem(req.params.id);
-      if (!queueItem) {
-        return res.status(404).json({ message: "Decommissions queue item not found" });
-      }
-      res.json(queueItem);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch Decommissions queue item" });
-    }
-  });
-
-  app.post("/api/decommissions-queue", async (req, res) => {
-    try {
-      const queueItemData = insertQueueItemSchema.parse(req.body);
-      const queueItem = await storage.createDecommissionsQueueItem(queueItemData);
-      res.status(201).json(queueItem);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to create Decommissions queue item" });
-    }
-  });
-
-  app.patch("/api/decommissions-queue/:id/assign", async (req, res) => {
-    try {
-      const { assigneeId } = req.body;
-      if (!assigneeId) {
-        return res.status(400).json({ message: "Assignee ID is required" });
-      }
-      const queueItem = await storage.assignDecommissionsQueueItem(req.params.id, assigneeId);
-      if (!queueItem) {
-        return res.status(404).json({ message: "Decommissions queue item not found" });
-      }
-      res.json(queueItem);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to assign Decommissions queue item" });
-    }
-  });
-
-  app.patch("/api/decommissions-queue/:id/complete", async (req, res) => {
-    try {
-      const { completedBy } = req.body;
-      if (!completedBy) {
-        return res.status(400).json({ message: "Completed by user ID is required" });
-      }
-      const queueItem = await storage.completeDecommissionsQueueItem(req.params.id, completedBy);
-      if (!queueItem) {
-        return res.status(404).json({ message: "Decommissions queue item not found" });
-      }
-      res.json(queueItem);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to complete Decommissions queue item" });
-    }
-  });
 
   // Common queue operations (cancel works across all modules)
   app.patch("/api/queue/:id/cancel", async (req, res) => {
@@ -768,7 +689,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requestedModules = modulesParam.split(',').map(m => m.trim()) as any[];
       
       // Validate modules
-      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
       const invalidModules = requestedModules.filter(m => !validModules.includes(m));
       if (invalidModules.length > 0) {
         return res.status(400).json({ 
@@ -814,7 +735,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requestedModules = modulesParam.split(',').map(m => m.trim()) as any[];
       
       // Validate modules
-      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
       const invalidModules = requestedModules.filter(m => !validModules.includes(m));
       if (invalidModules.length > 0) {
         return res.status(400).json({ 
@@ -858,7 +779,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "assigneeId is required" });
       }
       
-      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
       if (!validModules.includes(module)) {
         return res.status(400).json({ 
           message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 
@@ -897,7 +818,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "completedBy is required" });
       }
       
-      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'];
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
       if (!validModules.includes(module)) {
         return res.status(400).json({ 
           message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 

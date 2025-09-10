@@ -40,8 +40,7 @@ const moduleLabels = {
   ntao: "NTAO",
   assets: "Assets Management", 
   inventory: "Inventory Control",
-  fleet: "Fleet Management",
-  decommissions: "Decommissions"
+  fleet: "Fleet Management"
 };
 
 export default function UnifiedQueueManagement() {
@@ -71,7 +70,7 @@ export default function UnifiedQueueManagement() {
       setSelectedModules(user.accessibleQueues);
     } else if (user?.role === "superadmin") {
       // Only superadmin gets access to all queues by default
-      setSelectedModules(['ntao', 'assets', 'inventory', 'fleet', 'decommissions']);
+      setSelectedModules(['ntao', 'assets', 'inventory', 'fleet']);
     } else {
       // Regular users without accessible queues get no access
       setSelectedModules([]);
@@ -233,7 +232,6 @@ export default function UnifiedQueueManagement() {
       case "assets": return "bg-green-500";
       case "inventory": return "bg-blue-500";
       case "fleet": return "bg-orange-500";
-      case "decommissions": return "bg-red-500";
       default: return "bg-gray-500";
     }
   };
