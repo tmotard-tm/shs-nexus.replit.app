@@ -73,6 +73,7 @@ export default function OnboardHire() {
     "Laundry",
     "Dishwasher",
     "Refrigerator",
+    "HVAC",
     "HA PM Check"
   ];
 
