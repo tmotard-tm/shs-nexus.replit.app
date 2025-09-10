@@ -327,7 +327,30 @@ export class MemStorage implements IStorage {
       }
     ];
 
-    sampleQueueItems.forEach(item => this.queueItems.set(item.id, item));
+    // Distribute sample items across separate queue modules based on department
+    sampleQueueItems.forEach(item => {
+      switch (item.department) {
+        case "NTAO":
+          this.ntaoQueueItems.set(item.id, item);
+          break;
+        case "Assets Management":
+          this.assetsQueueItems.set(item.id, item);
+          break;
+        case "Inventory Control":
+          this.inventoryQueueItems.set(item.id, item);
+          break;
+        case "Fleet Management":
+          this.fleetQueueItems.set(item.id, item);
+          break;
+        case "Decommissions":
+          this.decommissionsQueueItems.set(item.id, item);
+          break;
+        default:
+          // Default to NTAO queue if no department specified
+          this.ntaoQueueItems.set(item.id, item);
+          break;
+      }
+    });
   }
 
   // Users
@@ -496,10 +519,17 @@ export class MemStorage implements IStorage {
     decommission: { pending: number; inProgress: number; completed: number };
     activeUsers: number;
   }> {
-    const queueItems = Array.from(this.queueItems.values());
+    // Combine all queue items from separate modules
+    const allQueueItems = [
+      ...Array.from(this.ntaoQueueItems.values()),
+      ...Array.from(this.assetsQueueItems.values()),
+      ...Array.from(this.inventoryQueueItems.values()),
+      ...Array.from(this.fleetQueueItems.values()),
+      ...Array.from(this.decommissionsQueueItems.values())
+    ];
     
     const getWorkflowStats = (workflowType: string) => {
-      const items = queueItems.filter(item => item.workflowType === workflowType);
+      const items = allQueueItems.filter(item => item.workflowType === workflowType);
       return {
         pending: items.filter(item => item.status === "pending").length,
         inProgress: items.filter(item => item.status === "in_progress").length,
@@ -518,55 +548,25 @@ export class MemStorage implements IStorage {
     };
   }
 
-  // Queue Items
-  async getQueueItem(id: string): Promise<QueueItem | undefined> {
-    return this.queueItems.get(id);
+  // NTAO Queue Module
+  async getNTAOQueueItem(id: string): Promise<QueueItem | undefined> {
+    return this.ntaoQueueItems.get(id);
   }
 
-  async getQueueItems(): Promise<QueueItem[]> {
-    return Array.from(this.queueItems.values()).sort((a, b) => 
+  async getNTAOQueueItems(): Promise<QueueItem[]> {
+    return Array.from(this.ntaoQueueItems.values()).sort((a, b) => 
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }
 
-  async getQueueItemsByStatus(status: string): Promise<QueueItem[]> {
-    return Array.from(this.queueItems.values())
-      .filter(item => item.status === status)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }
-
-  async getQueueItemsByWorkflowType(workflowType: string): Promise<QueueItem[]> {
-    return Array.from(this.queueItems.values())
-      .filter(item => item.workflowType === workflowType)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }
-
-  async getQueueItemsByDepartment(department: string): Promise<QueueItem[]> {
-    return Array.from(this.queueItems.values())
-      .filter(item => item.department === department)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }
-
-  async getQueueItemsByAssignee(userId: string): Promise<QueueItem[]> {
-    return Array.from(this.queueItems.values())
-      .filter(item => item.assignedTo === userId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }
-
-  async getMyQueueItems(userId: string): Promise<QueueItem[]> {
-    return Array.from(this.queueItems.values())
-      .filter(item => item.requesterId === userId || item.assignedTo === userId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }
-
-  async createQueueItem(insertItem: InsertQueueItem): Promise<QueueItem> {
+  async createNTAOQueueItem(insertItem: InsertQueueItem): Promise<QueueItem> {
     const id = randomUUID();
     const item: QueueItem = {
       ...insertItem,
       status: insertItem.status || "pending",
       priority: insertItem.priority || "medium",
       assignedTo: insertItem.assignedTo || null,
-      department: insertItem.department || null,
+      department: "NTAO",
       data: insertItem.data || null,
       metadata: insertItem.metadata || null,
       notes: insertItem.notes || null,
@@ -578,35 +578,21 @@ export class MemStorage implements IStorage {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    this.queueItems.set(id, item);
-    
-    // Log the queue item creation
-    await this.createActivityLog({
-      userId: insertItem.requesterId,
-      action: "queue_item_created",
-      entityType: "queue_item",
-      entityId: id,
-      details: `Created ${insertItem.workflowType} queue item: ${insertItem.title}`,
-    });
-    
+    this.ntaoQueueItems.set(id, item);
     return item;
   }
 
-  async updateQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
-    const item = this.queueItems.get(id);
+  async updateNTAOQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const item = this.ntaoQueueItems.get(id);
     if (!item) return undefined;
     
-    const updatedItem = { 
-      ...item, 
-      ...updates, 
-      updatedAt: new Date() 
-    };
-    this.queueItems.set(id, updatedItem);
+    const updatedItem = { ...item, ...updates, updatedAt: new Date() };
+    this.ntaoQueueItems.set(id, updatedItem);
     return updatedItem;
   }
 
-  async assignQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
-    const item = this.queueItems.get(id);
+  async assignNTAOQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    const item = this.ntaoQueueItems.get(id);
     if (!item) return undefined;
     
     const updatedItem = { 
@@ -615,22 +601,12 @@ export class MemStorage implements IStorage {
       status: "in_progress",
       updatedAt: new Date() 
     };
-    this.queueItems.set(id, updatedItem);
-    
-    // Log the assignment
-    await this.createActivityLog({
-      userId: assigneeId,
-      action: "queue_item_assigned",
-      entityType: "queue_item",
-      entityId: id,
-      details: `Assigned ${item.workflowType} queue item: ${item.title}`,
-    });
-    
+    this.ntaoQueueItems.set(id, updatedItem);
     return updatedItem;
   }
 
-  async completeQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
-    const item = this.queueItems.get(id);
+  async completeNTAOQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const item = this.ntaoQueueItems.get(id);
     if (!item) return undefined;
     
     const updatedItem = { 
@@ -639,33 +615,319 @@ export class MemStorage implements IStorage {
       completedAt: new Date(),
       updatedAt: new Date() 
     };
-    this.queueItems.set(id, updatedItem);
-    
-    // Log the completion
-    await this.createActivityLog({
-      userId: completedBy,
-      action: "queue_item_completed",
-      entityType: "queue_item",
-      entityId: id,
-      details: `Completed ${item.workflowType} queue item: ${item.title}`,
-    });
-    
+    this.ntaoQueueItems.set(id, updatedItem);
     return updatedItem;
   }
 
-  async cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined> {
-    const item = this.queueItems.get(id);
+  // Assets Queue Module
+  async getAssetsQueueItem(id: string): Promise<QueueItem | undefined> {
+    return this.assetsQueueItems.get(id);
+  }
+
+  async getAssetsQueueItems(): Promise<QueueItem[]> {
+    return Array.from(this.assetsQueueItems.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async createAssetsQueueItem(insertItem: InsertQueueItem): Promise<QueueItem> {
+    const id = randomUUID();
+    const item: QueueItem = {
+      ...insertItem,
+      status: insertItem.status || "pending",
+      priority: insertItem.priority || "medium",
+      assignedTo: insertItem.assignedTo || null,
+      department: "Assets Management",
+      data: insertItem.data || null,
+      metadata: insertItem.metadata || null,
+      notes: insertItem.notes || null,
+      scheduledFor: insertItem.scheduledFor || null,
+      attempts: insertItem.attempts || 0,
+      lastError: insertItem.lastError || null,
+      completedAt: insertItem.completedAt || null,
+      id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.assetsQueueItems.set(id, item);
+    return item;
+  }
+
+  async updateAssetsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const item = this.assetsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { ...item, ...updates, updatedAt: new Date() };
+    this.assetsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async assignAssetsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    const item = this.assetsQueueItems.get(id);
     if (!item) return undefined;
     
     const updatedItem = { 
       ...item, 
-      status: "cancelled",
-      lastError: reason,
+      assignedTo: assigneeId,
+      status: "in_progress",
       updatedAt: new Date() 
     };
-    this.queueItems.set(id, updatedItem);
-    
+    this.assetsQueueItems.set(id, updatedItem);
     return updatedItem;
+  }
+
+  async completeAssetsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const item = this.assetsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { 
+      ...item, 
+      status: "completed",
+      completedAt: new Date(),
+      updatedAt: new Date() 
+    };
+    this.assetsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  // Inventory Queue Module
+  async getInventoryQueueItem(id: string): Promise<QueueItem | undefined> {
+    return this.inventoryQueueItems.get(id);
+  }
+
+  async getInventoryQueueItems(): Promise<QueueItem[]> {
+    return Array.from(this.inventoryQueueItems.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async createInventoryQueueItem(insertItem: InsertQueueItem): Promise<QueueItem> {
+    const id = randomUUID();
+    const item: QueueItem = {
+      ...insertItem,
+      status: insertItem.status || "pending",
+      priority: insertItem.priority || "medium",
+      assignedTo: insertItem.assignedTo || null,
+      department: "Inventory Control",
+      data: insertItem.data || null,
+      metadata: insertItem.metadata || null,
+      notes: insertItem.notes || null,
+      scheduledFor: insertItem.scheduledFor || null,
+      attempts: insertItem.attempts || 0,
+      lastError: insertItem.lastError || null,
+      completedAt: insertItem.completedAt || null,
+      id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.inventoryQueueItems.set(id, item);
+    return item;
+  }
+
+  async updateInventoryQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const item = this.inventoryQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { ...item, ...updates, updatedAt: new Date() };
+    this.inventoryQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async assignInventoryQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    const item = this.inventoryQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { 
+      ...item, 
+      assignedTo: assigneeId,
+      status: "in_progress",
+      updatedAt: new Date() 
+    };
+    this.inventoryQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async completeInventoryQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const item = this.inventoryQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { 
+      ...item, 
+      status: "completed",
+      completedAt: new Date(),
+      updatedAt: new Date() 
+    };
+    this.inventoryQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  // Fleet Queue Module
+  async getFleetQueueItem(id: string): Promise<QueueItem | undefined> {
+    return this.fleetQueueItems.get(id);
+  }
+
+  async getFleetQueueItems(): Promise<QueueItem[]> {
+    return Array.from(this.fleetQueueItems.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async createFleetQueueItem(insertItem: InsertQueueItem): Promise<QueueItem> {
+    const id = randomUUID();
+    const item: QueueItem = {
+      ...insertItem,
+      status: insertItem.status || "pending",
+      priority: insertItem.priority || "medium",
+      assignedTo: insertItem.assignedTo || null,
+      department: "Fleet Management",
+      data: insertItem.data || null,
+      metadata: insertItem.metadata || null,
+      notes: insertItem.notes || null,
+      scheduledFor: insertItem.scheduledFor || null,
+      attempts: insertItem.attempts || 0,
+      lastError: insertItem.lastError || null,
+      completedAt: insertItem.completedAt || null,
+      id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.fleetQueueItems.set(id, item);
+    return item;
+  }
+
+  async updateFleetQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const item = this.fleetQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { ...item, ...updates, updatedAt: new Date() };
+    this.fleetQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async assignFleetQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    const item = this.fleetQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { 
+      ...item, 
+      assignedTo: assigneeId,
+      status: "in_progress",
+      updatedAt: new Date() 
+    };
+    this.fleetQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async completeFleetQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const item = this.fleetQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { 
+      ...item, 
+      status: "completed",
+      completedAt: new Date(),
+      updatedAt: new Date() 
+    };
+    this.fleetQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  // Decommissions Queue Module
+  async getDecommissionsQueueItem(id: string): Promise<QueueItem | undefined> {
+    return this.decommissionsQueueItems.get(id);
+  }
+
+  async getDecommissionsQueueItems(): Promise<QueueItem[]> {
+    return Array.from(this.decommissionsQueueItems.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async createDecommissionsQueueItem(insertItem: InsertQueueItem): Promise<QueueItem> {
+    const id = randomUUID();
+    const item: QueueItem = {
+      ...insertItem,
+      status: insertItem.status || "pending",
+      priority: insertItem.priority || "medium",
+      assignedTo: insertItem.assignedTo || null,
+      department: "Decommissions",
+      data: insertItem.data || null,
+      metadata: insertItem.metadata || null,
+      notes: insertItem.notes || null,
+      scheduledFor: insertItem.scheduledFor || null,
+      attempts: insertItem.attempts || 0,
+      lastError: insertItem.lastError || null,
+      completedAt: insertItem.completedAt || null,
+      id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.decommissionsQueueItems.set(id, item);
+    return item;
+  }
+
+  async updateDecommissionsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const item = this.decommissionsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { ...item, ...updates, updatedAt: new Date() };
+    this.decommissionsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async assignDecommissionsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    const item = this.decommissionsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { 
+      ...item, 
+      assignedTo: assigneeId,
+      status: "in_progress",
+      updatedAt: new Date() 
+    };
+    this.decommissionsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async completeDecommissionsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const item = this.decommissionsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { 
+      ...item, 
+      status: "completed",
+      completedAt: new Date(),
+      updatedAt: new Date() 
+    };
+    this.decommissionsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined> {
+    // Search across all queue modules to find the item
+    const allMaps = [
+      this.ntaoQueueItems,
+      this.assetsQueueItems,
+      this.inventoryQueueItems,
+      this.fleetQueueItems,
+      this.decommissionsQueueItems
+    ];
+    
+    for (const queueMap of allMaps) {
+      const item = queueMap.get(id);
+      if (item) {
+        const updatedItem = { 
+          ...item, 
+          status: "cancelled",
+          lastError: reason,
+          updatedAt: new Date() 
+        };
+        queueMap.set(id, updatedItem);
+        return updatedItem;
+      }
+    }
+    
+    return undefined;
   }
 }
 
