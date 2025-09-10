@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
-import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map, ArrowRight, Plus } from "lucide-react";
+import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map, ArrowRight, Plus, TrendingUp, Clock, CheckCircle, Users } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
@@ -151,6 +151,150 @@ export default function AssistanceSelection() {
                 <p className="text-sm text-black">View on Map</p>
               </CardContent>
             </Card>
+          </div>
+
+          {/* Productivity Dashboard by Department */}
+          <div className="mb-8">
+            <h3 className="text-xl font-semibold mb-6 text-center" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>
+              Productivity Dashboard by Department
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              {/* NTAO Department */}
+              <Card className="bg-white/95 hover:shadow-lg transition-shadow">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-medium text-gray-800">NTAO</CardTitle>
+                    <TrendingUp className="h-4 w-4 text-blue-600" />
+                  </div>
+                  <CardDescription className="text-xs">Network Technical Assistance</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <CheckCircle className="h-3 w-3" />
+                      Completed Today
+                    </span>
+                    <span className="font-semibold text-sm text-green-600">23</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Avg. Response Time
+                    </span>
+                    <span className="font-semibold text-sm text-blue-600">2.4h</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <Users className="h-3 w-3" />
+                      Active Staff
+                    </span>
+                    <span className="font-semibold text-sm">8</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Assets Department */}
+              <Card className="bg-white/95 hover:shadow-lg transition-shadow">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-medium text-gray-800">Assets Management</CardTitle>
+                    <TrendingUp className="h-4 w-4 text-green-600" />
+                  </div>
+                  <CardDescription className="text-xs">Asset Tracking & Management</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <CheckCircle className="h-3 w-3" />
+                      Completed Today
+                    </span>
+                    <span className="font-semibold text-sm text-green-600">31</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Avg. Response Time
+                    </span>
+                    <span className="font-semibold text-sm text-blue-600">1.8h</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <Users className="h-3 w-3" />
+                      Active Staff
+                    </span>
+                    <span className="font-semibold text-sm">12</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Inventory Department */}
+              <Card className="bg-white/95 hover:shadow-lg transition-shadow">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-medium text-gray-800">Inventory Control</CardTitle>
+                    <TrendingUp className="h-4 w-4 text-purple-600" />
+                  </div>
+                  <CardDescription className="text-xs">Stock & Supply Management</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <CheckCircle className="h-3 w-3" />
+                      Completed Today
+                    </span>
+                    <span className="font-semibold text-sm text-green-600">18</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Avg. Response Time
+                    </span>
+                    <span className="font-semibold text-sm text-blue-600">3.1h</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <Users className="h-3 w-3" />
+                      Active Staff
+                    </span>
+                    <span className="font-semibold text-sm">6</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Fleet Department */}
+              <Card className="bg-white/95 hover:shadow-lg transition-shadow">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-medium text-gray-800">Fleet Management</CardTitle>
+                    <TrendingUp className="h-4 w-4 text-orange-600" />
+                  </div>
+                  <CardDescription className="text-xs">Vehicle Operations & Maintenance</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <CheckCircle className="h-3 w-3" />
+                      Completed Today
+                    </span>
+                    <span className="font-semibold text-sm text-green-600">27</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Avg. Response Time
+                    </span>
+                    <span className="font-semibold text-sm text-blue-600">2.7h</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-600 flex items-center gap-1">
+                      <Users className="h-3 w-3" />
+                      Active Staff
+                    </span>
+                    <span className="font-semibold text-sm">10</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </div>
 
           {/* Main Workflow Actions */}
