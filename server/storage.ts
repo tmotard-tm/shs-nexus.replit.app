@@ -881,6 +881,138 @@ export class MemStorage implements IStorage {
   }
 
 
+  // Workflow automation function - triggers next step in sequential workflows
+  async triggerNextWorkflowStep(completedItem: QueueItem): Promise<void> {
+    // Only proceed if this item is part of a workflow
+    if (!completedItem.workflowId || !completedItem.workflowStep) return;
+
+    try {
+      const triggerData = completedItem.triggerData ? JSON.parse(completedItem.triggerData) : null;
+      if (!triggerData) return;
+
+      const nextStep = completedItem.workflowStep + 1;
+      
+      // Define the offboarding workflow sequence
+      // Step 1: NTAO (stop truck replenishment) - completed
+      // Step 2: Assets Management (recover phone)
+      // Step 3: Fleet Management (move to Pepboys) 
+      // Step 4: Inventory Control (parts count)
+      
+      let nextTask: Partial<QueueItem> | null = null;
+      
+      switch (nextStep) {
+        case 2: // Assets Management - recover phone
+          nextTask = {
+            workflowType: "offboarding",
+            title: `Recover Company Phone - ${triggerData.employee.name}`,
+            description: `Recover company phone from ${triggerData.employee.name} (${triggerData.employee.racfId}). Vehicle: ${triggerData.vehicle.vehicleNumber}. Contact employee to arrange pickup or return of company phone and any other mobile devices.`,
+            priority: "high",
+            requesterId: "system",
+            department: "Assets Management",
+            workflowId: completedItem.workflowId,
+            workflowStep: 2,
+            dependsOn: completedItem.id,
+            autoTrigger: true,
+            data: JSON.stringify({
+              workflowType: "offboarding_sequence",
+              step: "assets_recover_phone",
+              employee: triggerData.employee,
+              vehicle: triggerData.vehicle,
+              submitter: triggerData.submitter,
+              instructions: [
+                "Contact employee to arrange phone return",
+                "Verify phone is company-issued device",
+                "Check for any accessories (charger, case)",
+                "Wipe device data per security protocol",
+                "Update asset management system",
+                "Mark task complete when phone recovered"
+              ]
+            }),
+            triggerData: completedItem.triggerData // Pass along for next step
+          };
+          await this.createAssetsQueueItem(nextTask as any);
+          break;
+
+        case 3: // Fleet Management - move van to Pepboys
+          nextTask = {
+            workflowType: "offboarding",
+            title: `Move Van to Pepboys for Prep - ${triggerData.vehicle.vehicleNumber}`,
+            description: `Move van ${triggerData.vehicle.vehicleNumber} to Pepboys for preparation. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Schedule transport and prep for next assignment.`,
+            priority: "high",
+            requesterId: "system",
+            department: "Fleet Management",
+            workflowId: completedItem.workflowId,
+            workflowStep: 3,
+            dependsOn: completedItem.id,
+            autoTrigger: true,
+            data: JSON.stringify({
+              workflowType: "offboarding_sequence",
+              step: "fleet_move_to_pepboys",
+              employee: triggerData.employee,
+              vehicle: triggerData.vehicle,
+              submitter: triggerData.submitter,
+              instructions: [
+                "Schedule van pickup from employee location",
+                "Coordinate transport to Pepboys service center",
+                "Verify vehicle condition and mileage",
+                "Schedule maintenance and cleaning",
+                "Update fleet management system",
+                "Mark task complete when van at Pepboys"
+              ]
+            }),
+            triggerData: completedItem.triggerData // Pass along for next step
+          };
+          await this.createFleetQueueItem(nextTask as any);
+          break;
+
+        case 4: // Inventory Control - full parts count
+          nextTask = {
+            workflowType: "offboarding",
+            title: `Full Parts and Tools Count - ${triggerData.vehicle.vehicleNumber}`,
+            description: `Perform full inventory count of parts and tools in van ${triggerData.vehicle.vehicleNumber}. Employee: ${triggerData.employee.name} (${triggerData.employee.racfId}). Complete audit before van reassignment.`,
+            priority: "medium",
+            requesterId: "system",
+            department: "Inventory Control",
+            workflowId: completedItem.workflowId,
+            workflowStep: 4,
+            dependsOn: completedItem.id,
+            autoTrigger: true,
+            data: JSON.stringify({
+              workflowType: "offboarding_sequence",
+              step: "inventory_parts_count",
+              employee: triggerData.employee,
+              vehicle: triggerData.vehicle,
+              submitter: triggerData.submitter,
+              instructions: [
+                "Access van at Pepboys location",
+                "Perform complete inventory count",
+                "Check all parts against manifest",
+                "Verify tool condition and counts",
+                "Document any missing or damaged items",
+                "Update inventory management system",
+                "Mark task complete when count finished"
+              ],
+              finalStep: true // This is the last step in the workflow
+            }),
+            triggerData: null // Final step doesn't need to trigger anything else
+          };
+          await this.createInventoryQueueItem(nextTask as any);
+          break;
+
+        default:
+          // No more steps in the workflow
+          console.log(`Workflow ${completedItem.workflowId} completed at step ${completedItem.workflowStep}`);
+          break;
+      }
+
+      if (nextTask) {
+        console.log(`Auto-triggered workflow step ${nextStep} for workflow ${completedItem.workflowId}`);
+      }
+    } catch (error) {
+      console.error('Error triggering next workflow step:', error);
+    }
+  }
+
   async cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined> {
     // Search across all queue modules to find the item
     const allMaps = [
