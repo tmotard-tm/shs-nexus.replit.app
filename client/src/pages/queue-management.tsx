@@ -57,6 +57,9 @@ export default function UnifiedQueueManagement() {
   const [selectedDepartment, setSelectedDepartment] = useState<string>("all");
   const [searchRequestId, setSearchRequestId] = useState<string>("");
   const [searchServiceOrder, setSearchServiceOrder] = useState<string>("");
+  const [searchVehicleNumber, setSearchVehicleNumber] = useState<string>("");
+  const [searchEmployeeName, setSearchEmployeeName] = useState<string>("");
+  const [searchEmployeeId, setSearchEmployeeId] = useState<string>("");
   const [selectedResolution, setSelectedResolution] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
@@ -230,19 +233,91 @@ export default function UnifiedQueueManagement() {
     }
   };
 
-  // Filter items based on active tab
+  // Filter items based on active tab and search criteria
   const getFilteredItems = (items: CombinedQueueItem[]) => {
+    let filtered = items;
+
+    // Filter by tab status
     switch (activeTab) {
       case "new":
-        return items.filter(item => item.status === "pending");
+        filtered = filtered.filter(item => item.status === "pending");
+        break;
       case "in-progress":
-        return items.filter(item => item.status === "in_progress");
+        filtered = filtered.filter(item => item.status === "in_progress");
+        break;
       case "completed":
-        return items.filter(item => item.status === "completed");
+        filtered = filtered.filter(item => item.status === "completed");
+        break;
       case "all":
       default:
-        return items;
+        // Show all statuses
+        break;
     }
+
+    // Apply search filters
+    if (searchRequestId.trim()) {
+      filtered = filtered.filter(item => 
+        item.id.toLowerCase().includes(searchRequestId.toLowerCase())
+      );
+    }
+
+    if (searchServiceOrder.trim()) {
+      filtered = filtered.filter(item => 
+        item.title.toLowerCase().includes(searchServiceOrder.toLowerCase()) ||
+        item.description.toLowerCase().includes(searchServiceOrder.toLowerCase())
+      );
+    }
+
+    if (searchVehicleNumber.trim()) {
+      filtered = filtered.filter(item => {
+        try {
+          if (item.data) {
+            const data = JSON.parse(item.data);
+            const vehicleNumber = data.vehicleNumber || data.vehicle?.licensePlate || data.licensePlate || '';
+            return vehicleNumber.toLowerCase().includes(searchVehicleNumber.toLowerCase());
+          }
+          return false;
+        } catch (e) {
+          return false;
+        }
+      });
+    }
+
+    if (searchEmployeeName.trim()) {
+      filtered = filtered.filter(item => {
+        try {
+          if (item.data) {
+            const data = JSON.parse(item.data);
+            const firstName = data.employee?.firstName || data.firstName || '';
+            const lastName = data.employee?.lastName || data.lastName || '';
+            const fullName = `${firstName} ${lastName}`.toLowerCase();
+            return fullName.includes(searchEmployeeName.toLowerCase()) ||
+                   item.title.toLowerCase().includes(searchEmployeeName.toLowerCase()) ||
+                   item.description.toLowerCase().includes(searchEmployeeName.toLowerCase());
+          }
+          return false;
+        } catch (e) {
+          return false;
+        }
+      });
+    }
+
+    if (searchEmployeeId.trim()) {
+      filtered = filtered.filter(item => {
+        try {
+          if (item.data) {
+            const data = JSON.parse(item.data);
+            const employeeId = data.employee?.enterpriseId || data.enterpriseId || data.employeeId || '';
+            return employeeId.toLowerCase().includes(searchEmployeeId.toLowerCase());
+          }
+          return false;
+        } catch (e) {
+          return false;
+        }
+      });
+    }
+
+    return filtered;
   };
 
   const filteredItems = getFilteredItems(queueItems);
@@ -444,7 +519,7 @@ export default function UnifiedQueueManagement() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="search-request-id">Request ID</Label>
                   <Input
@@ -464,6 +539,39 @@ export default function UnifiedQueueManagement() {
                     value={searchServiceOrder}
                     onChange={(e) => setSearchServiceOrder(e.target.value)}
                     data-testid="input-search-service-order"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="search-vehicle-number">Vehicle Number</Label>
+                  <Input
+                    id="search-vehicle-number"
+                    placeholder="Search by vehicle number..."
+                    value={searchVehicleNumber}
+                    onChange={(e) => setSearchVehicleNumber(e.target.value)}
+                    data-testid="input-search-vehicle-number"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="search-employee-name">Employee Name</Label>
+                  <Input
+                    id="search-employee-name"
+                    placeholder="Search by employee name..."
+                    value={searchEmployeeName}
+                    onChange={(e) => setSearchEmployeeName(e.target.value)}
+                    data-testid="input-search-employee-name"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="search-employee-id">Employee ID</Label>
+                  <Input
+                    id="search-employee-id"
+                    placeholder="Search by employee ID..."
+                    value={searchEmployeeId}
+                    onChange={(e) => setSearchEmployeeId(e.target.value)}
+                    data-testid="input-search-employee-id"
                   />
                 </div>
 

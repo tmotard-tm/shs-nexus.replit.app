@@ -1122,29 +1122,7 @@ export class MemStorage implements IStorage {
           break;
       }
       
-      // Check if there are any workflow-triggered tasks for this module (onboarding/offboarding)
-      const workflowTriggeredTasks = items.filter(item => {
-        try {
-          if (item.data) {
-            const data = JSON.parse(item.data);
-            return data.autoTriggered === true || 
-                   data.triggeredBy === "employee_onboarding" ||
-                   item.workflowType === "offboarding" ||
-                   item.workflowType === "department_notification";
-          }
-          return false;
-        } catch (e) {
-          return false;
-        }
-      });
-      
-      // If workflow-triggered tasks exist, show ONLY those for this queue
-      if (workflowTriggeredTasks.length > 0) {
-        items = workflowTriggeredTasks;
-      } else {
-        // If no workflow-triggered tasks, show nothing to keep queues clean
-        items = [];
-      }
+      // Show all tasks for the department
       
       // Add module annotation and filter by status if provided
       items.forEach(item => {
