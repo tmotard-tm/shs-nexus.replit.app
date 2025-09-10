@@ -388,62 +388,380 @@ export default function QueueManagement() {
 
         {/* View Queue Item Dialog */}
         <Dialog open={!!viewQueueItem} onOpenChange={() => setViewQueueItem(null)}>
-          <DialogContent className="max-w-3xl">
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Queue Item Details</DialogTitle>
               <DialogDescription>
-                View and manage queue item information
+                View complete form submission and manage queue item
               </DialogDescription>
             </DialogHeader>
+            {viewQueueItem && <QueueItemDetailsView item={viewQueueItem} users={users} />}
             {viewQueueItem && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Title</Label>
-                    <p className="text-sm text-muted-foreground">{viewQueueItem.title}</p>
-                  </div>
-                  <div>
-                    <Label>Status</Label>
-                    <Badge className="mt-1">{viewQueueItem.status}</Badge>
-                  </div>
-                  <div>
-                    <Label>Workflow Type</Label>
-                    <p className="text-sm text-muted-foreground">{viewQueueItem.workflowType}</p>
-                  </div>
-                  <div>
-                    <Label>Priority</Label>
-                    <Badge className="mt-1">{viewQueueItem.priority}</Badge>
-                  </div>
-                </div>
-                <div>
-                  <Label>Description</Label>
-                  <p className="text-sm text-muted-foreground">{viewQueueItem.description}</p>
-                </div>
-                {viewQueueItem.data && (
-                  <div>
-                    <Label>Data</Label>
-                    <pre className="text-xs bg-muted p-3 rounded-md overflow-auto">
-                      {JSON.stringify(JSON.parse(viewQueueItem.data), null, 2)}
-                    </pre>
-                  </div>
+              <div className="flex gap-2 pt-4 border-t">
+                {viewQueueItem.status === "pending" && (
+                  <Button onClick={() => assignMutation.mutate({ queueItemId: viewQueueItem.id, assigneeId: user?.id || "" })}>
+                    Assign to Me
+                  </Button>
                 )}
-                <div className="flex gap-2 pt-4">
-                  {viewQueueItem.status === "pending" && (
-                    <Button onClick={() => assignMutation.mutate({ queueItemId: viewQueueItem.id, assigneeId: user?.id || "" })}>
-                      Assign to Me
-                    </Button>
-                  )}
-                  {viewQueueItem.status === "in_progress" && viewQueueItem.assignedTo === user?.id && (
-                    <Button onClick={() => completeMutation.mutate(viewQueueItem.id)}>
-                      Mark Complete
-                    </Button>
-                  )}
-                </div>
+                {viewQueueItem.status === "in_progress" && viewQueueItem.assignedTo === user?.id && (
+                  <Button onClick={() => completeMutation.mutate(viewQueueItem.id)}>
+                    Mark Complete
+                  </Button>
+                )}
               </div>
             )}
           </DialogContent>
         </Dialog>
       </div>
     </MainContent>
+  );
+}
+
+// Component to display queue item details with all form data
+function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserType[] }) {
+  let parsedData = null;
+  try {
+    parsedData = item.data ? JSON.parse(item.data) : null;
+  } catch (error) {
+    console.error('Error parsing queue item data:', error);
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString();
+  };
+
+  const formatDateTime = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
+  };
+
+  const assignedUser = users.find(u => u.id === item.assignedTo);
+
+  return (
+    <div className="space-y-6">
+      {/* Basic Info */}
+      <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+        <div>
+          <Label className="font-semibold">Request ID</Label>
+          <p className="text-sm">{item.id}</p>
+        </div>
+        <div>
+          <Label className="font-semibold">Status</Label>
+          <div className="mt-1">
+            <Badge variant={item.status === 'completed' ? 'secondary' : item.status === 'in_progress' ? 'default' : 'outline'}>
+              {item.status === 'in_progress' ? 'In Progress' : item.status}
+            </Badge>
+          </div>
+        </div>
+        <div>
+          <Label className="font-semibold">Workflow Type</Label>
+          <p className="text-sm capitalize">{item.workflowType.replace('_', ' ')}</p>
+        </div>
+        <div>
+          <Label className="font-semibold">Priority</Label>
+          <div className="mt-1">
+            <Badge variant={item.priority === 'high' ? 'destructive' : item.priority === 'medium' ? 'default' : 'secondary'}>
+              {item.priority}
+            </Badge>
+          </div>
+        </div>
+        <div>
+          <Label className="font-semibold">Created</Label>
+          <p className="text-sm">{formatDateTime(item.createdAt)}</p>
+        </div>
+        <div>
+          <Label className="font-semibold">Assigned To</Label>
+          <p className="text-sm">{assignedUser ? assignedUser.username : 'Unassigned'}</p>
+        </div>
+      </div>
+
+      <div>
+        <Label className="font-semibold">Description</Label>
+        <p className="text-sm mt-1 p-3 bg-slate-50 dark:bg-slate-800 rounded">{item.description}</p>
+      </div>
+
+      {/* Form Data Based on Workflow Type */}
+      {parsedData && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold border-b pb-2">Original Form Submission</h3>
+          
+          {item.workflowType === "onboarding" && (
+            <OnboardingFormData data={parsedData} />
+          )}
+          
+          {item.workflowType === "vehicle_assignment" && (
+            <VehicleAssignmentFormData data={parsedData} />
+          )}
+          
+          {item.workflowType === "offboarding" && (
+            <OffboardingFormData data={parsedData} />
+          )}
+          
+          {item.workflowType === "decommission" && (
+            <DecommissionFormData data={parsedData} />
+          )}
+        </div>
+      )}
+
+      {/* Raw Data (for debugging) */}
+      {parsedData && (
+        <details className="bg-slate-50 dark:bg-slate-800 rounded p-3">
+          <summary className="cursor-pointer font-medium">Raw Data (Developer View)</summary>
+          <pre className="text-xs mt-2 overflow-auto">
+            {JSON.stringify(parsedData, null, 2)}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+// Onboarding form data display
+function OnboardingFormData({ data }: { data: any }) {
+  const { employee, vehicleAssignment, supplyOrders, requestsCreated } = data;
+
+  return (
+    <div className="space-y-4">
+      {/* Employee Information */}
+      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+        <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Employee Information</h4>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <Label>Name</Label>
+            <p>{employee.firstName} {employee.lastName}</p>
+          </div>
+          <div>
+            <Label>Enterprise ID</Label>
+            <p>{employee.enterpriseId}</p>
+          </div>
+          <div>
+            <Label>Department</Label>
+            <p>{employee.department}</p>
+          </div>
+          <div>
+            <Label>Start Date</Label>
+            <p>{employee.startDate}</p>
+          </div>
+          <div>
+            <Label>Region</Label>
+            <p>{employee.region}</p>
+          </div>
+          <div>
+            <Label>District</Label>
+            <p>{employee.district}</p>
+          </div>
+          <div className="col-span-2">
+            <Label>Specialties</Label>
+            <div className="flex gap-2 mt-1">
+              <Badge variant="outline">Primary: {employee.primarySpecialty}</Badge>
+              <Badge variant="outline">Secondary: {employee.secondarySpecialty}</Badge>
+              <Badge variant="outline">Tertiary: {employee.tertiarySpecialty}</Badge>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Vehicle Assignment */}
+      {vehicleAssignment && (
+        <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+          <h4 className="font-semibold mb-3 text-green-900 dark:text-green-100">Vehicle Assignment</h4>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <Label>Auto Assign</Label>
+              <p>{vehicleAssignment.autoAssign ? 'Yes' : 'No'}</p>
+            </div>
+            {vehicleAssignment.workZipcode && (
+              <div>
+                <Label>Work Zipcode</Label>
+                <p>{vehicleAssignment.workZipcode}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Supply Orders */}
+      {supplyOrders && (
+        <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
+          <h4 className="font-semibold mb-3 text-purple-900 dark:text-purple-100">Supply Orders</h4>
+          <div className="flex gap-4 text-sm">
+            <div>
+              <Label>Assets & Supplies</Label>
+              <p>{supplyOrders.assetsSupplies ? 'Requested' : 'Not Requested'}</p>
+            </div>
+            <div>
+              <Label>NTAO Parts Stock</Label>
+              <p>{supplyOrders.ntaoPartsStock ? 'Requested' : 'Not Requested'}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Requests Created */}
+      {requestsCreated && requestsCreated.length > 0 && (
+        <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
+          <h4 className="font-semibold mb-3 text-orange-900 dark:text-orange-100">Triggered Requests</h4>
+          <div className="flex flex-wrap gap-2">
+            {requestsCreated.map((request: string, index: number) => (
+              <Badge key={index} variant="secondary">{request}</Badge>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Vehicle Assignment form data display
+function VehicleAssignmentFormData({ data }: { data: any }) {
+  const { employee, vehicle, supplyOrders, orderMessages } = data;
+
+  return (
+    <div className="space-y-4">
+      {/* Employee Information */}
+      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+        <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Employee Information</h4>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <Label>Name</Label>
+            <p>{employee.name}</p>
+          </div>
+          <div>
+            <Label>Enterprise ID</Label>
+            <p>{employee.enterpriseId}</p>
+          </div>
+          <div className="col-span-2">
+            <Label>Specialties</Label>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {employee.specialties && employee.specialties.map((specialty: string, index: number) => (
+                <Badge key={index} variant="outline" className="text-xs">{specialty}</Badge>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Vehicle Information */}
+      <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+        <h4 className="font-semibold mb-3 text-green-900 dark:text-green-100">Vehicle Information</h4>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <Label>Vehicle</Label>
+            <p>{vehicle.year} {vehicle.make} {vehicle.model}</p>
+          </div>
+          <div>
+            <Label>License Plate</Label>
+            <p>{vehicle.licensePlate}</p>
+          </div>
+          <div>
+            <Label>VIN</Label>
+            <p>{vehicle.vin}</p>
+          </div>
+          <div>
+            <Label>Location</Label>
+            <p>{vehicle.location}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Supply Orders */}
+      {supplyOrders && (
+        <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
+          <h4 className="font-semibold mb-3 text-purple-900 dark:text-purple-100">Supply Orders</h4>
+          <div className="flex gap-4 text-sm">
+            <div>
+              <Label>Assets & Supplies</Label>
+              <p>{supplyOrders.assetsSupplies ? 'Requested' : 'Not Requested'}</p>
+            </div>
+            <div>
+              <Label>NTAO Parts Stock</Label>
+              <p>{supplyOrders.ntaoPartsStock ? 'Requested' : 'Not Requested'}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order Messages */}
+      {orderMessages && orderMessages.length > 0 && (
+        <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
+          <h4 className="font-semibold mb-3 text-orange-900 dark:text-orange-100">Order Messages</h4>
+          <div className="space-y-1 text-sm">
+            {orderMessages.map((message: string, index: number) => (
+              <p key={index}>• {message}</p>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Offboarding form data display
+function OffboardingFormData({ data }: { data: any }) {
+  const { technician, vehicle, departments } = data;
+
+  return (
+    <div className="space-y-4">
+      {/* Technician Information */}
+      <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
+        <h4 className="font-semibold mb-3 text-red-900 dark:text-red-100">Technician Information</h4>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <Label>Name</Label>
+            <p>{technician.name}</p>
+          </div>
+          <div>
+            <Label>RACF ID</Label>
+            <p>{technician.racfId}</p>
+          </div>
+          <div>
+            <Label>Last Day Worked</Label>
+            <p>{technician.lastDayWorked}</p>
+          </div>
+          <div>
+            <Label>Reason</Label>
+            <p>{technician.reason}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Vehicle Information */}
+      <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+        <h4 className="font-semibold mb-3 text-green-900 dark:text-green-100">Vehicle Information</h4>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <Label>Vehicle Number</Label>
+            <p>{vehicle.number}</p>
+          </div>
+          <div>
+            <Label>Vehicle Name</Label>
+            <p>{vehicle.name}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Departments Notified */}
+      {departments && departments.length > 0 && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+          <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Departments Notified</h4>
+          <div className="flex flex-wrap gap-2">
+            {departments.map((dept: string, index: number) => (
+              <Badge key={index} variant="secondary">{dept}</Badge>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Decommission form data display (placeholder)
+function DecommissionFormData({ data }: { data: any }) {
+  return (
+    <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+      <h4 className="font-semibold mb-3">Decommission Data</h4>
+      <pre className="text-xs overflow-auto">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    </div>
   );
 }
