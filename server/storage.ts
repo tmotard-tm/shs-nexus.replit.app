@@ -1122,21 +1122,26 @@ export class MemStorage implements IStorage {
           break;
       }
       
-      // Filter to only show department-specific auto-triggered tasks
-      items = items.filter(item => {
+      // Check if there are any auto-triggered tasks for this module
+      const autoTriggeredTasks = items.filter(item => {
         try {
           if (item.data) {
             const data = JSON.parse(item.data);
-            // Only show tasks that are auto-triggered for departments or have explicit department notifications
-            return data.autoTriggered === true || 
-                   data.notificationType === "Employee Onboarding" ||
-                   data.triggeredBy === "employee_onboarding";
+            return data.autoTriggered === true || data.triggeredBy === "employee_onboarding";
           }
-          return false; // Hide tasks without proper data structure
+          return false;
         } catch (e) {
-          return false; // Hide tasks with invalid data structure
+          return false;
         }
       });
+      
+      // If auto-triggered tasks exist, show ONLY those for this queue
+      if (autoTriggeredTasks.length > 0) {
+        items = autoTriggeredTasks;
+      } else {
+        // If no auto-triggered tasks, show nothing to keep queues clean
+        items = [];
+      }
       
       // Add module annotation and filter by status if provided
       items.forEach(item => {
