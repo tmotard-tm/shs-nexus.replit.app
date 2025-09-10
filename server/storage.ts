@@ -146,6 +146,33 @@ export class MemStorage implements IStorage {
       },
       {
         id: randomUUID(),
+        username: "INVENTORY001",
+        email: "inventory@sears.com",
+        password: "passwords", // In real app, this would be hashed
+        role: "approver",
+        department: "Inventory Control",
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "FLEET001",
+        email: "fleet@sears.com",
+        password: "passwords", // In real app, this would be hashed
+        role: "approver",
+        department: "Fleet Management",
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "DECOM001",
+        email: "decommissions@sears.com",
+        password: "passwords", // In real app, this would be hashed
+        role: "approver",
+        department: "Decommissions",
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
         username: "SUPER001",
         email: "superadmin@sears.com",
         password: "passwords", // In real app, this would be hashed
