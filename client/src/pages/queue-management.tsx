@@ -417,6 +417,8 @@ export default function QueueManagement() {
   );
 }
 
+
+
 // Notes Section Component
 function NotesSection({ item }: { item: QueueItem }) {
   const [notes, setNotes] = useState(item.notes || "");
@@ -510,6 +512,8 @@ function NotesSection({ item }: { item: QueueItem }) {
     </div>
   );
 }
+
+
 
 // Component to display queue item details with all form data
 function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserType[] }) {
@@ -618,6 +622,10 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
           {item.workflowType === "ntao_parts" && (
             <NTAOPartsFormData data={parsedData} />
           )}
+          
+          {item.workflowType === "department_notification" && (
+            <DepartmentNotificationFormData data={parsedData} />
+          )}
         </div>
       )}
 
@@ -636,6 +644,8 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
     </div>
   );
 }
+
+
 
 // Onboarding form data display
 function OnboardingFormData({ data }: { data: any }) {
@@ -733,6 +743,8 @@ function OnboardingFormData({ data }: { data: any }) {
   );
 }
 
+
+
 // Vehicle Assignment form data display
 function VehicleAssignmentFormData({ data }: { data: any }) {
   const { employee, vehicle, supplyOrders, orderMessages } = data || {};
@@ -817,6 +829,8 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
   );
 }
 
+
+
 // Offboarding form data display
 function OffboardingFormData({ data }: { data: any }) {
   const { employee, vehicle, notifications } = data || {};
@@ -897,6 +911,8 @@ function OffboardingFormData({ data }: { data: any }) {
   );
 }
 
+
+
 // Decommission form data display (placeholder)
 function DecommissionFormData({ data }: { data: any }) {
   return (
@@ -908,6 +924,8 @@ function DecommissionFormData({ data }: { data: any }) {
     </div>
   );
 }
+
+
 
 // Assets & Supplies form data display
 function AssetsSuppliesFormData({ data }: { data: any }) {
@@ -982,6 +1000,8 @@ function AssetsSuppliesFormData({ data }: { data: any }) {
   );
 }
 
+
+
 // NTAO Parts form data display
 function NTAOPartsFormData({ data }: { data: any }) {
   const { employee, orderType, autoTriggered, triggeredBy, workLocation } = data || {};
@@ -1053,6 +1073,84 @@ function NTAOPartsFormData({ data }: { data: any }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Department Notification form data display
+function DepartmentNotificationFormData({ data }: { data: any }) {
+  const { department, notificationType, employee, vehicle, autoTriggered, triggeredBy } = data || {};
+
+  return (
+    <div className="space-y-4">
+      {/* Notification Information */}
+      <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+        <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Notification Details</h4>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <Label className="text-blue-700 dark:text-blue-300">Department</Label>
+            <p className="font-medium text-blue-900 dark:text-blue-100">{department || 'N/A'}</p>
+          </div>
+          <div>
+            <Label className="text-blue-700 dark:text-blue-300">Notification Type</Label>
+            <p className="text-blue-900 dark:text-blue-100">{notificationType || 'N/A'}</p>
+          </div>
+          <div>
+            <Label className="text-blue-700 dark:text-blue-300">Auto Triggered</Label>
+            <p className="text-blue-900 dark:text-blue-100">{autoTriggered ? 'Yes' : 'No'}</p>
+          </div>
+          <div>
+            <Label className="text-blue-700 dark:text-blue-300">Triggered By</Label>
+            <p className="text-blue-900 dark:text-blue-100">{triggeredBy || 'N/A'}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Employee Information */}
+      {employee && (
+        <div className="bg-muted p-4 rounded-lg border border-border">
+          <h4 className="font-semibold mb-3">Employee Information</h4>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <Label>Name</Label>
+              <p>{employee.name || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>RACF ID</Label>
+              <p>{employee.racfId || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Enterprise ID</Label>
+              <p>{employee.enterpriseId || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Last Day Worked</Label>
+              <p>{employee.lastDayWorked || 'N/A'}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Vehicle Information */}
+      {vehicle && (
+        <div className="bg-muted p-4 rounded-lg border border-border">
+          <h4 className="font-semibold mb-3">Vehicle Information</h4>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <Label>Vehicle Number</Label>
+              <p>{vehicle.vehicleNumber || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Vehicle Name</Label>
+              <p>{vehicle.vehicleName || 'N/A'}</p>
+            </div>
+            <div>
+              <Label>Reason</Label>
+              <p>{vehicle.reason || 'N/A'}</p>
+            </div>
+          </div>
         </div>
       )}
     </div>

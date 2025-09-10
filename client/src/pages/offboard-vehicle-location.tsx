@@ -76,57 +76,94 @@ export default function OffboardVehicleLocation() {
     e.preventDefault();
     const vehicle = vehicles.find(veh => veh.id === vehicleOffboard.vehicleId);
     
-    // Trigger notifications to required departments
-    const notificationDepartments = ['NTAO', 'Assets', 'Inventory', 'Fleet'];
+    // Departments that need separate tasks
+    const departmentTasks = [
+      { dept: 'NTAO', priority: 'high' },
+      { dept: 'Assets Management', priority: 'high' },
+      { dept: 'Inventory Control', priority: 'medium' },
+      { dept: 'Fleet Management', priority: 'high' }
+    ];
     
-    // Simulate notification triggers
-    console.log('🚨 OFFBOARDING NOTIFICATIONS TRIGGERED:', {
-      techRacfId: vehicleOffboard.techRacfId,
-      techName: vehicleOffboard.techName,
-      vehicleNumber: vehicleOffboard.vehicleNumber,
-      reason: vehicleOffboard.reason,
-      lastDayWorked: vehicleOffboard.lastDayWorked,
-      departments: notificationDepartments,
-      timestamp: new Date().toISOString()
-    });
+    const tasksCreated: string[] = [];
     
-    // Create queue item for offboarding process
     try {
+      // Create separate queue tasks for each department
+      for (const { dept, priority } of departmentTasks) {
+        const deptQueueItem = await apiRequest("POST", "/api/queue", {
+          workflowType: "department_notification",
+          title: `${dept} - Vehicle Offboarding Notification (Auto-triggered)`,
+          description: `Notification for ${dept} regarding vehicle offboarding. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}`,
+          priority: priority,
+          requesterId: user?.id || "system",
+          data: JSON.stringify({
+            submitter: {
+              name: user?.username || user?.email || "Unknown User",
+              submittedAt: new Date().toISOString()
+            },
+            department: dept,
+            notificationType: "Vehicle Offboarding",
+            employee: {
+              name: vehicleOffboard.techName,
+              racfId: vehicleOffboard.techRacfId,
+              lastDayWorked: vehicleOffboard.lastDayWorked,
+              enterpriseId: vehicleOffboard.techRacfId
+            },
+            vehicle: {
+              vehicleNumber: vehicleOffboard.vehicleNumber,
+              vehicleName: vehicle?.name || vehicleOffboard.vehicleNumber,
+              reason: vehicleOffboard.reason
+            },
+            autoTriggered: true,
+            triggeredBy: "vehicle_offboarding"
+          })
+        });
+        tasksCreated.push(dept);
+      }
+      
+      // Create main queue item for offboarding process
       await apiRequest("POST", "/api/queue", {
         workflowType: "offboarding",
         title: `Offboard Employee - ${vehicleOffboard.techName}`,
-        description: `Process offboarding for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}`,
+        description: `Process offboarding for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}. ${tasksCreated.length} department notifications created.`,
         priority: "high",
         requesterId: user?.id || "system",
         data: JSON.stringify({
-          technician: {
+          submitter: {
+            name: user?.username || user?.email || "Unknown User",
+            submittedAt: new Date().toISOString()
+          },
+          employee: {
             name: vehicleOffboard.techName,
             racfId: vehicleOffboard.techRacfId,
             lastDayWorked: vehicleOffboard.lastDayWorked,
-            reason: vehicleOffboard.reason
+            enterpriseId: vehicleOffboard.techRacfId,
+            departments: ["Field Services", "NTAO", "Fleet Management"]
           },
           vehicle: {
-            number: vehicleOffboard.vehicleNumber,
-            name: vehicle?.name || vehicleOffboard.vehicleNumber
+            vehicleNumber: vehicleOffboard.vehicleNumber,
+            reason: vehicleOffboard.reason
           },
-          departments: notificationDepartments,
+          notifications: {
+            departments: tasksCreated,
+            timestamp: new Date().toISOString()
+          },
           offboardingDate: new Date().toISOString()
         })
       });
     } catch (queueError) {
-      console.error('Error creating queue item:', queueError);
+      console.error('Error creating queue items:', queueError);
     }
 
     toast({
       title: "Vehicle Offboarded Successfully",
-      description: `${vehicle?.name} removed from fleet. Notifications sent to: ${notificationDepartments.join(', ')}`,
+      description: `${vehicle?.name} removed from fleet. ${tasksCreated.length} department tasks created: ${tasksCreated.join(', ')}`,
     });
     
     // Show secondary notification confirmation
     setTimeout(() => {
       toast({
-        title: "Department Notifications Sent",
-        description: `✅ NTAO, Assets, Inventory, and Fleet have been notified of offboarding for ${vehicleOffboard.techName}`,
+        title: "Department Tasks Created",
+        description: `✅ ${tasksCreated.join(', ')} teams have been assigned tasks for ${vehicleOffboard.techName}'s offboarding`,
         variant: "default"
       });
     }, 2000);
