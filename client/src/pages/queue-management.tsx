@@ -348,7 +348,18 @@ export default function QueueManagement() {
                   <div className="space-y-2">
                     {filteredQueueItems.map((item: QueueItem) => {
                       const itemData = item.data ? JSON.parse(item.data) : {};
-                      const department = itemData.department || '-';
+                      let department = itemData.department || '';
+                      
+                      // Extract department from different data structures
+                      if (!department && itemData.notifications?.departments) {
+                        department = `Multiple: ${itemData.notifications.departments.join(', ')}`;
+                      }
+                      if (!department && itemData.employee?.department) {
+                        department = itemData.employee.department;
+                      }
+                      if (!department) {
+                        department = 'General';
+                      }
                       
                       return (
                         <div key={item.id} className="grid grid-cols-10 gap-4 text-sm bg-muted/50 rounded p-3 hover:bg-muted transition-colors">
@@ -356,13 +367,18 @@ export default function QueueManagement() {
                           <div className="text-muted-foreground">{new Date(item.createdAt).toLocaleDateString()}</div>
                           <div className="text-muted-foreground capitalize">{item.workflowType.replace('_', ' ')}</div>
                           <div className="text-muted-foreground">
-                            {department !== '-' ? (
-                              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300 dark:bg-green-900 dark:text-green-100 dark:border-green-600">
-                                {department}
-                              </Badge>
-                            ) : (
-                              '-'
-                            )}
+                            <Badge 
+                              variant="outline" 
+                              className={`font-medium ${
+                                department.includes('NTAO') ? 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-900 dark:text-blue-100' :
+                                department.includes('Assets') ? 'bg-orange-50 text-orange-700 border-orange-300 dark:bg-orange-900 dark:text-orange-100' :
+                                department.includes('Fleet') ? 'bg-purple-50 text-purple-700 border-purple-300 dark:bg-purple-900 dark:text-purple-100' :
+                                department.includes('Inventory') ? 'bg-yellow-50 text-yellow-700 border-yellow-300 dark:bg-yellow-900 dark:text-yellow-100' :
+                                'bg-green-50 text-green-700 border-green-300 dark:bg-green-900 dark:text-green-100'
+                              }`}
+                            >
+                              {department}
+                            </Badge>
                           </div>
                           <div className="text-foreground font-medium truncate">{item.title}</div>
                           <div>
