@@ -132,7 +132,7 @@ export default function FleetQueuePage() {
       <div className="container mx-auto p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Fleet Management Queue</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Fleet Queue</h1>
             <p className="text-muted-foreground">
               Manage Fleet Management department tasks and assignments
             </p>
