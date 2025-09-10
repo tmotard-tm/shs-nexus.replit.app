@@ -439,7 +439,7 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
   return (
     <div className="space-y-6">
       {/* Basic Info */}
-      <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+      <div className="grid grid-cols-2 gap-4 p-4 bg-slate-800 rounded-lg">
         <div>
           <Label className="font-semibold">Request ID</Label>
           <p className="text-sm">{item.id}</p>
@@ -475,8 +475,8 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
       </div>
 
       <div>
-        <Label className="font-semibold">Description</Label>
-        <p className="text-sm mt-1 p-3 bg-slate-50 dark:bg-slate-800 rounded">{item.description}</p>
+        <Label className="font-semibold text-slate-300">Description</Label>
+        <p className="text-sm mt-1 p-3 bg-slate-800 rounded text-slate-300">{item.description}</p>
       </div>
 
       {/* Form Data Based on Workflow Type */}
@@ -504,7 +504,7 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
 
       {/* Raw Data (for debugging) */}
       {parsedData && (
-        <details className="bg-slate-50 dark:bg-slate-800 rounded p-3">
+        <details className="bg-slate-800 rounded p-3 border border-slate-600">
           <summary className="cursor-pointer font-medium">Raw Data (Developer View)</summary>
           <pre className="text-xs mt-2 overflow-auto">
             {JSON.stringify(parsedData, null, 2)}
@@ -522,8 +522,8 @@ function OnboardingFormData({ data }: { data: any }) {
   return (
     <div className="space-y-4">
       {/* Employee Information */}
-      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-        <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Employee Information</h4>
+      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+        <h4 className="font-semibold mb-3 text-slate-200">Employee Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Name</Label>
@@ -562,8 +562,8 @@ function OnboardingFormData({ data }: { data: any }) {
 
       {/* Vehicle Assignment */}
       {vehicleAssignment && (
-        <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-          <h4 className="font-semibold mb-3 text-green-900 dark:text-green-100">Vehicle Assignment</h4>
+        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+          <h4 className="font-semibold mb-3 text-slate-200">Vehicle Assignment</h4>
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <Label>Auto Assign</Label>
@@ -581,8 +581,8 @@ function OnboardingFormData({ data }: { data: any }) {
 
       {/* Supply Orders */}
       {supplyOrders && (
-        <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
-          <h4 className="font-semibold mb-3 text-purple-900 dark:text-purple-100">Supply Orders</h4>
+        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+          <h4 className="font-semibold mb-3 text-slate-200">Supply Orders</h4>
           <div className="flex gap-4 text-sm">
             <div>
               <Label>Assets & Supplies</Label>
@@ -598,8 +598,8 @@ function OnboardingFormData({ data }: { data: any }) {
 
       {/* Requests Created */}
       {requestsCreated && requestsCreated.length > 0 && (
-        <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
-          <h4 className="font-semibold mb-3 text-orange-900 dark:text-orange-100">Triggered Requests</h4>
+        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+          <h4 className="font-semibold mb-3 text-slate-200">Triggered Requests</h4>
           <div className="flex flex-wrap gap-2">
             {requestsCreated.map((request: string, index: number) => (
               <Badge key={index} variant="secondary">{request}</Badge>
@@ -618,8 +618,8 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
   return (
     <div className="space-y-4">
       {/* Employee Information */}
-      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-        <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Employee Information</h4>
+      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+        <h4 className="font-semibold mb-3 text-slate-200">Employee Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Name</Label>
@@ -641,8 +641,8 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
       </div>
 
       {/* Vehicle Information */}
-      <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-        <h4 className="font-semibold mb-3 text-green-900 dark:text-green-100">Vehicle Information</h4>
+      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+        <h4 className="font-semibold mb-3 text-slate-200">Vehicle Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Vehicle</Label>
@@ -665,8 +665,8 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
 
       {/* Supply Orders */}
       {supplyOrders && (
-        <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
-          <h4 className="font-semibold mb-3 text-purple-900 dark:text-purple-100">Supply Orders</h4>
+        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+          <h4 className="font-semibold mb-3 text-slate-200">Supply Orders</h4>
           <div className="flex gap-4 text-sm">
             <div>
               <Label>Assets & Supplies</Label>
@@ -682,8 +682,8 @@ function VehicleAssignmentFormData({ data }: { data: any }) {
 
       {/* Order Messages */}
       {orderMessages && orderMessages.length > 0 && (
-        <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
-          <h4 className="font-semibold mb-3 text-orange-900 dark:text-orange-100">Order Messages</h4>
+        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+          <h4 className="font-semibold mb-3 text-slate-200">Order Messages</h4>
           <div className="space-y-1 text-sm">
             {orderMessages.map((message: string, index: number) => (
               <p key={index}>• {message}</p>
@@ -702,8 +702,8 @@ function OffboardingFormData({ data }: { data: any }) {
   return (
     <div className="space-y-4">
       {/* Technician Information */}
-      <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
-        <h4 className="font-semibold mb-3 text-red-900 dark:text-red-100">Technician Information</h4>
+      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+        <h4 className="font-semibold mb-3 text-slate-200">Technician Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Name</Label>
@@ -725,8 +725,8 @@ function OffboardingFormData({ data }: { data: any }) {
       </div>
 
       {/* Vehicle Information */}
-      <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-        <h4 className="font-semibold mb-3 text-green-900 dark:text-green-100">Vehicle Information</h4>
+      <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+        <h4 className="font-semibold mb-3 text-slate-200">Vehicle Information</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <Label>Vehicle Number</Label>
@@ -741,8 +741,8 @@ function OffboardingFormData({ data }: { data: any }) {
 
       {/* Departments Notified */}
       {departments && departments.length > 0 && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-          <h4 className="font-semibold mb-3 text-blue-900 dark:text-blue-100">Departments Notified</h4>
+        <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+          <h4 className="font-semibold mb-3 text-slate-200">Departments Notified</h4>
           <div className="flex flex-wrap gap-2">
             {departments.map((dept: string, index: number) => (
               <Badge key={index} variant="secondary">{dept}</Badge>
@@ -757,8 +757,8 @@ function OffboardingFormData({ data }: { data: any }) {
 // Decommission form data display (placeholder)
 function DecommissionFormData({ data }: { data: any }) {
   return (
-    <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
-      <h4 className="font-semibold mb-3">Decommission Data</h4>
+    <div className="bg-slate-700 p-4 rounded-lg border border-slate-600">
+      <h4 className="font-semibold mb-3 text-slate-200">Decommission Data</h4>
       <pre className="text-xs overflow-auto">
         {JSON.stringify(data, null, 2)}
       </pre>
