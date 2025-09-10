@@ -298,8 +298,8 @@ export default function OffboardVehicleLocation() {
                               <li>Assets Management (Recover phone)</li>
                               <li>Fleet Management (Move van to central location/shop)</li>
                             </ul>
-                            <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van: Inventory Control + Assets Management will get joint parts count task.</p>
-                            <p className="text-yellow-700 dark:text-yellow-300 mt-1 text-xs">After parts count: Fleet Management will get final vehicle readiness verification task.</p>
+                            <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van: Inventory Control + Assets Management each receive a task to complete count.</p>
+                            <p className="text-yellow-700 dark:text-yellow-300 mt-1 text-xs">Once both teams complete their count tasks: Fleet Management will get final vehicle readiness verification task.</p>
                           </div>
                         </div>
                       </div>
