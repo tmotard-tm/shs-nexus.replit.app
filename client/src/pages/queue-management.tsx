@@ -635,7 +635,7 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
         <p className="text-sm mt-1 p-3 bg-muted rounded">{item.description}</p>
       </div>
 
-      {/* Form Data Based on Workflow Type */}
+      {/* Form Data Based on Workflow Type (excluding department notifications) */}
       {parsedData && (
         <div className="space-y-4">
           <h3 className="text-lg font-semibold border-b pb-2">Original Form Submission</h3>
@@ -680,15 +680,18 @@ function QueueItemDetailsView({ item, users }: { item: QueueItem; users: UserTyp
           {item.workflowType === "ntao_parts" && (
             <NTAOPartsFormData data={parsedData} />
           )}
-          
-          {item.workflowType === "department_notification" && (
-            <DepartmentNotificationFormData data={parsedData} />
-          )}
         </div>
       )}
 
       {/* Notes Section */}
       <NotesSection item={item} />
+
+      {/* Department Notification Details - Moved to Bottom */}
+      {parsedData && item.workflowType === "department_notification" && (
+        <div className="space-y-4">
+          <DepartmentNotificationFormData data={parsedData} />
+        </div>
+      )}
 
       {/* Raw Data (for debugging) */}
       {parsedData && (
