@@ -183,8 +183,8 @@ export default function OffboardVehicleLocation() {
       // Step 3: Create Fleet task (move van to central location/shop) - runs in parallel, triggers final step when complete
       await apiRequest("POST", "/api/fleet-queue", {
         workflowType: "offboarding",
-        title: `Move Van to Central Location/Shop for Prep - ${vehicleOffboard.vehicleNumber}`,
-        description: `Move van ${vehicleOffboard.vehicleNumber} to central location/shop for preparation. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Schedule transport and prep for next assignment.`,
+        title: `Fleet Offboarding Checklist - ${vehicleOffboard.vehicleNumber}`,
+        description: `Complete fleet offboarding checklist for vehicle ${vehicleOffboard.vehicleNumber}. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Contact technician, arrange towing to Pep Boys/shop, update AMS and Holman systems, and prepare for PM.`,
         priority: "high",
         requesterId: user?.id || "system",
         department: "Fleet Management",
@@ -197,12 +197,13 @@ export default function OffboardVehicleLocation() {
           step: "fleet_move_to_pepboys",
           ...sharedTriggerData,
           instructions: [
-            "Schedule van pickup from employee location",
-            "Coordinate transport to central location/shop",
-            "Verify vehicle condition and mileage",
-            "Schedule maintenance and cleaning",
-            "Update fleet management system",
-            "Mark task complete when van at central location/shop"
+            "Contact technician to schedule retrieval of the truck",
+            "Arrange for the truck to be towed:",
+            "  • To a Pep Boys location, if one is available in the area",
+            "  • If not, to a local repair shop",
+            "Record vehicle information and location in AMS and Holman and update to 'Spare' Truck Status",
+            "Once the truck completes its Preventive Maintenance (PM), it is ready for reassignment",
+            "Mark task complete when all steps above are finished"
           ]
         }),
         triggerData: JSON.stringify(sharedTriggerData)
