@@ -622,31 +622,6 @@ export default function OnboardHire() {
 
 
                     {/* Automatic Supply Orders */}
-                    <div className="border-t pt-6">
-                      <h4 className="font-semibold mb-4 flex items-center gap-2">
-                        <Package className="h-4 w-4" />
-                        Day 1 Supply Orders (Automatic)
-                      </h4>
-                      <div className="space-y-3 bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-800">
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                          <Label className="flex items-center gap-2 text-green-800 dark:text-green-200">
-                            <Package className="h-4 w-4" />
-                            Assets & Supplies Order for Day 1 Supplies (Auto-triggered)
-                          </Label>
-                        </div>
-                        <div className="flex items-center space-x-3">
-                          <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                          <Label className="flex items-center gap-2 text-green-800 dark:text-green-200">
-                            <Wrench className="h-4 w-4" />
-                            NTAO Order for Parts Stock (Auto-triggered)
-                          </Label>
-                        </div>
-                        <p className="text-xs text-green-700 dark:text-green-300 mt-2 italic">
-                          *Triggered automatically when employee profile is created
-                        </p>
-                      </div>
-                    </div>
 
                     {/* Automatic Vehicle Assignment */}
                     <div className="border-t pt-6">
