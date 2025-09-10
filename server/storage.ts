@@ -134,6 +134,7 @@ export class MemStorage implements IStorage {
         role: "field",
         department: "NTAO",
         createdAt: new Date(),
+        accessibleQueues: ['ntao'],
       },
       {
         id: randomUUID(),
@@ -143,6 +144,7 @@ export class MemStorage implements IStorage {
         role: "agent",
         department: "Assets Management",
         createdAt: new Date(),
+        accessibleQueues: ['assets'],
       },
       {
         id: randomUUID(),
@@ -152,6 +154,7 @@ export class MemStorage implements IStorage {
         role: "approver",
         department: "Inventory Control",
         createdAt: new Date(),
+        accessibleQueues: ['inventory'],
       },
       {
         id: randomUUID(),
@@ -161,6 +164,7 @@ export class MemStorage implements IStorage {
         role: "approver",
         department: "Fleet Management",
         createdAt: new Date(),
+        accessibleQueues: ['fleet'],
       },
       {
         id: randomUUID(),
@@ -170,6 +174,7 @@ export class MemStorage implements IStorage {
         role: "approver",
         department: "Decommissions",
         createdAt: new Date(),
+        accessibleQueues: ['decommissions'],
       },
       {
         id: randomUUID(),
@@ -179,6 +184,7 @@ export class MemStorage implements IStorage {
         role: "superadmin",
         department: null,
         createdAt: new Date(),
+        accessibleQueues: ['ntao', 'assets', 'inventory', 'fleet', 'decommissions'],
       },
     ];
     
