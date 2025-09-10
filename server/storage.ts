@@ -51,18 +51,45 @@ export interface IStorage {
     activeUsers: number;
   }>;
 
-  // Queue Items
-  getQueueItem(id: string): Promise<QueueItem | undefined>;
-  getQueueItems(): Promise<QueueItem[]>;
-  getQueueItemsByStatus(status: string): Promise<QueueItem[]>;
-  getQueueItemsByWorkflowType(workflowType: string): Promise<QueueItem[]>;
-  getQueueItemsByDepartment(department: string): Promise<QueueItem[]>;
-  getQueueItemsByAssignee(userId: string): Promise<QueueItem[]>;
-  getMyQueueItems(userId: string): Promise<QueueItem[]>; // Items user created or assigned to
-  createQueueItem(item: InsertQueueItem): Promise<QueueItem>;
-  updateQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
-  assignQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
-  completeQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
+  // NTAO Queue Module
+  getNTAOQueueItem(id: string): Promise<QueueItem | undefined>;
+  getNTAOQueueItems(): Promise<QueueItem[]>;
+  createNTAOQueueItem(item: InsertQueueItem): Promise<QueueItem>;
+  updateNTAOQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
+  assignNTAOQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  completeNTAOQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
+
+  // Assets Queue Module  
+  getAssetsQueueItem(id: string): Promise<QueueItem | undefined>;
+  getAssetsQueueItems(): Promise<QueueItem[]>;
+  createAssetsQueueItem(item: InsertQueueItem): Promise<QueueItem>;
+  updateAssetsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
+  assignAssetsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  completeAssetsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
+
+  // Inventory Queue Module
+  getInventoryQueueItem(id: string): Promise<QueueItem | undefined>;
+  getInventoryQueueItems(): Promise<QueueItem[]>;
+  createInventoryQueueItem(item: InsertQueueItem): Promise<QueueItem>;
+  updateInventoryQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
+  assignInventoryQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  completeInventoryQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
+
+  // Fleet Queue Module
+  getFleetQueueItem(id: string): Promise<QueueItem | undefined>;
+  getFleetQueueItems(): Promise<QueueItem[]>;
+  createFleetQueueItem(item: InsertQueueItem): Promise<QueueItem>;
+  updateFleetQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
+  assignFleetQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  completeFleetQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
+
+  // Decommissions Queue Module
+  getDecommissionsQueueItem(id: string): Promise<QueueItem | undefined>;
+  getDecommissionsQueueItems(): Promise<QueueItem[]>;
+  createDecommissionsQueueItem(item: InsertQueueItem): Promise<QueueItem>;
+  updateDecommissionsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
+  assignDecommissionsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  completeDecommissionsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
   cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined>;
 }
 
@@ -71,14 +98,26 @@ export class MemStorage implements IStorage {
   private requests: Map<string, Request>;
   private apiConfigurations: Map<string, ApiConfiguration>;
   private activityLogs: Map<string, ActivityLog>;
-  private queueItems: Map<string, QueueItem>;
+  
+  // Separate storage for each queue module
+  private ntaoQueueItems: Map<string, QueueItem>;
+  private assetsQueueItems: Map<string, QueueItem>;
+  private inventoryQueueItems: Map<string, QueueItem>;
+  private fleetQueueItems: Map<string, QueueItem>;
+  private decommissionsQueueItems: Map<string, QueueItem>;
 
   constructor() {
     this.users = new Map();
     this.requests = new Map();
     this.apiConfigurations = new Map();
     this.activityLogs = new Map();
-    this.queueItems = new Map();
+    
+    // Initialize separate queue modules
+    this.ntaoQueueItems = new Map();
+    this.assetsQueueItems = new Map();
+    this.inventoryQueueItems = new Map();
+    this.fleetQueueItems = new Map();
+    this.decommissionsQueueItems = new Map();
     
     // Initialize with admin user
     this.initializeDefaultData();
