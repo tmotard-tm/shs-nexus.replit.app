@@ -305,7 +305,7 @@ export default function OffboardVehicleLocation() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="space-y-2">
                             <Label htmlFor="lastDayWorked">Last Day Worked *</Label>
                             <Input
@@ -325,30 +325,6 @@ export default function OffboardVehicleLocation() {
                               placeholder="Enter vehicle number"
                               data-testid="input-vehicle-number"
                             />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="vehicleId">Vehicle *</Label>
-                            <Select 
-                              value={vehicleOffboard.vehicleId} 
-                              onValueChange={(value) => setVehicleOffboard(prev => ({ ...prev, vehicleId: value }))}
-                              data-testid="select-vehicle-offboard"
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select vehicle to offboard" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {vehicles.map(vehicle => (
-                                  <SelectItem key={vehicle.id} value={vehicle.id} data-testid={`option-vehicle-${vehicle.id}`}>
-                                    <div className="flex items-center justify-between w-full">
-                                      <span>{vehicle.name}</span>
-                                      <Badge className={`ml-2 ${getStatusColor(vehicle.status)}`}>
-                                        {vehicle.status}
-                                      </Badge>
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
                           </div>
                         </div>
 
