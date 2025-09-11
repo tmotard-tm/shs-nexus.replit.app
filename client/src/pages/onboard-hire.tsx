@@ -108,41 +108,46 @@ export default function OnboardHire() {
     ];
     const vehicleFields = ['autoAssign', 'workZipcode'];
 
-    const validators = {
-      email: commonValidators.email,
-      phone: commonValidators.phone,
-      startDate: commonValidators.date,
-      proposedRouteStartDate: commonValidators.date,
-      firstName: commonValidators.employeeName,
-      lastName: commonValidators.employeeName,
-      zipCode: (value: string) => value.replace(/\D/g, '').slice(0, 5), // Keep only digits, max 5
-      employeeId: (value: string) => value.replace(/\D/g, '').slice(0, 11), // Keep only digits, max 11
-      enterpriseId: commonValidators.text,
-      techId: commonValidators.text,
-      requisitionId: commonValidators.text
-    };
-
-    const employeePrefill = getPrefillParams(employeeFields, validators);
-    const vehiclePrefill = getPrefillParams(vehicleFields, validators);
+    const employeePrefill = getPrefillParams(employeeFields);
+    const vehiclePrefill = getPrefillParams(vehicleFields);
 
     // Apply employee prefill data
     if (Object.keys(employeePrefill).length > 0) {
-      setEmployeeForm(prev => ({
-        ...prev,
-        ...employeePrefill,
-        // Convert string 'true'/'false' to boolean for isGeneralist
-        ...(employeePrefill.isGeneralist && { isGeneralist: employeePrefill.isGeneralist === 'true' })
-      }));
+      const processedData: any = {};
+      if (employeePrefill.email) processedData.email = commonValidators.email(employeePrefill.email);
+      if (employeePrefill.phone) processedData.phone = commonValidators.phone(employeePrefill.phone);
+      if (employeePrefill.startDate) processedData.startDate = commonValidators.date(employeePrefill.startDate);
+      if (employeePrefill.proposedRouteStartDate) processedData.proposedRouteStartDate = commonValidators.date(employeePrefill.proposedRouteStartDate);
+      if (employeePrefill.firstName) processedData.firstName = commonValidators.employeeName(employeePrefill.firstName);
+      if (employeePrefill.lastName) processedData.lastName = commonValidators.employeeName(employeePrefill.lastName);
+      if (employeePrefill.zipCode) processedData.zipCode = employeePrefill.zipCode.replace(/\D/g, '').slice(0, 5);
+      if (employeePrefill.employeeId) processedData.employeeId = employeePrefill.employeeId.replace(/\D/g, '').slice(0, 11);
+      if (employeePrefill.enterpriseId) processedData.enterpriseId = commonValidators.text(employeePrefill.enterpriseId);
+      if (employeePrefill.techId) processedData.techId = commonValidators.text(employeePrefill.techId);
+      if (employeePrefill.requisitionId) processedData.requisitionId = commonValidators.text(employeePrefill.requisitionId);
+      if (employeePrefill.isGeneralist) processedData.isGeneralist = employeePrefill.isGeneralist === 'true';
+      
+      Object.keys(employeePrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && employeePrefill[key]) {
+          processedData[key] = employeePrefill[key];
+        }
+      });
+      
+      setEmployeeForm(prev => ({ ...prev, ...processedData }));
     }
 
     // Apply vehicle assignment prefill data
     if (Object.keys(vehiclePrefill).length > 0) {
-      setVehicleAssignment(prev => ({
-        ...prev,
-        ...vehiclePrefill,
-        // Convert string 'true'/'false' to boolean for autoAssign
-        ...(vehiclePrefill.autoAssign && { autoAssign: vehiclePrefill.autoAssign === 'true' })
-      }));
+      const processedData: any = {};
+      if (vehiclePrefill.autoAssign) processedData.autoAssign = vehiclePrefill.autoAssign === 'true';
+      
+      Object.keys(vehiclePrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && vehiclePrefill[key]) {
+          processedData[key] = vehiclePrefill[key];
+        }
+      });
+      
+      setVehicleAssignment(prev => ({ ...prev, ...processedData }));
     }
   }, []);
 
@@ -250,10 +255,22 @@ export default function OnboardHire() {
           title: `${dept} - Employee Onboarding Task (Auto-triggered)`,
           description: `${taskType} task for ${dept} regarding new employee onboarding. Employee: ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}). Department: ${employeeForm.department}. Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}.`,
           priority: priority,
-          requesterId: user?.id || "system",
+          requesterId: user?.id || "anonymous",
+          submitterInfo: user ? {
+            id: user.id,
+            name: user.username || user.email,
+            email: user.email
+          } : {
+            id: "anonymous",
+            name: "Anonymous User",
+            email: null
+          },
           data: JSON.stringify({
-            submitter: {
-              name: user?.username || user?.email || "Unknown User",
+            submitter: user ? {
+              name: user.username || user.email || "Unknown User",
+              submittedAt: new Date().toISOString()
+            } : {
+              name: "Anonymous User",
               submittedAt: new Date().toISOString()
             },
             department: dept,
@@ -322,10 +339,22 @@ export default function OnboardHire() {
         title: `Vehicle Assignment - ${employeeForm.firstName} ${employeeForm.lastName}`,
         description: `Manually assign vehicle to new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}) in ${employeeForm.region}.`,
         priority: "high",
-        requesterId: user?.id || "system",
+        requesterId: user?.id || "anonymous",
+        submitterInfo: user ? {
+          id: user.id,
+          name: user.username || user.email,
+          email: user.email
+        } : {
+          id: "anonymous",
+          name: "Anonymous User",
+          email: null
+        },
         data: JSON.stringify({
-          submitter: {
-            name: user?.username || user?.email || "Unknown User",
+          submitter: user ? {
+            name: user.username || user.email || "Unknown User",
+            submittedAt: new Date().toISOString()
+          } : {
+            name: "Anonymous User",
             submittedAt: new Date().toISOString()
           },
           department: "Fleet Management",
@@ -395,10 +424,22 @@ export default function OnboardHire() {
           title: `Onboard New Employee - ${employeeForm.firstName} ${employeeForm.lastName}`,
           description: `Complete onboarding process for ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). ${requestsCreated.length > 0 ? `Requests created: ${requestsCreated.join(", ")}.` : ""}`,
           priority: "high",
-          requesterId: user?.id || "system",
+          requesterId: user?.id || "anonymous",
+          submitterInfo: user ? {
+            id: user.id,
+            name: user.username || user.email,
+            email: user.email
+          } : {
+            id: "anonymous",
+            name: "Anonymous User",
+            email: null
+          },
           data: JSON.stringify({
-            submitter: {
-              name: user?.username || user?.email || "Unknown User",
+            submitter: user ? {
+              name: user.username || user.email || "Unknown User",
+              submittedAt: new Date().toISOString()
+            } : {
+              name: "Anonymous User",
               submittedAt: new Date().toISOString()
             },
             employee: employeeForm,

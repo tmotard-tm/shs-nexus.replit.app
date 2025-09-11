@@ -118,49 +118,60 @@ export default function AssignVehicleLocation() {
     const rentalFields = ['isRental', 'rentalVanNumber', 'assignmentReason'];
     const searchFields = ['searchQuery', 'brandingFilter', 'interiorFilter', 'targetZipcode'];
 
-    const validators = {
-      email: commonValidators.email,
-      phone: commonValidators.phone,
-      startDate: commonValidators.date,
-      endDate: commonValidators.date,
-      proposedRouteStartDate: commonValidators.date,
-      firstName: commonValidators.employeeName,
-      lastName: commonValidators.employeeName,
-      emergencyContact: commonValidators.employeeName,
-      emergencyPhone: commonValidators.phone,
-      rentalVanNumber: commonValidators.vehicleNumber
-    };
-
-    const assignmentPrefill = getPrefillParams(assignmentFields, validators);
-    const employeePrefill = getPrefillParams(employeeFields, validators);
-    const rentalPrefill = getPrefillParams(rentalFields, validators);
-    const searchPrefill = getPrefillParams(searchFields, validators);
+    const assignmentPrefill = getPrefillParams(assignmentFields);
+    const employeePrefill = getPrefillParams(employeeFields);
+    const rentalPrefill = getPrefillParams(rentalFields);
+    const searchPrefill = getPrefillParams(searchFields);
 
     // Apply assignment prefill data
     if (Object.keys(assignmentPrefill).length > 0) {
-      setVehicleAssignment(prev => ({ ...prev, ...assignmentPrefill }));
+      const processedData: any = {};
+      if (assignmentPrefill.startDate) processedData.startDate = commonValidators.date(assignmentPrefill.startDate);
+      if (assignmentPrefill.endDate) processedData.endDate = commonValidators.date(assignmentPrefill.endDate);
+      Object.keys(assignmentPrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && assignmentPrefill[key]) {
+          processedData[key] = assignmentPrefill[key];
+        }
+      });
+      setVehicleAssignment(prev => ({ ...prev, ...processedData }));
     }
 
     // Apply employee prefill data
     if (Object.keys(employeePrefill).length > 0) {
-      setEmployeeData(prev => ({ ...prev, ...employeePrefill }));
+      const processedData: any = {};
+      if (employeePrefill.email) processedData.email = commonValidators.email(employeePrefill.email);
+      if (employeePrefill.phone) processedData.phone = commonValidators.phone(employeePrefill.phone);
+      if (employeePrefill.firstName) processedData.firstName = commonValidators.employeeName(employeePrefill.firstName);
+      if (employeePrefill.lastName) processedData.lastName = commonValidators.employeeName(employeePrefill.lastName);
+      if (employeePrefill.proposedRouteStartDate) processedData.proposedRouteStartDate = commonValidators.date(employeePrefill.proposedRouteStartDate);
+      if (employeePrefill.emergencyContact) processedData.emergencyContact = commonValidators.employeeName(employeePrefill.emergencyContact);
+      if (employeePrefill.emergencyPhone) processedData.emergencyPhone = commonValidators.phone(employeePrefill.emergencyPhone);
+      Object.keys(employeePrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && employeePrefill[key]) {
+          processedData[key] = employeePrefill[key];
+        }
+      });
+      setEmployeeData(prev => ({ ...prev, ...processedData }));
     }
 
     // Apply rental prefill data
     if (Object.keys(rentalPrefill).length > 0) {
-      setRentalInfo(prev => ({ 
-        ...prev, 
-        ...rentalPrefill,
-        // Convert string 'true'/'false' to boolean for isRental
-        ...(rentalPrefill.isRental && { isRental: rentalPrefill.isRental === 'true' })
-      }));
+      const processedData: any = {};
+      if (rentalPrefill.rentalVanNumber) processedData.rentalVanNumber = commonValidators.vehicleNumber(rentalPrefill.rentalVanNumber);
+      if (rentalPrefill.isRental) processedData.isRental = rentalPrefill.isRental === 'true';
+      Object.keys(rentalPrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && rentalPrefill[key]) {
+          processedData[key] = rentalPrefill[key];
+        }
+      });
+      setRentalInfo(prev => ({ ...prev, ...processedData }));
     }
 
     // Apply search prefill data
-    if (searchPrefill.searchQuery) setSearchQuery(searchPrefill.searchQuery as string);
-    if (searchPrefill.brandingFilter) setBrandingFilter(searchPrefill.brandingFilter as string);
-    if (searchPrefill.interiorFilter) setInteriorFilter(searchPrefill.interiorFilter as string);
-    if (searchPrefill.targetZipcode) setTargetZipcode(searchPrefill.targetZipcode as string);
+    if (searchPrefill.searchQuery) setSearchQuery(searchPrefill.searchQuery);
+    if (searchPrefill.brandingFilter) setBrandingFilter(searchPrefill.brandingFilter);
+    if (searchPrefill.interiorFilter) setInteriorFilter(searchPrefill.interiorFilter);
+    if (searchPrefill.targetZipcode) setTargetZipcode(searchPrefill.targetZipcode);
   }, []);
 
   // Simple distance calculation based on zip code numerical difference
@@ -231,7 +242,16 @@ export default function AssignVehicleLocation() {
         title: `Assign Vehicle to ${employee.name}`,
         description: `Assign ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) to ${employee.name}. ${orderMessages.length > 0 ? `Orders: ${orderMessages.join(", ")}.` : ""}`,
         priority: "medium",
-        requesterId: user?.id || "system",
+        requesterId: user?.id || "anonymous",
+        submitterInfo: user ? {
+          id: user.id,
+          name: user.username || user.email,
+          email: user.email
+        } : {
+          id: "anonymous",
+          name: "Anonymous User",
+          email: null
+        },
         data: JSON.stringify({
           employee: {
             id: employee.id,
@@ -251,7 +271,14 @@ export default function AssignVehicleLocation() {
           },
           supplyOrders,
           orderMessages,
-          assignmentDate: new Date().toISOString()
+          assignmentDate: new Date().toISOString(),
+          submitter: user ? {
+            name: user.username || user.email || "Unknown User",
+            submittedAt: new Date().toISOString()
+          } : {
+            name: "Anonymous User",
+            submittedAt: new Date().toISOString()
+          }
         })
       });
     } catch (queueError) {

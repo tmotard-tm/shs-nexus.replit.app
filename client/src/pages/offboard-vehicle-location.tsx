@@ -85,29 +85,44 @@ export default function OffboardVehicleLocation() {
       'locationId', 'reason', 'effectiveDate', 'notes', 'equipmentDisposal'
     ];
 
-    const validators = {
-      techName: commonValidators.employeeName,
-      employeeId: (value: string) => value.replace(/\D/g, '').slice(0, 11), // Keep only digits, max 11
-      techRacfId: (value: string) => value.replace(/[^a-zA-Z0-9]/g, '').slice(0, 7), // Alphanumeric only, max 7
-      lastDayWorked: commonValidators.date,
-      effectiveDate: commonValidators.date,
-      vehicleNumber: commonValidators.vehicleNumber,
-      notes: commonValidators.text,
-      vehicleLocation: commonValidators.text,
-      equipmentDisposal: commonValidators.text
-    };
-
-    const vehiclePrefill = getPrefillParams(vehicleOffboardFields, validators);
-    const locationPrefill = getPrefillParams(locationOffboardFields, validators);
+    const vehiclePrefill = getPrefillParams(vehicleOffboardFields);
+    const locationPrefill = getPrefillParams(locationOffboardFields);
 
     // Apply vehicle offboard prefill data
     if (Object.keys(vehiclePrefill).length > 0) {
-      setVehicleOffboard(prev => ({ ...prev, ...vehiclePrefill }));
+      const processedData: any = {};
+      if (vehiclePrefill.techName) processedData.techName = commonValidators.employeeName(vehiclePrefill.techName);
+      if (vehiclePrefill.employeeId) processedData.employeeId = vehiclePrefill.employeeId.replace(/\D/g, '').slice(0, 11);
+      if (vehiclePrefill.techRacfId) processedData.techRacfId = vehiclePrefill.techRacfId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 7);
+      if (vehiclePrefill.lastDayWorked) processedData.lastDayWorked = commonValidators.date(vehiclePrefill.lastDayWorked);
+      if (vehiclePrefill.effectiveDate) processedData.effectiveDate = commonValidators.date(vehiclePrefill.effectiveDate);
+      if (vehiclePrefill.vehicleNumber) processedData.vehicleNumber = commonValidators.vehicleNumber(vehiclePrefill.vehicleNumber);
+      if (vehiclePrefill.notes) processedData.notes = commonValidators.text(vehiclePrefill.notes);
+      if (vehiclePrefill.vehicleLocation) processedData.vehicleLocation = commonValidators.text(vehiclePrefill.vehicleLocation);
+      
+      Object.keys(vehiclePrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && vehiclePrefill[key]) {
+          processedData[key] = vehiclePrefill[key];
+        }
+      });
+      
+      setVehicleOffboard(prev => ({ ...prev, ...processedData }));
     }
 
     // Apply location offboard prefill data
     if (Object.keys(locationPrefill).length > 0) {
-      setLocationOffboard(prev => ({ ...prev, ...locationPrefill }));
+      const processedData: any = {};
+      if (locationPrefill.effectiveDate) processedData.effectiveDate = commonValidators.date(locationPrefill.effectiveDate);
+      if (locationPrefill.notes) processedData.notes = commonValidators.text(locationPrefill.notes);
+      if (locationPrefill.equipmentDisposal) processedData.equipmentDisposal = commonValidators.text(locationPrefill.equipmentDisposal);
+      
+      Object.keys(locationPrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && locationPrefill[key]) {
+          processedData[key] = locationPrefill[key];
+        }
+      });
+      
+      setLocationOffboard(prev => ({ ...prev, ...processedData }));
     }
   }, []);
 
@@ -157,8 +172,11 @@ export default function OffboardVehicleLocation() {
           location: vehicleOffboard.vehicleLocation,
           condition: vehicleOffboard.returnCondition
         },
-        submitter: {
-          name: user?.username || user?.email || "Unknown User",
+        submitter: user ? {
+          name: user.username || user.email || "Unknown User",
+          submittedAt: new Date().toISOString()
+        } : {
+          name: "Anonymous User",
           submittedAt: new Date().toISOString()
         }
       };
@@ -169,7 +187,16 @@ export default function OffboardVehicleLocation() {
         title: `Stop Truck Stock Replenishment - ${vehicleOffboard.techName}`,
         description: `Stop truck stock replenishment for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}. Complete this task once removed from truck replenishment system.`,
         priority: "high",
-        requesterId: user?.id || "system",
+        requesterId: user?.id || "anonymous",
+        submitterInfo: user ? {
+          id: user.id,
+          name: user.username || user.email,
+          email: user.email
+        } : {
+          id: "anonymous",
+          name: "Anonymous User",
+          email: null
+        },
         department: "NTAO",
         workflowId: workflowId,
         workflowStep: 1,
@@ -196,7 +223,16 @@ export default function OffboardVehicleLocation() {
         title: `Recover Company Phone - ${vehicleOffboard.techName}`,
         description: `Recover company phone from ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Contact employee to arrange pickup or return of company phone and any other mobile devices.`,
         priority: "high",
-        requesterId: user?.id || "system",
+        requesterId: user?.id || "anonymous",
+        submitterInfo: user ? {
+          id: user.id,
+          name: user.username || user.email,
+          email: user.email
+        } : {
+          id: "anonymous",
+          name: "Anonymous User",
+          email: null
+        },
         department: "Assets Management",
         workflowId: workflowId,
         workflowStep: 2,
@@ -224,7 +260,16 @@ export default function OffboardVehicleLocation() {
         title: `Fleet Offboarding Checklist - ${vehicleOffboard.vehicleNumber}`,
         description: `Complete fleet offboarding checklist for vehicle ${vehicleOffboard.vehicleNumber}. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Contact technician, arrange towing to Pep Boys/shop, update AMS and Holman systems, and prepare for PM.`,
         priority: "high",
-        requesterId: user?.id || "system",
+        requesterId: user?.id || "anonymous",
+        submitterInfo: user ? {
+          id: user.id,
+          name: user.username || user.email,
+          email: user.email
+        } : {
+          id: "anonymous",
+          name: "Anonymous User",
+          email: null
+        },
         department: "Fleet Management",
         workflowId: workflowId,
         workflowStep: 3,

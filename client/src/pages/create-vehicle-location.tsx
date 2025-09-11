@@ -107,37 +107,55 @@ export default function CreateVehicle() {
       'emergencyContact', 'emergencyPhone'
     ];
 
-    const validators = {
-      email: commonValidators.email,
-      phone: commonValidators.phone,
-      vehicleNumber: commonValidators.vehicleNumber,
-      firstName: commonValidators.employeeName,
-      lastName: commonValidators.employeeName,
-      proposedRouteStartDate: commonValidators.date,
-      modelYear: commonValidators.number,
-      emergencyContact: commonValidators.employeeName,
-      emergencyPhone: commonValidators.phone
-    };
-
-    const vehiclePrefill = getPrefillParams(vehicleFields, validators);
-    const employeePrefill = getPrefillParams(employeeFields, validators);
+    const vehiclePrefill = getPrefillParams(vehicleFields);
+    const employeePrefill = getPrefillParams(employeeFields);
 
     // Apply vehicle prefill data
     if (Object.keys(vehiclePrefill).length > 0) {
-      setVehicleForm(prev => ({
-        ...prev,
-        ...vehiclePrefill,
-        // Convert modelYear to number if provided
-        ...(vehiclePrefill.modelYear && { modelYear: parseInt(vehiclePrefill.modelYear as string, 10) || new Date().getFullYear() })
-      }));
+      const processedData: any = {};
+      
+      // Process and validate individual fields
+      if (vehiclePrefill.email) processedData.email = commonValidators.email(vehiclePrefill.email);
+      if (vehiclePrefill.phone) processedData.phone = commonValidators.phone(vehiclePrefill.phone);
+      if (vehiclePrefill.vehicleNumber) processedData.vehicleNumber = commonValidators.vehicleNumber(vehiclePrefill.vehicleNumber);
+      if (vehiclePrefill.firstName) processedData.firstName = commonValidators.employeeName(vehiclePrefill.firstName);
+      if (vehiclePrefill.lastName) processedData.lastName = commonValidators.employeeName(vehiclePrefill.lastName);
+      if (vehiclePrefill.proposedRouteStartDate) processedData.proposedRouteStartDate = commonValidators.date(vehiclePrefill.proposedRouteStartDate);
+      if (vehiclePrefill.modelYear) processedData.modelYear = parseInt(vehiclePrefill.modelYear, 10) || new Date().getFullYear();
+      if (vehiclePrefill.emergencyContact) processedData.emergencyContact = commonValidators.employeeName(vehiclePrefill.emergencyContact);
+      if (vehiclePrefill.emergencyPhone) processedData.emergencyPhone = commonValidators.phone(vehiclePrefill.emergencyPhone);
+      
+      // Copy remaining vehicle fields
+      Object.keys(vehiclePrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && vehiclePrefill[key]) {
+          processedData[key] = vehiclePrefill[key];
+        }
+      });
+      
+      setVehicleForm(prev => ({ ...prev, ...processedData }));
     }
 
     // Apply employee prefill data
     if (Object.keys(employeePrefill).length > 0) {
-      setEmployeeData(prev => ({
-        ...prev,
-        ...employeePrefill
-      }));
+      const processedData: any = {};
+      
+      // Process and validate individual fields
+      if (employeePrefill.email) processedData.email = commonValidators.email(employeePrefill.email);
+      if (employeePrefill.phone) processedData.phone = commonValidators.phone(employeePrefill.phone);
+      if (employeePrefill.firstName) processedData.firstName = commonValidators.employeeName(employeePrefill.firstName);
+      if (employeePrefill.lastName) processedData.lastName = commonValidators.employeeName(employeePrefill.lastName);
+      if (employeePrefill.proposedRouteStartDate) processedData.proposedRouteStartDate = commonValidators.date(employeePrefill.proposedRouteStartDate);
+      if (employeePrefill.emergencyContact) processedData.emergencyContact = commonValidators.employeeName(employeePrefill.emergencyContact);
+      if (employeePrefill.emergencyPhone) processedData.emergencyPhone = commonValidators.phone(employeePrefill.emergencyPhone);
+      
+      // Copy remaining employee fields
+      Object.keys(employeePrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && employeePrefill[key]) {
+          processedData[key] = employeePrefill[key];
+        }
+      });
+      
+      setEmployeeData(prev => ({ ...prev, ...processedData }));
     }
   }, []);
 

@@ -63,43 +63,33 @@ export default function SearsDriveEnrollment() {
       'ldap', 'techEmail', 'referredBy', 'city', 'state', 'industry'
     ];
 
-    const validators = {
-      techEmail: commonValidators.email,
-      techFirstName: commonValidators.employeeName,
-      techLastName: commonValidators.employeeName,
-      ldap: commonValidators.text,
-      referredBy: commonValidators.employeeName,
-      city: commonValidators.text,
-      state: commonValidators.text,
-      districtNumber: commonValidators.text,
-      currentTruckNumber: commonValidators.vehicleNumber,
-      industry: (value: string): string[] => {
+    const prefillData = getPrefillParams(formFields);
+
+    const processedData = {
+      districtNumber: prefillData.districtNumber ? commonValidators.text(prefillData.districtNumber) : "",
+      currentTruckNumber: prefillData.currentTruckNumber ? commonValidators.vehicleNumber(prefillData.currentTruckNumber) : "",
+      techFirstName: prefillData.techFirstName ? commonValidators.employeeName(prefillData.techFirstName) : "",
+      techLastName: prefillData.techLastName ? commonValidators.employeeName(prefillData.techLastName) : "",
+      ldap: prefillData.ldap ? commonValidators.text(prefillData.ldap) : "",
+      techEmail: prefillData.techEmail ? commonValidators.email(prefillData.techEmail) : "",
+      referredBy: prefillData.referredBy ? commonValidators.employeeName(prefillData.referredBy) : "",
+      city: prefillData.city ? commonValidators.text(prefillData.city) : "",
+      state: prefillData.state ? commonValidators.text(prefillData.state) : "",
+      industry: prefillData.industry ? (() => {
         try {
+          const value = prefillData.industry;
           // Handle array string format like "Cook,Dish,Microwave" or JSON array
           if (value.startsWith('[') && value.endsWith(']')) {
             return JSON.parse(value);
           }
           return value.split(',').map(s => s.trim()).filter(s => s.length > 0);
         } catch {
-          return [value]; // Fallback to single item array
+          return [prefillData.industry]; // Fallback to single item array
         }
-      }
+      })() : []
     };
 
-    const prefillData = getPrefillParams(formFields, validators);
-
-    return {
-      districtNumber: prefillData.districtNumber || "",
-      currentTruckNumber: prefillData.currentTruckNumber || "",
-      techFirstName: prefillData.techFirstName || "",
-      techLastName: prefillData.techLastName || "",
-      ldap: prefillData.ldap || "",
-      techEmail: prefillData.techEmail || "",
-      referredBy: prefillData.referredBy || "",
-      city: prefillData.city || "",
-      state: prefillData.state || "",
-      industry: prefillData.industry || [],
-    };
+    return processedData;
   };
 
   const form = useForm<EnrollmentFormData>({
