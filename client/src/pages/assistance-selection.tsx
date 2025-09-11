@@ -383,7 +383,7 @@ export default function AssistanceSelection() {
                   className="w-full mt-4"
                   data-testid="button-sears-drive"
                 >
-                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
+                  Submit BYOV Program Enrollment <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </CardContent>
             </Card>

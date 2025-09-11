@@ -185,9 +185,17 @@ export default function UnifiedQueueManagement() {
       });
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
       queryClient.invalidateQueries({ queryKey: ["/api/queues/stats"] });
+      
+      // If the task was assigned to the current user, open the work module dialog
+      if (variables.assigneeId === user?.id && pickUpItem) {
+        setWorkModuleItem(pickUpItem);
+        setIsWorkModuleOpen(true);
+        setPickUpItem(null); // Close the pickup dialog
+      }
+      
       toast({
         title: "Success",
         description: "Task assigned successfully",
@@ -1034,7 +1042,7 @@ export default function UnifiedQueueManagement() {
           onOpenChange={setIsWorkModuleOpen}
           queueItem={workModuleItem}
           module={workModuleItem?.module}
-          currentUser={user}
+          currentUser={user || undefined}
           users={users}
           onTaskCompleted={() => {
             queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
