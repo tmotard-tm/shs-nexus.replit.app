@@ -35,7 +35,8 @@ const industryOptions = [
   "Laundry",
   "Refrigeration",
   "Hvac",
-  "Lawn and Garden"
+  "Lawn and Garden",
+  "BYOV"
 ];
 
 const requiredUploads = [
@@ -85,10 +86,7 @@ export default function SearsDriveEnrollment() {
         formData.append(key, file);
       });
 
-      return apiRequest('/api/sears-drive-enrollment', {
-        method: 'POST',
-        body: formData,
-      });
+      return apiRequest('POST', '/api/sears-drive-enrollment', formData);
     },
     onSuccess: () => {
       toast({
