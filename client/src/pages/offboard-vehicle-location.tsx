@@ -187,24 +187,20 @@ export default function OffboardVehicleLocation() {
         title: `Stop Truck Stock Replenishment - ${vehicleOffboard.techName}`,
         description: `Stop truck stock replenishment for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}. Complete this task once removed from truck replenishment system.`,
         priority: "high",
-        requesterId: user?.id || "anonymous",
-        submitterInfo: user ? {
-          id: user.id,
-          name: user.username || user.email,
-          email: user.email
-        } : {
-          id: "anonymous",
-          name: "Anonymous User",
-          email: null
-        },
-        department: "NTAO",
-        workflowId: workflowId,
-        workflowStep: 1,
-        dependsOn: null,
-        autoTrigger: false,
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
           step: "ntao_stop_replenishment",
+          workflowId: workflowId,
+          workflowStep: 1,
+          submitterInfo: user ? {
+            id: user.id,
+            name: user.username || user.email,
+            email: user.email
+          } : {
+            id: "anonymous",
+            name: "Anonymous User",
+            email: null
+          },
           ...sharedTriggerData,
           instructions: [
             "Access truck stock replenishment system",
@@ -213,8 +209,7 @@ export default function OffboardVehicleLocation() {
             "Confirm no pending stock orders",
             "Mark task complete when removed from system"
           ]
-        }),
-        triggerData: JSON.stringify(sharedTriggerData)
+        })
       });
 
       // Step 2: Create Assets task (recover phone) - runs in parallel
@@ -223,24 +218,20 @@ export default function OffboardVehicleLocation() {
         title: `Recover Company Phone - ${vehicleOffboard.techName}`,
         description: `Recover company phone from ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Contact employee to arrange pickup or return of company phone and any other mobile devices.`,
         priority: "high",
-        requesterId: user?.id || "anonymous",
-        submitterInfo: user ? {
-          id: user.id,
-          name: user.username || user.email,
-          email: user.email
-        } : {
-          id: "anonymous",
-          name: "Anonymous User",
-          email: null
-        },
-        department: "Assets Management",
-        workflowId: workflowId,
-        workflowStep: 2,
-        dependsOn: null,
-        autoTrigger: false,
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
           step: "assets_recover_phone",
+          workflowId: workflowId,
+          workflowStep: 2,
+          submitterInfo: user ? {
+            id: user.id,
+            name: user.username || user.email,
+            email: user.email
+          } : {
+            id: "anonymous",
+            name: "Anonymous User",
+            email: null
+          },
           ...sharedTriggerData,
           instructions: [
             "Contact employee to arrange phone return",
@@ -250,8 +241,7 @@ export default function OffboardVehicleLocation() {
             "Update asset management system",
             "Mark task complete when phone recovered"
           ]
-        }),
-        triggerData: JSON.stringify(sharedTriggerData)
+        })
       });
 
       // Step 3: Create Fleet task (move van to central location/shop) - runs in parallel, triggers final step when complete
@@ -260,24 +250,20 @@ export default function OffboardVehicleLocation() {
         title: `Fleet Offboarding Checklist - ${vehicleOffboard.vehicleNumber}`,
         description: `Complete fleet offboarding checklist for vehicle ${vehicleOffboard.vehicleNumber}. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Contact technician, arrange towing to Pep Boys/shop, update AMS and Holman systems, and prepare for PM.`,
         priority: "high",
-        requesterId: user?.id || "anonymous",
-        submitterInfo: user ? {
-          id: user.id,
-          name: user.username || user.email,
-          email: user.email
-        } : {
-          id: "anonymous",
-          name: "Anonymous User",
-          email: null
-        },
-        department: "Fleet Management",
-        workflowId: workflowId,
-        workflowStep: 3,
-        dependsOn: null,
-        autoTrigger: false,
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
           step: "fleet_move_to_pepboys",
+          workflowId: workflowId,
+          workflowStep: 3,
+          submitterInfo: user ? {
+            id: user.id,
+            name: user.username || user.email,
+            email: user.email
+          } : {
+            id: "anonymous",
+            name: "Anonymous User",
+            email: null
+          },
           ...sharedTriggerData,
           instructions: [
             "Contact technician to schedule retrieval of the truck",
@@ -288,8 +274,7 @@ export default function OffboardVehicleLocation() {
             "Once the truck completes its Preventive Maintenance (PM), it is ready for reassignment",
             "Mark task complete when all steps above are finished"
           ]
-        }),
-        triggerData: JSON.stringify(sharedTriggerData)
+        })
       });
 
       // Send email notification to OneCard Help Desk for credit card deactivation
