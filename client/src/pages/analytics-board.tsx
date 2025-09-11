@@ -198,61 +198,6 @@ export default function AnalyticsBoard() {
           </div>
         )}
 
-        {/* Fleet Map Visualization */}
-        {mapVehicleData.length > 0 && (
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-foreground">Fleet Map Visualization</h2>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <MapPin className="h-4 w-4" />
-                <span>{mapVehicleData.length} vehicles displayed</span>
-                {vehicles.length === 0 && <span className="text-amber-600">(Sample Data)</span>}
-              </div>
-            </div>
-            
-            {/* Main Map */}
-            <div className="grid grid-cols-1 gap-6">
-              <Card className="bg-card">
-                <CardHeader>
-                  <CardTitle className="text-lg font-semibold text-foreground">Continental United States Fleet Distribution</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[600px]">
-                    <FilteredMap isOpen={true} />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-            
-            {/* Hawaii and Puerto Rico Mini Maps */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-              <Card className="bg-card">
-                <CardHeader>
-                  <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
-                    <MapPin className="h-5 w-5" />
-                    Hawaii Operations
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <HawaiiMap filteredVehicles={mapVehicleData} />
-                </CardContent>
-              </Card>
-              
-              <Card className="bg-card">
-                <CardHeader>
-                  <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
-                    <MapPin className="h-5 w-5" />
-                    Puerto Rico Operations
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <PuertoRicoMap filteredVehicles={mapVehicleData} />
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        )}
-
         {/* Department Productivity Dashboard */}
         <div className="mb-8">
           <h2 className="text-xl font-semibold mb-4 text-foreground">Department Productivity Dashboard</h2>
@@ -394,6 +339,62 @@ export default function AnalyticsBoard() {
             </Card>
           </div>
         </div>
+
+        {/* Fleet Map Visualization */}
+        {mapVehicleData.length > 0 && (
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-foreground">Fleet Map Visualization</h2>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <MapPin className="h-4 w-4" />
+                <span>{mapVehicleData.length} vehicles displayed</span>
+                {vehicles.length === 0 && <span className="text-amber-600">(Sample Data)</span>}
+              </div>
+            </div>
+            
+            {/* Main Map */}
+            <div className="grid grid-cols-1 gap-6">
+              <Card className="bg-card">
+                <CardHeader>
+                  <CardTitle className="text-lg font-semibold text-foreground">Continental United States Fleet Distribution</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[600px]">
+                    <FilteredMap isOpen={true} />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            
+            {/* Hawaii and Puerto Rico Mini Maps */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+              <Card className="bg-card">
+                <CardHeader>
+                  <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <MapPin className="h-5 w-5" />
+                    Hawaii Operations
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <HawaiiMap filteredVehicles={mapVehicleData} />
+                </CardContent>
+              </Card>
+              
+              <Card className="bg-card">
+                <CardHeader>
+                  <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <MapPin className="h-5 w-5" />
+                    Puerto Rico Operations
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <PuertoRicoMap filteredVehicles={mapVehicleData} />
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
 
       </div>
     </div>
