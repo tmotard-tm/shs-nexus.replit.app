@@ -8,6 +8,32 @@ import { useToast } from "@/hooks/use-toast";
 import { Settings } from "lucide-react";
 import { useLocation } from "wouter";
 
+// Validates the next URL parameter to prevent open redirect attacks
+function validateNextUrl(next: string | null): string {
+  if (!next) return '/';
+  
+  try {
+    // Create absolute URL to test origin
+    const url = new URL(next, window.location.origin);
+    
+    // Only allow same-origin paths
+    if (url.origin !== window.location.origin) {
+      return '/';
+    }
+    
+    // Prevent redirect back to login
+    if (url.pathname === '/login') {
+      return '/';
+    }
+    
+    // Return the validated path with query and hash
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    // Invalid URL format
+    return '/';
+  }
+}
+
 export default function Login() {
   const [enterpriseId, setEnterpriseId] = useState("");
   const [password, setPassword] = useState("");
@@ -23,8 +49,10 @@ export default function Login() {
     try {
       const success = await login(enterpriseId, password);
       if (success) {
-        // Redirect to home page after successful login
-        setLocation("/");
+        // Read the next parameter from URL and redirect to intended destination
+        const urlParams = new URLSearchParams(window.location.search);
+        const nextUrl = urlParams.get('next');
+        setLocation(validateNextUrl(nextUrl));
       } else {
         toast({
           title: "Login Failed",
