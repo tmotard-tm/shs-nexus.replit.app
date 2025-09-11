@@ -437,10 +437,11 @@ export default function OffboardVehicleLocation() {
                                 <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
                                   <li>NTAO (Stop truck replenishment)</li>
                                   <li>Assets Management (Recover phone)</li>
-                                  <li>Fleet Management (Move van to central location/shop)</li>
+                                  <li>Fleet Management (Fleet vehicle to central location/shop)</li>
+                                  <li>Inventory Control (Remove vehicle from TPMS)</li>
                                 </ul>
-                                <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van: Inventory Control + Assets Management each receive a task to complete count.</p>
-                                <p className="text-yellow-700 dark:text-yellow-300 mt-1 text-xs">Once both teams complete their count tasks: Fleet Management will get final vehicle readiness verification task.</p>
+                                <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van, Inventory Control + Assets Management each receive a task to complete count.</p>
+                                <p className="text-yellow-700 dark:text-yellow-300 mt-1 text-xs">Once both teams complete their count tasks, Fleet Management will get final vehicle readiness verification task.</p>
                               </div>
                             </div>
                           </div>
