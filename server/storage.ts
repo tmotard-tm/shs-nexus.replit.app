@@ -781,7 +781,7 @@ export class MemStorage implements IStorage {
     const updatedItem = { 
       ...item, 
       assignedTo: assigneeId,
-      status: "in_progress",
+      status: "pending", // Keep as pending when assigned
       updatedAt: new Date() 
     };
     this.ntaoQueueItems.set(id, updatedItem);
@@ -856,7 +856,7 @@ export class MemStorage implements IStorage {
     const updatedItem = { 
       ...item, 
       assignedTo: assigneeId,
-      status: "in_progress",
+      status: "pending", // Keep as pending when assigned
       updatedAt: new Date() 
     };
     this.assetsQueueItems.set(id, updatedItem);
@@ -931,7 +931,7 @@ export class MemStorage implements IStorage {
     const updatedItem = { 
       ...item, 
       assignedTo: assigneeId,
-      status: "in_progress",
+      status: "pending", // Keep as pending when assigned
       updatedAt: new Date() 
     };
     this.inventoryQueueItems.set(id, updatedItem);
@@ -1006,7 +1006,7 @@ export class MemStorage implements IStorage {
     const updatedItem = { 
       ...item, 
       assignedTo: assigneeId,
-      status: "in_progress",
+      status: "pending", // Keep as pending when assigned
       updatedAt: new Date() 
     };
     this.fleetQueueItems.set(id, updatedItem);
