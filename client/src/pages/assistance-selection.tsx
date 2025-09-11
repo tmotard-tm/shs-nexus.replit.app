@@ -167,7 +167,7 @@ export default function AssistanceSelection() {
                   className="w-full mt-4"
                   data-testid="button-create-vehicle"
                 >
-                  Start Vehicle Creation <ArrowRight className="ml-2 h-4 w-4" />
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </CardContent>
             </Card>
@@ -227,7 +227,7 @@ export default function AssistanceSelection() {
                   className="w-full mt-4"
                   data-testid="button-assign-vehicle"
                 >
-                  Start Assignment <ArrowRight className="ml-2 h-4 w-4" />
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </CardContent>
             </Card>
@@ -279,7 +279,7 @@ export default function AssistanceSelection() {
                   className="w-full mt-4"
                   data-testid="button-onboarding"
                 >
-                  Start Onboarding <ArrowRight className="ml-2 h-4 w-4" />
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </CardContent>
             </Card>
@@ -331,7 +331,7 @@ export default function AssistanceSelection() {
                   className="w-full mt-4"
                   data-testid="button-offboarding"
                 >
-                  Start Offboarding <ArrowRight className="ml-2 h-4 w-4" />
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </CardContent>
             </Card>
