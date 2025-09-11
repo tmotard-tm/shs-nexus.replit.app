@@ -118,7 +118,7 @@ export default function AssistanceSelection() {
 
           
           {/* Main Form Modules Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             
             {/* Create Vehicle Form Module */}
             <Card 
@@ -336,6 +336,57 @@ export default function AssistanceSelection() {
               </CardContent>
             </Card>
 
+            {/* Sears Drive Program Enrollment Form Module */}
+            <Card 
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
+              data-testid="form-sears-drive"
+            >
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center">
+                    <FileText className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg text-gray-800">Sears Drive Program</CardTitle>
+                    <CardDescription className="text-gray-600">Submit Drive Program Enrollment</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">District Number</Label>
+                    <Input placeholder="123" disabled className="h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">Truck Number</Label>
+                    <Input placeholder="TRK001" disabled className="h-9" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm text-gray-700">Tech Name</Label>
+                    <Input placeholder="John Doe" disabled className="h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-700">Industry</Label>
+                    <Select disabled>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select industry..." />
+                      </SelectTrigger>
+                    </Select>
+                  </div>
+                </div>
+                <Button 
+                  onClick={() => setLocation("/sears-drive-enrollment")}
+                  className="w-full mt-4"
+                  data-testid="button-sears-drive"
+                >
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
 
           </div>
           
