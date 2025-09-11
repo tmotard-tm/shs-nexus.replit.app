@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BackButton } from "@/components/ui/back-button";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { Request } from "@shared/schema";
 import { useAuth } from "@/hooks/use-auth";
 import { Car, UserPlus, UserMinus, Plus, ArrowRight, Settings, TrendingUp, Clock, CheckCircle, Users } from "lucide-react";
