@@ -1,14 +1,61 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema } from "@shared/schema";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
 import multer from "multer";
+import rateLimit from "express-rate-limit";
+import DOMPurify from "isomorphic-dompurify";
 
 // Simple session store for demo purposes
 const sessions = new Map<string, { userId: string; username: string; expiresAt: Date }>();
+
+// Rate limiting store for anonymous form submissions
+const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW = 5 * 60 * 1000; // 5 minutes
+const RATE_LIMIT_MAX_REQUESTS = 10; // 10 requests per window
+
+// Input sanitization function
+function sanitizeInput(obj: any): any {
+  if (typeof obj === 'string') {
+    return DOMPurify.sanitize(obj, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeInput);
+  }
+  if (obj && typeof obj === 'object') {
+    const sanitized: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      sanitized[key] = sanitizeInput(value);
+    }
+    return sanitized;
+  }
+  return obj;
+}
+
+// Rate limiting middleware for anonymous endpoints
+function checkAnonymousRateLimit(req: any, res: any, next: any): any {
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const now = Date.now();
+  const limitData = rateLimitStore.get(ip);
+
+  if (!limitData || now > limitData.resetTime) {
+    rateLimitStore.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+
+  if (limitData.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return res.status(429).json({ 
+      message: "Too many requests. Please try again later.",
+      retryAfter: Math.ceil((limitData.resetTime - now) / 1000)
+    });
+  }
+
+  limitData.count++;
+  return next();
+}
 
 // Authentication middleware
 function requireAuth(req: any, res: any, next: any): any {
@@ -416,16 +463,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/ntao-queue", async (req, res) => {
+  app.post("/api/ntao-queue", checkAnonymousRateLimit, async (req, res) => {
     try {
-      const queueItemData = insertQueueItemSchema.parse(req.body);
+      // Sanitize and validate with anonymous schema
+      const sanitizedData = sanitizeInput(req.body);
+      const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
+      
+      const queueItemData = {
+        ...validatedData,
+        requesterId: "anonymous",
+        department: "NTAO" as const, // Enforce department for NTAO queue
+        status: "pending" as const,
+        attempts: 0,
+        scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
+      };
+      
       const queueItem = await storage.createNTAOQueueItem(queueItemData);
-      res.status(201).json(queueItem);
+      
+      // Return minimal response (no sensitive data)
+      res.status(201).json({ 
+        id: queueItem.id, 
+        status: queueItem.status, 
+        message: "Queue item created successfully" 
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid form data", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to create NTAO queue item" });
+      console.error('NTAO queue creation error:', error);
+      res.status(500).json({ message: "Failed to submit form" });
     }
   });
 
@@ -483,16 +549,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/assets-queue", async (req, res) => {
+  app.post("/api/assets-queue", checkAnonymousRateLimit, async (req, res) => {
     try {
-      const queueItemData = insertQueueItemSchema.parse(req.body);
+      // Sanitize and validate with anonymous schema
+      const sanitizedData = sanitizeInput(req.body);
+      const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
+      
+      const queueItemData = {
+        ...validatedData,
+        requesterId: "anonymous",
+        department: "Assets Management" as const, // Enforce department for Assets queue
+        status: "pending" as const,
+        attempts: 0,
+        scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
+      };
+      
       const queueItem = await storage.createAssetsQueueItem(queueItemData);
-      res.status(201).json(queueItem);
+      
+      // Return minimal response (no sensitive data)
+      res.status(201).json({ 
+        id: queueItem.id, 
+        status: queueItem.status, 
+        message: "Queue item created successfully" 
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid form data", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to create Assets queue item" });
+      console.error('Assets queue creation error:', error);
+      res.status(500).json({ message: "Failed to submit form" });
     }
   });
 
@@ -550,16 +635,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/inventory-queue", async (req, res) => {
+  app.post("/api/inventory-queue", checkAnonymousRateLimit, async (req, res) => {
     try {
-      const queueItemData = insertQueueItemSchema.parse(req.body);
+      // Sanitize and validate with anonymous schema
+      const sanitizedData = sanitizeInput(req.body);
+      const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
+      
+      const queueItemData = {
+        ...validatedData,
+        requesterId: "anonymous",
+        department: "Inventory Control" as const, // Enforce department for Inventory queue
+        status: "pending" as const,
+        attempts: 0,
+        scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
+      };
+      
       const queueItem = await storage.createInventoryQueueItem(queueItemData);
-      res.status(201).json(queueItem);
+      
+      // Return minimal response (no sensitive data)
+      res.status(201).json({ 
+        id: queueItem.id, 
+        status: queueItem.status, 
+        message: "Queue item created successfully" 
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid form data", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to create Inventory queue item" });
+      console.error('Inventory queue creation error:', error);
+      res.status(500).json({ message: "Failed to submit form" });
     }
   });
 
@@ -617,16 +721,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/fleet-queue", async (req, res) => {
+  app.post("/api/fleet-queue", checkAnonymousRateLimit, async (req, res) => {
     try {
-      const queueItemData = insertQueueItemSchema.parse(req.body);
+      // Sanitize and validate with anonymous schema
+      const sanitizedData = sanitizeInput(req.body);
+      const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
+      
+      const queueItemData = {
+        ...validatedData,
+        requesterId: "anonymous",
+        department: "Fleet Management" as const, // Enforce department for Fleet queue
+        status: "pending" as const,
+        attempts: 0,
+        scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
+      };
+      
       const queueItem = await storage.createFleetQueueItem(queueItemData);
-      res.status(201).json(queueItem);
+      
+      // Return minimal response (no sensitive data)
+      res.status(201).json({ 
+        id: queueItem.id, 
+        status: queueItem.status, 
+        message: "Queue item created successfully" 
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid form data", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to create Fleet queue item" });
+      console.error('Fleet queue creation error:', error);
+      res.status(500).json({ message: "Failed to submit form" });
     }
   });
 
@@ -663,13 +786,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
-  // Unified queue creation endpoint
-  app.post("/api/queue", async (req, res) => {
+  // Unified queue creation endpoint (anonymous-accessible with rate limiting)
+  app.post("/api/queue", checkAnonymousRateLimit, async (req, res) => {
     try {
       const { module, ...queueItemData } = req.body;
       
-      // Validate the queue item data
-      const validatedData = insertQueueItemSchema.parse(queueItemData);
+      // Sanitize input data
+      const sanitizedData = sanitizeInput(queueItemData);
+      
+      // Validate with anonymous schema (field whitelisting)
+      const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
+      
+      // Convert to full queue item format
+      const fullQueueItemData = {
+        ...validatedData,
+        requesterId: "anonymous", // Handle anonymous submissions
+        status: "pending" as const,
+        attempts: 0,
+        // Convert scheduledFor string to Date if present
+        scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : undefined,
+      };
       
       // Determine target module
       let targetModule: string;
@@ -686,10 +822,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         // Infer module from workflowType
         const workflowTypeToModuleMap: Record<string, string> = {
-          'vehicle_assignment': 'fleet'
+          'vehicle_assignment': 'fleet',
+          'byov_assignment': 'fleet',
+          'onboarding': 'ntao',
+          'offboarding': 'ntao',
+          'decommission': 'assets',
+          'storage_request': 'assets'
         };
         
-        targetModule = workflowTypeToModuleMap[validatedData.workflowType];
+        targetModule = workflowTypeToModuleMap[fullQueueItemData.workflowType];
         
         if (!targetModule) {
           return res.status(400).json({ 
@@ -698,26 +839,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      // Set department based on module
+      const moduleToDepartmentMap: Record<string, string> = {
+        'fleet': 'Fleet Management',
+        'ntao': 'NTAO',
+        'assets': 'Assets Management',
+        'inventory': 'Inventory Control'
+      };
+      
+      // Create the final queue item data with department
+      const queueItemDataWithDepartment = {
+        ...fullQueueItemData,
+        department: moduleToDepartmentMap[targetModule]
+      };
+      
       // Create queue item in the appropriate module
       let queueItem;
       switch (targetModule) {
         case 'fleet':
-          queueItem = await storage.createFleetQueueItem(validatedData);
+          queueItem = await storage.createFleetQueueItem(queueItemDataWithDepartment);
           break;
         case 'ntao':
-          queueItem = await storage.createNTAOQueueItem(validatedData);
+          queueItem = await storage.createNTAOQueueItem(queueItemDataWithDepartment);
           break;
         case 'assets':
-          queueItem = await storage.createAssetsQueueItem(validatedData);
+          queueItem = await storage.createAssetsQueueItem(queueItemDataWithDepartment);
           break;
         case 'inventory':
-          queueItem = await storage.createInventoryQueueItem(validatedData);
+          queueItem = await storage.createInventoryQueueItem(queueItemDataWithDepartment);
           break;
         default:
           return res.status(400).json({ message: "Unsupported module" });
       }
       
-      res.status(201).json(queueItem);
+      // Return minimal response (no sensitive data)
+      res.status(201).json({ 
+        id: queueItem.id, 
+        status: queueItem.status, 
+        module: targetModule,
+        message: "Queue item created successfully" 
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
@@ -1101,26 +1262,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/storage-spots", async (req, res) => {
+  app.post("/api/storage-spots", checkAnonymousRateLimit, async (req, res) => {
     try {
-      const storageSpotData = insertStorageSpotSchema.parse(req.body);
+      // Sanitize and validate with anonymous schema
+      const sanitizedData = sanitizeInput(req.body);
+      const validatedData = anonymousStorageSpotSchema.parse(sanitizedData);
+      
+      // Convert to full storage spot format with safe defaults
+      const storageSpotData = {
+        ...validatedData,
+        status: "open" as const,
+        availableSpots: 0, // Default value, admin will update
+        totalCapacity: 1, // Minimum value, admin will update
+        securityLevel: "standard" as const,
+      };
+      
       const storageSpot = await storage.createStorageSpot(storageSpotData);
       
-      // Log activity
+      // Log activity for anonymous submission
       await storage.createActivityLog({
-        userId: "system", // TODO: Get from authenticated user
+        userId: "anonymous",
         action: "storage_spot_created",
         entityType: "storage_spot",
         entityId: storageSpot.id,
-        details: `Created storage spot: ${storageSpot.name}`,
+        details: `Anonymous storage spot request: ${storageSpot.name}`,
       });
 
-      res.status(201).json(storageSpot);
+      // Return minimal response (no sensitive data)
+      res.status(201).json({ 
+        id: storageSpot.id, 
+        name: storageSpot.name,
+        status: storageSpot.status,
+        message: "Storage spot request submitted successfully" 
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid storage spot data", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to create storage spot" });
+      console.error('Storage spot creation error:', error);
+      res.status(500).json({ message: "Failed to submit storage spot request" });
     }
   });
 
@@ -1209,26 +1389,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/vehicles", async (req, res) => {
+  app.post("/api/vehicles", checkAnonymousRateLimit, async (req, res) => {
     try {
-      const vehicleData = insertVehicleSchema.parse(req.body);
+      // Sanitize and validate with anonymous schema
+      const sanitizedData = sanitizeInput(req.body);
+      const validatedData = anonymousVehicleSchema.parse(sanitizedData);
+      
+      // Convert to full vehicle format with safe defaults
+      const vehicleData = {
+        ...validatedData,
+        status: "available" as const,
+      };
+      
       const vehicle = await storage.createVehicle(vehicleData);
       
-      // Log activity
+      // Log activity for anonymous submission
       await storage.createActivityLog({
-        userId: "system", // TODO: Get from authenticated user
+        userId: "anonymous",
         action: "vehicle_created",
         entityType: "vehicle",
         entityId: vehicle.id,
-        details: `Created vehicle: ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (VIN: ${vehicle.vin})`,
+        details: `Anonymous vehicle submission: ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (VIN: ${vehicle.vin})`,
       });
 
-      res.status(201).json(vehicle);
+      // Return minimal response (no sensitive data)
+      res.status(201).json({ 
+        id: vehicle.id, 
+        vin: vehicle.vin,
+        status: vehicle.status,
+        message: "Vehicle submitted successfully" 
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid vehicle data", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to create vehicle" });
+      console.error('Vehicle creation error:', error);
+      res.status(500).json({ message: "Failed to submit vehicle" });
     }
   });
 

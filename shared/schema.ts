@@ -193,6 +193,41 @@ export const assignQueueItemSchema = z.object({
   assigneeId: z.string().min(1, "assigneeId is required"),
 });
 
+// Anonymous form submission schemas with field whitelisting
+export const anonymousQueueItemSchema = z.object({
+  workflowType: z.enum(["onboarding", "offboarding", "vehicle_assignment", "decommission", "byov_assignment", "storage_request"]),
+  title: z.string().min(1).max(200, "Title must be 200 characters or less"),
+  description: z.string().min(1).max(2000, "Description must be 2000 characters or less"),
+  priority: z.enum(["low", "medium", "high"]).default("medium"),
+  data: z.string().max(10000, "Data must be 10000 characters or less").optional(), // JSON string
+  scheduledFor: z.string().datetime().optional(),
+  // Note: requesterId, department, status, attempts are added by server, not submitted by client
+}).strict(); // .strict() ensures only allowed fields are accepted
+
+export const anonymousVehicleSchema = z.object({
+  vin: z.string().min(17).max(17, "VIN must be exactly 17 characters"),
+  modelYear: z.number().int().min(1990).max(new Date().getFullYear() + 2),
+  makeName: z.string().min(1).max(100),
+  modelName: z.string().min(1).max(100),
+  color: z.string().max(50).optional(),
+  licensePlate: z.string().max(20).optional(),
+  licenseState: z.string().length(2).optional(),
+  // Allow only safe vehicle fields for anonymous submission
+}).strict();
+
+export const anonymousStorageSpotSchema = z.object({
+  name: z.string().min(1).max(200, "Name must be 200 characters or less"),
+  address: z.string().min(1).max(500, "Address must be 500 characters or less"),
+  city: z.string().min(1).max(100, "City must be 100 characters or less"),
+  state: z.string().length(2, "State must be 2 characters"),
+  zipCode: z.string().min(5).max(10, "Zip code must be between 5-10 characters"),
+  notes: z.string().max(1000, "Notes must be 1000 characters or less").optional(),
+  contactInfo: z.string().max(500, "Contact info must be 500 characters or less").optional(),
+  operatingHours: z.string().max(200, "Operating hours must be 200 characters or less").optional(),
+  facilityType: z.enum(["outdoor", "indoor", "covered"]).default("outdoor"),
+  // Exclude admin fields like totalCapacity, availableSpots, etc.
+}).strict();
+
 // Types
 export type User = typeof users.$inferSelect & {
   accessibleQueues?: QueueModule[];
@@ -220,3 +255,6 @@ export type CombinedQueueItem = QueueItem & {
 export type SaveProgressPayload = z.infer<typeof saveProgressSchema>;
 export type CompleteQueueItemPayload = z.infer<typeof completeQueueItemSchema>;
 export type AssignQueueItemPayload = z.infer<typeof assignQueueItemSchema>;
+export type AnonymousQueueItemPayload = z.infer<typeof anonymousQueueItemSchema>;
+export type AnonymousVehiclePayload = z.infer<typeof anonymousVehicleSchema>;
+export type AnonymousStorageSpotPayload = z.infer<typeof anonymousStorageSpotSchema>;

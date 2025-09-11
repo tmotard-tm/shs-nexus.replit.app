@@ -250,7 +250,22 @@ export class MemStorage implements IStorage {
       },
     ];
     
+    // Add anonymous user for anonymous form submissions
+    const anonymousUser: User = {
+      id: "anonymous",
+      username: "anonymous",
+      email: "anonymous@system.com",
+      password: "no-password", // Cannot be used for login
+      role: "field", // Minimal permissions
+      department: null,
+      createdAt: new Date(),
+      accessibleQueues: [], // No queue access for anonymous user
+    };
+    enterpriseUsers.push(anonymousUser);
+    
     enterpriseUsers.forEach(user => this.users.set(user.id, user));
+    // Also add anonymous user by username for lookups
+    this.users.set("anonymous", anonymousUser);
 
     // Create sample API configurations
     const sampleApis: ApiConfiguration[] = [
