@@ -219,6 +219,197 @@ export default function CreateVehicle() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleVehicleSubmit} className="space-y-8">
+                {/* Employee Information Section */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-primary flex items-center gap-2" data-testid="text-section-employee">
+                    <User className="h-5 w-5" />
+                    Employee Assignment Information
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="firstName">First Name</Label>
+                      <Input
+                        id="firstName"
+                        value={employeeData.firstName}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, firstName: e.target.value }))}
+                        placeholder="John"
+                        data-testid="input-first-name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="lastName">Last Name</Label>
+                      <Input
+                        id="lastName"
+                        value={employeeData.lastName}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, lastName: e.target.value }))}
+                        placeholder="Doe"
+                        data-testid="input-last-name"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="email">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={employeeData.email}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, email: e.target.value }))}
+                        placeholder="john.doe@company.com"
+                        data-testid="input-email"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Phone</Label>
+                      <Input
+                        id="phone"
+                        value={employeeData.phone}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, phone: e.target.value }))}
+                        placeholder="(555) 123-4567"
+                        data-testid="input-phone"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="empRegion">Employee Region</Label>
+                      <Select 
+                        value={employeeData.region} 
+                        onValueChange={(value) => setEmployeeData(prev => ({ ...prev, region: value }))}
+                        data-testid="select-emp-region"
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select employee region" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {regions.map(region => (
+                            <SelectItem key={region} value={region} data-testid={`option-${region.toLowerCase().replace(/\s+/g, '-')}`}>
+                              {region}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="empDistrict">Employee District</Label>
+                      <Input
+                        id="empDistrict"
+                        value={employeeData.district}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, district: e.target.value }))}
+                        placeholder="e.g., District 25"
+                        data-testid="input-emp-district"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="requisitionId">Requisition ID</Label>
+                      <Input
+                        id="requisitionId"
+                        value={employeeData.requisitionId}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, requisitionId: e.target.value }))}
+                        placeholder="REQ-2024-001"
+                        data-testid="input-requisition-id"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="enterpriseId">Enterprise ID</Label>
+                      <Input
+                        id="enterpriseId"
+                        value={employeeData.enterpriseId}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, enterpriseId: e.target.value }))}
+                        placeholder="ENT1234"
+                        data-testid="input-enterprise-id"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="techId">Tech ID</Label>
+                      <Input
+                        id="techId"
+                        value={employeeData.techId}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, techId: e.target.value }))}
+                        placeholder="TECH-001"
+                        data-testid="input-tech-id"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="proposedRouteStartDate">Proposed Route Start Date</Label>
+                      <Input
+                        id="proposedRouteStartDate"
+                        type="date"
+                        value={employeeData.proposedRouteStartDate}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, proposedRouteStartDate: e.target.value }))}
+                        data-testid="input-proposed-route-start-date"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    <div className="space-y-2">
+                      <Label>Specialties</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {specialtyOptions.map(specialty => (
+                          <div key={specialty} className="flex items-center space-x-2">
+                            <Checkbox 
+                              id={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                              checked={employeeData.specialties.includes(specialty)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setEmployeeData(prev => ({ 
+                                    ...prev, 
+                                    specialties: [...prev.specialties, specialty]
+                                  }));
+                                } else {
+                                  setEmployeeData(prev => ({ 
+                                    ...prev, 
+                                    specialties: prev.specialties.filter(s => s !== specialty)
+                                  }));
+                                }
+                              }}
+                              data-testid={`checkbox-specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                            />
+                            <Label 
+                              htmlFor={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
+                              className="text-sm font-normal cursor-pointer"
+                            >
+                              {specialty}
+                            </Label>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="emergencyContact">Emergency Contact</Label>
+                      <Input
+                        id="emergencyContact"
+                        value={employeeData.emergencyContact}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, emergencyContact: e.target.value }))}
+                        placeholder="Jane Doe"
+                        data-testid="input-emergency-contact"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="emergencyPhone">Emergency Phone</Label>
+                      <Input
+                        id="emergencyPhone"
+                        value={employeeData.emergencyPhone}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, emergencyPhone: e.target.value }))}
+                        placeholder="(555) 987-6543"
+                        data-testid="input-emergency-phone"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
                 {/* Basic Vehicle Information */}
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold text-primary" data-testid="text-section-basic">Basic Vehicle Information</h3>
@@ -523,197 +714,6 @@ export default function CreateVehicle() {
                     </Select>
                   </div>
                 </div>
-
-                {/* Employee Information Section */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-primary flex items-center gap-2" data-testid="text-section-employee">
-                    <User className="h-5 w-5" />
-                    Employee Assignment Information
-                  </h3>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="firstName">First Name</Label>
-                      <Input
-                        id="firstName"
-                        value={employeeData.firstName}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, firstName: e.target.value }))}
-                        placeholder="John"
-                        data-testid="input-first-name"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="lastName">Last Name</Label>
-                      <Input
-                        id="lastName"
-                        value={employeeData.lastName}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, lastName: e.target.value }))}
-                        placeholder="Doe"
-                        data-testid="input-last-name"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={employeeData.email}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, email: e.target.value }))}
-                        placeholder="john.doe@company.com"
-                        data-testid="input-email"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Phone</Label>
-                      <Input
-                        id="phone"
-                        value={employeeData.phone}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, phone: e.target.value }))}
-                        placeholder="(555) 123-4567"
-                        data-testid="input-phone"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="empRegion">Employee Region</Label>
-                      <Select 
-                        value={employeeData.region} 
-                        onValueChange={(value) => setEmployeeData(prev => ({ ...prev, region: value }))}
-                        data-testid="select-emp-region"
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select employee region" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {regions.map(region => (
-                            <SelectItem key={region} value={region} data-testid={`option-${region.toLowerCase().replace(/\s+/g, '-')}`}>
-                              {region}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="empDistrict">Employee District</Label>
-                      <Input
-                        id="empDistrict"
-                        value={employeeData.district}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, district: e.target.value }))}
-                        placeholder="e.g., District 25"
-                        data-testid="input-emp-district"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="requisitionId">Requisition ID</Label>
-                      <Input
-                        id="requisitionId"
-                        value={employeeData.requisitionId}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, requisitionId: e.target.value }))}
-                        placeholder="REQ-2024-001"
-                        data-testid="input-requisition-id"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="enterpriseId">Enterprise ID</Label>
-                      <Input
-                        id="enterpriseId"
-                        value={employeeData.enterpriseId}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, enterpriseId: e.target.value }))}
-                        placeholder="ENT1234"
-                        data-testid="input-enterprise-id"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="techId">Tech ID</Label>
-                      <Input
-                        id="techId"
-                        value={employeeData.techId}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, techId: e.target.value }))}
-                        placeholder="TECH-001"
-                        data-testid="input-tech-id"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="proposedRouteStartDate">Proposed Route Start Date</Label>
-                      <Input
-                        id="proposedRouteStartDate"
-                        type="date"
-                        value={employeeData.proposedRouteStartDate}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, proposedRouteStartDate: e.target.value }))}
-                        data-testid="input-proposed-route-start-date"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4">
-                    <div className="space-y-2">
-                      <Label>Specialties</Label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {specialtyOptions.map(specialty => (
-                          <div key={specialty} className="flex items-center space-x-2">
-                            <Checkbox 
-                              id={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
-                              checked={employeeData.specialties.includes(specialty)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setEmployeeData(prev => ({ 
-                                    ...prev, 
-                                    specialties: [...prev.specialties, specialty]
-                                  }));
-                                } else {
-                                  setEmployeeData(prev => ({ 
-                                    ...prev, 
-                                    specialties: prev.specialties.filter(s => s !== specialty)
-                                  }));
-                                }
-                              }}
-                              data-testid={`checkbox-specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
-                            />
-                            <Label 
-                              htmlFor={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
-                              className="text-sm font-normal cursor-pointer"
-                            >
-                              {specialty}
-                            </Label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="emergencyContact">Emergency Contact</Label>
-                      <Input
-                        id="emergencyContact"
-                        value={employeeData.emergencyContact}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, emergencyContact: e.target.value }))}
-                        placeholder="Jane Doe"
-                        data-testid="input-emergency-contact"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="emergencyPhone">Emergency Phone</Label>
-                      <Input
-                        id="emergencyPhone"
-                        value={employeeData.emergencyPhone}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, emergencyPhone: e.target.value }))}
-                        placeholder="(555) 987-6543"
-                        data-testid="input-emergency-phone"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
 
                 <Button type="submit" className="w-full" data-testid="button-submit-vehicle">
                   Create Vehicle & Assign Employee
