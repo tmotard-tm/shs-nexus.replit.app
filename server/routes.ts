@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema } from "@shared/schema";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
@@ -627,7 +627,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const queueItemData = {
         ...validatedData,
         requesterId: "anonymous",
-        department: "Assets Management" as const, // Enforce department for Assets queue
+        department: "ASSETS" as const, // Enforce department for Assets queue
         status: "pending" as const,
         attempts: 0,
         scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
@@ -713,7 +713,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const queueItemData = {
         ...validatedData,
         requesterId: "anonymous",
-        department: "Inventory Control" as const, // Enforce department for Inventory queue
+        department: "INVENTORY" as const, // Enforce department for Inventory queue
         status: "pending" as const,
         attempts: 0,
         scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
@@ -799,7 +799,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const queueItemData = {
         ...validatedData,
         requesterId: "anonymous",
-        department: "Fleet Management" as const, // Enforce department for Fleet queue
+        department: "FLEET" as const, // Enforce department for Fleet queue
         status: "pending" as const,
         attempts: 0,
         scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
@@ -935,10 +935,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Set department based on module
       const moduleToDepartmentMap: Record<string, string> = {
-        'fleet': 'Fleet Management',
+        'fleet': 'FLEET',
         'ntao': 'NTAO',
-        'assets': 'Assets Management',
-        'inventory': 'Inventory Control'
+        'assets': 'ASSETS',
+        'inventory': 'INVENTORY'
       };
       
       // Create the final queue item data with department
@@ -1817,6 +1817,439 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error submitting Sears Drive enrollment:', error);
       res.status(500).json({ message: "Failed to submit enrollment form" });
+    }
+  });
+
+  // Unified form submission endpoint
+  app.post("/api/forms/:key/submit", checkAnonymousRateLimit, async (req, res) => {
+    try {
+      const { key } = req.params;
+      const sanitizedData = sanitizeInput(req.body);
+      
+      // Validate form key
+      const validKeys = ['create-vehicle', 'assign-vehicle', 'onboarding', 'offboarding', 'byov-enrollment'];
+      if (!validKeys.includes(key)) {
+        return res.status(400).json({ message: `Invalid form key: ${key}` });
+      }
+
+      // Validate request body using appropriate schema based on form key
+      let validatedData;
+      try {
+        switch (key) {
+          case 'create-vehicle':
+            validatedData = anonymousVehicleSchema.parse(sanitizedData);
+            break;
+          case 'assign-vehicle':
+            validatedData = anonymousVehicleAssignmentSchema.parse(sanitizedData);
+            break;
+          case 'onboarding':
+            validatedData = anonymousOnboardingSchema.parse(sanitizedData);
+            break;
+          case 'offboarding':
+            validatedData = anonymousOffboardingSchema.parse(sanitizedData);
+            break;
+          case 'byov-enrollment':
+            validatedData = anonymousByovEnrollmentSchema.parse(sanitizedData);
+            break;
+          default:
+            return res.status(400).json({ message: `Validation schema not found for form key: ${key}` });
+        }
+      } catch (validationError) {
+        if (validationError instanceof z.ZodError) {
+          return res.status(400).json({ 
+            message: "Invalid form data", 
+            errors: validationError.errors 
+          });
+        }
+        throw validationError;
+      }
+
+      // Create workflow ID to link related tasks
+      const workflowId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const taskIds: string[] = [];
+      const createdTasks: Array<{id: string, department: string, type: string}> = [];
+
+      // Route to appropriate departments based on form key
+      switch (key) {
+        case 'create-vehicle':
+          {
+            const vehicleData = validatedData as z.infer<typeof anonymousVehicleSchema>;
+            const task = await storage.createFleetQueueItem({
+              workflowType: "vehicle_assignment",
+              title: "Create Vehicle Record",
+              description: `Vehicle creation: ${vehicleData.makeName} ${vehicleData.modelName} (${vehicleData.vin})`,
+              priority: "medium",
+              requesterId: "anonymous",
+              department: "FLEET",
+              data: JSON.stringify(vehicleData),
+              workflowId,
+              workflowStep: 1,
+              metadata: JSON.stringify({
+                templateType: "fleet_create_vehicle_v1",
+                priority: 2,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(task.id);
+            createdTasks.push({id: task.id, department: "FLEET", type: "Create Vehicle Record"});
+          }
+          break;
+
+        case 'assign-vehicle':
+          {
+            const assignmentData = validatedData as z.infer<typeof anonymousVehicleAssignmentSchema>;
+            // FLEET → Assign Vehicle to Tech (priority:1)
+            const fleetTask = await storage.createFleetQueueItem({
+              workflowType: "vehicle_assignment",
+              title: "Assign Vehicle to Tech",
+              description: `Vehicle assignment for ${assignmentData.firstName} ${assignmentData.lastName}`,
+              priority: "high",
+              requesterId: "anonymous",
+              department: "FLEET",
+              data: JSON.stringify(assignmentData),
+              workflowId,
+              workflowStep: 1,
+              metadata: JSON.stringify({
+                templateType: "fleet_assign_vehicle_v1",
+                priority: 1,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(fleetTask.id);
+            createdTasks.push({id: fleetTask.id, department: "FLEET", type: "Assign Vehicle to Tech"});
+
+            // INVENTORY → Initialize Truck Stock Profile (priority:2)
+            const inventoryTask = await storage.createInventoryQueueItem({
+              workflowType: "vehicle_assignment",
+              title: "Initialize Truck Stock Profile",
+              description: `Initialize truck inventory for ${assignmentData.firstName} ${assignmentData.lastName}`,
+              priority: "medium",
+              requesterId: "anonymous",
+              department: "INVENTORY",
+              data: JSON.stringify(assignmentData),
+              workflowId,
+              workflowStep: 2,
+              dependsOn: fleetTask.id,
+              metadata: JSON.stringify({
+                templateType: "inventory_init_truck_profile_v1",
+                priority: 2,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(inventoryTask.id);
+            createdTasks.push({id: inventoryTask.id, department: "INVENTORY", type: "Initialize Truck Stock Profile"});
+
+            // ASSETS → Issue/Verify Assets (priority:2)
+            const assetsTask = await storage.createAssetsQueueItem({
+              workflowType: "vehicle_assignment",
+              title: "Issue/Verify Assets",
+              description: `Issue company assets to ${assignmentData.firstName} ${assignmentData.lastName}`,
+              priority: "medium",
+              requesterId: "anonymous",
+              department: "ASSETS",
+              data: JSON.stringify(assignmentData),
+              workflowId,
+              workflowStep: 2,
+              dependsOn: fleetTask.id,
+              metadata: JSON.stringify({
+                templateType: "assets_issue_v1",
+                priority: 2,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(assetsTask.id);
+            createdTasks.push({id: assetsTask.id, department: "ASSETS", type: "Issue/Verify Assets"});
+
+            // NTAO → Update Technician Profile (priority:3)
+            const ntaoTask = await storage.createNTAOQueueItem({
+              workflowType: "vehicle_assignment",
+              title: "Update Technician Profile",
+              description: `Update technician profile for ${assignmentData.firstName} ${assignmentData.lastName}`,
+              priority: "low",
+              requesterId: "anonymous",
+              department: "NTAO",
+              data: JSON.stringify(assignmentData),
+              workflowId,
+              workflowStep: 3,
+              dependsOn: fleetTask.id,
+              metadata: JSON.stringify({
+                templateType: "ntao_update_profile_v1",
+                priority: 3,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(ntaoTask.id);
+            createdTasks.push({id: ntaoTask.id, department: "NTAO", type: "Update Technician Profile"});
+          }
+          break;
+
+        case 'onboarding':
+          {
+            const onboardingData = validatedData as z.infer<typeof anonymousOnboardingSchema>;
+            // NTAO → Create Tech Record & Access (priority:1)
+            const ntaoTask = await storage.createNTAOQueueItem({
+              workflowType: "onboarding",
+              title: "Create Tech Record & Access",
+              description: `Onboard new technician: ${onboardingData.firstName} ${onboardingData.lastName}`,
+              priority: "high",
+              requesterId: "anonymous",
+              department: "NTAO",
+              data: JSON.stringify(onboardingData),
+              workflowId,
+              workflowStep: 1,
+              metadata: JSON.stringify({
+                templateType: "ntao_create_user_v1",
+                priority: 1,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(ntaoTask.id);
+            createdTasks.push({id: ntaoTask.id, department: "NTAO", type: "Create Tech Record & Access"});
+
+            // ASSETS → Provision Assets (priority:2)
+            const assetsTask = await storage.createAssetsQueueItem({
+              workflowType: "onboarding",
+              title: "Provision Assets",
+              description: `Provision company assets for ${onboardingData.firstName} ${onboardingData.lastName}`,
+              priority: "medium",
+              requesterId: "anonymous",
+              department: "ASSETS",
+              data: JSON.stringify(onboardingData),
+              workflowId,
+              workflowStep: 2,
+              dependsOn: ntaoTask.id,
+              metadata: JSON.stringify({
+                templateType: "assets_provision_v1",
+                priority: 2,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(assetsTask.id);
+            createdTasks.push({id: assetsTask.id, department: "ASSETS", type: "Provision Assets"});
+
+            // FLEET → Queue Vehicle Assignment (priority:2)
+            const fleetTask = await storage.createFleetQueueItem({
+              workflowType: "onboarding",
+              title: "Queue Vehicle Assignment",
+              description: `Queue vehicle assignment for ${onboardingData.firstName} ${onboardingData.lastName}`,
+              priority: "medium",
+              requesterId: "anonymous",
+              department: "FLEET",
+              data: JSON.stringify(onboardingData),
+              workflowId,
+              workflowStep: 2,
+              dependsOn: ntaoTask.id,
+              metadata: JSON.stringify({
+                templateType: "fleet_queue_assignment_v1",
+                priority: 2,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(fleetTask.id);
+            createdTasks.push({id: fleetTask.id, department: "FLEET", type: "Queue Vehicle Assignment"});
+
+            // INVENTORY → Seed Truck Stock (priority:3)
+            const inventoryTask = await storage.createInventoryQueueItem({
+              workflowType: "onboarding",
+              title: "Seed Truck Stock",
+              description: `Initialize truck inventory for ${onboardingData.firstName} ${onboardingData.lastName}`,
+              priority: "low",
+              requesterId: "anonymous",
+              department: "INVENTORY",
+              data: JSON.stringify(onboardingData),
+              workflowId,
+              workflowStep: 3,
+              dependsOn: fleetTask.id,
+              metadata: JSON.stringify({
+                templateType: "inventory_seed_stock_v1",
+                priority: 3,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(inventoryTask.id);
+            createdTasks.push({id: inventoryTask.id, department: "INVENTORY", type: "Seed Truck Stock"});
+          }
+          break;
+
+        case 'offboarding':
+          {
+            const offboardingData = validatedData as z.infer<typeof anonymousOffboardingSchema>;
+            // Priority 1 tasks (parallel execution)
+            const fleetTask1 = await storage.createFleetQueueItem({
+              workflowType: "offboarding",
+              title: "Stop Truck Stock Replenishment",
+              description: `Stop replenishment for ${offboardingData.techName || 'technician'}`,
+              priority: "high",
+              requesterId: "anonymous",
+              department: "FLEET",
+              data: JSON.stringify(offboardingData),
+              workflowId,
+              workflowStep: 1,
+              metadata: JSON.stringify({
+                templateType: "fleet_stop_replenishment_v1",
+                priority: 1,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(fleetTask1.id);
+            createdTasks.push({id: fleetTask1.id, department: "FLEET", type: "Stop Truck Stock Replenishment"});
+
+            const inventoryTask1 = await storage.createInventoryQueueItem({
+              workflowType: "offboarding",
+              title: "Full Truck Count & Return",
+              description: `Perform full inventory count for ${offboardingData.techName || 'technician'}`,
+              priority: "high",
+              requesterId: "anonymous",
+              department: "INVENTORY",
+              data: JSON.stringify(offboardingData),
+              workflowId,
+              workflowStep: 1,
+              metadata: JSON.stringify({
+                templateType: "inventory_full_recovery_v1",
+                priority: 1,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(inventoryTask1.id);
+            createdTasks.push({id: inventoryTask1.id, department: "INVENTORY", type: "Full Truck Count & Return"});
+
+            const assetsTask1 = await storage.createAssetsQueueItem({
+              workflowType: "offboarding",
+              title: "Collect Company Assets",
+              description: `Collect all company assets from ${offboardingData.techName || 'technician'}`,
+              priority: "high",
+              requesterId: "anonymous",
+              department: "ASSETS",
+              data: JSON.stringify(offboardingData),
+              workflowId,
+              workflowStep: 1,
+              metadata: JSON.stringify({
+                templateType: "assets_collect_v1",
+                priority: 1,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(assetsTask1.id);
+            createdTasks.push({id: assetsTask1.id, department: "ASSETS", type: "Collect Company Assets"});
+
+            const ntaoTask1 = await storage.createNTAOQueueItem({
+              workflowType: "offboarding",
+              title: "Access Removal / Separation Notice",
+              description: `Process access removal for ${offboardingData.techName || 'technician'}`,
+              priority: "high",
+              requesterId: "anonymous",
+              department: "NTAO",
+              data: JSON.stringify(offboardingData),
+              workflowId,
+              workflowStep: 1,
+              metadata: JSON.stringify({
+                templateType: "ntao_access_remove_v1",
+                priority: 1,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(ntaoTask1.id);
+            createdTasks.push({id: ntaoTask1.id, department: "NTAO", type: "Access Removal / Separation Notice"});
+
+            // Priority 2 task (depends on inventory completion)
+            const fleetTask2 = await storage.createFleetQueueItem({
+              workflowType: "offboarding",
+              title: "Vehicle Return / Reassign",
+              description: `Process vehicle return for ${offboardingData.techName || 'technician'}`,
+              priority: "medium",
+              requesterId: "anonymous",
+              department: "FLEET",
+              data: JSON.stringify(offboardingData),
+              workflowId,
+              workflowStep: 2,
+              dependsOn: inventoryTask1.id,
+              metadata: JSON.stringify({
+                templateType: "fleet_return_vehicle_v1",
+                priority: 2,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(fleetTask2.id);
+            createdTasks.push({id: fleetTask2.id, department: "FLEET", type: "Vehicle Return / Reassign"});
+          }
+          break;
+
+        case 'byov-enrollment':
+          {
+            const byovData = validatedData as z.infer<typeof anonymousByovEnrollmentSchema>;
+            // ASSETS → BYOV Agreement Acknowledgment (priority:1)
+            const assetsTask = await storage.createAssetsQueueItem({
+              workflowType: "byov_assignment",
+              title: "BYOV Agreement Acknowledgment",
+              description: `Process BYOV agreement for ${byovData.techFirstName} ${byovData.techLastName}`,
+              priority: "high",
+              requesterId: "anonymous",
+              department: "ASSETS",
+              data: JSON.stringify(byovData),
+              workflowId,
+              workflowStep: 1,
+              metadata: JSON.stringify({
+                templateType: "assets_byov_agreement_v1",
+                priority: 1,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(assetsTask.id);
+            createdTasks.push({id: assetsTask.id, department: "ASSETS", type: "BYOV Agreement Acknowledgment"});
+
+            // INVENTORY → BYOV Inventory Policy Setup (priority:2)
+            const inventoryTask = await storage.createInventoryQueueItem({
+              workflowType: "byov_assignment",
+              title: "BYOV Inventory Policy Setup",
+              description: `Setup BYOV inventory policy for ${byovData.techFirstName} ${byovData.techLastName}`,
+              priority: "medium",
+              requesterId: "anonymous",
+              department: "INVENTORY",
+              data: JSON.stringify(byovData),
+              workflowId,
+              workflowStep: 2,
+              dependsOn: assetsTask.id,
+              metadata: JSON.stringify({
+                templateType: "inventory_byov_rules_v1",
+                priority: 2,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(inventoryTask.id);
+            createdTasks.push({id: inventoryTask.id, department: "INVENTORY", type: "BYOV Inventory Policy Setup"});
+
+            // NTAO → Payroll/Compliance Flag (priority:2)
+            const ntaoTask = await storage.createNTAOQueueItem({
+              workflowType: "byov_assignment",
+              title: "Payroll/Compliance Flag",
+              description: `Setup payroll compliance for BYOV: ${byovData.techFirstName} ${byovData.techLastName}`,
+              priority: "medium",
+              requesterId: "anonymous",
+              department: "NTAO",
+              data: JSON.stringify(byovData),
+              workflowId,
+              workflowStep: 2,
+              dependsOn: assetsTask.id,
+              metadata: JSON.stringify({
+                templateType: "ntao_byov_flag_v1",
+                priority: 2,
+                source: "unified_forms"
+              })
+            });
+            taskIds.push(ntaoTask.id);
+            createdTasks.push({id: ntaoTask.id, department: "NTAO", type: "Payroll/Compliance Flag"});
+          }
+          break;
+      }
+
+      res.json({
+        task_ids: taskIds,
+        created: createdTasks
+      });
+
+    } catch (error) {
+      console.error(`Error processing unified form submission for key ${req.params.key}:`, error);
+      res.status(500).json({ message: "Failed to process form submission" });
     }
   });
 

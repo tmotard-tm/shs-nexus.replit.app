@@ -228,6 +228,64 @@ export const anonymousStorageSpotSchema = z.object({
   // Exclude admin fields like totalCapacity, availableSpots, etc.
 }).strict();
 
+// Unified form validation schemas
+export const anonymousVehicleAssignmentSchema = z.object({
+  firstName: z.string().min(1).max(100, "First name must be 100 characters or less"),
+  lastName: z.string().min(1).max(100, "Last name must be 100 characters or less"),
+  techId: z.string().min(1).max(50, "Tech ID must be 50 characters or less").optional(),
+  email: z.string().email("Invalid email format").max(200).optional(),
+  phone: z.string().max(20, "Phone must be 20 characters or less").optional(),
+  startDate: z.string().datetime().optional(),
+  department: z.string().max(100, "Department must be 100 characters or less").optional(),
+  // Additional fields specific to vehicle assignment
+}).strict();
+
+export const anonymousOnboardingSchema = z.object({
+  firstName: z.string().min(1).max(100, "First name must be 100 characters or less"),
+  lastName: z.string().min(1).max(100, "Last name must be 100 characters or less"),
+  techId: z.string().min(1).max(50, "Tech ID must be 50 characters or less").optional(),
+  email: z.string().email("Invalid email format").max(200).optional(),
+  phone: z.string().max(20, "Phone must be 20 characters or less").optional(),
+  startDate: z.string().datetime().optional(),
+  position: z.string().max(100, "Position must be 100 characters or less").optional(),
+  department: z.string().max(100, "Department must be 100 characters or less").optional(),
+  supervisor: z.string().max(100, "Supervisor must be 100 characters or less").optional(),
+  // Additional onboarding-specific fields
+}).strict();
+
+export const anonymousOffboardingSchema = z.object({
+  techName: z.string().min(1).max(200, "Tech name must be 200 characters or less"),
+  techId: z.string().min(1).max(50, "Tech ID must be 50 characters or less").optional(),
+  lastWorkDate: z.string().datetime().optional(),
+  reason: z.string().max(500, "Reason must be 500 characters or less").optional(),
+  returnDate: z.string().datetime().optional(),
+  notes: z.string().max(1000, "Notes must be 1000 characters or less").optional(),
+  // Additional offboarding-specific fields
+}).strict();
+
+export const anonymousByovEnrollmentSchema = z.object({
+  techFirstName: z.string().min(1).max(100, "First name must be 100 characters or less"),
+  techLastName: z.string().min(1).max(100, "Last name must be 100 characters or less"),
+  techId: z.string().min(1).max(50, "Tech ID must be 50 characters or less").optional(),
+  email: z.string().email("Invalid email format").max(200).optional(),
+  phone: z.string().max(20, "Phone must be 20 characters or less").optional(),
+  vehicleInfo: z.object({
+    make: z.string().min(1).max(100),
+    model: z.string().min(1).max(100),
+    year: z.number().int().min(1990).max(new Date().getFullYear() + 2),
+    vin: z.string().min(17).max(17, "VIN must be exactly 17 characters").optional(),
+    licensePlate: z.string().max(20).optional(),
+    licenseState: z.string().length(2).optional(),
+  }).optional(),
+  insuranceInfo: z.object({
+    provider: z.string().max(100).optional(),
+    policyNumber: z.string().max(100).optional(),
+    expirationDate: z.string().datetime().optional(),
+  }).optional(),
+  agreementAccepted: z.boolean().refine(val => val === true, "Agreement must be accepted"),
+  // Additional BYOV-specific fields
+}).strict();
+
 // Types
 export type User = typeof users.$inferSelect & {
   accessibleQueues?: QueueModule[];
@@ -258,3 +316,7 @@ export type AssignQueueItemPayload = z.infer<typeof assignQueueItemSchema>;
 export type AnonymousQueueItemPayload = z.infer<typeof anonymousQueueItemSchema>;
 export type AnonymousVehiclePayload = z.infer<typeof anonymousVehicleSchema>;
 export type AnonymousStorageSpotPayload = z.infer<typeof anonymousStorageSpotSchema>;
+export type AnonymousVehicleAssignmentPayload = z.infer<typeof anonymousVehicleAssignmentSchema>;
+export type AnonymousOnboardingPayload = z.infer<typeof anonymousOnboardingSchema>;
+export type AnonymousOffboardingPayload = z.infer<typeof anonymousOffboardingSchema>;
+export type AnonymousByovEnrollmentPayload = z.infer<typeof anonymousByovEnrollmentSchema>;
