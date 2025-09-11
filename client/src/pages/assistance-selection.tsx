@@ -327,58 +327,6 @@ export default function AssistanceSelection() {
               </CardContent>
             </Card>
 
-            
-            {/* Other Tools Form Module */}
-            <Card 
-              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
-              style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
-              data-testid="form-other-tools"
-            >
-              <CardHeader className="pb-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 rounded-lg bg-gray-600 flex items-center justify-center">
-                    <Settings className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg text-gray-800">Other Tools</CardTitle>
-                    <CardDescription className="text-gray-600">Access Additional Tools and Features</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 gap-3">
-                  <p className="text-sm text-gray-600">
-                    Access additional features including:
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                      <span>Dashboard</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <span>Queue Management</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                      <span>Analytics Board</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-                      <span>Active Vehicles</span>
-                    </div>
-                  </div>
-                </div>
-                <Button 
-                  onClick={() => setLocation("/dashboard")}
-                  className="w-full mt-4"
-                  variant="outline"
-                  data-testid="button-other-tools"
-                >
-                  Explore Tools <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </CardContent>
-            </Card>
 
           </div>
           
