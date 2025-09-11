@@ -13,6 +13,8 @@ import {
   type CombinedQueueItem,
   type StorageSpot,
   type InsertStorageSpot,
+  type Vehicle,
+  type InsertVehicle,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -98,6 +100,18 @@ export interface IStorage {
   updateStorageSpot(id: string, updates: Partial<StorageSpot>): Promise<StorageSpot | undefined>;
   deleteStorageSpot(id: string): Promise<boolean>;
 
+  // Vehicles Module
+  getVehicle(id: string): Promise<Vehicle | undefined>;
+  getVehicleByVin(vin: string): Promise<Vehicle | undefined>;
+  getVehicles(): Promise<Vehicle[]>;
+  getVehiclesByStatus(status: string): Promise<Vehicle[]>;
+  getVehiclesByState(state: string): Promise<Vehicle[]>;
+  getVehiclesByBranding(branding: string): Promise<Vehicle[]>;
+  createVehicle(vehicle: InsertVehicle): Promise<Vehicle>;
+  createVehicles(vehicles: InsertVehicle[]): Promise<Vehicle[]>;
+  updateVehicle(id: string, updates: Partial<Vehicle>): Promise<Vehicle | undefined>;
+  deleteVehicle(id: string): Promise<boolean>;
+
   // Unified Queue Aggregator
   getUnifiedQueueItems(modules: QueueModule[], status?: string): Promise<CombinedQueueItem[]>;
   getUnifiedQueueStats(modules: QueueModule[]): Promise<{
@@ -116,6 +130,7 @@ export class MemStorage implements IStorage {
   private apiConfigurations: Map<string, ApiConfiguration>;
   private activityLogs: Map<string, ActivityLog>;
   private storageSpots: Map<string, StorageSpot>;
+  private vehicles: Map<string, Vehicle>;
   
   // Separate storage for each queue module
   private ntaoQueueItems: Map<string, QueueItem>;
@@ -129,6 +144,7 @@ export class MemStorage implements IStorage {
     this.apiConfigurations = new Map();
     this.activityLogs = new Map();
     this.storageSpots = new Map();
+    this.vehicles = new Map();
     
     // Initialize separate queue modules
     this.ntaoQueueItems = new Map();
@@ -1373,6 +1389,78 @@ export class MemStorage implements IStorage {
 
   async deleteStorageSpot(id: string): Promise<boolean> {
     return this.storageSpots.delete(id);
+  }
+
+  // Vehicle CRUD operations
+  async getVehicle(id: string): Promise<Vehicle | undefined> {
+    return this.vehicles.get(id);
+  }
+
+  async getVehicleByVin(vin: string): Promise<Vehicle | undefined> {
+    return Array.from(this.vehicles.values()).find(v => v.vin === vin);
+  }
+
+  async getVehicles(): Promise<Vehicle[]> {
+    return Array.from(this.vehicles.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async getVehiclesByStatus(status: string): Promise<Vehicle[]> {
+    return Array.from(this.vehicles.values())
+      .filter(vehicle => vehicle.status === status)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getVehiclesByState(state: string): Promise<Vehicle[]> {
+    return Array.from(this.vehicles.values())
+      .filter(vehicle => vehicle.state === state)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getVehiclesByBranding(branding: string): Promise<Vehicle[]> {
+    return Array.from(this.vehicles.values())
+      .filter(vehicle => vehicle.branding === branding)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async createVehicle(insertVehicle: InsertVehicle): Promise<Vehicle> {
+    const id = randomUUID();
+    const vehicle: Vehicle = {
+      ...insertVehicle,
+      status: insertVehicle.status || "available",
+      id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.vehicles.set(id, vehicle);
+    return vehicle;
+  }
+
+  async createVehicles(insertVehicles: InsertVehicle[]): Promise<Vehicle[]> {
+    const createdVehicles: Vehicle[] = [];
+    for (const insertVehicle of insertVehicles) {
+      const vehicle = await this.createVehicle(insertVehicle);
+      createdVehicles.push(vehicle);
+    }
+    return createdVehicles;
+  }
+
+  async updateVehicle(id: string, updates: Partial<Vehicle>): Promise<Vehicle | undefined> {
+    const vehicle = this.vehicles.get(id);
+    if (!vehicle) return undefined;
+    
+    const updatedVehicle = { 
+      ...vehicle, 
+      ...updates, 
+      updatedAt: new Date() 
+    };
+    this.vehicles.set(id, updatedVehicle);
+    return updatedVehicle;
+  }
+
+  async deleteVehicle(id: string): Promise<boolean> {
+    return this.vehicles.delete(id);
   }
 }
 

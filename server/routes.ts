@@ -1,9 +1,10 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, QueueModule } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule } from "@shared/schema";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
+import { activeVehicles } from "../client/src/data/fleetData";
 
 // Simple session store for demo purposes
 const sessions = new Map<string, { userId: string; username: string; expiresAt: Date }>();
@@ -947,6 +948,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Storage spot deleted successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete storage spot" });
+    }
+  });
+
+  // Vehicle API routes
+  app.get("/api/vehicles", async (req, res) => {
+    try {
+      const { status, state, branding } = req.query;
+      
+      let vehicles;
+      if (status) {
+        vehicles = await storage.getVehiclesByStatus(status as string);
+      } else if (state) {
+        vehicles = await storage.getVehiclesByState(state as string);
+      } else if (branding) {
+        vehicles = await storage.getVehiclesByBranding(branding as string);
+      } else {
+        vehicles = await storage.getVehicles();
+      }
+      
+      res.json(vehicles);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch vehicles" });
+    }
+  });
+
+  app.get("/api/vehicles/:id", async (req, res) => {
+    try {
+      const vehicle = await storage.getVehicle(req.params.id);
+      if (!vehicle) {
+        return res.status(404).json({ message: "Vehicle not found" });
+      }
+      res.json(vehicle);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch vehicle" });
+    }
+  });
+
+  app.post("/api/vehicles", async (req, res) => {
+    try {
+      const vehicleData = insertVehicleSchema.parse(req.body);
+      const vehicle = await storage.createVehicle(vehicleData);
+      
+      // Log activity
+      await storage.createActivityLog({
+        userId: "system", // TODO: Get from authenticated user
+        action: "vehicle_created",
+        entityType: "vehicle",
+        entityId: vehicle.id,
+        details: `Created vehicle: ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (VIN: ${vehicle.vin})`,
+      });
+
+      res.status(201).json(vehicle);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid vehicle data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create vehicle" });
+    }
+  });
+
+  // Seed endpoint to populate database with fleet data
+  app.post("/api/vehicles/seed", async (req, res) => {
+    try {
+      // Convert activeVehicles from fleetData to insertVehicle format
+      const vehiclesToInsert = activeVehicles.map(fleetVehicle => ({
+        vin: fleetVehicle.vin,
+        vehicleNumber: fleetVehicle.vehicleNumber,
+        modelYear: fleetVehicle.modelYear,
+        makeName: fleetVehicle.makeName,
+        modelName: fleetVehicle.modelName,
+        color: fleetVehicle.color,
+        licensePlate: fleetVehicle.licensePlate,
+        licenseState: fleetVehicle.licenseState,
+        deliveryDate: fleetVehicle.deliveryDate ? new Date(fleetVehicle.deliveryDate) : null,
+        outOfServiceDate: fleetVehicle.outOfServiceDate ? new Date(fleetVehicle.outOfServiceDate) : null,
+        saleDate: fleetVehicle.saleDate ? new Date(fleetVehicle.saleDate) : null,
+        registrationRenewalDate: fleetVehicle.regRenewalDate ? new Date(fleetVehicle.regRenewalDate) : null,
+        odometerDelivery: fleetVehicle.odometerDelivery,
+        branding: fleetVehicle.branding,
+        interior: fleetVehicle.interior,
+        tuneStatus: fleetVehicle.tuneStatus,
+        region: fleetVehicle.region,
+        district: fleetVehicle.district,
+        deliveryAddress: fleetVehicle.deliveryAddress,
+        city: fleetVehicle.city,
+        state: fleetVehicle.state,
+        zip: fleetVehicle.zip,
+        mis: fleetVehicle.mis,
+        remainingBookValue: fleetVehicle.remainingBookValue ? fleetVehicle.remainingBookValue.toString() : null,
+        leaseEndDate: fleetVehicle.leaseEndDate ? new Date(fleetVehicle.leaseEndDate) : null,
+        status: "available", // Default status
+      }));
+
+      const createdVehicles = await storage.createVehicles(vehiclesToInsert);
+      
+      // Log activity
+      await storage.createActivityLog({
+        userId: "system", // TODO: Get from authenticated user
+        action: "vehicles_seeded",
+        entityType: "vehicle",
+        entityId: "bulk",
+        details: `Seeded ${createdVehicles.length} vehicles from fleet data`,
+      });
+
+      res.status(201).json({
+        message: `Successfully seeded ${createdVehicles.length} vehicles`,
+        count: createdVehicles.length,
+        vehicles: createdVehicles
+      });
+    } catch (error) {
+      console.error('Error seeding vehicles:', error);
+      res.status(500).json({ message: "Failed to seed vehicles", error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  });
+
+  app.put("/api/vehicles/:id", async (req, res) => {
+    try {
+      const existingVehicle = await storage.getVehicle(req.params.id);
+      if (!existingVehicle) {
+        return res.status(404).json({ message: "Vehicle not found" });
+      }
+
+      const updates = insertVehicleSchema.partial().parse(req.body);
+      const updatedVehicle = await storage.updateVehicle(req.params.id, updates);
+      
+      if (!updatedVehicle) {
+        return res.status(404).json({ message: "Vehicle not found" });
+      }
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: "system", // TODO: Get from authenticated user
+        action: "vehicle_updated",
+        entityType: "vehicle",
+        entityId: req.params.id,
+        details: `Updated vehicle: ${updatedVehicle.modelYear} ${updatedVehicle.makeName} ${updatedVehicle.modelName}`,
+      });
+
+      res.json(updatedVehicle);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid vehicle data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update vehicle" });
+    }
+  });
+
+  app.delete("/api/vehicles/:id", async (req, res) => {
+    try {
+      const vehicle = await storage.getVehicle(req.params.id);
+      if (!vehicle) {
+        return res.status(404).json({ message: "Vehicle not found" });
+      }
+
+      const deleted = await storage.deleteVehicle(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Vehicle not found" });
+      }
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: "system", // TODO: Get from authenticated user
+        action: "vehicle_deleted",
+        entityType: "vehicle",
+        entityId: req.params.id,
+        details: `Deleted vehicle: ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (VIN: ${vehicle.vin})`,
+      });
+
+      res.json({ message: "Vehicle deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete vehicle" });
     }
   });
 
