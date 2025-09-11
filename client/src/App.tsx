@@ -35,6 +35,7 @@ import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
+import { PublicFormRoute } from "@/components/public-form-route";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -154,50 +155,45 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
-      {/* New shareable deep-link form routes */}
+      {/* New shareable deep-link form routes - public access */}
       <Route path="/forms/create-vehicle">
-        <PermissionProtectedRoute formKey="create-vehicle">
-          <Sidebar />
+        <PublicFormRoute>
           <MainContent>
             <CreateVehicle />
           </MainContent>
-        </PermissionProtectedRoute>
+        </PublicFormRoute>
       </Route>
       
       <Route path="/forms/assign-vehicle">
-        <PermissionProtectedRoute formKey="assign-vehicle">
-          <Sidebar />
+        <PublicFormRoute>
           <MainContent>
             <AssignVehicleLocation />
           </MainContent>
-        </PermissionProtectedRoute>
+        </PublicFormRoute>
       </Route>
       
       <Route path="/forms/onboarding">
-        <PermissionProtectedRoute formKey="onboarding">
-          <Sidebar />
+        <PublicFormRoute>
           <MainContent>
             <OnboardHire />
           </MainContent>
-        </PermissionProtectedRoute>
+        </PublicFormRoute>
       </Route>
       
       <Route path="/forms/offboarding">
-        <PermissionProtectedRoute formKey="offboarding">
-          <Sidebar />
+        <PublicFormRoute>
           <MainContent>
             <OffboardVehicleLocation />
           </MainContent>
-        </PermissionProtectedRoute>
+        </PublicFormRoute>
       </Route>
       
       <Route path="/forms/byov-enrollment">
-        <PermissionProtectedRoute formKey="byov-enrollment">
-          <Sidebar />
+        <PublicFormRoute>
           <MainContent>
             <SearsDriveEnrollment />
           </MainContent>
-        </PermissionProtectedRoute>
+        </PublicFormRoute>
       </Route>
       
       {/* Legacy routes - kept for backward compatibility */}
