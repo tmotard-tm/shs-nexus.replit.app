@@ -190,7 +190,6 @@ export default function OffboardVehicleLocation() {
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
           step: "ntao_stop_replenishment",
-          workflowId: workflowId,
           workflowStep: 1,
           submitterInfo: user ? {
             id: user.id,
@@ -203,11 +202,9 @@ export default function OffboardVehicleLocation() {
           },
           ...sharedTriggerData,
           instructions: [
-            "Access truck stock replenishment system",
-            "Remove employee from active replenishment schedule", 
-            "Update employee status to 'offboarded'",
-            "Confirm no pending stock orders",
-            "Mark task complete when removed from system"
+            "Place a shipping hold to prevent future shipments",
+            "Cancel any pending orders",
+            "Cancel all backorders"
           ]
         })
       });
@@ -221,7 +218,6 @@ export default function OffboardVehicleLocation() {
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
           step: "assets_recover_phone",
-          workflowId: workflowId,
           workflowStep: 2,
           submitterInfo: user ? {
             id: user.id,
@@ -253,7 +249,6 @@ export default function OffboardVehicleLocation() {
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
           step: "fleet_move_to_pepboys",
-          workflowId: workflowId,
           workflowStep: 3,
           submitterInfo: user ? {
             id: user.id,
@@ -286,7 +281,6 @@ export default function OffboardVehicleLocation() {
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
           step: "inventory_remove_from_tpms",
-          workflowId: workflowId,
           workflowStep: 4,
           submitterInfo: user ? {
             id: user.id,
