@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
@@ -24,6 +24,7 @@ export function Sidebar() {
     { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
     { name: "Analytics Board", href: "/analytics", icon: Activity },
     getQueueManagementItem(),
+    { name: "Storage Spots", href: "/storage-spots", icon: MapPin },
     { name: "Requests", href: "/requests", icon: FileText },
     { name: "Approvals", href: "/approvals", icon: CheckCircle },
     { name: "API Management", href: "/api-management", icon: Settings },

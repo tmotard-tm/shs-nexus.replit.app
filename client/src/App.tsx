@@ -29,6 +29,7 @@ import FleetQueuePage from "@/pages/fleet-queue";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
 import AnalyticsBoard from "@/pages/analytics-board";
+import StorageSpots from "@/pages/storage-spots";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 
@@ -104,6 +105,13 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
+      <Route path="/storage-spots">
+        <ProtectedRoute>
+          <MainContent>
+            <StorageSpots />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
       
       <Route path="/requester">
         <ProtectedRoute>

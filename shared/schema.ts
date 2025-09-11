@@ -110,6 +110,26 @@ export const vehicles = pgTable("vehicles", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const storageSpots = pgTable("storage_spots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  address: text("address").notNull(),
+  city: text("city").notNull(),
+  state: varchar("state", { length: 2 }).notNull(),
+  zipCode: varchar("zip_code", { length: 10 }).notNull(),
+  status: text("status").notNull().default("open"), // open, closed, maintenance
+  availableSpots: integer("available_spots").notNull().default(0),
+  totalCapacity: integer("total_capacity").notNull(),
+  notes: text("notes"),
+  contactInfo: text("contact_info"),
+  operatingHours: text("operating_hours"),
+  facilityType: text("facility_type").notNull().default("outdoor"), // outdoor, indoor, covered
+  securityLevel: text("security_level").notNull().default("standard"), // basic, standard, high
+  accessInstructions: text("access_instructions"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
@@ -146,6 +166,12 @@ export const insertQueueItemSchema = createInsertSchema(queueItems).omit({
   updatedAt: true,
 });
 
+export const insertStorageSpotSchema = createInsertSchema(storageSpots).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 
 // Types
 export type User = typeof users.$inferSelect & {
@@ -162,6 +188,8 @@ export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = z.infer<typeof insertVehicleSchema>;
 export type QueueItem = typeof queueItems.$inferSelect;
 export type InsertQueueItem = z.infer<typeof insertQueueItemSchema>;
+export type StorageSpot = typeof storageSpots.$inferSelect;
+export type InsertStorageSpot = z.infer<typeof insertStorageSpotSchema>;
 
 // Combined queue item with module information for unified queue access
 export type CombinedQueueItem = QueueItem & {

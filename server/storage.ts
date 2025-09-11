@@ -11,6 +11,8 @@ import {
   type InsertQueueItem,
   type QueueModule,
   type CombinedQueueItem,
+  type StorageSpot,
+  type InsertStorageSpot,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -87,6 +89,15 @@ export interface IStorage {
   // Queue operations
   cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined>;
 
+  // Storage Spots Module
+  getStorageSpot(id: string): Promise<StorageSpot | undefined>;
+  getStorageSpots(): Promise<StorageSpot[]>;
+  getStorageSpotsByStatus(status: string): Promise<StorageSpot[]>;
+  getStorageSpotsByState(state: string): Promise<StorageSpot[]>;
+  createStorageSpot(spot: InsertStorageSpot): Promise<StorageSpot>;
+  updateStorageSpot(id: string, updates: Partial<StorageSpot>): Promise<StorageSpot | undefined>;
+  deleteStorageSpot(id: string): Promise<boolean>;
+
   // Unified Queue Aggregator
   getUnifiedQueueItems(modules: QueueModule[], status?: string): Promise<CombinedQueueItem[]>;
   getUnifiedQueueStats(modules: QueueModule[]): Promise<{
@@ -104,6 +115,7 @@ export class MemStorage implements IStorage {
   private requests: Map<string, Request>;
   private apiConfigurations: Map<string, ApiConfiguration>;
   private activityLogs: Map<string, ActivityLog>;
+  private storageSpots: Map<string, StorageSpot>;
   
   // Separate storage for each queue module
   private ntaoQueueItems: Map<string, QueueItem>;
@@ -116,6 +128,7 @@ export class MemStorage implements IStorage {
     this.requests = new Map();
     this.apiConfigurations = new Map();
     this.activityLogs = new Map();
+    this.storageSpots = new Map();
     
     // Initialize separate queue modules
     this.ntaoQueueItems = new Map();
@@ -407,6 +420,107 @@ export class MemStorage implements IStorage {
           break;
       }
     });
+
+    // Create sample storage spots
+    const sampleStorageSpots: StorageSpot[] = [
+      {
+        id: randomUUID(),
+        name: "Downtown Service Center",
+        address: "123 Main Street",
+        city: "Chicago",
+        state: "IL",
+        zipCode: "60601",
+        status: "open",
+        availableSpots: 15,
+        totalCapacity: 20,
+        notes: "Primary metropolitan storage facility with 24/7 access",
+        contactInfo: "Manager: John Smith - (312) 555-0123",
+        operatingHours: "24/7",
+        facilityType: "indoor",
+        securityLevel: "high",
+        accessInstructions: "Use keycard at main entrance. Building secured with cameras and on-site security.",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        name: "Suburban Depot A",
+        address: "4567 Industrial Blvd",
+        city: "Schaumburg", 
+        state: "IL",
+        zipCode: "60173",
+        status: "open",
+        availableSpots: 8,
+        totalCapacity: 12,
+        notes: "Covered outdoor storage with good highway access",
+        contactInfo: "Site Supervisor: Sarah Johnson - (847) 555-0456",
+        operatingHours: "6:00 AM - 10:00 PM",
+        facilityType: "covered",
+        securityLevel: "standard",
+        accessInstructions: "Gate code: 1234. Park in designated numbered spots.",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        name: "North Shore Storage",
+        address: "890 Lakefront Drive",
+        city: "Evanston",
+        state: "IL", 
+        zipCode: "60201",
+        status: "maintenance",
+        availableSpots: 0,
+        totalCapacity: 8,
+        notes: "Temporarily closed for fence repair and lot resurfacing",
+        contactInfo: "Maintenance Coordinator: Mike Wilson - (224) 555-0789",
+        operatingHours: "Currently Closed",
+        facilityType: "outdoor",
+        securityLevel: "basic",
+        accessInstructions: "FACILITY CLOSED - Expected reopening: Next Tuesday",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        name: "West Side Logistics Hub",
+        address: "2345 Warehouse Road",
+        city: "Cicero",
+        state: "IL",
+        zipCode: "60804",
+        status: "open",
+        availableSpots: 22,
+        totalCapacity: 30,
+        notes: "Large capacity facility with loading docks and equipment storage",
+        contactInfo: "Hub Manager: Lisa Chen - (708) 555-0321",
+        operatingHours: "5:00 AM - 11:00 PM",
+        facilityType: "indoor",
+        securityLevel: "high",
+        accessInstructions: "Report to main office first. Escort required for vehicle placement.",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        name: "Emergency Overflow Lot",
+        address: "7890 Overflow Way",
+        city: "Oak Brook",
+        state: "IL",
+        zipCode: "60523",
+        status: "closed",
+        availableSpots: 0,
+        totalCapacity: 15,
+        notes: "Reserve storage for peak season overflow - currently not in use",
+        contactInfo: "Regional Manager: David Brown - (630) 555-0654",
+        operatingHours: "By appointment only",
+        facilityType: "outdoor",
+        securityLevel: "basic",
+        accessInstructions: "Contact regional manager for access approval",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+    ];
+
+    sampleStorageSpots.forEach(spot => this.storageSpots.set(spot.id, spot));
   }
 
   // Users
@@ -1199,6 +1313,66 @@ export class MemStorage implements IStorage {
       default:
         return undefined;
     }
+  }
+
+  // Storage Spots Module Implementation
+  async getStorageSpot(id: string): Promise<StorageSpot | undefined> {
+    return this.storageSpots.get(id);
+  }
+
+  async getStorageSpots(): Promise<StorageSpot[]> {
+    return Array.from(this.storageSpots.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async getStorageSpotsByStatus(status: string): Promise<StorageSpot[]> {
+    return Array.from(this.storageSpots.values())
+      .filter(spot => spot.status === status)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getStorageSpotsByState(state: string): Promise<StorageSpot[]> {
+    return Array.from(this.storageSpots.values())
+      .filter(spot => spot.state === state)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async createStorageSpot(insertStorageSpot: InsertStorageSpot): Promise<StorageSpot> {
+    const id = randomUUID();
+    const storageSpot: StorageSpot = {
+      ...insertStorageSpot,
+      status: insertStorageSpot.status || "open",
+      availableSpots: insertStorageSpot.availableSpots || 0,
+      facilityType: insertStorageSpot.facilityType || "outdoor",
+      securityLevel: insertStorageSpot.securityLevel || "standard",
+      notes: insertStorageSpot.notes || null,
+      contactInfo: insertStorageSpot.contactInfo || null,
+      operatingHours: insertStorageSpot.operatingHours || null,
+      accessInstructions: insertStorageSpot.accessInstructions || null,
+      id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.storageSpots.set(id, storageSpot);
+    return storageSpot;
+  }
+
+  async updateStorageSpot(id: string, updates: Partial<StorageSpot>): Promise<StorageSpot | undefined> {
+    const storageSpot = this.storageSpots.get(id);
+    if (!storageSpot) return undefined;
+    
+    const updatedStorageSpot = { 
+      ...storageSpot, 
+      ...updates, 
+      updatedAt: new Date() 
+    };
+    this.storageSpots.set(id, updatedStorageSpot);
+    return updatedStorageSpot;
+  }
+
+  async deleteStorageSpot(id: string): Promise<boolean> {
+    return this.storageSpots.delete(id);
   }
 }
 

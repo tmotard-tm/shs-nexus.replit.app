@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, QueueModule } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, QueueModule } from "@shared/schema";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 
@@ -841,6 +841,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error completing unified queue item:', error);
       res.status(500).json({ message: "Failed to complete queue item" });
+    }
+  });
+
+  // Storage Spots API routes
+  app.get("/api/storage-spots", async (req, res) => {
+    try {
+      const { status, state } = req.query;
+      
+      let storageSpots;
+      if (status) {
+        storageSpots = await storage.getStorageSpotsByStatus(status as string);
+      } else if (state) {
+        storageSpots = await storage.getStorageSpotsByState(state as string);
+      } else {
+        storageSpots = await storage.getStorageSpots();
+      }
+      
+      res.json(storageSpots);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch storage spots" });
+    }
+  });
+
+  app.get("/api/storage-spots/:id", async (req, res) => {
+    try {
+      const storageSpot = await storage.getStorageSpot(req.params.id);
+      if (!storageSpot) {
+        return res.status(404).json({ message: "Storage spot not found" });
+      }
+      res.json(storageSpot);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch storage spot" });
+    }
+  });
+
+  app.post("/api/storage-spots", async (req, res) => {
+    try {
+      const storageSpotData = insertStorageSpotSchema.parse(req.body);
+      const storageSpot = await storage.createStorageSpot(storageSpotData);
+      
+      // Log activity
+      await storage.createActivityLog({
+        userId: "system", // TODO: Get from authenticated user
+        action: "storage_spot_created",
+        entityType: "storage_spot",
+        entityId: storageSpot.id,
+        details: `Created storage spot: ${storageSpot.name}`,
+      });
+
+      res.status(201).json(storageSpot);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid storage spot data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create storage spot" });
+    }
+  });
+
+  app.patch("/api/storage-spots/:id", async (req, res) => {
+    try {
+      const updates = req.body;
+      const storageSpot = await storage.updateStorageSpot(req.params.id, updates);
+      
+      if (!storageSpot) {
+        return res.status(404).json({ message: "Storage spot not found" });
+      }
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: "system", // TODO: Get from authenticated user
+        action: "storage_spot_updated",
+        entityType: "storage_spot",
+        entityId: storageSpot.id,
+        details: `Updated storage spot: ${storageSpot.name}`,
+      });
+
+      res.json(storageSpot);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update storage spot" });
+    }
+  });
+
+  app.delete("/api/storage-spots/:id", async (req, res) => {
+    try {
+      const storageSpot = await storage.getStorageSpot(req.params.id);
+      if (!storageSpot) {
+        return res.status(404).json({ message: "Storage spot not found" });
+      }
+
+      const deleted = await storage.deleteStorageSpot(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Storage spot not found" });
+      }
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: "system", // TODO: Get from authenticated user
+        action: "storage_spot_deleted",
+        entityType: "storage_spot",
+        entityId: req.params.id,
+        details: `Deleted storage spot: ${storageSpot.name}`,
+      });
+
+      res.json({ message: "Storage spot deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete storage spot" });
     }
   });
 
