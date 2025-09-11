@@ -12,6 +12,9 @@ import DOMPurify from "isomorphic-dompurify";
 // Simple session store for demo purposes
 const sessions = new Map<string, { userId: string; username: string; expiresAt: Date }>();
 
+// Human verification session store
+const humanVerificationSessions = new Map<string, { verified: boolean; expiresAt: Date; originalUrl: string }>();
+
 // Rate limiting store for anonymous form submissions
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 5 * 60 * 1000; // 5 minutes
@@ -147,6 +150,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
       res.status(500).json({ message: "Registration failed" });
+    }
+  });
+
+  // Human verification routes for form access
+  app.post("/api/forms/verify-human", checkAnonymousRateLimit, async (req, res) => {
+    try {
+      const { timestamp, originalUrl } = req.body;
+      
+      // Simple validation: must have timestamp and URL
+      if (!timestamp || !originalUrl) {
+        return res.status(400).json({ message: "Invalid verification request" });
+      }
+      
+      // Basic bot detection: check if request was too fast (less than 1 second)
+      const requestTime = Date.now() - timestamp;
+      if (requestTime < 1000) {
+        return res.status(429).json({ message: "Verification failed: too fast" });
+      }
+      
+      // Create verification session
+      const verificationId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      
+      humanVerificationSessions.set(verificationId, {
+        verified: true,
+        expiresAt,
+        originalUrl: sanitizeInput(originalUrl)
+      });
+      
+      // Set httpOnly cookie for verification
+      res.cookie('humanVerified', verificationId, {
+        httpOnly: true,
+        secure: false, // Set to true in production with HTTPS
+        sameSite: 'lax',
+        expires: expiresAt,
+        path: '/forms' // Restrict to forms path
+      });
+      
+      res.json({ success: true, message: "Human verification successful" });
+    } catch (error) {
+      console.error('Human verification error:', error);
+      res.status(500).json({ message: "Verification failed" });
+    }
+  });
+
+  app.get("/api/forms/verify-status", async (req, res) => {
+    try {
+      const cookieHeader = req.headers.cookie;
+      const verificationId = cookieHeader?.match(/humanVerified=([^;]+)/)?.[1];
+      
+      if (!verificationId) {
+        return res.json({ verified: false });
+      }
+      
+      const verification = humanVerificationSessions.get(verificationId);
+      if (!verification || verification.expiresAt < new Date()) {
+        // Clean up expired session
+        if (verification) {
+          humanVerificationSessions.delete(verificationId);
+        }
+        return res.json({ verified: false });
+      }
+      
+      res.json({ verified: true, originalUrl: verification.originalUrl });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check verification status" });
     }
   });
 
