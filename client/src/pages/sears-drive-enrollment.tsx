@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { apiRequest } from "@/lib/queryClient";
 import { Upload, FileImage, Truck, User, MapPin, Briefcase, Upload as UploadIcon } from "lucide-react";
 
@@ -145,10 +146,19 @@ export default function SearsDriveEnrollment() {
       <div className="max-w-4xl mx-auto">
         <Card className="bg-card">
           <CardHeader className="bg-blue-600 text-white">
-            <CardTitle className="text-2xl font-bold flex items-center gap-3">
-              <Truck className="h-8 w-8" />
-              Sears Drive Program Enrollment Submission
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-2xl font-bold flex items-center gap-3">
+                <Truck className="h-8 w-8" />
+                Sears Drive Program Enrollment Submission
+              </CardTitle>
+              <CopyLinkButton
+                variant="icon"
+                preserveQuery={true}
+                preserveHash={true}
+                data-testid="button-copy-form-link"
+                className="shrink-0 text-white hover:bg-white/20"
+              />
+            </div>
           </CardHeader>
           <CardContent className="p-8">
             <Form {...form}>

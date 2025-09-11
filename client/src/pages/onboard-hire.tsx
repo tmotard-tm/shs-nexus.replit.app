@@ -14,6 +14,7 @@ import { getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { BackButton } from "@/components/ui/back-button";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 
 export default function OnboardHire() {
   const { toast } = useToast();
@@ -435,13 +436,24 @@ export default function OnboardHire() {
             <div className="lg:col-span-2">
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2" data-testid="text-employee-info-title">
-                    <UserPlus className="h-5 w-5" />
-                    Employee Information
-                  </CardTitle>
-                  <CardDescription>
-                    Enter the new employee's personal and job information
-                  </CardDescription>
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
+                      <CardTitle className="flex items-center gap-2" data-testid="text-employee-info-title">
+                        <UserPlus className="h-5 w-5" />
+                        Employee Information
+                      </CardTitle>
+                      <CardDescription>
+                        Enter the new employee's personal and job information
+                      </CardDescription>
+                    </div>
+                    <CopyLinkButton
+                      variant="icon"
+                      preserveQuery={true}
+                      preserveHash={true}
+                      data-testid="button-copy-form-link"
+                      className="shrink-0"
+                    />
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={handleSubmit} className="space-y-6">

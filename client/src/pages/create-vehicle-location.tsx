@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { BackButton } from "@/components/ui/back-button";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { Car, User } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { type InsertVehicle } from "@shared/schema";
@@ -133,10 +134,21 @@ export default function CreateVehicle() {
           <BackButton href="/" />
           <Card>
             <CardHeader>
-              <CardTitle data-testid="text-vehicle-title">Add New Vehicle</CardTitle>
-              <CardDescription>
-                Enter the vehicle details to add it to your fleet
-              </CardDescription>
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <CardTitle data-testid="text-vehicle-title">Add New Vehicle</CardTitle>
+                  <CardDescription>
+                    Enter the vehicle details to add it to your fleet
+                  </CardDescription>
+                </div>
+                <CopyLinkButton
+                  variant="icon"
+                  preserveQuery={true}
+                  preserveHash={true}
+                  data-testid="button-copy-form-link"
+                  className="shrink-0"
+                />
+              </div>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleVehicleSubmit} className="space-y-8">

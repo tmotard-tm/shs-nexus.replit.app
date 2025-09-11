@@ -13,6 +13,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { Car, MapPin, AlertTriangle, Trash2, Archive } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 
 export default function OffboardVehicleLocation() {
   const { toast } = useToast();
@@ -323,28 +324,41 @@ export default function OffboardVehicleLocation() {
                 <div className="lg:col-span-2">
                   <Card>
                     <CardHeader>
-                      <CardTitle className="flex items-center gap-2" data-testid="text-vehicle-offboard-title">
-                        <Trash2 className="h-5 w-5" />
-                        Remove Vehicle from Fleet
-                      </CardTitle>
-                      <CardDescription>
-                        Process vehicle removal and document the reason
-                      </CardDescription>
-                      <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
-                          <div className="text-sm">
-                            <p className="font-medium text-yellow-800 dark:text-yellow-200">Workflow Sequence</p>
-                            <p className="text-yellow-700 dark:text-yellow-300">Upon submission, these departments will get immediate tasks:</p>
-                            <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
-                              <li>NTAO (Stop truck replenishment)</li>
-                              <li>Assets Management (Recover phone)</li>
-                              <li>Fleet Management (Move van to central location/shop)</li>
-                            </ul>
-                            <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van: Inventory Control + Assets Management each receive a task to complete count.</p>
-                            <p className="text-yellow-700 dark:text-yellow-300 mt-1 text-xs">Once both teams complete their count tasks: Fleet Management will get final vehicle readiness verification task.</p>
+                      <div className="flex items-start justify-between">
+                        <div className="space-y-3 flex-1">
+                          <div className="space-y-1">
+                            <CardTitle className="flex items-center gap-2" data-testid="text-vehicle-offboard-title">
+                              <Trash2 className="h-5 w-5" />
+                              Remove Vehicle from Fleet
+                            </CardTitle>
+                            <CardDescription>
+                              Process vehicle removal and document the reason
+                            </CardDescription>
+                          </div>
+                          <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                              <div className="text-sm">
+                                <p className="font-medium text-yellow-800 dark:text-yellow-200">Workflow Sequence</p>
+                                <p className="text-yellow-700 dark:text-yellow-300">Upon submission, these departments will get immediate tasks:</p>
+                                <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
+                                  <li>NTAO (Stop truck replenishment)</li>
+                                  <li>Assets Management (Recover phone)</li>
+                                  <li>Fleet Management (Move van to central location/shop)</li>
+                                </ul>
+                                <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van: Inventory Control + Assets Management each receive a task to complete count.</p>
+                                <p className="text-yellow-700 dark:text-yellow-300 mt-1 text-xs">Once both teams complete their count tasks: Fleet Management will get final vehicle readiness verification task.</p>
+                              </div>
+                            </div>
                           </div>
                         </div>
+                        <CopyLinkButton
+                          variant="icon"
+                          preserveQuery={true}
+                          preserveHash={true}
+                          data-testid="button-copy-form-link-vehicle"
+                          className="shrink-0"
+                        />
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -543,13 +557,24 @@ export default function OffboardVehicleLocation() {
                 <div className="lg:col-span-2">
                   <Card>
                     <CardHeader>
-                      <CardTitle className="flex items-center gap-2" data-testid="text-location-offboard-title">
-                        <Archive className="h-5 w-5" />
-                        Deactivate Location
-                      </CardTitle>
-                      <CardDescription>
-                        Process location closure and document the reason
-                      </CardDescription>
+                      <div className="flex items-start justify-between">
+                        <div className="space-y-1">
+                          <CardTitle className="flex items-center gap-2" data-testid="text-location-offboard-title">
+                            <Archive className="h-5 w-5" />
+                            Deactivate Location
+                          </CardTitle>
+                          <CardDescription>
+                            Process location closure and document the reason
+                          </CardDescription>
+                        </div>
+                        <CopyLinkButton
+                          variant="icon"
+                          preserveQuery={true}
+                          preserveHash={true}
+                          data-testid="button-copy-form-link-location"
+                          className="shrink-0"
+                        />
+                      </div>
                     </CardHeader>
                     <CardContent>
                       <form onSubmit={handleLocationOffboard} className="space-y-6">

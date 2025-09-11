@@ -14,6 +14,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getAvailableVehicles, getBrandingOptions, getInteriorOptions, getTuneStatusOptions, getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
 
 export default function AssignVehicleLocation() {
@@ -178,11 +179,12 @@ export default function AssignVehicleLocation() {
           employee: {
             id: employee.id,
             name: employee.name,
-            enterpriseId: employee.enterpriseId,
-            specialties: employee.specialties
+            department: employee.department,
+            region: employee.region,
+            enterpriseId: employeeData.enterpriseId,
+            specialties: employeeData.specialties
           },
           vehicle: {
-            id: vehicle.id,
             vin: vehicle.vin,
             year: vehicle.modelYear,
             make: vehicle.makeName,
@@ -241,10 +243,21 @@ export default function AssignVehicleLocation() {
             <div className="space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Search Available Vehicles</CardTitle>
-                  <CardDescription>
-                    Search by VIN, vehicle number, license plate, or make/model
-                  </CardDescription>
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
+                      <CardTitle>Search Available Vehicles</CardTitle>
+                      <CardDescription>
+                        Search by VIN, vehicle number, license plate, or make/model
+                      </CardDescription>
+                    </div>
+                    <CopyLinkButton
+                      variant="icon"
+                      preserveQuery={true}
+                      preserveHash={true}
+                      data-testid="button-copy-form-link"
+                      className="shrink-0"
+                    />
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
