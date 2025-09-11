@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -65,7 +64,7 @@ export default function UnifiedQueueManagement() {
   const [selectedResolution, setSelectedResolution] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<string>("new");
+  const [expandedQueues, setExpandedQueues] = useState<Record<QueueModule, boolean>>({} as Record<QueueModule, boolean>);
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [pickUpItem, setPickUpItem] = useState<CombinedQueueItem | null>(null);
@@ -303,26 +302,59 @@ export default function UnifiedQueueManagement() {
     }
   };
 
-  // Filter items based on active tab and search criteria
+  // Helper function to group items by module and then by status
+  const groupItemsByModuleAndStatus = (items: CombinedQueueItem[]) => {
+    const grouped: Record<QueueModule, Record<string, CombinedQueueItem[]>> = {} as Record<QueueModule, Record<string, CombinedQueueItem[]>>;
+    
+    selectedModules.forEach(module => {
+      grouped[module] = {
+        pending: [],
+        in_progress: [],
+        completed: [],
+        failed: [],
+        cancelled: []
+      };
+    });
+
+    items.forEach(item => {
+      if (selectedModules.includes(item.module)) {
+        if (!grouped[item.module][item.status]) {
+          grouped[item.module][item.status] = [];
+        }
+        grouped[item.module][item.status].push(item);
+      }
+    });
+
+    return grouped;
+  };
+
+  // Helper function to calculate status counts per module
+  const getModuleStatusCounts = (items: CombinedQueueItem[], module: QueueModule) => {
+    const moduleItems = items.filter(item => item.module === module);
+    return {
+      pending: moduleItems.filter(item => item.status === "pending").length,
+      in_progress: moduleItems.filter(item => item.status === "in_progress").length,
+      completed: moduleItems.filter(item => item.status === "completed").length,
+      failed: moduleItems.filter(item => item.status === "failed").length,
+      cancelled: moduleItems.filter(item => item.status === "cancelled").length,
+      total: moduleItems.length
+    };
+  };
+
+  // Helper function to get module-specific icon
+  const getModuleIcon = (module: QueueModule) => {
+    switch (module) {
+      case "ntao": return "📋";
+      case "assets": return "🏢";
+      case "inventory": return "📦";
+      case "fleet": return "🚐";
+      default: return "📋";
+    }
+  };
+
+  // Filter items based on search criteria (no longer based on active tab)
   const getFilteredItems = (items: CombinedQueueItem[]) => {
     let filtered = items;
-
-    // Filter by tab status
-    switch (activeTab) {
-      case "new":
-        filtered = filtered.filter(item => item.status === "pending");
-        break;
-      case "in-progress":
-        filtered = filtered.filter(item => item.status === "in_progress");
-        break;
-      case "completed":
-        filtered = filtered.filter(item => item.status === "completed");
-        break;
-      case "all":
-      default:
-        // Show all statuses
-        break;
-    }
 
     // Apply search filters
     if (searchVehicleNumber.trim()) {
@@ -375,6 +407,14 @@ export default function UnifiedQueueManagement() {
     }
 
     return filtered;
+  };
+
+  // Toggle expanded state for queue sections
+  const toggleQueueExpansion = (module: QueueModule) => {
+    setExpandedQueues(prev => ({
+      ...prev,
+      [module]: !prev[module]
+    }));
   };
 
   const filteredItems = getFilteredItems(queueItems);
@@ -633,204 +673,259 @@ export default function UnifiedQueueManagement() {
           </Card>
         )}
 
-        {/* Queue Items */}
+        {/* Queue Items - Grouped by Module */}
         {selectedModules.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <List className="h-5 w-5" />
-                Queue Items
-                {queueItems.length > 0 && (
-                  <Badge variant="secondary" className="ml-auto">
-                    {filteredItems.length} of {queueItems.length}
-                  </Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-4">
-                  <TabsTrigger value="new" data-testid="tab-new">
-                    New ({queueItems.filter(item => item.status === "pending").length})
-                  </TabsTrigger>
-                  <TabsTrigger value="in-progress" data-testid="tab-in-progress">
-                    In Progress ({queueItems.filter(item => item.status === "in_progress").length})
-                  </TabsTrigger>
-                  <TabsTrigger value="completed" data-testid="tab-completed">
-                    Completed ({queueItems.filter(item => item.status === "completed").length})
-                  </TabsTrigger>
-                  <TabsTrigger value="all" data-testid="tab-all">
-                    All ({queueItems.length})
-                  </TabsTrigger>
-                </TabsList>
+          <div className="space-y-6">
+            {isLoading ? (
+              <Card>
+                <CardContent className="py-8">
+                  <div className="text-center">
+                    <p className="text-muted-foreground">Loading queue items...</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : filteredItems.length === 0 ? (
+              <Card>
+                <CardContent className="py-8">
+                  <div className="text-center">
+                    <p className="text-muted-foreground">
+                      {selectedModules.length === 0 
+                        ? "Select at least one queue to view items"
+                        : "No queue items found matching your criteria"
+                      }
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              selectedModules.map((module) => {
+                const moduleItems = filteredItems.filter(item => item.module === module);
+                const statusCounts = getModuleStatusCounts(filteredItems, module);
+                const isExpanded = expandedQueues[module] !== false; // Default to expanded
+                
+                return (
+                  <Card key={module} className="overflow-hidden">
+                    <CardHeader 
+                      className={`cursor-pointer transition-colors hover:bg-muted/50 ${getModuleColor(module)} text-white`}
+                      onClick={() => toggleQueueExpansion(module)}
+                      data-testid={`header-queue-${module}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="flex items-center gap-3">
+                          <span className="text-2xl">{getModuleIcon(module)}</span>
+                          <span>{moduleLabels[module]} Queue</span>
+                          <Badge variant="secondary" className="bg-white/20 text-white border-white/30">
+                            {statusCounts.total} items
+                          </Badge>
+                        </CardTitle>
+                        <div className="flex items-center gap-4">
+                          {/* Status count badges */}
+                          <div className="flex items-center gap-2">
+                            {statusCounts.pending > 0 && (
+                              <Badge variant="secondary" className="bg-yellow-500/20 text-white border-yellow-400/30" data-testid={`badge-${module}-pending-count`}>
+                                {statusCounts.pending} New
+                              </Badge>
+                            )}
+                            {statusCounts.in_progress > 0 && (
+                              <Badge variant="secondary" className="bg-blue-500/20 text-white border-blue-400/30" data-testid={`badge-${module}-progress-count`}>
+                                {statusCounts.in_progress} In Progress
+                              </Badge>
+                            )}
+                            {statusCounts.completed > 0 && (
+                              <Badge variant="secondary" className="bg-green-500/20 text-white border-green-400/30" data-testid={`badge-${module}-completed-count`}>
+                                {statusCounts.completed} Completed
+                              </Badge>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-white hover:bg-white/10"
+                            data-testid={`button-toggle-${module}`}
+                          >
+                            {isExpanded ? "▼" : "▶"}
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    
+                    {isExpanded && (
+                      <CardContent className="p-6">
+                        {moduleItems.length === 0 ? (
+                          <div className="text-center py-8">
+                            <p className="text-muted-foreground">
+                              No items in {moduleLabels[module]} queue matching your criteria
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            {/* Status Buckets within Module */}
+                            {[
+                              { status: 'pending', label: 'New Tasks', color: 'bg-yellow-500', icon: Clock },
+                              { status: 'in_progress', label: 'In Progress', color: 'bg-blue-500', icon: Settings },
+                              { status: 'completed', label: 'Completed', color: 'bg-green-500', icon: CheckCircle },
+                              { status: 'failed', label: 'Failed', color: 'bg-red-500', icon: XCircle },
+                              { status: 'cancelled', label: 'Cancelled', color: 'bg-gray-500', icon: AlertCircle }
+                            ].map(({ status, label, color, icon: Icon }) => {
+                              const statusItems = moduleItems.filter(item => item.status === status);
+                              if (statusItems.length === 0) return null;
 
-                <TabsContent value={activeTab} className="mt-6">
-                  {isLoading ? (
-                    <div className="text-center py-8">
-                      <p className="text-muted-foreground">Loading queue items...</p>
-                    </div>
-                  ) : filteredItems.length === 0 ? (
-                    <div className="text-center py-8">
-                      <p className="text-muted-foreground">
-                        {selectedModules.length === 0 
-                          ? "Select at least one queue to view items"
-                          : "No queue items found matching your criteria"
-                        }
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {filteredItems.map((item) => (
-                        <Card key={`${item.module}-${item.id}`} className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-transparent hover:border-l-blue-500">
-                          <CardContent className="p-6">
-                            <div className="flex items-start justify-between">
-                              <div className="space-y-3 flex-1">
-                                {/* Prominent module badge at top */}
-                                <div className="flex items-center justify-between">
-                                  <Badge 
-                                    className={`${getModuleColor(item.module)} text-white px-3 py-1.5 text-sm font-semibold shadow-md`}
-                                    data-testid={`badge-module-${item.module}`}
-                                  >
-                                    📋 {moduleLabels[item.module]}
-                                  </Badge>
-                                  <div className="flex items-center gap-2">
-                                    <Badge 
-                                      className={`${getStatusColor(item.status)} text-white px-2 py-1`}
-                                      data-testid={`badge-status-${item.status}`}
-                                    >
-                                      {item.status.replace('_', ' ')}
+                              return (
+                                <div key={status} className="space-y-3">
+                                  <div className={`flex items-center gap-2 p-3 rounded-lg ${color} text-white`}>
+                                    <Icon className="h-5 w-5" />
+                                    <h4 className="font-semibold">{label}</h4>
+                                    <Badge variant="secondary" className="bg-white/20 text-white ml-auto">
+                                      {statusItems.length} items
                                     </Badge>
-                                    <Badge 
-                                      className={`${getPriorityColor(item.priority)} text-white px-2 py-1`}
-                                      data-testid={`badge-priority-${item.priority}`}
-                                    >
-                                      {item.priority}
-                                    </Badge>
-                                    {item.workflowType && (
-                                      <Badge variant="outline" data-testid={`badge-workflow-${item.workflowType}`}>
-                                        {item.workflowType.replace('_', ' ')}
-                                      </Badge>
-                                    )}
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-1 gap-4">
+                                    {statusItems.map((item) => (
+                                      <Card key={`${item.module}-${item.id}`} className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-transparent hover:border-l-blue-500">
+                                        <CardContent className="p-4">
+                                          <div className="flex items-start justify-between">
+                                            <div className="space-y-2 flex-1">
+                                              <div className="flex items-center justify-between">
+                                                <h3 className="font-semibold text-lg text-foreground" data-testid={`text-item-title-${item.id}`}>
+                                                  {item.title}
+                                                </h3>
+                                                <div className="flex items-center gap-2">
+                                                  <Badge 
+                                                    className={`${getPriorityColor(item.priority)} text-white px-2 py-1`}
+                                                    data-testid={`badge-priority-${item.priority}`}
+                                                  >
+                                                    {item.priority}
+                                                  </Badge>
+                                                  {item.workflowType && (
+                                                    <Badge variant="outline" data-testid={`badge-workflow-${item.workflowType}`}>
+                                                      {item.workflowType.replace('_', ' ')}
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                              </div>
+                                              
+                                              <p className="text-muted-foreground text-sm" data-testid={`text-item-description-${item.id}`}>
+                                                {item.description}
+                                              </p>
+
+                                              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                                                <div className="flex items-center gap-1">
+                                                  <Calendar className="h-4 w-4" />
+                                                  <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+                                                </div>
+                                                
+                                                {item.assignedTo && (
+                                                  <div className="flex items-center gap-1">
+                                                    <User className="h-4 w-4" />
+                                                    <span>
+                                                      {users.find((u: UserType) => u.id === item.assignedTo)?.username || 'Unknown'}
+                                                    </span>
+                                                  </div>
+                                                )}
+
+                                                {item.department && (
+                                                  <div className="flex items-center gap-1">
+                                                    <Users className="h-4 w-4" />
+                                                    <span>{item.department}</span>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+
+                                            {/* Direct action buttons */}
+                                            <div className="flex flex-col gap-2 ml-4 min-w-fit">
+                                              <div className="flex items-center gap-2">
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  onClick={() => setViewQueueItem(item)}
+                                                  data-testid={`button-view-${item.id}`}
+                                                >
+                                                  <Eye className="h-4 w-4 mr-1" />
+                                                  View
+                                                </Button>
+                                                
+                                                {/* Start Work button */}
+                                                {item.status === "pending" && item.assignedTo === user?.id && (
+                                                  <Button
+                                                    size="sm"
+                                                    className="bg-green-600 hover:bg-green-700 text-white font-medium shadow-md"
+                                                    onClick={() => handleStartWork(item)}
+                                                    disabled={startWorkMutation.isPending}
+                                                    data-testid={`button-start-work-${item.id}`}
+                                                  >
+                                                    <Play className="h-4 w-4 mr-1" />
+                                                    Start Work
+                                                  </Button>
+                                                )}
+                                                
+                                                {/* Complete button */}
+                                                {item.status === "in_progress" && item.assignedTo === user?.id && (
+                                                  <Button
+                                                    size="sm"
+                                                    className="bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md"
+                                                    onClick={() => handleCompleteTask(item)}
+                                                    disabled={completeMutation.isPending}
+                                                    data-testid={`button-complete-${item.id}`}
+                                                  >
+                                                    <CheckCircle className="h-4 w-4 mr-1" />
+                                                    Complete
+                                                  </Button>
+                                                )}
+                                              </div>
+                                              
+                                              {/* Assignment dropdown for unassigned items */}
+                                              {item.status === "pending" && !item.assignedTo && (
+                                                <Select
+                                                  onValueChange={(assigneeId) => handleAssignTask(item, assigneeId)}
+                                                >
+                                                  <SelectTrigger className="w-full" data-testid={`select-assign-${item.id}`}>
+                                                    <SelectValue placeholder="Assign Task" />
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    {users
+                                                      .filter((u: UserType) => !user?.accessibleQueues || user.accessibleQueues.includes(item.module))
+                                                      .map((assigneeUser: UserType) => (
+                                                        <SelectItem key={assigneeUser.id} value={assigneeUser.id}>
+                                                          {assigneeUser.username}
+                                                        </SelectItem>
+                                                      ))}
+                                                  </SelectContent>
+                                                </Select>
+                                              )}
+                                              
+                                              {/* Pick up button for unassigned items */}
+                                              {item.status === "pending" && !item.assignedTo && (
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  onClick={() => setPickUpItem(item)}
+                                                  disabled={assignMutation.isPending}
+                                                  data-testid={`button-pick-up-${item.id}`}
+                                                >
+                                                  <User className="h-4 w-4 mr-1" />
+                                                  Pick Up
+                                                </Button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </CardContent>
+                                      </Card>
+                                    ))}
                                   </div>
                                 </div>
-                                
-                                <h3 className="font-semibold text-lg text-foreground" data-testid={`text-item-title-${item.id}`}>
-                                  {item.title}
-                                </h3>
-                                
-                                <p className="text-muted-foreground" data-testid={`text-item-description-${item.id}`}>
-                                  {item.description}
-                                </p>
-
-                                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                  <div className="flex items-center gap-1">
-                                    <Calendar className="h-4 w-4" />
-                                    <span>{new Date(item.createdAt).toLocaleDateString()}</span>
-                                  </div>
-                                  
-                                  {item.assignedTo && (
-                                    <div className="flex items-center gap-1">
-                                      <User className="h-4 w-4" />
-                                      <span>
-                                        {users.find((u: UserType) => u.id === item.assignedTo)?.username || 'Unknown'}
-                                      </span>
-                                    </div>
-                                  )}
-
-                                  {item.department && (
-                                    <div className="flex items-center gap-1">
-                                      <Users className="h-4 w-4" />
-                                      <span>{item.department}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Direct action buttons prominently displayed */}
-                              <div className="flex flex-col gap-2 ml-4 min-w-fit">
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setViewQueueItem(item)}
-                                    data-testid={`button-view-${item.id}`}
-                                  >
-                                    <Eye className="h-4 w-4 mr-1" />
-                                    View
-                                  </Button>
-                                  
-                                  {/* Prominent Work/Edit button */}
-                                  {item.status === "pending" && item.assignedTo === user?.id && (
-                                    <Button
-                                      size="sm"
-                                      className="bg-green-600 hover:bg-green-700 text-white font-medium shadow-md"
-                                      onClick={() => handleStartWork(item)}
-                                      disabled={startWorkMutation.isPending}
-                                      data-testid={`button-start-work-${item.id}`}
-                                    >
-                                      <Play className="h-4 w-4 mr-1" />
-                                      Start Work
-                                    </Button>
-                                  )}
-                                  
-                                  {item.status === "in_progress" && item.assignedTo === user?.id && (
-                                    <Button
-                                      size="sm"
-                                      className="bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md"
-                                      onClick={() => handleCompleteTask(item)}
-                                      disabled={completeMutation.isPending}
-                                      data-testid={`button-complete-${item.id}`}
-                                    >
-                                      <CheckCircle className="h-4 w-4 mr-1" />
-                                      Complete
-                                    </Button>
-                                  )}
-                                </div>
-                                
-                                {/* Assignment dropdown for unassigned items */}
-                                {item.status === "pending" && !item.assignedTo && (
-                                  <Select
-                                    onValueChange={(assigneeId) => handleAssignTask(item, assigneeId)}
-                                  >
-                                    <SelectTrigger className="w-full" data-testid={`select-assign-${item.id}`}>
-                                      <SelectValue placeholder="Assign Task" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {users
-                                        .filter((u: UserType) => !user?.accessibleQueues || user.accessibleQueues.includes(item.module))
-                                        .map((assigneeUser: UserType) => (
-                                          <SelectItem key={assigneeUser.id} value={assigneeUser.id}>
-                                            {assigneeUser.username}
-                                          </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                  </Select>
-                                )}
-                                
-                                {/* Pick up button for unassigned items */}
-                                {item.status === "pending" && !item.assignedTo && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setPickUpItem(item)}
-                                    disabled={assignMutation.isPending}
-                                    data-testid={`button-pick-up-${item.id}`}
-                                  >
-                                    <User className="h-4 w-4 mr-1" />
-                                    Pick Up
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
+                );
+              })
+            )}
+          </div>
         )}
 
         {/* View Queue Item Dialog */}
