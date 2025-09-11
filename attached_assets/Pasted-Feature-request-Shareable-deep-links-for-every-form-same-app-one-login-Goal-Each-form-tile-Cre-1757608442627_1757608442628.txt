@@ -1,0 +1,118 @@
+Feature request: Shareable deep links for every form (same app, one login)
+Goal
+
+Each form tile (Create Vehicle, Assign/Update Vehicle, Onboarding, Offboarding, Sears Drive/“BYOV Program”) must have a stable URL that can be copied and shared (email/Teams). When opened, it should go straight to that form (like the Sears Tech Refund Form link), using the same single sign-on. If the user isn’t logged in, the app should prompt login and redirect back to that form after auth.
+
+Requirements
+
+Routes (deep links)
+
+/forms/create-vehicle
+
+/forms/assign-vehicle
+
+/forms/onboarding
+
+/forms/offboarding
+
+/forms/byov-enrollment
+
+Keep the existing refund link behavior (e.g., /refunds/new) as reference.
+
+Single login
+
+One auth realm for the whole app.
+
+If unauthenticated and a deep link is opened, after successful login redirect back to the exact path + query string.
+
+Share button on each tile & form
+
+Add a “Copy Link”/“Share” icon on:
+
+The dashboard tile and
+
+The form header (like the refund form screenshot).
+
+The link should be the absolute URL to the route above (include any query params if present).
+
+Prefill via query params (optional but useful)
+
+Support prefill through the URL:
+
+Example: /forms/assign-vehicle?employee=55231&vehicle=TRK001&start=2025-09-15&type=Permanent
+
+Only allow prefill of non-sensitive fields; validate all values server-side.
+
+Authorization/visibility
+
+Respect existing role/queue permissions when a deep link is opened.
+
+If a user lacks access to that department/queue, show a clean “No access” message instead of loading the form.
+
+Post-auth redirect
+
+Implement next parameter flow:
+
+If hitting /forms/onboarding while logged out, redirect to /login?next=/forms/onboarding.
+
+After login, navigate to next.
+
+Back-to-queue context
+
+When a form is opened from a queue, keep department context (e.g., department=FLEET) in the query string so the Back to Queue button returns to the filtered list.
+
+Instrumentation
+
+Log route_opened with {path, user_id, department?, source: 'direct'|'dashboard'|'queue'} to verify link usage.
+
+Acceptance criteria
+
+Opening any of the five routes directly loads that form (if logged in) or logs in then returns to the form (if not).
+
+“Copy Link” produces a URL that works from email/Teams and opens the same form.
+
+Query params prefill fields when present.
+
+Permissions are enforced exactly as in the main app.
+
+This uses one app / one login; no per-department accounts are created.
+
+Suggested implementation sketch
+Frontend (React/Router)
+// routes
+<Routes>
+  <Route path="/forms/create-vehicle" element={<CreateVehicleForm />} />
+  <Route path="/forms/assign-vehicle" element={<AssignVehicleForm />} />
+  <Route path="/forms/onboarding" element={<OnboardingForm />} />
+  <Route path="/forms/offboarding" element={<OffboardingForm />} />
+  <Route path="/forms/byov-enrollment" element={<ByovEnrollmentForm />} />
+</Routes>
+
+// share button utility
+function copyShareLink(pathWithQuery: string) {
+  const url = new URL(pathWithQuery, window.location.origin).toString();
+  navigator.clipboard.writeText(url);
+  toast.success("Link copied");
+}
+
+Auth redirect
+
+When guard detects unauthenticated access to /forms/*, redirect to:
+
+/login?next=<encodeURIComponent(currentPathAndQuery)>
+
+After login, read next and navigate(next || '/').
+
+Backend (FastAPI/Express)
+
+No special logic is required to serve the form routes beyond existing auth middleware.
+
+Keep existing submit endpoints (e.g., POST /api/forms/{key}/submit) and enforce department/role checks server-side.
+
+Security notes
+
+Validate all prefilled values server-side.
+
+CSRF protection on POSTs.
+
+Rate limit submissions as per refund form.

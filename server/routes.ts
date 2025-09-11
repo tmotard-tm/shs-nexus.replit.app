@@ -1380,6 +1380,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Sears Drive Program Enrollment submission endpoint
   app.post("/api/sears-drive-enrollment", upload.any(), async (req, res) => {
     try {
+      console.log('DEBUG - Raw request body:', req.body);
+      console.log('DEBUG - Form data keys:', Object.keys(req.body));
+      console.log('DEBUG - Files received:', (req as any).files?.map((f: any) => f.fieldname));
+      
       // Parse industry from JSON string if needed
       let parsedBody = { ...req.body };
       if (typeof parsedBody.industry === 'string' && parsedBody.industry.startsWith('[')) {
@@ -1390,6 +1394,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           parsedBody.industry = [parsedBody.industry];
         }
       }
+      
+      console.log('DEBUG - Parsed body:', parsedBody);
 
       // Validate form data
       const formSchema = z.object({
