@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -49,6 +50,7 @@ export function WorkModuleDialog({
   
   // Form state
   const [decisionType, setDecisionType] = useState<string>("");
+  const [finalResolution, setFinalResolution] = useState<string>("");
   const [completeFinal, setCompleteFinal] = useState<boolean>(false);
   const [workNotes, setWorkNotes] = useState<string>("");
   const [requiresReview, setRequiresReview] = useState<boolean>(false);
@@ -66,6 +68,7 @@ export function WorkModuleDialog({
       setAssignedTo(queueItem.assignedTo || "");
       setAdminNotes(""); // Reset admin notes for new work session
       setDecisionType("");
+      setFinalResolution("");
       setCompleteFinal(false);
       setRequiresReview(false);
     }
@@ -108,6 +111,7 @@ export function WorkModuleDialog({
         completedBy: currentUser?.id,
         finalNotes: workNotes,
         decisionType,
+        finalResolution,
         requiresReview,
         adminNotes
       });
@@ -344,17 +348,33 @@ export function WorkModuleDialog({
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label htmlFor="decision-type">Decision Type</Label>
-                <Select value={decisionType} onValueChange={setDecisionType}>
-                  <SelectTrigger data-testid="select-decision-type">
-                    <SelectValue placeholder="Select decision type..." />
+                <Label className="text-sm font-medium">Decision Type</Label>
+                <RadioGroup value={decisionType} onValueChange={setDecisionType} className="mt-2">
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="final_disposition" id="final-disposition" data-testid="radio-final-disposition" />
+                    <Label htmlFor="final-disposition" className="text-sm font-medium">
+                      Final Disposition
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="requires_review" id="requires-review-radio" data-testid="radio-requires-review" />
+                    <Label htmlFor="requires-review-radio" className="text-sm font-medium">
+                      Requires Further Review
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              <div>
+                <Label htmlFor="final-resolution">Final Resolution</Label>
+                <Select value={finalResolution} onValueChange={setFinalResolution}>
+                  <SelectTrigger data-testid="select-final-resolution">
+                    <SelectValue placeholder="Select Resolution..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="final_disposition">Final Disposition</SelectItem>
-                    <SelectItem value="partial_resolution">Partial Resolution</SelectItem>
-                    <SelectItem value="escalation">Escalation Required</SelectItem>
-                    <SelectItem value="rejected">Request Rejected</SelectItem>
-                    <SelectItem value="deferred">Deferred for Later</SelectItem>
+                    <SelectItem value="full_refund_approved">Full Refund Approved</SelectItem>
+                    <SelectItem value="partial_refund_approved">Partial Refund Approved</SelectItem>
+                    <SelectItem value="denied">Denied</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -381,18 +401,6 @@ export function WorkModuleDialog({
                   rows={4}
                   data-testid="textarea-work-notes"
                 />
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Checkbox 
-                  id="requires-review"
-                  checked={requiresReview}
-                  onCheckedChange={(checked) => setRequiresReview(checked as boolean)}
-                  data-testid="checkbox-requires-review"
-                />
-                <Label htmlFor="requires-review" className="text-sm font-medium">
-                  Requires Further Review
-                </Label>
               </div>
             </CardContent>
           </Card>
