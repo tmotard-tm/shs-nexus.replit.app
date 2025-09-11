@@ -384,7 +384,7 @@ export default function SearsDriveEnrollment() {
                     ) : (
                       <>
                         <Upload className="h-4 w-4 mr-2" />
-                        Submit Enrollment
+                        Submit BYOV Program Enrollment
                       </>
                     )}
                   </Button>
