@@ -1,4 +1,5 @@
-import { Switch, Route } from "wouter";
+import { useState, useEffect } from "react";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -36,6 +37,18 @@ import { MainContent } from "@/components/layout/main-content";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
+  const [, setLocation] = useLocation();
+  const [redirected, setRedirected] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading && !user && !redirected) {
+      const path = window.location.pathname;
+      const search = window.location.search || "";
+      const hash = window.location.hash || "";
+      setRedirected(true);
+      setLocation(`/login?next=${encodeURIComponent(`${path}${search}${hash}`)}`);
+    }
+  }, [isLoading, user, redirected, setLocation]);
 
   if (isLoading) {
     return (
@@ -54,14 +67,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    return (
-      <>
-        <div className="dev-banner">
-          🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
-        </div>
-        <Login />
-      </>
-    );
+    // Return null during redirect
+    return null;
   }
 
   return (
