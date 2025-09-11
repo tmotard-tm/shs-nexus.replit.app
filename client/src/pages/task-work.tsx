@@ -10,6 +10,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { BackButton } from "@/components/ui/back-button";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import type { QueueItem, QueueModule, User } from "@shared/schema";
 import { 
   FileText, 
@@ -152,6 +153,13 @@ export default function TaskWorkPage() {
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
+                  <CopyLinkButton
+                    variant="icon"
+                    preserveQuery={true}
+                    preserveHash={true}
+                    data-testid="button-copy-task-link"
+                    className="shrink-0"
+                  />
                   <Badge 
                     variant={taskData.status === "completed" ? "default" : "secondary"}
                     data-testid="task-status-badge"
