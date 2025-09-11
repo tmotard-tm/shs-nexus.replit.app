@@ -1,0 +1,287 @@
+Sears In-Home Operations Portal — Unified Spec (Final)
+0) Non-negotiables
+
+One login, one app. No per-department accounts.
+
+Queues are departments (filters), not separate apps.
+
+Deep links for every form and every task work page.
+
+Pick up opens an editable Work Module (checklist), not a read-only view.
+
+1) Departments / Queues (use these codes)
+
+FLEET
+
+ASSETS
+
+PARTS_RECOVERY
+
+NTAO ← (rename from TAO)
+
+DECOM
+
+BILLING (refunds/adjustments)
+
+Agents can have access to one or more queues via user_department_access.
+
+2) Deep links (forms & tasks)
+
+Forms (dashboard tiles):
+
+/forms/create-vehicle
+
+/forms/assign-vehicle
+
+/forms/onboarding
+
+/forms/offboarding
+
+/forms/byov-enrollment
+
+Tasks (work pages):
+
+/tasks/{id}/work
+
+Auth redirect: if unauthenticated, send to /login?next=<path> and return after login.
+
+Copy Link button on every tile and every form header (like the Refund Form UI).
+
+Prefill via query: allow safe prefill of non-sensitive fields, e.g.
+/forms/assign-vehicle?employee=55231&vehicle=TRK001&start=2025-09-15&type=Permanent
+
+3) Forms → Task Router (server-side)
+
+All forms submit to one endpoint; the server creates 1..N tasks and returns them.
+
+Endpoint
+
+POST /api/forms/{key}/submit
+Body: { ...form fields... }
+→ Validates → Creates tasks via router →
+Response:
+{
+  "task_ids": [123,124,...],
+  "created": [
+    {"id":123,"department":"FLEET","type":"Stop Truck Replenishment"},
+    {"id":124,"department":"PARTS_RECOVERY","type":"Full Truck Count & Return"}
+  ]
+}
+
+
+Task shape
+
+{
+  "id": 123,
+  "type": "string",
+  "department": "FLEET|ASSETS|PARTS_RECOVERY|NTAO|DECOM|BILLING",
+  "title": "Readable title",
+  "priority": 1,
+  "assigned_to": null,
+  "status": "NEW",
+  "template_type": "string",   // binds to checklist template
+  "context": { ... }           // form data needed to work the task
+}
+
+4) Routing rules (what each form must create)
+A) Create a New Vehicle (key: create-vehicle)
+
+Spawns
+
+FLEET → Create Vehicle Record (template: fleet_create_vehicle_v1, priority:2)
+
+(optional flag) DECOM → Prep for Retirement/Transfer (decom_prep_v1, priority:3)
+
+B) Assign or Update a Vehicle (key: assign-vehicle)
+
+Spawns
+
+FLEET → Assign Vehicle to Tech (fleet_assign_vehicle_v1, priority:1)
+
+PARTS_RECOVERY → Initialize Truck Stock Profile (parts_init_truck_profile_v1, priority:2)
+
+ASSETS → Issue/Verify Assets (phone/tools) (assets_issue_v1, priority:2)
+
+NTAO → Update Technician Profile (ntao_update_profile_v1, priority:3)
+
+C) Onboarding (key: onboarding)
+
+Spawns
+
+NTAO → Create Tech Record & Access (ntao_create_user_v1, priority:1)
+
+ASSETS → Provision Assets (assets_provision_v1, priority:2)
+
+(if vehicle needed) FLEET → Queue Vehicle Assignment (fleet_queue_assignment_v1, priority:2)
+
+(if applicable) PARTS_RECOVERY → Seed/Enable Truck Stock (parts_seed_stock_v1, priority:3)
+
+D) Offboarding (key: offboarding)
+
+Spawns
+
+FLEET → Stop Truck Stock Replenishment (fleet_stop_replenishment_v1, priority:1)
+
+PARTS_RECOVERY → Full Truck Count & Return (parts_full_recovery_v1, priority:1)
+
+ASSETS → Collect Company Assets (assets_collect_v1, priority:1)
+
+FLEET → Vehicle Return / Reassign (fleet_return_vehicle_v1, priority:2)
+
+NTAO → Access Removal / Separation Notice (ntao_access_remove_v1, priority:1)
+
+E) Sears Drive / BYOV Program (key: byov-enrollment)
+
+Spawns
+
+ASSETS → BYOV Agreement Acknowledgment (assets_byov_agreement_v1, priority:1)
+
+PARTS_RECOVERY → BYOV Parts Policy Setup (parts_byov_rules_v1, priority:2)
+
+NTAO → **
+
+You said:
+parts recovery shoul be intventory an there is no decom or billing 
+ChatGPT said:
+
+Got it ✅ Thanks for clarifying. Let’s lock this down so you can give Replit a single “source of truth”:
+
+Rename PARTS_RECOVERY → INVENTORY
+
+Remove DECOM and BILLING completely from the system.
+
+Final queues = FLEET, ASSETS, INVENTORY, NTAO
+
+Here’s the fully updated spec:
+
+Sears In-Home Operations Portal — Unified Spec (Final, Cleaned)
+0) Non-negotiables
+
+One login, one app. No per-department accounts.
+
+Queues = departments. Agents switch queues via filter.
+
+Deep links for all forms + tasks.
+
+Pick up opens an editable Work Module (checklist).
+
+1) Departments / Queues (final list)
+
+FLEET
+
+ASSETS
+
+INVENTORY ← (was Parts Recovery)
+
+NTAO
+
+2) Deep links
+
+Forms:
+/forms/create-vehicle
+/forms/assign-vehicle
+/forms/onboarding
+/forms/offboarding
+/forms/byov-enrollment
+
+Tasks: /tasks/{id}/work
+
+Auth redirect: /login?next=<path>
+
+Copy Link button on each tile & header.
+
+Prefill supported via query params (safe fields only).
+
+3) Forms → Task Router (server-side)
+
+All forms post to /api/forms/{key}/submit.
+Server creates 1..N tasks, each tied to the right queue.
+
+Task shape
+
+{
+  "id": 123,
+  "type": "Stop Truck Stock Replenishment",
+  "department": "FLEET|ASSETS|INVENTORY|NTAO",
+  "title": "Readable title",
+  "priority": 1,
+  "assigned_to": null,
+  "status": "NEW",
+  "template_type": "string",
+  "context": { "form_key": "offboarding", "...": "..." }
+}
+
+4) Routing rules (by form)
+A) Create a New Vehicle
+
+FLEET → Create Vehicle Record (fleet_create_vehicle_v1, priority 2)
+
+B) Assign or Update a Vehicle
+
+FLEET → Assign Vehicle to Tech (fleet_assign_vehicle_v1, priority 1)
+
+INVENTORY → Initialize Truck Stock Profile (inventory_init_truck_profile_v1, priority 2)
+
+ASSETS → Issue/Verify Assets (phone/tools) (assets_issue_v1, priority 2)
+
+NTAO → Update Technician Profile (ntao_update_profile_v1, priority 3)
+
+C) Onboarding
+
+NTAO → Create Tech Record & Access (ntao_create_user_v1, priority 1)
+
+ASSETS → Provision Assets (assets_provision_v1, priority 2)
+
+FLEET (if vehicle needed) → Queue Vehicle Assignment (fleet_queue_assignment_v1, priority 2)
+
+INVENTORY (if vehicle) → Seed Truck Stock (inventory_seed_stock_v1, priority 3)
+
+D) Offboarding
+
+FLEET → Stop Truck Stock Replenishment (fleet_stop_replenishment_v1, priority 1)
+
+INVENTORY → Full Truck Count & Return (inventory_full_recovery_v1, priority 1)
+
+ASSETS → Collect Company Assets (assets_collect_v1, priority 1)
+
+FLEET → Vehicle Return / Reassign (fleet_return_vehicle_v1, priority 2)
+
+NTAO → Access Removal / Separation Notice (ntao_access_remove_v1, priority 1)
+
+E) Sears Drive / BYOV Program
+
+ASSETS → BYOV Agreement Acknowledgment (assets_byov_agreement_v1, priority 1)
+
+INVENTORY → BYOV Inventory Policy Setup (inventory_byov_rules_v1, priority 2)
+
+NTAO → Payroll/Compliance Flag (ntao_byov_flag_v1, priority 2)
+
+5) Work Module (Checklists)
+
+/tasks/:id/work = editable module.
+
+Templates are JSON (steps + fields).
+
+Required steps validated before “Complete.”
+
+“Pick up” → claims task → opens Work Module.
+
+“View” = read-only.
+
+File upload fields supported (photos, manifests, receipts).
+
+Progress auto-saved + reloadable.
+
+6) Acceptance criteria
+
+One login across all queues.
+
+Each form submission spawns tasks in the correct queues per rules above.
+
+Queues filter by department; agents only see what they’re permitted.
+
+Pick up → /tasks/:id/work with correct checklist.
+
+Deep links for forms and tasks work with login redirect.
+
+Offboarding spawns all required tasks across Fleet, Assets, Inventory, NTAO.
