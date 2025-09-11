@@ -36,6 +36,7 @@ import {
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
+import { WorkModuleDialog } from "@/components/work-module-dialog";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
 
 // Module labels for display
@@ -68,6 +69,8 @@ export default function UnifiedQueueManagement() {
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [pickUpItem, setPickUpItem] = useState<CombinedQueueItem | null>(null);
+  const [workModuleItem, setWorkModuleItem] = useState<CombinedQueueItem | null>(null);
+  const [isWorkModuleOpen, setIsWorkModuleOpen] = useState(false);
 
   // Auto-populate module selection based on user's accessible queues
   useEffect(() => {
@@ -261,7 +264,8 @@ export default function UnifiedQueueManagement() {
   };
 
   const handleStartWork = (item: CombinedQueueItem) => {
-    startWorkMutation.mutate({ module: item.module, id: item.id });
+    setWorkModuleItem(item);
+    setIsWorkModuleOpen(true);
   };
 
   const handleCompleteTask = (item: CombinedQueueItem) => {
@@ -927,6 +931,20 @@ export default function UnifiedQueueManagement() {
           users={users}
           queueModule={pickUpItem?.module}
           isLoading={assignMutation.isPending}
+        />
+
+        {/* Work Module Dialog */}
+        <WorkModuleDialog
+          isOpen={isWorkModuleOpen}
+          onOpenChange={setIsWorkModuleOpen}
+          queueItem={workModuleItem}
+          module={workModuleItem?.module}
+          currentUser={user}
+          users={users}
+          onTaskCompleted={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/queues/stats"] });
+          }}
         />
       </div>
     </MainContent>

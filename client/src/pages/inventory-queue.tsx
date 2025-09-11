@@ -15,11 +15,14 @@ import type { QueueItem, User } from "@shared/schema";
 import { Clock, User as UserIcon, Save, Eye, Truck } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
+import { WorkModuleDialog } from "@/components/work-module-dialog";
 
 export default function InventoryQueuePage() {
   const [viewQueueItem, setViewQueueItem] = useState<QueueItem | null>(null);
   const [workingOnItem, setWorkingOnItem] = useState<QueueItem | null>(null);
   const [pickUpItem, setPickUpItem] = useState<QueueItem | null>(null);
+  const [workModuleItem, setWorkModuleItem] = useState<QueueItem | null>(null);
+  const [isWorkModuleOpen, setIsWorkModuleOpen] = useState(false);
   const { toast } = useToast();
 
   // Fetch Inventory Control queue items only
@@ -46,10 +49,11 @@ export default function InventoryQueuePage() {
       apiRequest("PATCH", `/api/inventory-queue/${queueItemId}/assign`, { assigneeId }),
     onSuccess: (_, { queueItemId }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory-queue"] });
-      // Find the assigned item and open it automatically
+      // Find the assigned item and open work module automatically
       const assignedItem = queueItems.find(item => item.id === queueItemId);
       if (assignedItem) {
-        setWorkingOnItem(assignedItem);
+        setWorkModuleItem(assignedItem);
+        setIsWorkModuleOpen(true);
       }
       toast({
         title: "Task Picked Up",
@@ -361,83 +365,43 @@ export default function InventoryQueuePage() {
                   </Button>
                 )}
                 {viewQueueItem.status === "in_progress" && viewQueueItem.assignedTo === user?.id && (
-                  <Button 
-                    onClick={() => completeMutation.mutate(viewQueueItem.id)}
-                    disabled={completeMutation.isPending}
-                  >
-                    Mark Complete
-                  </Button>
+                  <>
+                    <Button 
+                      onClick={() => {
+                        setWorkModuleItem(viewQueueItem);
+                        setIsWorkModuleOpen(true);
+                      }}
+                      data-testid={`button-start-work-${viewQueueItem.id}`}
+                    >
+                      Start Work
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => completeMutation.mutate(viewQueueItem.id)}
+                      disabled={completeMutation.isPending}
+                    >
+                      Mark Complete
+                    </Button>
+                  </>
                 )}
               </div>
             )}
           </DialogContent>
         </Dialog>
 
-        {/* Work Module Dialog - Opens automatically when user picks up a task */}
-        <Dialog open={!!workingOnItem} onOpenChange={() => setWorkingOnItem(null)}>
-          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Working on Task - Inventory Control</DialogTitle>
-              <DialogDescription>
-                Complete your assigned task and add notes about your work
-              </DialogDescription>
-            </DialogHeader>
-            {workingOnItem && (
-              <div className="space-y-6">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 dark:bg-blue-900/20 dark:border-blue-800">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Badge variant="default">In Progress</Badge>
-                    <span className="text-sm font-medium">Task #{workingOnItem.id.slice(-2)}</span>
-                  </div>
-                  <h3 className="font-semibold text-lg">{workingOnItem.title}</h3>
-                  <p className="text-sm text-muted-foreground mt-1">{workingOnItem.description}</p>
-                </div>
-
-                {/* Task Details */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="font-semibold">Tech ID</Label>
-                    <p className="text-sm">{getItemDetails(workingOnItem).techId}</p>
-                  </div>
-                  <div>
-                    <Label className="font-semibold">District</Label>
-                    <p className="text-sm">{getItemDetails(workingOnItem).district}</p>
-                  </div>
-                  <div>
-                    <Label className="font-semibold">Service Order</Label>
-                    <p className="text-sm">{getItemDetails(workingOnItem).serviceOrder}</p>
-                  </div>
-                  <div>
-                    <Label className="font-semibold">Amount</Label>
-                    <p className="text-sm">{getItemDetails(workingOnItem).amount}</p>
-                  </div>
-                </div>
-
-                {/* Work Notes Section */}
-                <NotesSection item={workingOnItem} />
-
-                <div className="flex gap-3 pt-4 border-t">
-                  <Button 
-                    onClick={() => {
-                      completeMutation.mutate(workingOnItem.id);
-                      setWorkingOnItem(null);
-                    }}
-                    disabled={completeMutation.isPending}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    Complete Task
-                  </Button>
-                  <Button 
-                    variant="outline"
-                    onClick={() => setWorkingOnItem(null)}
-                  >
-                    Save Progress & Close
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+        {/* Work Module Dialog */}
+        <WorkModuleDialog
+          isOpen={isWorkModuleOpen}
+          onOpenChange={setIsWorkModuleOpen}
+          queueItem={workModuleItem}
+          module="inventory"
+          currentUser={user}
+          users={users}
+          onTaskCompleted={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/inventory-queue"] });
+            setViewQueueItem(null);
+          }}
+        />
       </div>
     </MainContent>
   );

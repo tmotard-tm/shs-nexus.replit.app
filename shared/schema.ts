@@ -172,6 +172,26 @@ export const insertStorageSpotSchema = createInsertSchema(storageSpots).omit({
   updatedAt: true,
 });
 
+// API endpoint validation schemas
+export const saveProgressSchema = z.object({
+  notes: z.string().optional(),
+  adminNotes: z.string().optional(),
+  assignedTo: z.string().optional(),
+  lastWorkedBy: z.string().optional(), 
+  workInProgress: z.boolean().optional().default(false),
+});
+
+export const completeQueueItemSchema = z.object({
+  completedBy: z.string().min(1, "completedBy is required"),
+  finalNotes: z.string().optional(),
+  decisionType: z.string().optional(),
+  requiresReview: z.boolean().optional().default(false),
+  adminNotes: z.string().optional(),
+});
+
+export const assignQueueItemSchema = z.object({
+  assigneeId: z.string().min(1, "assigneeId is required"),
+});
 
 // Types
 export type User = typeof users.$inferSelect & {
@@ -195,3 +215,8 @@ export type InsertStorageSpot = z.infer<typeof insertStorageSpotSchema>;
 export type CombinedQueueItem = QueueItem & {
   module: QueueModule;
 };
+
+// API endpoint types
+export type SaveProgressPayload = z.infer<typeof saveProgressSchema>;
+export type CompleteQueueItemPayload = z.infer<typeof completeQueueItemSchema>;
+export type AssignQueueItemPayload = z.infer<typeof assignQueueItemSchema>;

@@ -14,10 +14,13 @@ import type { QueueItem, User } from "@shared/schema";
 import { Clock, User as UserIcon, Save } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
+import { WorkModuleDialog } from "@/components/work-module-dialog";
 
 export default function NTAOQueuePage() {
   const [viewQueueItem, setViewQueueItem] = useState<QueueItem | null>(null);
   const [pickUpItem, setPickUpItem] = useState<QueueItem | null>(null);
+  const [workModuleItem, setWorkModuleItem] = useState<QueueItem | null>(null);
+  const [isWorkModuleOpen, setIsWorkModuleOpen] = useState(false);
   const { toast } = useToast();
 
   // Fetch NTAO queue items only
@@ -441,12 +444,24 @@ export default function NTAOQueuePage() {
                   </Button>
                 )}
                 {viewQueueItem.status === "in_progress" && viewQueueItem.assignedTo === user?.id && (
-                  <Button 
-                    onClick={() => completeMutation.mutate(viewQueueItem.id)}
-                    disabled={completeMutation.isPending}
-                  >
-                    Mark Complete
-                  </Button>
+                  <>
+                    <Button 
+                      onClick={() => {
+                        setWorkModuleItem(viewQueueItem);
+                        setIsWorkModuleOpen(true);
+                      }}
+                      data-testid={`button-start-work-${viewQueueItem.id}`}
+                    >
+                      Start Work
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => completeMutation.mutate(viewQueueItem.id)}
+                      disabled={completeMutation.isPending}
+                    >
+                      Mark Complete
+                    </Button>
+                  </>
                 )}
               </div>
             )}
@@ -465,6 +480,20 @@ export default function NTAOQueuePage() {
           users={users}
           queueModule="ntao"
           isLoading={assignMutation.isPending}
+        />
+
+        {/* Work Module Dialog */}
+        <WorkModuleDialog
+          isOpen={isWorkModuleOpen}
+          onOpenChange={setIsWorkModuleOpen}
+          queueItem={workModuleItem}
+          module="ntao"
+          currentUser={user}
+          users={users}
+          onTaskCompleted={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/ntao-queue"] });
+            setViewQueueItem(null);
+          }}
         />
       </div>
     </MainContent>

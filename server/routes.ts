@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema } from "@shared/schema";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
@@ -849,11 +849,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { module, id } = req.params;
-      const { assigneeId } = req.body;
       
-      if (!assigneeId) {
-        return res.status(400).json({ message: "assigneeId is required" });
+      // Validate request body
+      const validation = assignQueueItemSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: "Invalid request data", 
+          errors: validation.error.errors 
+        });
       }
+      
+      const { assigneeId } = validation.data;
       
       const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
       if (!validModules.includes(module)) {
@@ -923,11 +929,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { module, id } = req.params;
-      const { completedBy } = req.body;
       
-      if (!completedBy) {
-        return res.status(400).json({ message: "completedBy is required" });
+      // Validate request body
+      const validation = completeQueueItemSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: "Invalid request data", 
+          errors: validation.error.errors 
+        });
       }
+      
+      const { completedBy, finalNotes, decisionType, requiresReview, adminNotes } = validation.data;
       
       const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
       if (!validModules.includes(module)) {
@@ -942,15 +954,118 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied to this queue" });
       }
       
+      // Update the queue item with completion data including decision details
       const updatedItem = await storage.completeUnifiedQueueItem(module as any, id, completedBy);
       if (!updatedItem) {
         return res.status(404).json({ message: "Queue item not found" });
+      }
+
+      // Save the additional completion metadata
+      if (finalNotes || decisionType || adminNotes) {
+        const currentItem = await storage.getUnifiedQueueItem(module as any, id);
+        if (currentItem) {
+          const existingData = currentItem.data ? JSON.parse(currentItem.data) : {};
+          const completionData = {
+            ...existingData,
+            completion: {
+              finalNotes,
+              decisionType,
+              requiresReview,
+              adminNotes,
+              completedAt: new Date().toISOString(),
+              completedBy
+            }
+          };
+
+          await storage.updateUnifiedQueueItem(module as any, id, {
+            data: JSON.stringify(completionData),
+            notes: finalNotes
+          });
+        }
       }
       
       res.json({ ...updatedItem, module });
     } catch (error) {
       console.error('Error completing unified queue item:', error);
       res.status(500).json({ message: "Failed to complete queue item" });
+    }
+  });
+
+  // Save progress on unified queue item
+  app.patch("/api/queues/:module/:id/save-progress", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      
+      const { module, id } = req.params;
+      
+      // Validate request body
+      const validation = saveProgressSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: "Invalid request data", 
+          errors: validation.error.errors 
+        });
+      }
+      
+      const { notes, adminNotes, assignedTo, lastWorkedBy, workInProgress } = validation.data;
+      
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
+      if (!validModules.includes(module)) {
+        return res.status(400).json({ 
+          message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 
+        });
+      }
+      
+      // Enforce access control
+      if (currentUser.role !== "superadmin" && 
+          (!currentUser.accessibleQueues || !currentUser.accessibleQueues.includes(module as any))) {
+        return res.status(403).json({ message: "Access denied to this queue" });
+      }
+      
+      // Get current item and update progress
+      const currentItem = await storage.getUnifiedQueueItem(module as any, id);
+      if (!currentItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+
+      // Parse existing data and add progress information
+      const existingData = currentItem.data ? JSON.parse(currentItem.data) : {};
+      const progressData = {
+        ...existingData,
+        progress: {
+          lastWorkedBy,
+          lastWorkedAt: new Date().toISOString(),
+          workInProgress: workInProgress || false,
+          adminNotes
+        }
+      };
+
+      // Update the item with progress
+      const updateData: any = {
+        updatedAt: new Date(),
+        data: JSON.stringify(progressData)
+      };
+
+      if (notes) {
+        updateData.notes = notes;
+      }
+      
+      if (assignedTo) {
+        updateData.assignedTo = assignedTo;
+      }
+
+      const updatedItem = await storage.updateUnifiedQueueItem(module as any, id, updateData);
+      if (!updatedItem) {
+        return res.status(404).json({ message: "Failed to update queue item" });
+      }
+      
+      res.json({ ...updatedItem, module });
+    } catch (error) {
+      console.error('Error saving progress on unified queue item:', error);
+      res.status(500).json({ message: "Failed to save progress on queue item" });
     }
   });
 

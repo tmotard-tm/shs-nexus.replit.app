@@ -124,6 +124,8 @@ export interface IStorage {
     completed: number;
     total: number;
   }>;
+  getUnifiedQueueItem(module: QueueModule, id: string): Promise<QueueItem | undefined>;
+  updateUnifiedQueueItem(module: QueueModule, id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
   assignUnifiedQueueItem(module: QueueModule, id: string, assigneeId: string): Promise<QueueItem | undefined>;
   startWorkUnifiedQueueItem(module: QueueModule, id: string, workerId: string): Promise<QueueItem | undefined>;
   completeUnifiedQueueItem(module: QueueModule, id: string, completedBy: string): Promise<QueueItem | undefined>;
@@ -1418,6 +1420,36 @@ export class MemStorage implements IStorage {
         return this.completeInventoryQueueItem(id, completedBy);
       case 'fleet':
         return this.completeFleetQueueItem(id, completedBy);
+      default:
+        return undefined;
+    }
+  }
+
+  async getUnifiedQueueItem(module: QueueModule, id: string): Promise<QueueItem | undefined> {
+    switch (module) {
+      case 'ntao':
+        return this.getNTAOQueueItem(id);
+      case 'assets':
+        return this.getAssetsQueueItem(id);
+      case 'inventory':
+        return this.getInventoryQueueItem(id);
+      case 'fleet':
+        return this.getFleetQueueItem(id);
+      default:
+        return undefined;
+    }
+  }
+
+  async updateUnifiedQueueItem(module: QueueModule, id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    switch (module) {
+      case 'ntao':
+        return this.updateNTAOQueueItem(id, updates);
+      case 'assets':
+        return this.updateAssetsQueueItem(id, updates);
+      case 'inventory':
+        return this.updateInventoryQueueItem(id, updates);
+      case 'fleet':
+        return this.updateFleetQueueItem(id, updates);
       default:
         return undefined;
     }
