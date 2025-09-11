@@ -56,6 +56,7 @@ export function WorkModuleDialog({
   const [requiresReview, setRequiresReview] = useState<boolean>(false);
   const [assignedTo, setAssignedTo] = useState<string>("");
   const [adminNotes, setAdminNotes] = useState<string>("");
+  const [approvedAmount, setApprovedAmount] = useState<string>("");
 
   // Parse task data
   const taskData = queueItem?.data ? JSON.parse(queueItem.data) : {};
@@ -71,6 +72,7 @@ export function WorkModuleDialog({
       setFinalResolution("");
       setCompleteFinal(false);
       setRequiresReview(false);
+      setApprovedAmount("");
     }
   }, [queueItem]);
 
@@ -113,7 +115,8 @@ export function WorkModuleDialog({
         decisionType,
         finalResolution,
         requiresReview,
-        adminNotes
+        adminNotes,
+        approvedAmount
       });
     },
     onSuccess: () => {
@@ -163,7 +166,8 @@ export function WorkModuleDialog({
       adminNotes,
       assignedTo,
       lastWorkedBy: currentUser?.id,
-      workInProgress: true
+      workInProgress: true,
+      approvedAmount
     };
     
     saveProgressMutation.mutate(progressData);
@@ -378,6 +382,31 @@ export function WorkModuleDialog({
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Approved Amount Field - Show only when Final Disposition is selected */}
+              {decisionType === "final_disposition" && (
+                <div>
+                  <Label htmlFor="approved-amount">Approved Amount</Label>
+                  <div className="relative">
+                    <Input
+                      id="approved-amount"
+                      type="text"
+                      placeholder="0.00"
+                      value={approvedAmount}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Allow empty string, digits, and single decimal point
+                        if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
+                          setApprovedAmount(value);
+                        }
+                      }}
+                      className="pl-6"
+                      data-testid="input-approved-amount"
+                    />
+                    <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-muted-foreground">$</span>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center space-x-2">
                 <Checkbox 
