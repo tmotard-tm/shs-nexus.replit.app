@@ -97,18 +97,12 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
   }, [hawaiiVehicles]);
 
   return (
-    <div className="bg-gray-100 rounded-lg overflow-hidden">
-      <div className="bg-gray-800 text-white px-3 py-1 text-sm font-medium flex justify-between">
-        <span>Hawaii</span>
-        <span className="text-xs opacity-75">{hawaiiVehicles.length} vehicles</span>
-      </div>
-      <div 
-        ref={mapRef} 
-        style={{ 
-          height: '200px',
-          width: '100%'
-        }}
-      />
-    </div>
+    <div 
+      ref={mapRef} 
+      style={{ 
+        height: '300px',
+        width: '100%'
+      }}
+    />
   );
 }
