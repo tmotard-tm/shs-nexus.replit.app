@@ -277,6 +277,38 @@ export default function OffboardVehicleLocation() {
         })
       });
 
+      // Step 4: Create Inventory task (remove vehicle from TPMS) - runs in parallel
+      await apiRequest("POST", "/api/inventory-queue", {
+        workflowType: "offboarding",
+        title: `Remove Vehicle from TPMS - ${vehicleOffboard.vehicleNumber}`,
+        description: `Remove terminated technician's truck ${vehicleOffboard.vehicleNumber} from TPMS assignment. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Remove the vehicle assignment from the Truck Parts Management System.`,
+        priority: "high",
+        data: JSON.stringify({
+          workflowType: "offboarding_sequence",
+          step: "inventory_remove_from_tpms",
+          workflowId: workflowId,
+          workflowStep: 4,
+          submitterInfo: user ? {
+            id: user.id,
+            name: user.username || user.email,
+            email: user.email
+          } : {
+            id: "anonymous",
+            name: "Anonymous User",
+            email: null
+          },
+          ...sharedTriggerData,
+          instructions: [
+            "Access TPMS (Truck Parts Management System)",
+            "Locate vehicle assignment for terminated technician",
+            `Remove vehicle ${vehicleOffboard.vehicleNumber} from TPMS assignment`,
+            "Update vehicle status to unassigned/available",
+            "Clear any pending parts orders for this vehicle/technician combination",
+            "Mark task complete when vehicle is removed from TPMS"
+          ]
+        })
+      });
+
       // Send email notification to OneCard Help Desk for credit card deactivation
       try {
         await apiRequest("POST", "/api/send-deactivation-email", {
@@ -307,14 +339,14 @@ export default function OffboardVehicleLocation() {
 
     toast({
       title: "Offboarding Workflow Started",
-      description: `3 parallel tasks created for ${vehicleOffboard.techName}: NTAO, Assets, and Fleet Management.`,
+      description: `4 parallel tasks created for ${vehicleOffboard.techName}: NTAO, Assets, Fleet Management, and Inventory (TPMS removal).`,
     });
     
     // Show secondary notification about workflow sequence
     setTimeout(() => {
       toast({
         title: "Workflow Sequence",
-        description: `✅ NTAO + Assets + Fleet (parallel) → Inventory & Assets (parts count) → Fleet (vehicle readiness)`,
+        description: `✅ NTAO + Assets + Fleet + Inventory TPMS (parallel) → Inventory & Assets (parts count) → Fleet (vehicle readiness)`,
         variant: "default"
       });
     }, 2000);
