@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { RequestItem } from "@/components/request-item";
@@ -14,8 +14,10 @@ import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { Request } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { MainContent } from "@/components/layout/main-content";
 import { Plus } from "lucide-react";
+import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 
 export default function RequesterInterface() {
   const { user } = useAuth();
@@ -30,6 +32,32 @@ export default function RequesterInterface() {
     priority: "medium",
     targetApi: "",
   });
+
+  // Apply prefill data from query parameters on component mount
+  useEffect(() => {
+    const requestFields = ['title', 'description', 'type', 'priority', 'targetApi'];
+    const requestPrefill = getPrefillParams(requestFields);
+
+    if (Object.keys(requestPrefill).length > 0) {
+      const processedData: any = {};
+      
+      // Process and validate individual fields
+      if (requestPrefill.title) processedData.title = commonValidators.text(requestPrefill.title);
+      if (requestPrefill.description) processedData.description = commonValidators.text(requestPrefill.description);
+      if (requestPrefill.type) processedData.type = commonValidators.status(requestPrefill.type);
+      if (requestPrefill.priority) processedData.priority = commonValidators.priority(requestPrefill.priority);
+      if (requestPrefill.targetApi) processedData.targetApi = commonValidators.status(requestPrefill.targetApi);
+      
+      // Copy remaining fields (will only copy if they passed security validation)
+      Object.keys(requestPrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && requestPrefill[key]) {
+          processedData[key] = requestPrefill[key];
+        }
+      });
+      
+      setFormData(prev => ({ ...prev, ...processedData }));
+    }
+  }, []); // Run once on mount
 
   const { data: requests, isLoading } = useQuery({
     queryKey: ["/api/requests"],
@@ -100,10 +128,21 @@ export default function RequesterInterface() {
           <div className="lg:col-span-2">
             <Card>
               <CardHeader>
-                <CardTitle data-testid="text-my-requests-title">My Requests</CardTitle>
-                <CardDescription>
-                  View and track all your submitted requests
-                </CardDescription>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle data-testid="text-my-requests-title">My Requests</CardTitle>
+                    <CardDescription>
+                      View and track all your submitted requests
+                    </CardDescription>
+                  </div>
+                  <CopyLinkButton
+                    variant="icon"
+                    preserveQuery={true}
+                    preserveHash={true}
+                    data-testid="button-copy-form-link"
+                    className="shrink-0"
+                  />
+                </div>
               </CardHeader>
               <CardContent>
                 {isLoading ? (

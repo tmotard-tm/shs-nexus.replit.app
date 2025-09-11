@@ -13,7 +13,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { useToast } from "@/hooks/use-toast";
+import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 import { 
   activeVehicles,
   getBrandingOptions, 
@@ -117,6 +119,74 @@ export default function UpdateVehicle() {
     { id: "4", name: "Robert Wilson", department: "Finance" }
   ];
   
+  // Apply prefill data from query parameters on component mount
+  useEffect(() => {
+    const updateFields = [
+      'licensePlate', 'color', 'branding', 'interior', 'tuneStatus', 'city', 'state', 
+      'zip', 'region', 'district'
+    ];
+    const employeeFields = [
+      'firstName', 'lastName', 'email', 'phone', 'department', 'position', 'manager',
+      'enterpriseId', 'region', 'district', 'requisitionId', 'techId', 'proposedRouteStartDate',
+      'emergencyContact', 'emergencyPhone'
+    ];
+    const searchFields = ['searchQuery', 'brandingFilter', 'interiorFilter', 'tuneStatusFilter'];
+
+    const updatePrefill = getPrefillParams(updateFields);
+    const employeePrefill = getPrefillParams(employeeFields);
+    const searchPrefill = getPrefillParams(searchFields);
+
+    // Apply vehicle update prefill data
+    if (Object.keys(updatePrefill).length > 0) {
+      const processedData: any = {};
+      if (updatePrefill.licensePlate) processedData.licensePlate = commonValidators.licensePlate(updatePrefill.licensePlate);
+      if (updatePrefill.zip) processedData.zip = commonValidators.zipCode(updatePrefill.zip);
+      if (updatePrefill.city) processedData.city = commonValidators.text(updatePrefill.city);
+      if (updatePrefill.state) processedData.state = commonValidators.stateAbbr(updatePrefill.state);
+      
+      Object.keys(updatePrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && updatePrefill[key]) {
+          processedData[key] = updatePrefill[key];
+        }
+      });
+      
+      setVehicleUpdateData(prev => ({ ...prev, ...processedData }));
+    }
+
+    // Apply employee prefill data
+    if (Object.keys(employeePrefill).length > 0) {
+      const processedData: any = {};
+      if (employeePrefill.email) processedData.email = commonValidators.email(employeePrefill.email);
+      if (employeePrefill.phone) processedData.phone = commonValidators.phone(employeePrefill.phone);
+      if (employeePrefill.firstName) processedData.firstName = commonValidators.employeeName(employeePrefill.firstName);
+      if (employeePrefill.lastName) processedData.lastName = commonValidators.employeeName(employeePrefill.lastName);
+      if (employeePrefill.department) processedData.department = commonValidators.department(employeePrefill.department);
+      if (employeePrefill.position) processedData.position = commonValidators.position(employeePrefill.position);
+      if (employeePrefill.enterpriseId) processedData.enterpriseId = commonValidators.employeeId(employeePrefill.enterpriseId);
+      if (employeePrefill.requisitionId) processedData.requisitionId = commonValidators.text(employeePrefill.requisitionId);
+      if (employeePrefill.techId) processedData.techId = commonValidators.text(employeePrefill.techId);
+      if (employeePrefill.proposedRouteStartDate) processedData.proposedRouteStartDate = commonValidators.date(employeePrefill.proposedRouteStartDate);
+      if (employeePrefill.emergencyContact) processedData.emergencyContact = commonValidators.employeeName(employeePrefill.emergencyContact);
+      if (employeePrefill.emergencyPhone) processedData.emergencyPhone = commonValidators.phone(employeePrefill.emergencyPhone);
+      
+      Object.keys(employeePrefill).forEach(key => {
+        if (!processedData.hasOwnProperty(key) && employeePrefill[key]) {
+          processedData[key] = employeePrefill[key];
+        }
+      });
+      
+      setEmployeeData(prev => ({ ...prev, ...processedData }));
+    }
+
+    // Apply search/filter prefill data
+    if (Object.keys(searchPrefill).length > 0) {
+      if (searchPrefill.searchQuery) setSearchQuery(searchPrefill.searchQuery);
+      if (searchPrefill.brandingFilter && searchPrefill.brandingFilter !== "all") setBrandingFilter(searchPrefill.brandingFilter);
+      if (searchPrefill.interiorFilter && searchPrefill.interiorFilter !== "all") setInteriorFilter(searchPrefill.interiorFilter);
+      if (searchPrefill.tuneStatusFilter && searchPrefill.tuneStatusFilter !== "all") setTuneStatusFilter(searchPrefill.tuneStatusFilter);
+    }
+  }, []); // Run once on mount
+
   // Count active filters
   const activeFiltersCount = [
     brandingFilter, interiorFilter, tuneStatusFilter, makeFilter, modelFilter,
@@ -200,6 +270,13 @@ export default function UpdateVehicle() {
                 <CardTitle className="flex items-center justify-between">
                   <span>Search Vehicles to Update</span>
                   <div className="flex items-center gap-2">
+                    <CopyLinkButton
+                      variant="icon"
+                      preserveQuery={true}
+                      preserveHash={true}
+                      data-testid="button-copy-form-link"
+                      className="shrink-0"
+                    />
                     {activeFiltersCount > 0 && (
                       <span className="text-sm bg-primary/10 text-primary px-2 py-1 rounded-full">
                         {activeFiltersCount} active

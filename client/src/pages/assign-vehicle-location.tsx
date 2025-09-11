@@ -118,10 +118,20 @@ export default function AssignVehicleLocation() {
     const rentalFields = ['isRental', 'rentalVanNumber', 'assignmentReason'];
     const searchFields = ['searchQuery', 'brandingFilter', 'interiorFilter', 'targetZipcode'];
 
-    const assignmentPrefill = getPrefillParams(assignmentFields);
-    const employeePrefill = getPrefillParams(employeeFields);
-    const rentalPrefill = getPrefillParams(rentalFields);
-    const searchPrefill = getPrefillParams(searchFields);
+    // Define alias mappings for specification compliance
+    const assignmentAliases = {
+      'employee': 'employeeId',      // specification example: ?employee=55231 maps to employeeId
+      'vehicle': 'vehicleId',        // specification example: ?vehicle=TRK001 maps to vehicleId
+      'vehicleNumber': 'vehicleId',  // alternative alias for vehicle identification
+      'start': 'startDate',          // specification example: ?start=2025-09-15 maps to startDate
+      'end': 'endDate',              // alternative alias for end date
+      'type': 'purpose'              // specification example: ?type=Permanent maps to purpose
+    };
+
+    const assignmentPrefill = getPrefillParams(assignmentFields, undefined, assignmentAliases) as Record<string, string>;
+    const employeePrefill = getPrefillParams(employeeFields) as Record<string, string>;
+    const rentalPrefill = getPrefillParams(rentalFields) as Record<string, string>;
+    const searchPrefill = getPrefillParams(searchFields) as Record<string, string>;
 
     // Apply assignment prefill data
     if (Object.keys(assignmentPrefill).length > 0) {
