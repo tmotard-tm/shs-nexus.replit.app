@@ -23,20 +23,19 @@ const hawaiiCoordinates = expandedCityCoordinates;
 export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
-  const markersRef = useRef<L.CircleMarker[]>([]);
+  const markersLayerRef = useRef<L.LayerGroup | null>(null);
 
   // Filter vehicles in Hawaii
   const hawaiiVehicles = filteredVehicles.filter(vehicle => 
     vehicle.state === 'HI'
   );
 
+  // Initialize map once
   useEffect(() => {
     if (!mapRef.current) return;
 
-    // Clean up existing map
-    if (mapInstance.current) {
-      mapInstance.current.remove();
-    }
+    // Clear container to prevent duplicates
+    mapRef.current.innerHTML = '';
 
     try {
       // Create Hawaii-focused map
@@ -47,41 +46,7 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
       }).addTo(map);
 
       mapInstance.current = map;
-      
-      // Add Hawaii vehicle markers
-      markersRef.current.forEach(marker => marker.remove());
-      markersRef.current = [];
-      
-      hawaiiVehicles.forEach((vehicle) => {
-        const coordinates = hawaiiCoordinates[vehicle.city.toUpperCase()];
-        if (!coordinates) return;
-        
-        const lat = coordinates[0] + (Math.random() - 0.5) * 0.02;
-        const lng = coordinates[1] + (Math.random() - 0.5) * 0.02;
-        
-        const color = statusColors[vehicle.branding as keyof typeof statusColors] || statusColors.default;
-        
-        const marker = L.circleMarker([lat, lng], {
-          radius: 5,
-          fillColor: color,
-          color: '#000',
-          weight: 1,
-          opacity: 0.8,
-          fillOpacity: 0.7
-        });
-        
-        marker.bindPopup(`
-          <div style="font-family: system-ui, sans-serif; min-width: 180px;">
-            <strong>${vehicle.modelYear} ${vehicle.makeName}</strong><br/>
-            <strong>VIN:</strong> ${vehicle.vin}<br/>
-            <strong>Location:</strong> ${vehicle.city}, HI<br/>
-            <strong>Status:</strong> ${vehicle.branding}
-          </div>
-        `);
-        
-        marker.addTo(map);
-        markersRef.current.push(marker);
-      });
+      markersLayerRef.current = L.layerGroup().addTo(map);
 
     } catch (error) {
       console.error('Error creating Hawaii map:', error);
@@ -93,6 +58,45 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
         mapInstance.current = null;
       }
     };
+  }, []);
+
+  // Update markers when data changes
+  useEffect(() => {
+    if (!mapInstance.current || !markersLayerRef.current) return;
+
+    // Clear existing markers
+    markersLayerRef.current.clearLayers();
+    
+    // Add Hawaii vehicle markers
+    hawaiiVehicles.forEach((vehicle) => {
+      const coordinates = hawaiiCoordinates[vehicle.city.toUpperCase()];
+      if (!coordinates) return;
+      
+      const lat = coordinates[0] + (Math.random() - 0.5) * 0.02;
+      const lng = coordinates[1] + (Math.random() - 0.5) * 0.02;
+      
+      const color = statusColors[vehicle.branding as keyof typeof statusColors] || statusColors.default;
+      
+      const marker = L.circleMarker([lat, lng], {
+        radius: 5,
+        fillColor: color,
+        color: '#000',
+        weight: 1,
+        opacity: 0.8,
+        fillOpacity: 0.7
+      });
+      
+      marker.bindPopup(`
+        <div style="font-family: system-ui, sans-serif; min-width: 180px;">
+          <strong>${vehicle.modelYear} ${vehicle.makeName}</strong><br/>
+          <strong>VIN:</strong> ${vehicle.vin}<br/>
+          <strong>Location:</strong> ${vehicle.city}, HI<br/>
+          <strong>Status:</strong> ${vehicle.branding}
+        </div>
+      `);
+      
+      markersLayerRef.current!.addLayer(marker);
+    });
   }, [hawaiiVehicles]);
 
   return (

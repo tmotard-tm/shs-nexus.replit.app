@@ -23,20 +23,19 @@ const puertoRicoCoordinates = expandedCityCoordinates;
 export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
-  const markersRef = useRef<L.CircleMarker[]>([]);
+  const markersLayerRef = useRef<L.LayerGroup | null>(null);
 
   // Filter vehicles in Puerto Rico
   const puertoRicoVehicles = filteredVehicles.filter(vehicle => 
     vehicle.state === 'PR'
   );
 
+  // Initialize map once
   useEffect(() => {
     if (!mapRef.current) return;
 
-    // Clean up existing map
-    if (mapInstance.current) {
-      mapInstance.current.remove();
-    }
+    // Clear container to prevent duplicates
+    mapRef.current.innerHTML = '';
 
     try {
       // Create Puerto Rico-focused map
@@ -47,41 +46,7 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
       }).addTo(map);
 
       mapInstance.current = map;
-      
-      // Add Puerto Rico vehicle markers
-      markersRef.current.forEach(marker => marker.remove());
-      markersRef.current = [];
-      
-      puertoRicoVehicles.forEach((vehicle) => {
-        const coordinates = puertoRicoCoordinates[vehicle.city.toUpperCase()];
-        if (!coordinates) return;
-        
-        const lat = coordinates[0] + (Math.random() - 0.5) * 0.02;
-        const lng = coordinates[1] + (Math.random() - 0.5) * 0.02;
-        
-        const color = statusColors[vehicle.branding as keyof typeof statusColors] || statusColors.default;
-        
-        const marker = L.circleMarker([lat, lng], {
-          radius: 5,
-          fillColor: color,
-          color: '#000',
-          weight: 1,
-          opacity: 0.8,
-          fillOpacity: 0.7
-        });
-        
-        marker.bindPopup(`
-          <div style="font-family: system-ui, sans-serif; min-width: 180px;">
-            <strong>${vehicle.modelYear} ${vehicle.makeName}</strong><br/>
-            <strong>VIN:</strong> ${vehicle.vin}<br/>
-            <strong>Location:</strong> ${vehicle.city}, PR<br/>
-            <strong>Status:</strong> ${vehicle.branding}
-          </div>
-        `);
-        
-        marker.addTo(map);
-        markersRef.current.push(marker);
-      });
+      markersLayerRef.current = L.layerGroup().addTo(map);
 
     } catch (error) {
       console.error('Error creating Puerto Rico map:', error);
@@ -93,6 +58,45 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
         mapInstance.current = null;
       }
     };
+  }, []);
+
+  // Update markers when data changes
+  useEffect(() => {
+    if (!mapInstance.current || !markersLayerRef.current) return;
+
+    // Clear existing markers
+    markersLayerRef.current.clearLayers();
+    
+    // Add Puerto Rico vehicle markers
+    puertoRicoVehicles.forEach((vehicle) => {
+      const coordinates = puertoRicoCoordinates[vehicle.city.toUpperCase()];
+      if (!coordinates) return;
+      
+      const lat = coordinates[0] + (Math.random() - 0.5) * 0.02;
+      const lng = coordinates[1] + (Math.random() - 0.5) * 0.02;
+      
+      const color = statusColors[vehicle.branding as keyof typeof statusColors] || statusColors.default;
+      
+      const marker = L.circleMarker([lat, lng], {
+        radius: 5,
+        fillColor: color,
+        color: '#000',
+        weight: 1,
+        opacity: 0.8,
+        fillOpacity: 0.7
+      });
+      
+      marker.bindPopup(`
+        <div style="font-family: system-ui, sans-serif; min-width: 180px;">
+          <strong>${vehicle.modelYear} ${vehicle.makeName}</strong><br/>
+          <strong>VIN:</strong> ${vehicle.vin}<br/>
+          <strong>Location:</strong> ${vehicle.city}, PR<br/>
+          <strong>Status:</strong> ${vehicle.branding}
+        </div>
+      `);
+      
+      markersLayerRef.current!.addLayer(marker);
+    });
   }, [puertoRicoVehicles]);
 
   return (
