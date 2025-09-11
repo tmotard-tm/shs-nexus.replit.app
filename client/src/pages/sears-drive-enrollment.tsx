@@ -8,6 +8,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Upload, FileImage, Truck, User, MapPin, Briefcase, Upload as UploadIcon } from "lucide-react";
@@ -23,7 +24,7 @@ const enrollmentSchema = z.object({
   referredBy: z.string().min(1, "Referred by is required"),
   city: z.string().min(1, "City is required"),
   state: z.string().min(1, "State is required"),
-  industry: z.string().min(1, "Industry selection is required"),
+  industry: z.array(z.string()).min(1, "At least one industry must be selected"),
 });
 
 type EnrollmentFormData = z.infer<typeof enrollmentSchema>;
@@ -66,7 +67,7 @@ export default function SearsDriveEnrollment() {
       referredBy: "",
       city: "",
       state: "",
-      industry: "",
+      industry: [],
     },
   });
 
@@ -78,7 +79,12 @@ export default function SearsDriveEnrollment() {
       
       // Add form fields
       Object.entries(data).forEach(([key, value]) => {
-        formData.append(key, value);
+        if (key === 'industry' && Array.isArray(value)) {
+          // Handle industry array
+          formData.append(key, JSON.stringify(value));
+        } else {
+          formData.append(key, value as string);
+        }
       });
       
       // Add uploaded files
@@ -260,21 +266,37 @@ export default function SearsDriveEnrollment() {
                       name="industry"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Industry *</FormLabel>
-                          <Select onValueChange={field.onChange} defaultValue={field.value}>
-                            <FormControl>
-                              <SelectTrigger data-testid="select-industry">
-                                <SelectValue placeholder="Select industry" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {industryOptions.map((industry) => (
-                                <SelectItem key={industry} value={industry}>
+                          <FormLabel>Industry * (Select all that apply)</FormLabel>
+                          <div className="grid grid-cols-2 gap-3 mt-2">
+                            {industryOptions.map((industry) => (
+                              <div key={industry} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`industry-${industry}`}
+                                  checked={field.value?.includes(industry) || false}
+                                  onCheckedChange={(checked) => {
+                                    const currentValue = field.value || [];
+                                    if (checked) {
+                                      field.onChange([...currentValue, industry]);
+                                    } else {
+                                      field.onChange(currentValue.filter((item: string) => item !== industry));
+                                    }
+                                  }}
+                                  data-testid={`checkbox-industry-${industry.toLowerCase().replace(/\s+/g, '-')}`}
+                                />
+                                <label
+                                  htmlFor={`industry-${industry}`}
+                                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                                >
                                   {industry}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                                </label>
+                              </div>
+                            ))}
+                          </div>
+                          {field.value && field.value.length > 0 && (
+                            <div className="mt-2 text-sm text-muted-foreground">
+                              Selected: {field.value.join(", ")}
+                            </div>
+                          )}
                           <FormMessage />
                         </FormItem>
                       )}
