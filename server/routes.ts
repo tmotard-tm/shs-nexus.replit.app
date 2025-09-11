@@ -1380,6 +1380,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Sears Drive Program Enrollment submission endpoint
   app.post("/api/sears-drive-enrollment", upload.any(), async (req, res) => {
     try {
+      // Parse industry from JSON string if needed
+      let parsedBody = { ...req.body };
+      if (typeof parsedBody.industry === 'string' && parsedBody.industry.startsWith('[')) {
+        try {
+          parsedBody.industry = JSON.parse(parsedBody.industry);
+        } catch (e) {
+          // If parsing fails, treat as single string in array
+          parsedBody.industry = [parsedBody.industry];
+        }
+      }
+
       // Validate form data
       const formSchema = z.object({
         districtNumber: z.string(),
@@ -1391,10 +1402,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         referredBy: z.string(),
         city: z.string(),
         state: z.string(),
-        industry: z.string(),
+        industry: z.array(z.string()).min(1, "At least one industry must be selected"),
       });
 
-      const formData = formSchema.parse(req.body);
+      const formData = formSchema.parse(parsedBody);
       const files = (req as any).files || [];
 
       // Required file types
