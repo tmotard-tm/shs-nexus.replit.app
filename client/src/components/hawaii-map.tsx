@@ -48,6 +48,11 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
       mapInstance.current = map;
       markersLayerRef.current = L.layerGroup().addTo(map);
 
+      // Ensure proper sizing within wrapper
+      requestAnimationFrame(() => {
+        mapInstance.current?.invalidateSize();
+      });
+
     } catch (error) {
       console.error('Error creating Hawaii map:', error);
     }
@@ -100,10 +105,11 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
   }, [hawaiiVehicles]);
 
   return (
-    <div 
-      ref={mapRef} 
-      className="relative overflow-hidden h-[300px] w-full border border-border rounded-md"
-      style={{ zIndex: 1, isolation: 'isolate' }}
-    />
+    <div className="map-wrapper">
+      <div 
+        ref={mapRef} 
+        className="absolute inset-0"
+      />
+    </div>
   );
 }
