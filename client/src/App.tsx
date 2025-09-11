@@ -153,6 +153,48 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
+      {/* New shareable deep-link form routes */}
+      <Route path="/forms/create-vehicle">
+        <ProtectedRoute>
+          <MainContent>
+            <CreateVehicle />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/forms/assign-vehicle">
+        <ProtectedRoute>
+          <MainContent>
+            <AssignVehicleLocation />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/forms/onboarding">
+        <ProtectedRoute>
+          <MainContent>
+            <OnboardHire />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/forms/offboarding">
+        <ProtectedRoute>
+          <MainContent>
+            <OffboardVehicleLocation />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/forms/byov-enrollment">
+        <ProtectedRoute>
+          <MainContent>
+            <SearsDriveEnrollment />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+      
+      {/* Legacy routes - kept for backward compatibility */}
       <Route path="/create-vehicle-location">
         <ProtectedRoute>
           <MainContent>
