@@ -1245,10 +1245,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         color: fleetVehicle.color,
         licensePlate: fleetVehicle.licensePlate,
         licenseState: fleetVehicle.licenseState,
-        deliveryDate: fleetVehicle.deliveryDate ? new Date(fleetVehicle.deliveryDate) : null,
-        outOfServiceDate: fleetVehicle.outOfServiceDate ? new Date(fleetVehicle.outOfServiceDate) : null,
-        saleDate: fleetVehicle.saleDate ? new Date(fleetVehicle.saleDate) : null,
-        registrationRenewalDate: fleetVehicle.regRenewalDate ? new Date(fleetVehicle.regRenewalDate) : null,
+        deliveryDate: fleetVehicle.deliveryDate || null,
+        outOfServiceDate: fleetVehicle.outOfServiceDate || null,
+        saleDate: fleetVehicle.saleDate || null,
+        registrationRenewalDate: fleetVehicle.regRenewalDate || null,
         odometerDelivery: fleetVehicle.odometerDelivery,
         branding: fleetVehicle.branding,
         interior: fleetVehicle.interior,
@@ -1261,7 +1261,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         zip: fleetVehicle.zip,
         mis: fleetVehicle.mis,
         remainingBookValue: fleetVehicle.remainingBookValue ? fleetVehicle.remainingBookValue.toString() : null,
-        leaseEndDate: fleetVehicle.leaseEndDate ? new Date(fleetVehicle.leaseEndDate) : null,
+        leaseEndDate: fleetVehicle.leaseEndDate || null,
         status: "available", // Default status
       }));
 
@@ -1409,7 +1409,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ];
 
       // Check if all required files are present
-      const uploadedFileNames = files.map(file => file.fieldname);
+      const uploadedFileNames = files.map((file: any) => file.fieldname);
       const missingFiles = requiredFiles.filter(name => !uploadedFileNames.includes(name));
       
       if (missingFiles.length > 0) {
@@ -1422,7 +1422,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // For now, we'll just log the submission
       console.log('Sears Drive Program Enrollment Submitted:', {
         ...formData,
-        filesUploaded: files.map(f => ({ 
+        filesUploaded: files.map((f: any) => ({ 
           name: f.fieldname, 
           size: f.size, 
           mimetype: f.mimetype 
@@ -1432,11 +1432,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store the enrollment data
       const enrollmentId = `sears-drive-${Date.now()}`;
       
+      // Create fleet team queue item for BYOV review and van number assignment
+      let queueItem = null;
+      let queueItemId = null;
+      
+      try {
+        const techFullName = `${formData.techFirstName} ${formData.techLastName}`;
+        const location = `${formData.city}, ${formData.state}`;
+        
+        // Prepare queue item data
+        const queueItemData = {
+          workflowType: "byov_assignment",
+          title: `BYOV Assignment Request - ${techFullName}`,
+          description: `Review Sears Drive Program enrollment and assign BYOV van number for ${techFullName} in ${location}. Tech is currently using truck ${formData.currentTruckNumber} in district ${formData.districtNumber}.`,
+          priority: "high" as const,
+          requesterId: "system", // Automated task from enrollment system
+          data: JSON.stringify({
+            enrollmentId,
+            submissionTimestamp: new Date().toISOString(),
+            techInfo: {
+              firstName: formData.techFirstName,
+              lastName: formData.techLastName,
+              email: formData.techEmail,
+              ldap: formData.ldap,
+              currentTruckNumber: formData.currentTruckNumber,
+              districtNumber: formData.districtNumber,
+              referredBy: formData.referredBy
+            },
+            location: {
+              city: formData.city,
+              state: formData.state
+            },
+            industry: formData.industry,
+            filesSubmitted: files.map((f: any) => ({ 
+              name: f.fieldname, 
+              size: f.size, 
+              mimetype: f.mimetype 
+            })),
+            workflowStep: 1,
+            nextActions: [
+              "Review submitted vehicle photos and documents",
+              "Verify vehicle meets BYOV requirements", 
+              "Assign BYOV van number",
+              "Setup vehicle in fleet system",
+              "Notify technician of assignment"
+            ]
+          }),
+          metadata: JSON.stringify({
+            enrollmentId,
+            source: "sears_drive_enrollment",
+            techEmail: formData.techEmail,
+            priority_reason: "new_byov_enrollment"
+          })
+        };
+
+        queueItem = await storage.createFleetQueueItem(queueItemData);
+        queueItemId = queueItem.id;
+        
+        console.log(`Created fleet queue item ${queueItemId} for BYOV enrollment ${enrollmentId}`);
+        
+      } catch (queueError) {
+        // Log the error but don't fail the enrollment submission
+        console.error('Failed to create fleet queue item for enrollment:', queueError);
+      }
+      
       res.json({ 
         message: "Sears Drive Program enrollment submitted successfully!",
         enrollmentId,
         submittedData: formData,
-        filesReceived: files.length
+        filesReceived: files.length,
+        queueItemId,
+        fleetTaskCreated: queueItemId !== null,
+        nextSteps: queueItemId 
+          ? "A fleet team task has been created for BYOV review and van number assignment. You will be contacted once your vehicle has been processed."
+          : "Your enrollment has been submitted. A fleet team member will review your submission and contact you soon."
       });
     } catch (error) {
       console.error('Error submitting Sears Drive enrollment:', error);
