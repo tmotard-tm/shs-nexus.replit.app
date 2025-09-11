@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
-import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map, ArrowRight, Plus, TrendingUp, Clock, CheckCircle, Users } from "lucide-react";
+import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map, ArrowRight, Plus, TrendingUp, Clock, CheckCircle, Users, FileText } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
@@ -46,6 +46,15 @@ export default function AssistanceSelection() {
       bgColor: "bg-purple-100 dark:bg-purple-900/20",
       iconColor: "text-purple-600 dark:text-purple-400",
       action: () => setLocation("/onboard-hire")
+    },
+    {
+      id: "sears-drive-enrollment",
+      title: "Sears Drive Program",
+      description: "Submit Drive Program Enrollment",
+      icon: FileText,
+      bgColor: "bg-orange-100 dark:bg-orange-900/20",
+      iconColor: "text-orange-600 dark:text-orange-400",
+      action: () => setLocation("/sears-drive-enrollment")
     },
     {
       id: "offboard-vehicle-location",

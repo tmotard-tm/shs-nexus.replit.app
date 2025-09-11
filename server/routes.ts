@@ -5,6 +5,7 @@ import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, in
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
+import multer from "multer";
 
 // Simple session store for demo purposes
 const sessions = new Map<string, { userId: string; username: string; expiresAt: Date }>();
@@ -27,6 +28,15 @@ function requireAuth(req: any, res: any, next: any): any {
   req.user = { id: session.userId, username: session.username };
   return next();
 }
+
+// Configure multer for file uploads
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 10 // Max 10 files
+  }
+});
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth routes
@@ -1150,6 +1160,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error in send-deactivation-email endpoint:', error);
       res.status(500).json({ message: "Failed to process credit card deactivation notification" });
+    }
+  });
+
+  // Sears Drive Program Enrollment submission endpoint
+  app.post("/api/sears-drive-enrollment", upload.any(), async (req, res) => {
+    try {
+      // Validate form data
+      const formSchema = z.object({
+        districtNumber: z.string(),
+        currentTruckNumber: z.string(),
+        techFirstName: z.string(),
+        techLastName: z.string(),
+        ldap: z.string(),
+        techEmail: z.string().email(),
+        referredBy: z.string(),
+        city: z.string(),
+        state: z.string(),
+        industry: z.string(),
+      });
+
+      const formData = formSchema.parse(req.body);
+      const files = (req as any).files || [];
+
+      // Required file types
+      const requiredFiles = [
+        'vehicleFront',
+        'vehicleBack', 
+        'vehicleLeft',
+        'vehicleRight',
+        'vinNumber',
+        'insuranceCard',
+        'registration'
+      ];
+
+      // Check if all required files are present
+      const uploadedFileNames = files.map(file => file.fieldname);
+      const missingFiles = requiredFiles.filter(name => !uploadedFileNames.includes(name));
+      
+      if (missingFiles.length > 0) {
+        return res.status(400).json({ 
+          message: `Missing required files: ${missingFiles.join(', ')}` 
+        });
+      }
+
+      // TODO: Store files in object storage when available
+      // For now, we'll just log the submission
+      console.log('Sears Drive Program Enrollment Submitted:', {
+        ...formData,
+        filesUploaded: files.map(f => ({ 
+          name: f.fieldname, 
+          size: f.size, 
+          mimetype: f.mimetype 
+        }))
+      });
+
+      // Store the enrollment data
+      const enrollmentId = `sears-drive-${Date.now()}`;
+      
+      res.json({ 
+        message: "Sears Drive Program enrollment submitted successfully!",
+        enrollmentId,
+        submittedData: formData,
+        filesReceived: files.length
+      });
+    } catch (error) {
+      console.error('Error submitting Sears Drive enrollment:', error);
+      res.status(500).json({ message: "Failed to submit enrollment form" });
     }
   });
 

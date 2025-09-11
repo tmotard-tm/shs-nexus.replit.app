@@ -1,0 +1,402 @@
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useMutation } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { Upload, FileImage, Truck, User, MapPin, Briefcase, Upload as UploadIcon } from "lucide-react";
+
+// Form validation schema
+const enrollmentSchema = z.object({
+  districtNumber: z.string().min(1, "District number is required"),
+  currentTruckNumber: z.string().min(1, "Current truck number is required"),
+  techFirstName: z.string().min(1, "Tech first name is required"),
+  techLastName: z.string().min(1, "Tech last name is required"),
+  ldap: z.string().min(1, "LDAP is required"),
+  techEmail: z.string().email("Valid email is required"),
+  referredBy: z.string().min(1, "Referred by is required"),
+  city: z.string().min(1, "City is required"),
+  state: z.string().min(1, "State is required"),
+  industry: z.string().min(1, "Industry selection is required"),
+});
+
+type EnrollmentFormData = z.infer<typeof enrollmentSchema>;
+
+const industryOptions = [
+  "Cook",
+  "Dish", 
+  "Microwave",
+  "Laundry",
+  "Refrigeration",
+  "Hvac",
+  "Lawn and Garden"
+];
+
+const requiredUploads = [
+  { id: "vehicleFront", label: "Vehicle Front Side", required: true },
+  { id: "vehicleBack", label: "Vehicle Back Side", required: true },
+  { id: "vehicleLeft", label: "Vehicle Left Side", required: true },
+  { id: "vehicleRight", label: "Vehicle Right Side", required: true },
+  { id: "vinNumber", label: "VIN Number", required: true },
+  { id: "insuranceCard", label: "Insurance Card", required: true },
+  { id: "registration", label: "Registration", required: true },
+];
+
+export default function SearsDriveEnrollment() {
+  const { toast } = useToast();
+  const [uploadedFiles, setUploadedFiles] = useState<Record<string, File>>({});
+  const [uploadPreviews, setUploadPreviews] = useState<Record<string, string>>({});
+
+  const form = useForm<EnrollmentFormData>({
+    resolver: zodResolver(enrollmentSchema),
+    defaultValues: {
+      districtNumber: "",
+      currentTruckNumber: "",
+      techFirstName: "",
+      techLastName: "",
+      ldap: "",
+      techEmail: "",
+      referredBy: "",
+      city: "",
+      state: "",
+      industry: "",
+    },
+  });
+
+  // Submit mutation
+  const submitMutation = useMutation({
+    mutationFn: async (data: EnrollmentFormData) => {
+      // Create FormData for file uploads
+      const formData = new FormData();
+      
+      // Add form fields
+      Object.entries(data).forEach(([key, value]) => {
+        formData.append(key, value);
+      });
+      
+      // Add uploaded files
+      Object.entries(uploadedFiles).forEach(([key, file]) => {
+        formData.append(key, file);
+      });
+
+      return apiRequest('/api/sears-drive-enrollment', {
+        method: 'POST',
+        body: formData,
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Sears Drive Program enrollment submitted successfully!",
+      });
+      form.reset();
+      setUploadedFiles({});
+      setUploadPreviews({});
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to submit enrollment form",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleFileUpload = (uploadId: string, file: File) => {
+    if (file) {
+      setUploadedFiles(prev => ({ ...prev, [uploadId]: file }));
+      
+      // Create preview URL for images
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setUploadPreviews(prev => ({ ...prev, [uploadId]: e.target?.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const onSubmit = (data: EnrollmentFormData) => {
+    // Validate all required files are uploaded
+    const missingUploads = requiredUploads.filter(upload => !uploadedFiles[upload.id]);
+    
+    if (missingUploads.length > 0) {
+      toast({
+        title: "Missing Files",
+        description: `Please upload: ${missingUploads.map(u => u.label).join(', ')}`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    submitMutation.mutate(data);
+  };
+
+  return (
+    <div className="container mx-auto py-8 px-4">
+      <div className="max-w-4xl mx-auto">
+        <Card className="bg-card">
+          <CardHeader className="bg-blue-600 text-white">
+            <CardTitle className="text-2xl font-bold flex items-center gap-3">
+              <Truck className="h-8 w-8" />
+              Sears Drive Program Enrollment Submission
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-8">
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+                
+                {/* Technician Information */}
+                <div className="space-y-6">
+                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <User className="h-5 w-5" />
+                    Technician Information
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="districtNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>District Number *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter district number" {...field} data-testid="input-district-number" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="currentTruckNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Current Truck Number *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter current truck number" {...field} data-testid="input-truck-number" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="techFirstName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tech First Name *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter first name" {...field} data-testid="input-first-name" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="techLastName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tech Last Name *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter last name" {...field} data-testid="input-last-name" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="ldap"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>LDAP *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter LDAP" {...field} data-testid="input-ldap" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="techEmail"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tech Email *</FormLabel>
+                          <FormControl>
+                            <Input type="email" placeholder="Enter email address" {...field} data-testid="input-email" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="referredBy"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Referred By *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter who referred you" {...field} data-testid="input-referred-by" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="industry"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Industry *</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-industry">
+                                <SelectValue placeholder="Select industry" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {industryOptions.map((industry) => (
+                                <SelectItem key={industry} value={industry}>
+                                  {industry}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+
+                {/* Location Information */}
+                <div className="space-y-6">
+                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <MapPin className="h-5 w-5" />
+                    Location Information
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="city"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>City *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter city" {...field} data-testid="input-city" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="state"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>State *</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Enter state" {...field} data-testid="input-state" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+
+                {/* Required File Uploads */}
+                <div className="space-y-6">
+                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <UploadIcon className="h-5 w-5" />
+                    Required Document Uploads
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {requiredUploads.map((upload) => (
+                      <div key={upload.id} className="space-y-3">
+                        <label className="text-sm font-medium text-foreground">
+                          {upload.label} *
+                        </label>
+                        <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-4 text-center hover:border-muted-foreground/50 transition-colors">
+                          {uploadPreviews[upload.id] ? (
+                            <div className="space-y-2">
+                              <img 
+                                src={uploadPreviews[upload.id]} 
+                                alt={upload.label}
+                                className="max-h-32 mx-auto rounded"
+                              />
+                              <p className="text-sm text-green-600">✓ Uploaded</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <FileImage className="h-8 w-8 mx-auto text-muted-foreground" />
+                              <p className="text-sm text-muted-foreground">
+                                Click to upload {upload.label.toLowerCase()}
+                              </p>
+                            </div>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleFileUpload(upload.id, file);
+                            }}
+                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            data-testid={`input-file-${upload.id}`}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Submit Button */}
+                <div className="flex justify-center pt-6">
+                  <Button
+                    type="submit"
+                    size="lg"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-8"
+                    disabled={submitMutation.isPending}
+                    data-testid="button-submit-enrollment"
+                  >
+                    {submitMutation.isPending ? (
+                      <>
+                        <Upload className="h-4 w-4 mr-2 animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 mr-2" />
+                        Submit Enrollment
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+              </form>
+            </Form>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

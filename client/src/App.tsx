@@ -30,6 +30,7 @@ import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
 import AnalyticsBoard from "@/pages/analytics-board";
 import StorageSpots from "@/pages/storage-spots";
+import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 
@@ -181,6 +182,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <OffboardVehicleLocation />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/sears-drive-enrollment">
+        <ProtectedRoute>
+          <MainContent>
+            <SearsDriveEnrollment />
           </MainContent>
         </ProtectedRoute>
       </Route>
