@@ -192,7 +192,7 @@ export class MemStorage implements IStorage {
         username: "ADMIN123",
         email: "admin@sears.com",
         password: "passwords", // In real app, this would be hashed
-        role: "admin",
+        role: "superadmin",
         department: null,
         createdAt: new Date(),
         accessibleQueues: ['ntao', 'assets', 'inventory', 'fleet'],
