@@ -98,7 +98,8 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
   return (
     <div 
       ref={mapRef} 
-      className="relative overflow-hidden h-[300px] w-full"
+      className="relative overflow-hidden h-[300px] w-full border border-border rounded-md"
+      style={{ zIndex: 1, isolation: 'isolate' }}
     />
   );
 }
