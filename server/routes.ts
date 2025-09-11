@@ -185,7 +185,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         secure: false, // Set to true in production with HTTPS
         sameSite: 'lax',
         expires: expiresAt,
-        path: '/forms' // Restrict to forms path
+        path: '/' // Available to all paths including /forms and /api/forms
       });
       
       res.json({ success: true, message: "Human verification successful" });
