@@ -855,6 +855,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
+  // General task endpoint - searches across all queues for a task by ID
+  app.get("/api/tasks/:id", requireAuth, async (req, res) => {
+    try {
+      const taskId = req.params.id;
+      
+      // Try to find the task in each queue module
+      const modules: QueueModule[] = ["ntao", "assets", "inventory", "fleet"];
+      
+      for (const module of modules) {
+        const queueItem = await storage.getUnifiedQueueItem(module, taskId);
+        if (queueItem) {
+          // Add module information to the response
+          res.json({ ...queueItem, module });
+          return;
+        }
+      }
+      
+      // Task not found in any queue
+      res.status(404).json({ message: "Task not found" });
+    } catch (error) {
+      console.error('Task fetch error:', error);
+      res.status(500).json({ message: "Failed to fetch task" });
+    }
+  });
+
   // Unified queue creation endpoint (anonymous-accessible with rate limiting)
   app.post("/api/queue", checkAnonymousRateLimit, async (req, res) => {
     try {

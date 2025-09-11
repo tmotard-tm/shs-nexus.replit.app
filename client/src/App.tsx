@@ -32,6 +32,7 @@ import UserManagement from "@/pages/user-management";
 import AnalyticsBoard from "@/pages/analytics-board";
 import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
+import TaskWorkPage from "@/pages/task-work";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
@@ -194,6 +195,13 @@ function Router() {
             <SearsDriveEnrollment />
           </MainContent>
         </PublicFormRoute>
+      </Route>
+      
+      {/* Task work routes - deep linking for specific task IDs */}
+      <Route path="/tasks/:id/work">
+        <ProtectedRoute>
+          <TaskWorkPage />
+        </ProtectedRoute>
       </Route>
       
       {/* Legacy routes - kept for backward compatibility */}
