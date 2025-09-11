@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
 import { Car, MapPin, Truck, UserPlus, UserMinus, HelpCircle, Settings, Map, ArrowRight, Plus, TrendingUp, Clock, CheckCircle, Users, FileText } from "lucide-react";
@@ -122,11 +123,18 @@ export default function AssistanceSelection() {
             
             {/* Create Vehicle Form Module */}
             <Card 
-              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200 relative"
               style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
               data-testid="form-create-vehicle"
             >
-              <CardHeader className="pb-4">
+              <CardHeader className="pb-4 relative">
+                <CopyLinkButton
+                  path="/forms/create-vehicle"
+                  preserveQuery={false}
+                  variant="icon"
+                  className="absolute top-3 right-3 h-7 w-7"
+                  data-testid="button-copy-link-create-vehicle"
+                />
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
                     <Car className="h-5 w-5 text-white" />
@@ -174,11 +182,18 @@ export default function AssistanceSelection() {
 
             {/* Assign Vehicle Form Module */}
             <Card 
-              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200 relative"
               style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
               data-testid="form-assign-vehicle"
             >
-              <CardHeader className="pb-4">
+              <CardHeader className="pb-4 relative">
+                <CopyLinkButton
+                  path="/forms/assign-vehicle"
+                  preserveQuery={false}
+                  variant="icon"
+                  className="absolute top-3 right-3 h-7 w-7"
+                  data-testid="button-copy-link-assign-vehicle"
+                />
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 rounded-lg bg-green-500 flex items-center justify-center">
                     <MapPin className="h-5 w-5 text-white" />
@@ -234,11 +249,18 @@ export default function AssistanceSelection() {
 
             {/* Onboarding Form Module */}
             <Card 
-              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200 relative"
               style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
               data-testid="form-onboarding"
             >
-              <CardHeader className="pb-4">
+              <CardHeader className="pb-4 relative">
+                <CopyLinkButton
+                  path="/forms/onboarding"
+                  preserveQuery={false}
+                  variant="icon"
+                  className="absolute top-3 right-3 h-7 w-7"
+                  data-testid="button-copy-link-onboarding"
+                />
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 rounded-lg bg-purple-500 flex items-center justify-center">
                     <UserPlus className="h-5 w-5 text-white" />
@@ -286,11 +308,18 @@ export default function AssistanceSelection() {
 
             {/* Offboarding Form Module */}
             <Card 
-              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200 relative"
               style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
               data-testid="form-offboarding"
             >
-              <CardHeader className="pb-4">
+              <CardHeader className="pb-4 relative">
+                <CopyLinkButton
+                  path="/forms/offboarding"
+                  preserveQuery={false}
+                  variant="icon"
+                  className="absolute top-3 right-3 h-7 w-7"
+                  data-testid="button-copy-link-offboarding"
+                />
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 rounded-lg bg-red-500 flex items-center justify-center">
                     <UserMinus className="h-5 w-5 text-white" />
@@ -338,11 +367,18 @@ export default function AssistanceSelection() {
 
             {/* Sears Drive Program Enrollment Form Module */}
             <Card 
-              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200"
+              className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200 relative"
               style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
               data-testid="form-sears-drive"
             >
-              <CardHeader className="pb-4">
+              <CardHeader className="pb-4 relative">
+                <CopyLinkButton
+                  path="/forms/byov-enrollment"
+                  preserveQuery={false}
+                  variant="icon"
+                  className="absolute top-3 right-3 h-7 w-7"
+                  data-testid="button-copy-link-byov-enrollment"
+                />
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center">
                     <FileText className="h-5 w-5 text-white" />
