@@ -12,12 +12,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { QueueItem, User } from "@shared/schema";
-import { Clock, User as UserIcon, Save, Eye, PickUpTruck } from "lucide-react";
+import { Clock, User as UserIcon, Save, Eye, Truck } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
+import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 
 export default function InventoryQueuePage() {
   const [viewQueueItem, setViewQueueItem] = useState<QueueItem | null>(null);
   const [workingOnItem, setWorkingOnItem] = useState<QueueItem | null>(null);
+  const [pickUpItem, setPickUpItem] = useState<QueueItem | null>(null);
   const { toast } = useToast();
 
   // Fetch Inventory Control queue items only

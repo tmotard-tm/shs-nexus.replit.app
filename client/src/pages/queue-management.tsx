@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
+import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
 
 // Module labels for display
@@ -66,6 +67,7 @@ export default function UnifiedQueueManagement() {
   const [activeTab, setActiveTab] = useState<string>("new");
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [pickUpItem, setPickUpItem] = useState<CombinedQueueItem | null>(null);
 
   // Auto-populate module selection based on user's accessible queues
   useEffect(() => {
@@ -801,17 +803,17 @@ export default function UnifiedQueueManagement() {
                                   </Select>
                                 )}
                                 
-                                {/* Assign to me button for unassigned items */}
+                                {/* Pick up button for unassigned items */}
                                 {item.status === "pending" && !item.assignedTo && (
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={() => handleAssignTask(item, user?.id || "")}
+                                    onClick={() => setPickUpItem(item)}
                                     disabled={assignMutation.isPending}
-                                    data-testid={`button-assign-me-${item.id}`}
+                                    data-testid={`button-pick-up-${item.id}`}
                                   >
                                     <User className="h-4 w-4 mr-1" />
-                                    Assign to Me
+                                    Pick Up
                                   </Button>
                                 )}
                               </div>
@@ -912,6 +914,20 @@ export default function UnifiedQueueManagement() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Pick Up Request Dialog */}
+        <PickUpRequestDialog
+          isOpen={!!pickUpItem}
+          onClose={() => setPickUpItem(null)}
+          onPickUp={(agentId) => {
+            if (pickUpItem) {
+              handleAssignTask(pickUpItem, agentId);
+            }
+          }}
+          users={users}
+          queueModule={pickUpItem?.module}
+          isLoading={assignMutation.isPending}
+        />
       </div>
     </MainContent>
   );

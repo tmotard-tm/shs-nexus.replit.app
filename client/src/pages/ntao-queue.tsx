@@ -13,9 +13,11 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { QueueItem, User } from "@shared/schema";
 import { Clock, User as UserIcon, Save } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
+import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 
 export default function NTAOQueuePage() {
   const [viewQueueItem, setViewQueueItem] = useState<QueueItem | null>(null);
+  const [pickUpItem, setPickUpItem] = useState<QueueItem | null>(null);
   const { toast } = useToast();
 
   // Fetch NTAO queue items only
@@ -244,11 +246,12 @@ export default function NTAOQueuePage() {
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                assignMutation.mutate({ queueItemId: item.id, assigneeId: user?.id || "" });
+                                setPickUpItem(item);
                               }}
                               disabled={assignMutation.isPending}
+                              data-testid={`button-pick-up-${item.id}`}
                             >
-                              Assign to Me
+                              Pick Up
                             </Button>
                           </div>
                         </div>
@@ -430,13 +433,11 @@ export default function NTAOQueuePage() {
               <div className="flex gap-2 pt-4 border-t">
                 {viewQueueItem.status === "pending" && (
                   <Button 
-                    onClick={() => assignMutation.mutate({ 
-                      queueItemId: viewQueueItem.id, 
-                      assigneeId: user?.id || "" 
-                    })}
+                    onClick={() => setPickUpItem(viewQueueItem)}
                     disabled={assignMutation.isPending}
+                    data-testid={`button-pick-up-dialog-${viewQueueItem.id}`}
                   >
-                    Assign to Me
+                    Pick Up
                   </Button>
                 )}
                 {viewQueueItem.status === "in_progress" && viewQueueItem.assignedTo === user?.id && (
@@ -451,6 +452,20 @@ export default function NTAOQueuePage() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Pick Up Request Dialog */}
+        <PickUpRequestDialog
+          isOpen={!!pickUpItem}
+          onClose={() => setPickUpItem(null)}
+          onPickUp={(agentId) => {
+            if (pickUpItem) {
+              assignMutation.mutate({ queueItemId: pickUpItem.id, assigneeId: agentId });
+            }
+          }}
+          users={users}
+          queueModule="ntao"
+          isLoading={assignMutation.isPending}
+        />
       </div>
     </MainContent>
   );
