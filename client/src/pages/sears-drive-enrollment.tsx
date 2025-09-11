@@ -36,8 +36,7 @@ const industryOptions = [
   "Laundry",
   "Refrigeration",
   "Hvac",
-  "Lawn and Garden",
-  "BYOV"
+  "Lawn and Garden"
 ];
 
 const requiredUploads = [
@@ -292,7 +291,7 @@ export default function SearsDriveEnrollment() {
                               </div>
                             ))}
                           </div>
-                          {field.value && field.value.length > 0 && (
+                          {field.value && Array.isArray(field.value) && field.value.length > 0 && (
                             <div className="mt-2 text-sm text-muted-foreground">
                               Selected: {field.value.join(", ")}
                             </div>
