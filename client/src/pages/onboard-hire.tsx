@@ -97,39 +97,6 @@ export default function OnboardHire() {
     { id: "4", name: "Robert Wilson", department: "Finance" }
   ];
 
-  // Simple distance calculation based on zip code numerical difference
-  const calculateZipDistance = (zip1: string, zip2: string): number => {
-    if (!zip1 || !zip2) return 9999;
-    const num1 = parseInt(zip1.replace(/\D/g, ''), 10);
-    const num2 = parseInt(zip2.replace(/\D/g, ''), 10);
-    if (isNaN(num1) || isNaN(num2)) return 9999;
-    return Math.abs(num1 - num2);
-  };
-
-  const findClosestVehicle = (targetZip: string): FleetVehicle | null => {
-    if (!targetZip.trim()) return null;
-    
-    // Get only truly unassigned vehicles (vehicles that are available for assignment)
-    const unassignedVehicles = getUnassignedVehicles();
-    console.log(`Found ${unassignedVehicles.length} unassigned vehicles available for assignment`);
-    
-    if (unassignedVehicles.length === 0) {
-      console.log('No unassigned vehicles available for assignment');
-      return null;
-    }
-    
-    const vehiclesWithDistance = unassignedVehicles
-      .map(vehicle => ({
-        ...vehicle,
-        distance: calculateZipDistance(vehicle.zip, targetZip.trim())
-      }))
-      .sort((a, b) => a.distance - b.distance);
-    
-    const closestVehicle = vehiclesWithDistance[0];
-    console.log(`Closest vehicle found: ${closestVehicle?.modelYear} ${closestVehicle?.makeName} ${closestVehicle?.modelName} at distance ${closestVehicle?.distance}`);
-    
-    return closestVehicle || null;
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -301,76 +268,66 @@ export default function OnboardHire() {
         orderMessages.push(`${dept} task created for ${taskType.toLowerCase()}`);
       }
       
-      // Handle vehicle assignment
-      let vehicleMessage = "";
-      if (vehicleAssignment.autoAssign && vehicleAssignment.workZipcode) {
-        const closestVehicle = findClosestVehicle(vehicleAssignment.workZipcode);
-        if (closestVehicle) {
-          // Create Fleet Management task for vehicle assignment
-          await apiRequest("POST", "/api/fleet-queue", {
-            workflowType: "vehicle_assignment",
-            title: `Vehicle Assignment - ${employeeForm.firstName} ${employeeForm.lastName}`,
-            description: `Complete vehicle assignment setup for new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}). Vehicle: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName} (${closestVehicle.licensePlate}).`,
-            priority: "high",
-            requesterId: user?.id || "system",
-            data: JSON.stringify({
-              submitter: {
-                name: user?.username || user?.email || "Unknown User",
-                submittedAt: new Date().toISOString()
-              },
-              department: "Fleet Management",
-              notificationType: "Vehicle Assignment",
-              taskType: "Vehicle Setup",
-              employee: {
-                firstName: employeeForm.firstName,
-                lastName: employeeForm.lastName,
-                enterpriseId: employeeForm.enterpriseId,
-                techId: employeeForm.techId,
-                department: employeeForm.department,
-                startDate: employeeForm.startDate,
-                address: {
-                  street: employeeForm.street,
-                  city: employeeForm.city,
-                  state: employeeForm.state,
-                  zipCode: employeeForm.zipCode
-                }
-              },
-              vehicle: {
-                licensePlate: closestVehicle.licensePlate,
-                year: closestVehicle.modelYear,
-                make: closestVehicle.makeName,
-                model: closestVehicle.modelName,
-                city: closestVehicle.city,
-                state: closestVehicle.state,
-                zip: closestVehicle.zip
-              },
-              workLocation: vehicleAssignment.workZipcode,
-              autoTriggered: true,
-              triggeredBy: "employee_onboarding",
-              checklist: [
-                {
-                  id: "tpms_van_update",
-                  task: "Update TPMS with van number",
-                  description: `Update TPMS system with assigned van number: ${closestVehicle.licensePlate} for employee ${employeeForm.firstName} ${employeeForm.lastName} (Tech ID: ${employeeForm.techId})`,
-                  completed: false,
-                  required: true
-                }
-              ],
-              instructions: [
-                "Complete vehicle assignment setup for new employee",
-                "Update TPMS system with van number and employee assignment",
-                "Verify vehicle is properly registered to employee",
-                "Mark task complete only after TPMS is updated"
-              ]
-            })
-          });
-          
-          requestsCreated.push("Vehicle assignment");
-          vehicleMessage = `Closest vehicle assigned: ${closestVehicle.modelYear} ${closestVehicle.makeName} ${closestVehicle.modelName} (${closestVehicle.licensePlate}) located in ${closestVehicle.city}, ${closestVehicle.state}.`;
-        } else {
-          vehicleMessage = "No available vehicles found for assignment.";
-        }
-      }
+      // Create task for manual vehicle assignment
+      await apiRequest("POST", "/api/fleet-queue", {
+        workflowType: "vehicle_assignment",
+        title: `Vehicle Assignment - ${employeeForm.firstName} ${employeeForm.lastName}`,
+        description: `Manually assign vehicle to new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}) in ${employeeForm.region}.`,
+        priority: "high",
+        requesterId: user?.id || "system",
+        data: JSON.stringify({
+          submitter: {
+            name: user?.username || user?.email || "Unknown User",
+            submittedAt: new Date().toISOString()
+          },
+          department: "Fleet Management",
+          notificationType: "Vehicle Assignment",
+          taskType: "Manual Vehicle Setup",
+          employee: {
+            firstName: employeeForm.firstName,
+            lastName: employeeForm.lastName,
+            enterpriseId: employeeForm.enterpriseId,
+            techId: employeeForm.techId,
+            department: employeeForm.department,
+            region: employeeForm.region,
+            startDate: employeeForm.startDate,
+            address: {
+              street: employeeForm.street,
+              city: employeeForm.city,
+              state: employeeForm.state,
+              zipCode: employeeForm.zipCode
+            }
+          },
+          workLocation: employeeForm.region,
+          manualProcess: true,
+          triggeredBy: "employee_onboarding",
+          checklist: [
+            {
+              id: "select_vehicle",
+              task: "Select appropriate vehicle for assignment",
+              description: `Review available vehicles and select most suitable for employee ${employeeForm.firstName} ${employeeForm.lastName} (Tech ID: ${employeeForm.techId}) in ${employeeForm.region}`,
+              completed: false,
+              required: true
+            },
+            {
+              id: "tpms_van_update",
+              task: "Update TPMS with van number",
+              description: `Update TPMS system with assigned van number for employee ${employeeForm.firstName} ${employeeForm.lastName} (Tech ID: ${employeeForm.techId})`,
+              completed: false,
+              required: true
+            }
+          ],
+          instructions: [
+            "Manually select and assign vehicle for new employee",
+            "Update TPMS system with van number and employee assignment",
+            "Verify vehicle is properly registered to employee",
+            "Mark task complete only after TPMS is updated"
+          ]
+        })
+      });
+      
+      requestsCreated.push("Vehicle assignment task");
+      let vehicleMessage = "Manual vehicle assignment task created.";
       
       const allMessages = [...orderMessages];
       if (vehicleMessage) allMessages.push(vehicleMessage);
@@ -879,40 +836,6 @@ export default function OnboardHire() {
 
                     {/* Automatic Supply Orders */}
 
-                    {/* Automatic Vehicle Assignment */}
-                    <div className="border-t pt-6">
-                      <h4 className="font-semibold mb-4 flex items-center gap-2">
-                        <MapPin className="h-4 w-4" />
-                        Vehicle Assignment (Automatic)
-                      </h4>
-                      <div className="space-y-3">
-                        <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-800">
-                          <div className="flex items-center space-x-3 mb-3">
-                            <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                            <Label className="text-green-800 dark:text-green-200 font-medium">
-                              Auto-assign closest available vehicle
-                            </Label>
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="work-zipcode">Employee Work Location Zipcode *</Label>
-                            <Input
-                              id="work-zipcode"
-                              value={vehicleAssignment.workZipcode}
-                              onChange={(e) => setVehicleAssignment(prev => ({ ...prev, workZipcode: e.target.value }))}
-                              placeholder="Enter work location zipcode (e.g., 10001)"
-                              data-testid="input-work-zipcode"
-                              required
-                            />
-                            <p className="text-xs text-green-700 dark:text-green-300">
-                              System will automatically find and assign the closest unassigned vehicle
-                            </p>
-                            <p className="text-xs text-green-700 dark:text-green-300 mt-1 italic">
-                              *Assignment occurs when employee profile is created
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
 
                     <div className="border-t pt-6">
                       <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
@@ -920,17 +843,17 @@ export default function OnboardHire() {
                           <CheckCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
                           <div className="text-sm">
                             <p className="font-medium text-blue-800 dark:text-blue-200">Upon Profile Creation</p>
-                            <p className="text-blue-700 dark:text-blue-300">The following processes will be automatically triggered when you click "Create Employee Profile":</p>
+                            <p className="text-blue-700 dark:text-blue-300">The following tasks will be created for manual processing:</p>
                             <ul className="mt-2 text-blue-600 dark:text-blue-400 list-disc list-inside text-xs space-y-1">
                               <li>Assets & Supplies Order for Day 1 Supplies</li>
                               <li>NTAO Order for Parts Stock</li>
-                              <li>Vehicle Assignment (closest available to work location)</li>
+                              <li>Vehicle Assignment Task (for manual assignment)</li>
                             </ul>
                           </div>
                         </div>
                       </div>
                       <Button type="submit" className="w-full" data-testid="button-submit-employee">
-                        Create Employee Profile & Trigger Automation
+                        Create Employee Profile & Generate Tasks
                       </Button>
                     </div>
                   </form>
