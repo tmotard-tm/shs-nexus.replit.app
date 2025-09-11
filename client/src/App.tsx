@@ -34,6 +34,7 @@ import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
+import { PermissionProtectedRoute } from "@/components/permission-protected-route";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -155,43 +156,48 @@ function Router() {
       
       {/* New shareable deep-link form routes */}
       <Route path="/forms/create-vehicle">
-        <ProtectedRoute>
+        <PermissionProtectedRoute formKey="create-vehicle">
+          <Sidebar />
           <MainContent>
             <CreateVehicle />
           </MainContent>
-        </ProtectedRoute>
+        </PermissionProtectedRoute>
       </Route>
       
       <Route path="/forms/assign-vehicle">
-        <ProtectedRoute>
+        <PermissionProtectedRoute formKey="assign-vehicle">
+          <Sidebar />
           <MainContent>
             <AssignVehicleLocation />
           </MainContent>
-        </ProtectedRoute>
+        </PermissionProtectedRoute>
       </Route>
       
       <Route path="/forms/onboarding">
-        <ProtectedRoute>
+        <PermissionProtectedRoute formKey="onboarding">
+          <Sidebar />
           <MainContent>
             <OnboardHire />
           </MainContent>
-        </ProtectedRoute>
+        </PermissionProtectedRoute>
       </Route>
       
       <Route path="/forms/offboarding">
-        <ProtectedRoute>
+        <PermissionProtectedRoute formKey="offboarding">
+          <Sidebar />
           <MainContent>
             <OffboardVehicleLocation />
           </MainContent>
-        </ProtectedRoute>
+        </PermissionProtectedRoute>
       </Route>
       
       <Route path="/forms/byov-enrollment">
-        <ProtectedRoute>
+        <PermissionProtectedRoute formKey="byov-enrollment">
+          <Sidebar />
           <MainContent>
             <SearsDriveEnrollment />
           </MainContent>
-        </ProtectedRoute>
+        </PermissionProtectedRoute>
       </Route>
       
       {/* Legacy routes - kept for backward compatibility */}
