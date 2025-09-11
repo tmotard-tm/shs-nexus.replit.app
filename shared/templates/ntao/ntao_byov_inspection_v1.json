@@ -1,0 +1,94 @@
+{
+  "id": "ntao_byov_inspection_v1",
+  "name": "NTAO BYOV Operational Assessment",
+  "department": "NTAO",
+  "workflowType": "byov_assignment",
+  "version": "1.0",
+  "description": "NTAO operational assessment for BYOV program suitability",
+  "estimatedDuration": 25,
+  "difficulty": "easy",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "operational_suitability",
+      "title": "Assess Operational Suitability",
+      "description": "Evaluate vehicle's suitability for operational requirements",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "assessment",
+      "substeps": [
+        {
+          "id": "check_service_territory_fit",
+          "title": "Check service territory compatibility",
+          "description": "Verify vehicle is appropriate for assigned service territory",
+          "required": true
+        },
+        {
+          "id": "evaluate_customer_presentation",
+          "title": "Evaluate customer presentation",
+          "description": "Assess if vehicle meets customer-facing standards",
+          "required": true
+        },
+        {
+          "id": "check_routing_compatibility",
+          "title": "Check routing system compatibility",
+          "description": "Verify vehicle can integrate with routing systems",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "operational_setup",
+      "title": "Operational Setup Planning",
+      "description": "Plan operational setup requirements for BYOV",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "planning",
+      "substeps": [
+        {
+          "id": "plan_tracking_setup",
+          "title": "Plan vehicle tracking setup",
+          "description": "Determine requirements for GPS and tracking systems",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "operational_documentation",
+      "title": "Complete Operational Documentation",
+      "description": "Document operational assessment results",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "document_assessment_results",
+          "title": "Document assessment results",
+          "description": "Record operational suitability assessment results",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "approved",
+        "label": "BYOV Operationally Approved",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_modifications",
+        "label": "Requires Operational Modifications",
+        "requiresApproval": false
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-01-11T23:55:00Z",
+    "createdBy": "system",
+    "tags": ["byov", "ntao", "operations", "assessment"],
+    "isActive": true
+  }
+}

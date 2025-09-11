@@ -1,0 +1,151 @@
+{
+  "id": "fleet_assign_vehicle_v1",
+  "name": "Vehicle Assignment Process",
+  "department": "FLEET",
+  "workflowType": "vehicle_assignment",
+  "version": "1.0",
+  "description": "Complete process for assigning a vehicle to a technician",
+  "estimatedDuration": 45,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "verify_technician",
+      "title": "Verify Technician Information",
+      "description": "Confirm technician eligibility and documentation",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "check_enterprise_id",
+          "title": "Verify Enterprise ID is active",
+          "description": "Check system to ensure Enterprise ID is valid and active",
+          "required": true
+        },
+        {
+          "id": "verify_license",
+          "title": "Confirm valid driver's license",
+          "description": "Review driver's license expiration date and validity",
+          "required": true
+        },
+        {
+          "id": "check_insurance",
+          "title": "Verify insurance coverage",
+          "description": "Confirm technician has required insurance coverage",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "select_vehicle",
+      "title": "Select Appropriate Vehicle",
+      "description": "Choose vehicle based on territory and requirements",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "check_availability",
+          "title": "Verify vehicle availability",
+          "description": "Confirm selected vehicle is available for assignment",
+          "required": true
+        },
+        {
+          "id": "match_territory",
+          "title": "Match vehicle to territory needs",
+          "description": "Ensure vehicle type matches territory requirements",
+          "required": true
+        },
+        {
+          "id": "check_maintenance",
+          "title": "Review maintenance status",
+          "description": "Verify vehicle is in good condition and maintenance is current",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "create_assignment",
+      "title": "Create Vehicle Assignment",
+      "description": "Complete assignment documentation in system",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "update_vehicle_status",
+          "title": "Update vehicle status to 'assigned'",
+          "description": "Change vehicle status in fleet management system",
+          "required": true
+        },
+        {
+          "id": "assign_to_tech",
+          "title": "Link vehicle to technician profile",
+          "description": "Create assignment record linking vehicle to technician",
+          "required": true
+        },
+        {
+          "id": "set_assignment_date",
+          "title": "Set effective assignment date",
+          "description": "Record when assignment becomes effective",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "notify_stakeholders",
+      "title": "Send Notifications",
+      "description": "Notify relevant parties of vehicle assignment",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "communication",
+      "substeps": [
+        {
+          "id": "notify_technician",
+          "title": "Send assignment confirmation to technician",
+          "description": "Email technician with vehicle details and pickup instructions",
+          "required": true
+        },
+        {
+          "id": "notify_supervisor",
+          "title": "Inform technician's supervisor",
+          "description": "Send notification to supervisor about new vehicle assignment",
+          "required": true
+        },
+        {
+          "id": "update_fleet_dashboard",
+          "title": "Update fleet tracking dashboard",
+          "description": "Ensure assignment appears on fleet management dashboard",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "assigned",
+        "label": "Vehicle Successfully Assigned",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_documentation",
+        "label": "Pending Additional Documentation",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_supervisor_approval",
+        "label": "Requires Supervisor Approval",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-01-11T23:20:00Z",
+    "createdBy": "system",
+    "tags": ["vehicle", "assignment", "fleet"],
+    "isActive": true
+  }
+}

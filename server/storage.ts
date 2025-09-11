@@ -94,6 +94,10 @@ export interface IStorage {
 
   // Queue operations
   cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined>;
+  
+  // Generic queue item operations (searches across all modules)
+  getQueueItem(id: string): Promise<QueueItem | undefined>;
+  updateQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
 
   // Storage Spots Module
   getStorageSpot(id: string): Promise<StorageSpot | undefined>;
@@ -1503,6 +1507,41 @@ export class MemStorage implements IStorage {
       default:
         return undefined;
     }
+  }
+
+  // Generic queue item operations (searches across all modules)
+  async getQueueItem(id: string): Promise<QueueItem | undefined> {
+    // Search across all queue modules
+    let item = await this.getNTAOQueueItem(id);
+    if (item) return item;
+    
+    item = await this.getAssetsQueueItem(id);
+    if (item) return item;
+    
+    item = await this.getInventoryQueueItem(id);
+    if (item) return item;
+    
+    item = await this.getFleetQueueItem(id);
+    if (item) return item;
+    
+    return undefined;
+  }
+
+  async updateQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    // Try to update in each module until one succeeds
+    let updatedItem = await this.updateNTAOQueueItem(id, updates);
+    if (updatedItem) return updatedItem;
+    
+    updatedItem = await this.updateAssetsQueueItem(id, updates);
+    if (updatedItem) return updatedItem;
+    
+    updatedItem = await this.updateInventoryQueueItem(id, updates);
+    if (updatedItem) return updatedItem;
+    
+    updatedItem = await this.updateFleetQueueItem(id, updates);
+    if (updatedItem) return updatedItem;
+    
+    return undefined;
   }
 
   // Storage Spots Module Implementation

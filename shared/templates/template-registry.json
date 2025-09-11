@@ -1,0 +1,51 @@
+{
+  "registry": {
+    "vehicle_assignment": {
+      "FLEET": ["fleet_assign_vehicle_v1"],
+      "INVENTORY": ["inventory_assign_vehicle_v1"],
+      "ASSETS": ["assets_assign_vehicle_v1"],
+      "NTAO": ["ntao_assign_vehicle_v1"]
+    },
+    "onboarding": {
+      "FLEET": ["fleet_onboard_technician_v1"],
+      "INVENTORY": ["inventory_onboard_technician_v1"],
+      "ASSETS": ["assets_onboard_technician_v1"],
+      "NTAO": ["ntao_onboard_technician_v1"]
+    },
+    "offboarding": {
+      "FLEET": ["fleet_offboard_technician_v1"],
+      "INVENTORY": ["inventory_offboard_technician_v1"],
+      "ASSETS": ["assets_offboard_technician_v1"],
+      "NTAO": ["ntao_offboard_technician_v1"]
+    },
+    "decommission": {
+      "FLEET": ["fleet_decommission_vehicle_v1"],
+      "INVENTORY": ["inventory_process_decommission_v1"],
+      "ASSETS": [],
+      "NTAO": []
+    },
+    "byov_assignment": {
+      "FLEET": [],
+      "INVENTORY": ["inventory_byov_inspection_v1"],
+      "ASSETS": ["assets_byov_inspection_v1"],
+      "NTAO": ["ntao_byov_inspection_v1"]
+    },
+    "storage_request": {
+      "FLEET": [],
+      "INVENTORY": [],
+      "ASSETS": [],
+      "NTAO": []
+    },
+    "create_vehicle": {
+      "FLEET": ["fleet_create_vehicle_v1"],
+      "INVENTORY": [],
+      "ASSETS": [],
+      "NTAO": []
+    }
+  },
+  "metadata": {
+    "version": "1.2.0",
+    "lastUpdated": "2025-09-11T23:57:00Z",
+    "departments": ["FLEET", "INVENTORY", "ASSETS", "NTAO"]
+  }
+}

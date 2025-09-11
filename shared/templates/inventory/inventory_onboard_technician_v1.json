@@ -1,0 +1,151 @@
+{
+  "id": "inventory_onboard_technician_v1",
+  "name": "Inventory Technician Onboarding",
+  "department": "INVENTORY",
+  "workflowType": "onboarding",
+  "version": "1.0",
+  "description": "Complete onboarding process for inventory management technician",
+  "estimatedDuration": 50,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "verify_credentials",
+      "title": "Verify Technician Credentials",
+      "description": "Confirm required certifications and background checks",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "check_background",
+          "title": "Verify background check completion",
+          "description": "Confirm clean background check for inventory access",
+          "required": true
+        },
+        {
+          "id": "verify_certifications",
+          "title": "Check relevant certifications",
+          "description": "Verify any industry-specific certifications required",
+          "required": true
+        },
+        {
+          "id": "confirm_drug_screening",
+          "title": "Confirm drug screening results",
+          "description": "Verify satisfactory drug screening completion",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "inventory_system_setup",
+      "title": "Set Up Inventory System Access",
+      "description": "Configure access to inventory management systems",
+      "required": true,
+      "estimatedTime": 20,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "create_inventory_login",
+          "title": "Create inventory system login",
+          "description": "Set up username and password for inventory management system",
+          "required": true
+        },
+        {
+          "id": "assign_permissions",
+          "title": "Assign appropriate permissions",
+          "description": "Configure access levels based on role and responsibilities",
+          "required": true
+        },
+        {
+          "id": "setup_barcode_scanner",
+          "title": "Configure barcode scanning equipment",
+          "description": "Assign and configure handheld barcode scanners",
+          "required": true
+        },
+        {
+          "id": "assign_warehouse_zones",
+          "title": "Assign warehouse zones",
+          "description": "Define which warehouse areas technician will manage",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "inventory_training",
+      "title": "Complete Inventory Training",
+      "description": "Ensure completion of all inventory-specific training",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "inventory_procedures",
+          "title": "Complete inventory procedures training",
+          "description": "Learn cycle counting, receiving, and shipping procedures",
+          "required": true
+        },
+        {
+          "id": "safety_protocols",
+          "title": "Complete warehouse safety training",
+          "description": "Understand safety procedures for warehouse operations",
+          "required": true
+        },
+        {
+          "id": "system_training",
+          "title": "Complete inventory system training",
+          "description": "Learn to use inventory management software effectively",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "complete_setup",
+      "title": "Complete Onboarding Setup",
+      "description": "Finalize all onboarding requirements",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "update_personnel_records",
+          "title": "Update personnel database",
+          "description": "Add technician to inventory department roster",
+          "required": true
+        },
+        {
+          "id": "assign_mentor",
+          "title": "Assign experienced mentor",
+          "description": "Pair with experienced technician for initial guidance",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "onboarded",
+        "label": "Technician Successfully Onboarded",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_training",
+        "label": "Pending Training Completion",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_additional_verification",
+        "label": "Requires Additional Verification",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-01-11T23:20:00Z",
+    "createdBy": "system",
+    "tags": ["onboarding", "technician", "inventory"],
+    "isActive": true
+  }
+}

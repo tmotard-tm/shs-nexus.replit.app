@@ -1,0 +1,106 @@
+{
+  "id": "assets_offboard_technician_v1",
+  "name": "Assets Management Technician Offboarding",
+  "department": "ASSETS",
+  "workflowType": "offboarding",
+  "version": "1.0",
+  "description": "Assets management offboarding process for departing technicians",
+  "estimatedDuration": 35,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "asset_return_verification",
+      "title": "Verify Asset Returns",
+      "description": "Ensure all company assets are properly returned",
+      "required": true,
+      "estimatedTime": 20,
+      "category": "asset_verification",
+      "substeps": [
+        {
+          "id": "check_asset_register",
+          "title": "Check asset register",
+          "description": "Review all assets assigned to departing technician",
+          "required": true
+        },
+        {
+          "id": "physical_asset_inspection",
+          "title": "Perform physical asset inspection",
+          "description": "Inspect returned assets for damage or excessive wear",
+          "required": true
+        },
+        {
+          "id": "verify_asset_functionality",
+          "title": "Verify asset functionality",
+          "description": "Test that returned assets function as expected",
+          "required": true
+        },
+        {
+          "id": "update_asset_status",
+          "title": "Update asset management system",
+          "description": "Mark assets as returned and update their status",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "compliance_check",
+      "title": "Compliance and Documentation Check",
+      "description": "Verify all compliance requirements are met",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "compliance",
+      "substeps": [
+        {
+          "id": "verify_return_documentation",
+          "title": "Verify return documentation",
+          "description": "Ensure all required return paperwork is completed",
+          "required": true
+        },
+        {
+          "id": "check_damage_reports",
+          "title": "Review any damage reports",
+          "description": "Document any asset damage for potential charges",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "final_asset_processing",
+      "title": "Final Asset Processing",
+      "description": "Complete final asset-related processing",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "close_asset_assignments",
+          "title": "Close all asset assignments",
+          "description": "Formally close technician's asset assignments",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "completed",
+        "label": "Assets Offboarding Completed",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_damage_assessment",
+        "label": "Requires Damage Assessment",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-01-11T23:50:00Z",
+    "createdBy": "system",
+    "tags": ["offboarding", "assets", "compliance", "return"],
+    "isActive": true
+  }
+}

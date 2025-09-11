@@ -1,0 +1,145 @@
+{
+  "id": "inventory_process_decommission_v1",
+  "name": "Process Vehicle Decommission",
+  "department": "INVENTORY",
+  "workflowType": "decommission",
+  "version": "1.0",
+  "description": "Inventory management process for vehicle decommission",
+  "estimatedDuration": 60,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "inventory_assessment",
+      "title": "Assess Vehicle Inventory",
+      "description": "Evaluate all inventory items associated with vehicle",
+      "required": true,
+      "estimatedTime": 20,
+      "category": "inspection",
+      "substeps": [
+        {
+          "id": "parts_inventory",
+          "title": "Inventory all removable parts",
+          "description": "Catalog all parts that can be salvaged for reuse",
+          "required": true
+        },
+        {
+          "id": "tool_recovery",
+          "title": "Recover all company tools",
+          "description": "Collect and account for all tools assigned to vehicle",
+          "required": true
+        },
+        {
+          "id": "supply_collection",
+          "title": "Collect remaining supplies",
+          "description": "Gather any unused supplies or materials",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "categorize_items",
+      "title": "Categorize Recoverable Items",
+      "description": "Sort items by condition and reuse potential",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "reusable_parts",
+          "title": "Identify reusable parts",
+          "description": "Mark parts in good condition for reuse in other vehicles",
+          "required": true
+        },
+        {
+          "id": "sellable_items",
+          "title": "Identify sellable items",
+          "description": "Mark items that can be sold to recover value",
+          "required": true
+        },
+        {
+          "id": "scrap_items",
+          "title": "Identify scrap/disposal items",
+          "description": "Mark items for scrap or proper disposal",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "update_inventory_system",
+      "title": "Update Inventory Management System",
+      "description": "Process all inventory changes in system",
+      "required": true,
+      "estimatedTime": 20,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "check_in_reusable",
+          "title": "Check reusable items back into inventory",
+          "description": "Add recoverable items back to available inventory",
+          "required": true
+        },
+        {
+          "id": "schedule_disposal",
+          "title": "Schedule disposal of unusable items",
+          "description": "Arrange proper disposal for items that cannot be reused",
+          "required": true
+        },
+        {
+          "id": "update_vehicle_status",
+          "title": "Update vehicle inventory status",
+          "description": "Mark vehicle as decommissioned in inventory system",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "documentation_completion",
+      "title": "Complete Documentation",
+      "description": "Finalize all inventory documentation",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "generate_recovery_report",
+          "title": "Generate inventory recovery report",
+          "description": "Create detailed report of all recovered items",
+          "required": true
+        },
+        {
+          "id": "submit_to_finance",
+          "title": "Submit financial impact report",
+          "description": "Provide finance team with recovery value information",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "processed",
+        "label": "Decommission Inventory Successfully Processed",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_disposal",
+        "label": "Pending Final Disposal Actions",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_additional_assessment",
+        "label": "Requires Additional Value Assessment",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-01-11T23:20:00Z",
+    "createdBy": "system",
+    "tags": ["decommission", "inventory", "recovery"],
+    "isActive": true
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "id": "assets_onboard_technician_v1",
+  "name": "Assets Management Technician Onboarding",
+  "department": "ASSETS",
+  "workflowType": "onboarding",
+  "version": "1.0",
+  "description": "Assets management onboarding process for new technicians",
+  "estimatedDuration": 40,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "asset_assignment_setup",
+      "title": "Setup Asset Assignments",
+      "description": "Prepare and assign necessary company assets to new technician",
+      "required": true,
+      "estimatedTime": 20,
+      "category": "asset_assignment",
+      "substeps": [
+        {
+          "id": "determine_asset_needs",
+          "title": "Determine asset requirements",
+          "description": "Assess what assets the technician needs based on role and territory",
+          "required": true
+        },
+        {
+          "id": "check_asset_availability",
+          "title": "Check asset availability",
+          "description": "Verify required assets are available for assignment",
+          "required": true
+        },
+        {
+          "id": "assign_assets",
+          "title": "Assign assets to technician",
+          "description": "Formally assign assets and update asset management system",
+          "required": true
+        },
+        {
+          "id": "document_assignments",
+          "title": "Document asset assignments",
+          "description": "Create documentation of all assigned assets",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "compliance_setup",
+      "title": "Compliance and Documentation Setup",
+      "description": "Ensure all compliance requirements are met",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "compliance",
+      "substeps": [
+        {
+          "id": "asset_agreement_signing",
+          "title": "Asset responsibility agreement",
+          "description": "Have technician sign asset responsibility agreement",
+          "required": true
+        },
+        {
+          "id": "setup_asset_tracking",
+          "title": "Setup asset tracking",
+          "description": "Configure asset tracking systems for technician",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "training_and_handover",
+      "title": "Asset Training and Handover",
+      "description": "Provide training on asset care and usage",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "training",
+      "substeps": [
+        {
+          "id": "asset_care_training",
+          "title": "Provide asset care training",
+          "description": "Train technician on proper asset care and maintenance",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "completed",
+        "label": "Assets Onboarding Completed",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_assets",
+        "label": "Pending Asset Availability",
+        "requiresApproval": false
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-01-11T23:55:00Z",
+    "createdBy": "system",
+    "tags": ["onboarding", "assets", "compliance", "assignment"],
+    "isActive": true
+  }
+}

@@ -1,10 +1,11 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema } from "@shared/schema";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
+import { templateLoader, getTemplateForTask } from "../shared/template-loader";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import DOMPurify from "isomorphic-dompurify";
@@ -1185,8 +1186,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const { module, id } = req.params;
       
-      // Validate request body
-      const validation = completeQueueItemSchema.safeParse(req.body);
+      // Validate request body with enhanced schema to support template data
+      const validation = enhancedCompleteQueueItemSchema.safeParse(req.body);
       if (!validation.success) {
         return res.status(400).json({ 
           message: "Invalid request data", 
@@ -1194,7 +1195,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      const { completedBy, finalNotes, decisionType, requiresReview, adminNotes } = validation.data;
+      const { completedBy, finalNotes, decisionType, requiresReview, adminNotes, finalChecklistState, templateId } = validation.data;
       
       const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
       if (!validModules.includes(module)) {
@@ -1215,8 +1216,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Queue item not found" });
       }
 
-      // Save the additional completion metadata
-      if (finalNotes || decisionType || adminNotes) {
+      // Save the additional completion metadata including template data
+      if (finalNotes || decisionType || adminNotes || finalChecklistState || templateId) {
         const currentItem = await storage.getUnifiedQueueItem(module as any, id);
         if (currentItem) {
           const existingData = currentItem.data ? JSON.parse(currentItem.data) : {};
@@ -1228,7 +1229,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               requiresReview,
               adminNotes,
               completedAt: new Date().toISOString(),
-              completedBy
+              completedBy,
+              // Template completion data
+              finalChecklistState,
+              templateId
             }
           };
 
@@ -2250,6 +2254,171 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error(`Error processing unified form submission for key ${req.params.key}:`, error);
       res.status(500).json({ message: "Failed to process form submission" });
+    }
+  });
+
+  // Work Template Routes
+  app.get("/api/work-templates/:workflowType/:department", requireAuth, async (req, res) => {
+    try {
+      const { workflowType, department } = req.params;
+      
+      if (!["FLEET", "INVENTORY", "ASSETS", "NTAO"].includes(department.toUpperCase())) {
+        return res.status(400).json({ message: "Invalid department" });
+      }
+
+      const template = await getTemplateForTask(workflowType, department.toLowerCase() as QueueModule);
+      
+      if (template) {
+        res.json({ template });
+      } else {
+        res.status(404).json({ 
+          message: "Template not found",
+          error: `No template available for workflow ${workflowType} in department ${department}`
+        });
+      }
+    } catch (error) {
+      console.error("Error loading work template:", error);
+      res.status(500).json({ message: "Failed to load work template" });
+    }
+  });
+
+  app.get("/api/work-templates/:templateId", requireAuth, async (req, res) => {
+    try {
+      const { templateId } = req.params;
+      const result = await templateLoader.loadTemplate(templateId);
+      
+      if (result.template) {
+        res.json({ template: result.template });
+      } else {
+        res.status(404).json({ 
+          message: "Template not found",
+          error: result.error,
+          suggestions: result.suggestions
+        });
+      }
+    } catch (error) {
+      console.error("Error loading template by ID:", error);
+      res.status(500).json({ message: "Failed to load template" });
+    }
+  });
+
+  app.get("/api/work-templates/department/:department", requireAuth, async (req, res) => {
+    try {
+      const { department } = req.params;
+      
+      if (!["FLEET", "INVENTORY", "ASSETS", "NTAO"].includes(department.toUpperCase())) {
+        return res.status(400).json({ message: "Invalid department" });
+      }
+
+      const templates = await templateLoader.getTemplatesForDepartment(department.toLowerCase() as QueueModule);
+      res.json({ templates });
+    } catch (error) {
+      console.error("Error loading department templates:", error);
+      res.status(500).json({ message: "Failed to load department templates" });
+    }
+  });
+
+  app.post("/api/work-templates/validate", requireAuth, async (req, res) => {
+    try {
+      const templateData = req.body;
+      const { validateTemplate } = await import("../shared/template-loader");
+      const validation = await validateTemplate(templateData);
+      
+      res.json(validation);
+    } catch (error) {
+      console.error("Error validating template:", error);
+      res.status(500).json({ message: "Failed to validate template" });
+    }
+  });
+
+  app.get("/api/work-templates/validate/all", requireAuth, async (req, res) => {
+    try {
+      const result = await templateLoader.validateAllTemplates();
+      res.json(result);
+    } catch (error) {
+      console.error("Error validating all templates:", error);
+      res.status(500).json({ message: "Failed to validate templates" });
+    }
+  });
+
+  // Work Progress Routes for Template State
+  app.get("/api/work-progress/:queueItemId", requireAuth, async (req, res) => {
+    try {
+      const { queueItemId } = req.params;
+      
+      // Get queue item with current progress
+      const queueItem = await storage.getQueueItem(queueItemId);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+
+      // Parse metadata for template progress
+      let templateProgress = null;
+      let checklistState = {};
+      let stepNotes = {};
+      let substepNotes = {};
+
+      if (queueItem.metadata) {
+        try {
+          const metadata = JSON.parse(queueItem.metadata);
+          templateProgress = metadata.templateProgress;
+          checklistState = metadata.checklistState || {};
+          stepNotes = metadata.stepNotes || {};
+          substepNotes = metadata.substepNotes || {};
+        } catch (error) {
+          console.warn("Failed to parse queue item metadata:", error);
+        }
+      }
+
+      res.json({
+        progress: templateProgress,
+        checklistState,
+        stepNotes,
+        substepNotes
+      });
+    } catch (error) {
+      console.error("Error loading work progress:", error);
+      res.status(500).json({ message: "Failed to load work progress" });
+    }
+  });
+
+  app.patch("/api/work-progress/:queueItemId", requireAuth, async (req, res) => {
+    try {
+      const { queueItemId } = req.params;
+      const { checklistState, stepNotes, substepNotes, templateProgress } = req.body;
+
+      // Get current queue item
+      const queueItem = await storage.getQueueItem(queueItemId);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+
+      // Parse existing metadata
+      let metadata = {};
+      if (queueItem.metadata) {
+        try {
+          metadata = JSON.parse(queueItem.metadata);
+        } catch (error) {
+          console.warn("Failed to parse existing metadata:", error);
+        }
+      }
+
+      // Update metadata with template progress
+      metadata.templateProgress = templateProgress;
+      metadata.checklistState = checklistState;
+      metadata.stepNotes = stepNotes;
+      metadata.substepNotes = substepNotes;
+      metadata.lastTemplateUpdate = new Date().toISOString();
+
+      // Update queue item with new metadata
+      const updatedItem = await storage.updateQueueItem(queueItemId, {
+        metadata: JSON.stringify(metadata)
+      });
+
+      res.json({ success: true, metadata: metadata });
+    } catch (error) {
+      console.error("Error saving work progress:", error);
+      res.status(500).json({ message: "Failed to save work progress" });
     }
   });
 

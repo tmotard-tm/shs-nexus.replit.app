@@ -1,0 +1,196 @@
+{
+  "id": "assets_byov_inspection_v1",
+  "name": "BYOV Vehicle Inspection",
+  "department": "ASSETS",
+  "workflowType": "byov_assignment",
+  "version": "1.0",
+  "description": "Comprehensive inspection process for Bring Your Own Vehicle (BYOV) program",
+  "estimatedDuration": 90,
+  "difficulty": "hard",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "exterior_inspection",
+      "title": "Exterior Vehicle Inspection",
+      "description": "Comprehensive examination of vehicle exterior condition",
+      "required": true,
+      "estimatedTime": 25,
+      "category": "inspection",
+      "attachmentRequired": true,
+      "attachmentTypes": ["image"],
+      "substeps": [
+        {
+          "id": "body_condition",
+          "title": "Assess body condition",
+          "description": "Check for dents, scratches, rust, or other damage",
+          "required": true
+        },
+        {
+          "id": "paint_condition",
+          "title": "Evaluate paint condition",
+          "description": "Look for fading, chipping, or touch-up work",
+          "required": true
+        },
+        {
+          "id": "lights_inspection",
+          "title": "Test all lights and signals",
+          "description": "Verify headlights, taillights, turn signals, and hazards work",
+          "required": true
+        },
+        {
+          "id": "tire_inspection",
+          "title": "Inspect tires and wheels",
+          "description": "Check tread depth, wear patterns, and overall condition",
+          "required": true
+        },
+        {
+          "id": "glass_inspection",
+          "title": "Examine windows and windshield",
+          "description": "Check for cracks, chips, or visibility issues",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "interior_inspection",
+      "title": "Interior Vehicle Inspection",
+      "description": "Assess interior condition and functionality",
+      "required": true,
+      "estimatedTime": 20,
+      "category": "inspection",
+      "attachmentRequired": true,
+      "attachmentTypes": ["image"],
+      "substeps": [
+        {
+          "id": "seat_condition",
+          "title": "Check seat condition and functionality",
+          "description": "Test seat adjustments and look for wear or damage",
+          "required": true
+        },
+        {
+          "id": "electronics_test",
+          "title": "Test electronic systems",
+          "description": "Verify radio, AC/heat, power windows, and other electronics",
+          "required": true
+        },
+        {
+          "id": "storage_space",
+          "title": "Assess cargo/storage space",
+          "description": "Evaluate available space for work equipment and tools",
+          "required": true
+        },
+        {
+          "id": "cleanliness_standards",
+          "title": "Verify cleanliness standards",
+          "description": "Ensure vehicle meets company cleanliness requirements",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "mechanical_inspection",
+      "title": "Mechanical Systems Inspection",
+      "description": "Check mechanical systems and safety features",
+      "required": true,
+      "estimatedTime": 30,
+      "category": "inspection",
+      "substeps": [
+        {
+          "id": "engine_inspection",
+          "title": "Inspect engine condition",
+          "description": "Check engine bay for leaks, unusual noises, or issues",
+          "required": true
+        },
+        {
+          "id": "brake_system",
+          "title": "Test brake system functionality",
+          "description": "Verify brakes respond properly and check brake fluid",
+          "required": true
+        },
+        {
+          "id": "fluid_levels",
+          "title": "Check all fluid levels",
+          "description": "Verify oil, coolant, windshield washer, and other fluids",
+          "required": true
+        },
+        {
+          "id": "exhaust_system",
+          "title": "Inspect exhaust system",
+          "description": "Check for leaks, unusual noises, or emission issues",
+          "required": true
+        },
+        {
+          "id": "safety_equipment",
+          "title": "Verify safety equipment",
+          "description": "Confirm presence of spare tire, jack, emergency kit",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "documentation_review",
+      "title": "Review Vehicle Documentation",
+      "description": "Verify all required documentation is current and valid",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "registration_check",
+          "title": "Verify current registration",
+          "description": "Check registration is current and matches vehicle",
+          "required": true
+        },
+        {
+          "id": "insurance_verification",
+          "title": "Confirm adequate insurance coverage",
+          "description": "Verify insurance meets company minimum requirements",
+          "required": true
+        },
+        {
+          "id": "inspection_certificate",
+          "title": "Check state inspection certificate",
+          "description": "Ensure current state inspection is valid",
+          "required": true
+        },
+        {
+          "id": "title_verification",
+          "title": "Verify clear title ownership",
+          "description": "Confirm technician owns vehicle free and clear",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "approved",
+        "label": "Vehicle Approved for BYOV Program",
+        "requiresApproval": false
+      },
+      {
+        "value": "conditional_approval",
+        "label": "Approved with Conditions",
+        "requiresApproval": true
+      },
+      {
+        "value": "rejected",
+        "label": "Vehicle Rejected - Does Not Meet Standards",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_repairs",
+        "label": "Requires Repairs Before Approval",
+        "requiresApproval": false
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-01-11T23:20:00Z",
+    "createdBy": "system",
+    "tags": ["byov", "inspection", "assets", "vehicle"],
+    "isActive": true
+  }
+}

@@ -11,8 +11,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useWorkTemplate } from "@/hooks/use-work-template";
+import { TemplateChecklist } from "./template-checklist";
 import { 
   Clock, 
   User, 
@@ -23,7 +26,9 @@ import {
   CheckCircle,
   Save,
   X,
-  AlertTriangle
+  AlertTriangle,
+  BookOpen,
+  ListTodo
 } from "lucide-react";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
 
@@ -62,6 +67,22 @@ export function WorkModuleDialog({
   const taskData = queueItem?.data ? JSON.parse(queueItem.data) : {};
   const assignedUser = users.find(u => u.id === queueItem?.assignedTo);
 
+  // Load work template for this task
+  const {
+    template,
+    checklistState,
+    isLoading: templateLoading,
+    error: templateError,
+    updateStepProgress,
+    updateSubstepProgress,
+    calculateOverallProgress,
+    getEstimatedTimeRemaining,
+    isStepCompleted,
+    isSubstepCompleted,
+    getStepNotes,
+    getSubstepNotes,
+  } = useWorkTemplate({ queueItem, module });
+
   useEffect(() => {
     if (queueItem) {
       // Pre-fill form with existing data
@@ -79,15 +100,12 @@ export function WorkModuleDialog({
   // Save progress mutation
   const saveProgressMutation = useMutation({
     mutationFn: async (data: any) => {
-      const endpoint = module 
-        ? `/api/queues/${module}/${queueItem?.id}/save-progress`
-        : `/api/queue-items/${queueItem?.id}/save-progress`;
-      
-      return apiRequest("PATCH", endpoint, data);
+      return apiRequest("PATCH", `/api/work-progress/${queueItem?.id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
       queryClient.invalidateQueries({ queryKey: [`/api/${module}-queue`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/work-progress/${queueItem?.id}`] });
       toast({
         title: "Progress Saved",
         description: "Your work progress has been saved successfully.",
@@ -116,7 +134,10 @@ export function WorkModuleDialog({
         finalResolution,
         requiresReview,
         adminNotes,
-        approvedAmount
+        approvedAmount,
+        // Include final template state
+        finalChecklistState: template ? checklistState : undefined,
+        templateId: template?.id
       });
     },
     onSuccess: () => {
@@ -161,13 +182,43 @@ export function WorkModuleDialog({
   }, [isOpen, queueItem?.status, currentUser?.id]);
 
   const handleSaveProgress = () => {
+    // Collect stepNotes and substepNotes from template
+    let stepNotes: Record<string, string> = {};
+    let substepNotes: Record<string, Record<string, string>> = {};
+    
+    if (template) {
+      template.steps.forEach(step => {
+        const stepNote = getStepNotes(step.id);
+        if (stepNote) {
+          stepNotes[step.id] = stepNote;
+        }
+        
+        if (step.substeps) {
+          step.substeps.forEach(substep => {
+            const substepNote = getSubstepNotes(step.id, substep.id);
+            if (substepNote) {
+              if (!substepNotes[step.id]) {
+                substepNotes[step.id] = {};
+              }
+              substepNotes[step.id][substep.id] = substepNote;
+            }
+          });
+        }
+      });
+    }
+
     const progressData = {
       notes: workNotes,
       adminNotes,
       assignedTo,
       lastWorkedBy: currentUser?.id,
       workInProgress: true,
-      approvedAmount
+      approvedAmount,
+      // Include template progress
+      checklistState: template ? checklistState : undefined,
+      stepNotes: Object.keys(stepNotes).length > 0 ? stepNotes : undefined,
+      substepNotes: Object.keys(substepNotes).length > 0 ? substepNotes : undefined,
+      templateId: template?.id
     };
     
     saveProgressMutation.mutate(progressData);
@@ -181,6 +232,29 @@ export function WorkModuleDialog({
         variant: "destructive",
       });
       return;
+    }
+
+    // Check if template requires all steps to be completed
+    if (template) {
+      const requiredStepsCompleted = template.steps
+        .filter(step => step.required)
+        .every(step => {
+          if (step.substeps && step.substeps.length > 0) {
+            return step.substeps
+              .filter(substep => substep.required)
+              .every(substep => isSubstepCompleted(step.id, substep.id));
+          }
+          return isStepCompleted(step.id);
+        });
+
+      if (!requiredStepsCompleted) {
+        toast({
+          title: "Incomplete Required Steps",
+          description: "Please complete all required steps in the checklist before finalizing the task.",
+          variant: "destructive",
+        });
+        return;
+      }
     }
     
     completeTaskMutation.mutate();
@@ -276,49 +350,163 @@ export function WorkModuleDialog({
             </CardContent>
           </Card>
 
-          {/* Instructions/Checklist Section */}
-          {taskData.instructions && Array.isArray(taskData.instructions) && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ClipboardCheck className="h-4 w-4" />
-                  Task Instructions
-                </CardTitle>
-                <CardDescription>
-                  Complete the following checklist items to finish this task
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {taskData.instructions.map((instruction: string, index: number) => (
-                    <div key={index} className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
-                      <Checkbox 
-                        id={`instruction-${index}`}
-                        className="mt-0.5"
-                        data-testid={`checkbox-instruction-${index}`}
-                      />
-                      <div className="flex-1">
-                        <Label 
-                          htmlFor={`instruction-${index}`}
-                          className="text-sm font-normal cursor-pointer leading-relaxed"
-                        >
-                          {instruction}
-                        </Label>
+          {/* Template Checklist Section */}
+          <Tabs defaultValue="checklist" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="checklist" className="flex items-center gap-2">
+                <ListTodo className="h-4 w-4" />
+                Task Checklist
+              </TabsTrigger>
+              <TabsTrigger value="instructions" className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4" />
+                Additional Info
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="checklist" className="space-y-4">
+              {templateLoading && (
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center justify-center p-8">
+                      <div className="text-center space-y-2">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                        <p className="text-sm text-muted-foreground">Loading work template...</p>
                       </div>
                     </div>
-                  ))}
-                </div>
-                <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-                    <p className="text-sm text-blue-700 dark:text-blue-300">
-                      Check off each item as you complete it. Once all items are completed, use the Final Disposition section below to mark the task as complete.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {templateError && (
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center gap-2 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                      <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">Template Loading Error</p>
+                        <p className="text-xs text-yellow-700 dark:text-yellow-300">{templateError}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {template && (
+                <TemplateChecklist
+                  template={template}
+                  isStepCompleted={isStepCompleted}
+                  isSubstepCompleted={isSubstepCompleted}
+                  updateStepProgress={updateStepProgress}
+                  updateSubstepProgress={updateSubstepProgress}
+                  getStepNotes={getStepNotes}
+                  getSubstepNotes={getSubstepNotes}
+                  overallProgress={calculateOverallProgress()}
+                  estimatedTimeRemaining={getEstimatedTimeRemaining()}
+                  readonly={queueItem?.status === "completed"}
+                />
+              )}
+
+              {!template && !templateLoading && !templateError && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <ClipboardCheck className="h-4 w-4" />
+                      Standard Task Instructions
+                    </CardTitle>
+                    <CardDescription>
+                      Complete the following items to finish this task
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {taskData.instructions && Array.isArray(taskData.instructions) ? (
+                      <div className="space-y-3">
+                        {taskData.instructions.map((instruction: string, index: number) => (
+                          <div key={index} className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                            <Checkbox 
+                              id={`instruction-${index}`}
+                              className="mt-0.5"
+                              data-testid={`checkbox-instruction-${index}`}
+                            />
+                            <div className="flex-1">
+                              <Label 
+                                htmlFor={`instruction-${index}`}
+                                className="text-sm font-normal cursor-pointer leading-relaxed"
+                              >
+                                {instruction}
+                              </Label>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <ClipboardCheck className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                        <p className="text-sm text-muted-foreground">No specific instructions available for this task.</p>
+                        <p className="text-xs text-muted-foreground mt-1">Use your best judgment and department procedures.</p>
+                      </div>
+                    )}
+                    
+                    <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-blue-700 dark:text-blue-300">
+                          Complete all necessary work and use the Final Disposition section below to mark the task as complete.
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+
+            <TabsContent value="instructions" className="space-y-4">
+              {/* Additional task information and context */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <BookOpen className="h-4 w-4" />
+                    Task Context & Information
+                  </CardTitle>
+                  <CardDescription>
+                    Additional details and context for this task
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {taskData.description && (
+                    <div>
+                      <Label className="text-sm font-medium">Description</Label>
+                      <p className="text-sm text-muted-foreground mt-1">{taskData.description}</p>
+                    </div>
+                  )}
+                  
+                  {taskData.notes && (
+                    <div>
+                      <Label className="text-sm font-medium">Additional Notes</Label>
+                      <p className="text-sm text-muted-foreground mt-1">{taskData.notes}</p>
+                    </div>
+                  )}
+
+                  {template && (
+                    <div>
+                      <Label className="text-sm font-medium">Template Information</Label>
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{template.department}</Badge>
+                          <Badge variant="secondary">v{template.version}</Badge>
+                          <Badge variant={template.difficulty === 'easy' ? 'default' : template.difficulty === 'hard' ? 'destructive' : 'secondary'}>
+                            {template.difficulty}
+                          </Badge>
+                        </div>
+                        {template.description && (
+                          <p className="text-sm text-muted-foreground">{template.description}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
 
           {/* Financial Details Section */}
           <Card>

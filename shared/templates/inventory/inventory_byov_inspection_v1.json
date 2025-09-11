@@ -1,0 +1,100 @@
+{
+  "id": "inventory_byov_inspection_v1",
+  "name": "Inventory BYOV Equipment Assessment",
+  "department": "INVENTORY",
+  "workflowType": "byov_assignment",
+  "version": "1.0",
+  "description": "Inventory assessment for BYOV program to determine equipment needs",
+  "estimatedDuration": 30,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "vehicle_storage_assessment",
+      "title": "Assess Vehicle Storage Capacity",
+      "description": "Evaluate vehicle's ability to store required equipment",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "assessment",
+      "substeps": [
+        {
+          "id": "measure_cargo_space",
+          "title": "Measure available cargo space",
+          "description": "Assess dimensions and capacity of vehicle storage areas",
+          "required": true
+        },
+        {
+          "id": "evaluate_storage_security",
+          "title": "Evaluate storage security",
+          "description": "Check security features for equipment protection",
+          "required": true
+        },
+        {
+          "id": "check_equipment_compatibility",
+          "title": "Check equipment compatibility",
+          "description": "Verify vehicle can accommodate standard equipment",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "inventory_allocation",
+      "title": "Determine Inventory Allocation",
+      "description": "Decide what inventory items to allocate for BYOV setup",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "planning",
+      "substeps": [
+        {
+          "id": "create_equipment_list",
+          "title": "Create required equipment list",
+          "description": "Generate list of equipment needed for technician role",
+          "required": true
+        },
+        {
+          "id": "check_inventory_availability",
+          "title": "Check inventory availability",
+          "description": "Verify equipment is available for allocation",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "allocation_documentation",
+      "title": "Document Inventory Allocation",
+      "description": "Create documentation for BYOV inventory allocation",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "generate_allocation_record",
+          "title": "Generate allocation record",
+          "description": "Create formal record of equipment allocation for BYOV",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "approved",
+        "label": "BYOV Approved for Inventory Allocation",
+        "requiresApproval": false
+      },
+      {
+        "value": "insufficient_storage",
+        "label": "Insufficient Storage Capacity",
+        "requiresApproval": false
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-01-11T23:55:00Z",
+    "createdBy": "system",
+    "tags": ["byov", "inventory", "assessment", "equipment"],
+    "isActive": true
+  }
+}

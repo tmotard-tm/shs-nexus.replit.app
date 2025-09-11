@@ -320,3 +320,144 @@ export type AnonymousVehicleAssignmentPayload = z.infer<typeof anonymousVehicleA
 export type AnonymousOnboardingPayload = z.infer<typeof anonymousOnboardingSchema>;
 export type AnonymousOffboardingPayload = z.infer<typeof anonymousOffboardingSchema>;
 export type AnonymousByovEnrollmentPayload = z.infer<typeof anonymousByovEnrollmentSchema>;
+
+// Work Module Template Schema and Types
+export const workTemplateSubstepSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  required: z.boolean().default(true),
+  completed: z.boolean().default(false),
+  notes: z.string().optional(),
+  validationRule: z.string().optional(), // Regex or validation expression
+  conditionalLogic: z.object({
+    dependsOn: z.string().optional(), // ID of step/substep this depends on
+    condition: z.enum(["equals", "not_equals", "contains", "completed"]).optional(),
+    value: z.string().optional()
+  }).optional()
+});
+
+export const workTemplateStepSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  required: z.boolean().default(true),
+  completed: z.boolean().default(false),
+  notes: z.string().optional(),
+  estimatedTime: z.number().optional(), // In minutes
+  category: z.enum(["verification", "documentation", "system_action", "communication", "inspection", "approval"]).optional(),
+  substeps: z.array(workTemplateSubstepSchema).optional(),
+  validationRule: z.string().optional(),
+  conditionalLogic: z.object({
+    dependsOn: z.string().optional(),
+    condition: z.enum(["equals", "not_equals", "contains", "completed"]).optional(),
+    value: z.string().optional()
+  }).optional(),
+  attachmentRequired: z.boolean().default(false),
+  attachmentTypes: z.array(z.string()).optional() // ["image", "document", "signature"]
+});
+
+export const workTemplateSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  department: z.enum(["FLEET", "INVENTORY", "ASSETS", "NTAO"]),
+  workflowType: z.string().min(1), // Maps to queueItem workflowType
+  version: z.string().min(1),
+  description: z.string().optional(),
+  estimatedDuration: z.number().optional(), // Total estimated time in minutes
+  difficulty: z.enum(["easy", "medium", "hard"]).default("medium"),
+  requiredRole: z.enum(["field", "agent", "superadmin"]).default("field"),
+  steps: z.array(workTemplateStepSchema),
+  finalDisposition: z.object({
+    required: z.boolean().default(true),
+    options: z.array(z.object({
+      value: z.string(),
+      label: z.string(),
+      requiresApproval: z.boolean().default(false)
+    })).optional()
+  }).optional(),
+  metadata: z.object({
+    createdAt: z.string().datetime().optional(),
+    updatedAt: z.string().datetime().optional(),
+    createdBy: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    isActive: z.boolean().default(true)
+  }).optional()
+});
+
+// Work Template Progress Schema for tracking completion state
+export const workTemplateProgressSchema = z.object({
+  templateId: z.string().min(1),
+  queueItemId: z.string().min(1),
+  workerId: z.string().min(1),
+  startedAt: z.string().datetime(),
+  lastUpdatedAt: z.string().datetime(),
+  completedAt: z.string().datetime().optional(),
+  steps: z.array(z.object({
+    id: z.string(),
+    completed: z.boolean(),
+    completedAt: z.string().datetime().optional(),
+    notes: z.string().optional(),
+    substeps: z.array(z.object({
+      id: z.string(),
+      completed: z.boolean(),
+      completedAt: z.string().datetime().optional(),
+      notes: z.string().optional()
+    })).optional()
+  })),
+  overallProgress: z.number().min(0).max(100), // Percentage complete
+  estimatedTimeRemaining: z.number().optional(), // In minutes
+  finalNotes: z.string().optional()
+});
+
+// Enhanced SaveProgress Schema to include template progress
+export const enhancedSaveProgressSchema = saveProgressSchema.extend({
+  templateProgress: workTemplateProgressSchema.optional(),
+  checklistState: z.record(z.boolean()).optional() // Key-value pairs for step completion
+});
+
+// Enhanced CompleteQueueItem Schema to include template data
+export const enhancedCompleteQueueItemSchema = completeQueueItemSchema.extend({
+  templateProgress: workTemplateProgressSchema.optional(),
+  finalChecklistState: z.record(z.boolean()).optional(),
+  templateId: z.string().optional()
+});
+
+// Template Management Schemas
+export const templateFilterSchema = z.object({
+  department: z.enum(["FLEET", "INVENTORY", "ASSETS", "NTAO"]).optional(),
+  workflowType: z.string().optional(),
+  difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+  requiredRole: z.enum(["field", "agent", "superadmin"]).optional(),
+  isActive: z.boolean().optional()
+});
+
+export const templateSearchSchema = z.object({
+  query: z.string().min(1),
+  filters: templateFilterSchema.optional(),
+  limit: z.number().min(1).max(100).default(20)
+});
+
+// Export TypeScript Types
+export type WorkTemplateSubstep = z.infer<typeof workTemplateSubstepSchema>;
+export type WorkTemplateStep = z.infer<typeof workTemplateStepSchema>;
+export type WorkTemplate = z.infer<typeof workTemplateSchema>;
+export type WorkTemplateProgress = z.infer<typeof workTemplateProgressSchema>;
+export type EnhancedSaveProgressPayload = z.infer<typeof enhancedSaveProgressSchema>;
+export type EnhancedCompleteQueueItemPayload = z.infer<typeof enhancedCompleteQueueItemSchema>;
+export type TemplateFilter = z.infer<typeof templateFilterSchema>;
+export type TemplateSearch = z.infer<typeof templateSearchSchema>;
+
+// Template Registry Type for mapping workflow types to templates
+export type TemplateRegistry = {
+  [workflowType: string]: {
+    [department: string]: string[]; // Array of template IDs
+  };
+};
+
+// Template Loading Result Type
+export type TemplateLoadResult = {
+  template: WorkTemplate | null;
+  error?: string;
+  suggestions?: string[]; // Alternative template IDs if exact match not found
+};
