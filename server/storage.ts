@@ -10,7 +10,7 @@ import {
   type QueueItem,
   type InsertQueueItem,
   type QueueModule,
-  type CombinedQueueItem
+  type CombinedQueueItem,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 

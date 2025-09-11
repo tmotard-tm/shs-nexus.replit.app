@@ -110,6 +110,7 @@ export const vehicles = pgTable("vehicles", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -144,6 +145,7 @@ export const insertQueueItemSchema = createInsertSchema(queueItems).omit({
   createdAt: true,
   updatedAt: true,
 });
+
 
 // Types
 export type User = typeof users.$inferSelect & {
