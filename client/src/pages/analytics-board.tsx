@@ -34,15 +34,15 @@ export default function AnalyticsBoard() {
   const vehiclesAsFleetData: FleetVehicle[] = vehicles.map(vehicle => ({
     vin: vehicle.vin,
     vehicleNumber: vehicle.vehicleNumber || '',
-    deliveryDate: vehicle.deliveryDate?.toDateString() || '',
-    outOfServiceDate: vehicle.outOfServiceDate?.toDateString() || '',
-    saleDate: vehicle.saleDate?.toDateString() || '',
+    deliveryDate: vehicle.deliveryDate || '',
+    outOfServiceDate: vehicle.outOfServiceDate || '',
+    saleDate: vehicle.saleDate || '',
     modelYear: vehicle.modelYear,
     makeName: vehicle.makeName,
     modelName: vehicle.modelName,
     licenseState: vehicle.licenseState || '',
     licensePlate: vehicle.licensePlate || '',
-    regRenewalDate: vehicle.registrationRenewalDate?.toDateString() || '',
+    regRenewalDate: vehicle.registrationRenewalDate || '',
     color: vehicle.color || '',
     branding: vehicle.branding || '',
     interior: vehicle.interior || '',
@@ -56,7 +56,7 @@ export default function AnalyticsBoard() {
     zip: vehicle.zip || '',
     mis: vehicle.mis || '',
     remainingBookValue: parseFloat(vehicle.remainingBookValue || '0'),
-    leaseEndDate: vehicle.leaseEndDate?.toDateString() || ''
+    leaseEndDate: vehicle.leaseEndDate || ''
   }));
 
   // Use database data if available, otherwise fallback to static fleet data
@@ -64,7 +64,7 @@ export default function AnalyticsBoard() {
 
   // Seed database mutation
   const seedVehiclesMutation = useMutation({
-    mutationFn: () => apiRequest('/api/vehicles/seed', { method: 'POST' }),
+    mutationFn: () => apiRequest('/api/vehicles/seed', 'POST'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/vehicles'] });
       toast({
