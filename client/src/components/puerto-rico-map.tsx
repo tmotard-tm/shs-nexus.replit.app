@@ -27,8 +27,7 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
 
   // Filter vehicles in Puerto Rico
   const puertoRicoVehicles = filteredVehicles.filter(vehicle => 
-    vehicle.state === 'PR' || 
-    puertoRicoCoordinates[vehicle.city.toUpperCase()]
+    vehicle.state === 'PR'
   );
 
   useEffect(() => {
@@ -99,10 +98,7 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
   return (
     <div 
       ref={mapRef} 
-      style={{ 
-        height: '300px',
-        width: '100%'
-      }}
+      className="relative overflow-hidden h-[300px] w-full"
     />
   );
 }

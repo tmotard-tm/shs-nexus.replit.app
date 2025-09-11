@@ -27,8 +27,7 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
 
   // Filter vehicles in Hawaii
   const hawaiiVehicles = filteredVehicles.filter(vehicle => 
-    vehicle.state === 'HI' || 
-    hawaiiCoordinates[vehicle.city.toUpperCase()]
+    vehicle.state === 'HI'
   );
 
   useEffect(() => {
@@ -99,10 +98,7 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
   return (
     <div 
       ref={mapRef} 
-      style={{ 
-        height: '300px',
-        width: '100%'
-      }}
+      className="relative overflow-hidden h-[300px] w-full"
     />
   );
 }
