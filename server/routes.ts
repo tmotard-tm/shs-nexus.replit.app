@@ -663,6 +663,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
+  // Unified queue creation endpoint
+  app.post("/api/queue", async (req, res) => {
+    try {
+      const { module, ...queueItemData } = req.body;
+      
+      // Validate the queue item data
+      const validatedData = insertQueueItemSchema.parse(queueItemData);
+      
+      // Determine target module
+      let targetModule: string;
+      
+      if (module) {
+        // Validate provided module
+        const validModules = ['fleet', 'ntao', 'assets', 'inventory'];
+        if (!validModules.includes(module)) {
+          return res.status(400).json({ 
+            message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 
+          });
+        }
+        targetModule = module;
+      } else {
+        // Infer module from workflowType
+        const workflowTypeToModuleMap: Record<string, string> = {
+          'vehicle_assignment': 'fleet'
+        };
+        
+        targetModule = workflowTypeToModuleMap[validatedData.workflowType];
+        
+        if (!targetModule) {
+          return res.status(400).json({ 
+            message: `Unable to determine target module. Please provide a module parameter or use a supported workflowType. Supported workflowTypes: ${Object.keys(workflowTypeToModuleMap).join(', ')}` 
+          });
+        }
+      }
+      
+      // Create queue item in the appropriate module
+      let queueItem;
+      switch (targetModule) {
+        case 'fleet':
+          queueItem = await storage.createFleetQueueItem(validatedData);
+          break;
+        case 'ntao':
+          queueItem = await storage.createNTAOQueueItem(validatedData);
+          break;
+        case 'assets':
+          queueItem = await storage.createAssetsQueueItem(validatedData);
+          break;
+        case 'inventory':
+          queueItem = await storage.createInventoryQueueItem(validatedData);
+          break;
+        default:
+          return res.status(400).json({ message: "Unsupported module" });
+      }
+      
+      res.status(201).json(queueItem);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid queue item data", errors: error.errors });
+      }
+      console.error('Error creating queue item:', error);
+      res.status(500).json({ message: "Failed to create queue item" });
+    }
+  });
+
   // Common queue operations (cancel works across all modules)
   app.patch("/api/queue/:id/cancel", async (req, res) => {
     try {
