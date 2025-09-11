@@ -49,9 +49,10 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
       markersLayerRef.current = L.layerGroup().addTo(map);
 
       // Ensure proper sizing within wrapper
-      requestAnimationFrame(() => {
+      setTimeout(() => {
         mapInstance.current?.invalidateSize();
-      });
+        mapInstance.current?.setView([18.4655, -66.1057], 9);
+      }, 100);
 
     } catch (error) {
       console.error('Error creating Puerto Rico map:', error);

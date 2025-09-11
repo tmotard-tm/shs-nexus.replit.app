@@ -49,9 +49,10 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
       markersLayerRef.current = L.layerGroup().addTo(map);
 
       // Ensure proper sizing within wrapper
-      requestAnimationFrame(() => {
+      setTimeout(() => {
         mapInstance.current?.invalidateSize();
-      });
+        mapInstance.current?.setView([21.3099, -157.8581], 7);
+      }, 100);
 
     } catch (error) {
       console.error('Error creating Hawaii map:', error);
