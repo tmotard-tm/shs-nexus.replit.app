@@ -879,6 +879,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to assign queue item" });
     }
   });
+
+  // Start work on unified queue item
+  app.patch("/api/queues/:module/:id/start-work", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      
+      const { module, id } = req.params;
+      
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
+      if (!validModules.includes(module)) {
+        return res.status(400).json({ 
+          message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 
+        });
+      }
+      
+      // Enforce access control
+      if (currentUser.role !== "superadmin" && 
+          (!currentUser.accessibleQueues || !currentUser.accessibleQueues.includes(module as any))) {
+        return res.status(403).json({ message: "Access denied to this queue" });
+      }
+      
+      const updatedItem = await storage.startWorkUnifiedQueueItem(module as any, id, currentUser.id);
+      if (!updatedItem) {
+        return res.status(404).json({ message: "Queue item not found or not eligible to start work" });
+      }
+      
+      res.json({ ...updatedItem, module });
+    } catch (error) {
+      console.error('Error starting work on unified queue item:', error);
+      res.status(500).json({ message: "Failed to start work on queue item" });
+    }
+  });
   
   app.patch("/api/queues/:module/:id/complete", requireAuth, async (req: any, res) => {
     try {

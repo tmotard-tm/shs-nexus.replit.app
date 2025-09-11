@@ -62,6 +62,7 @@ export interface IStorage {
   createNTAOQueueItem(item: InsertQueueItem): Promise<QueueItem>;
   updateNTAOQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
   assignNTAOQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  startWorkNTAOQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
   completeNTAOQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
 
   // Assets Queue Module  
@@ -70,6 +71,7 @@ export interface IStorage {
   createAssetsQueueItem(item: InsertQueueItem): Promise<QueueItem>;
   updateAssetsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
   assignAssetsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  startWorkAssetsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
   completeAssetsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
 
   // Inventory Queue Module
@@ -78,6 +80,7 @@ export interface IStorage {
   createInventoryQueueItem(item: InsertQueueItem): Promise<QueueItem>;
   updateInventoryQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
   assignInventoryQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  startWorkInventoryQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
   completeInventoryQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
 
   // Fleet Queue Module
@@ -86,6 +89,7 @@ export interface IStorage {
   createFleetQueueItem(item: InsertQueueItem): Promise<QueueItem>;
   updateFleetQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
   assignFleetQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  startWorkFleetQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
   completeFleetQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
 
   // Queue operations
@@ -121,6 +125,7 @@ export interface IStorage {
     total: number;
   }>;
   assignUnifiedQueueItem(module: QueueModule, id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  startWorkUnifiedQueueItem(module: QueueModule, id: string, workerId: string): Promise<QueueItem | undefined>;
   completeUnifiedQueueItem(module: QueueModule, id: string, completedBy: string): Promise<QueueItem | undefined>;
 }
 
@@ -788,6 +793,24 @@ export class MemStorage implements IStorage {
     return updatedItem;
   }
 
+  async startWorkNTAOQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    const item = this.ntaoQueueItems.get(id);
+    if (!item) return undefined;
+    
+    // Only allow starting work if item is pending and assigned to the worker
+    if (item.status !== "pending" || item.assignedTo !== workerId) {
+      return undefined;
+    }
+    
+    const updatedItem = { 
+      ...item, 
+      status: "in_progress",
+      updatedAt: new Date() 
+    };
+    this.ntaoQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
   async completeNTAOQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
     const item = this.ntaoQueueItems.get(id);
     if (!item) return undefined;
@@ -857,6 +880,24 @@ export class MemStorage implements IStorage {
       ...item, 
       assignedTo: assigneeId,
       status: "pending", // Keep as pending when assigned
+      updatedAt: new Date() 
+    };
+    this.assetsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async startWorkAssetsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    const item = this.assetsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    // Only allow starting work if item is pending and assigned to the worker
+    if (item.status !== "pending" || item.assignedTo !== workerId) {
+      return undefined;
+    }
+    
+    const updatedItem = { 
+      ...item, 
+      status: "in_progress",
       updatedAt: new Date() 
     };
     this.assetsQueueItems.set(id, updatedItem);
@@ -938,6 +979,24 @@ export class MemStorage implements IStorage {
     return updatedItem;
   }
 
+  async startWorkInventoryQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    const item = this.inventoryQueueItems.get(id);
+    if (!item) return undefined;
+    
+    // Only allow starting work if item is pending and assigned to the worker
+    if (item.status !== "pending" || item.assignedTo !== workerId) {
+      return undefined;
+    }
+    
+    const updatedItem = { 
+      ...item, 
+      status: "in_progress",
+      updatedAt: new Date() 
+    };
+    this.inventoryQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
   async completeInventoryQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
     const item = this.inventoryQueueItems.get(id);
     if (!item) return undefined;
@@ -1007,6 +1066,24 @@ export class MemStorage implements IStorage {
       ...item, 
       assignedTo: assigneeId,
       status: "pending", // Keep as pending when assigned
+      updatedAt: new Date() 
+    };
+    this.fleetQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async startWorkFleetQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    const item = this.fleetQueueItems.get(id);
+    if (!item) return undefined;
+    
+    // Only allow starting work if item is pending and assigned to the worker
+    if (item.status !== "pending" || item.assignedTo !== workerId) {
+      return undefined;
+    }
+    
+    const updatedItem = { 
+      ...item, 
+      status: "in_progress",
       updatedAt: new Date() 
     };
     this.fleetQueueItems.set(id, updatedItem);
@@ -1311,6 +1388,21 @@ export class MemStorage implements IStorage {
         return this.assignInventoryQueueItem(id, assigneeId);
       case 'fleet':
         return this.assignFleetQueueItem(id, assigneeId);
+      default:
+        return undefined;
+    }
+  }
+  
+  async startWorkUnifiedQueueItem(module: QueueModule, id: string, workerId: string): Promise<QueueItem | undefined> {
+    switch (module) {
+      case 'ntao':
+        return this.startWorkNTAOQueueItem(id, workerId);
+      case 'assets':
+        return this.startWorkAssetsQueueItem(id, workerId);
+      case 'inventory':
+        return this.startWorkInventoryQueueItem(id, workerId);
+      case 'fleet':
+        return this.startWorkFleetQueueItem(id, workerId);
       default:
         return undefined;
     }

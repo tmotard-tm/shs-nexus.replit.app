@@ -29,7 +29,9 @@ import {
   BarChart,
   Users,
   FileText,
-  Clipboard
+  Clipboard,
+  Play,
+  Edit
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
@@ -65,11 +67,48 @@ export default function UnifiedQueueManagement() {
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
-  // Do not auto-select any queues - require manual selection
+  // Auto-populate module selection based on user's accessible queues
   useEffect(() => {
-    // Always start with no queues selected, regardless of user role or permissions
-    // Users must manually select which queues they want to access
-    setSelectedModules([]);
+    if (user) {
+      // Auto-select all accessible modules for the user
+      const accessibleModules: QueueModule[] = [];
+      
+      // If user has accessibleQueues, use those; otherwise determine by department/role
+      if (user.accessibleQueues && user.accessibleQueues.length > 0) {
+        accessibleModules.push(...user.accessibleQueues);
+      } else {
+        // Auto-determine based on department and role
+        if (user.role === "superadmin") {
+          accessibleModules.push("ntao", "assets", "inventory", "fleet");
+        } else {
+          // Map departments to queue modules
+          switch (user.department) {
+            case "NTAO":
+              accessibleModules.push("ntao");
+              break;
+            case "Assets Management":
+              accessibleModules.push("assets");
+              break;
+            case "Inventory Control":
+              accessibleModules.push("inventory");
+              break;
+            case "Fleet Management":
+              accessibleModules.push("fleet");
+              break;
+            default:
+              // If no specific department, default to agent role with access to ntao
+              if (user.role === "agent") {
+                accessibleModules.push("ntao");
+              }
+              break;
+          }
+        }
+      }
+      
+      setSelectedModules(accessibleModules);
+    } else {
+      setSelectedModules([]);
+    }
   }, [user]);
 
   // Fetch unified queue items
@@ -159,6 +198,29 @@ export default function UnifiedQueueManagement() {
     },
   });
 
+  // Start work mutation
+  const startWorkMutation = useMutation({
+    mutationFn: async ({ module, id }: { module: QueueModule; id: string }) => {
+      const response = await apiRequest("PATCH", `/api/queues/${module}/${id}/start-work`);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/queues/stats"] });
+      toast({
+        title: "Success",
+        description: "Work started successfully! Task is now in progress.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to start work on task",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Complete queue item mutation
   const completeMutation = useMutation({
     mutationFn: async ({ module, id, completedBy }: { module: QueueModule; id: string; completedBy: string }) => {
@@ -194,6 +256,10 @@ export default function UnifiedQueueManagement() {
 
   const handleAssignTask = (item: CombinedQueueItem, assigneeId: string) => {
     assignMutation.mutate({ module: item.module, id: item.id, assigneeId });
+  };
+
+  const handleStartWork = (item: CombinedQueueItem) => {
+    startWorkMutation.mutate({ module: item.module, id: item.id });
   };
 
   const handleCompleteTask = (item: CombinedQueueItem) => {
@@ -609,34 +675,37 @@ export default function UnifiedQueueManagement() {
                   ) : (
                     <div className="space-y-4">
                       {filteredItems.map((item) => (
-                        <Card key={`${item.module}-${item.id}`} className="hover:shadow-md transition-shadow">
+                        <Card key={`${item.module}-${item.id}`} className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-transparent hover:border-l-blue-500">
                           <CardContent className="p-6">
                             <div className="flex items-start justify-between">
-                              <div className="space-y-2 flex-1">
-                                <div className="flex items-center gap-2 flex-wrap">
+                              <div className="space-y-3 flex-1">
+                                {/* Prominent module badge at top */}
+                                <div className="flex items-center justify-between">
                                   <Badge 
-                                    className={`${getModuleColor(item.module)} text-white`}
+                                    className={`${getModuleColor(item.module)} text-white px-3 py-1.5 text-sm font-semibold shadow-md`}
                                     data-testid={`badge-module-${item.module}`}
                                   >
-                                    {moduleLabels[item.module]}
+                                    📋 {moduleLabels[item.module]}
                                   </Badge>
-                                  <Badge 
-                                    className={`${getStatusColor(item.status)} text-white`}
-                                    data-testid={`badge-status-${item.status}`}
-                                  >
-                                    {item.status.replace('_', ' ')}
-                                  </Badge>
-                                  <Badge 
-                                    className={`${getPriorityColor(item.priority)} text-white`}
-                                    data-testid={`badge-priority-${item.priority}`}
-                                  >
-                                    {item.priority}
-                                  </Badge>
-                                  {item.workflowType && (
-                                    <Badge variant="outline" data-testid={`badge-workflow-${item.workflowType}`}>
-                                      {item.workflowType.replace('_', ' ')}
+                                  <div className="flex items-center gap-2">
+                                    <Badge 
+                                      className={`${getStatusColor(item.status)} text-white px-2 py-1`}
+                                      data-testid={`badge-status-${item.status}`}
+                                    >
+                                      {item.status.replace('_', ' ')}
                                     </Badge>
-                                  )}
+                                    <Badge 
+                                      className={`${getPriorityColor(item.priority)} text-white px-2 py-1`}
+                                      data-testid={`badge-priority-${item.priority}`}
+                                    >
+                                      {item.priority}
+                                    </Badge>
+                                    {item.workflowType && (
+                                      <Badge variant="outline" data-testid={`badge-workflow-${item.workflowType}`}>
+                                        {item.workflowType.replace('_', ' ')}
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </div>
                                 
                                 <h3 className="font-semibold text-lg text-foreground" data-testid={`text-item-title-${item.id}`}>
@@ -671,22 +740,54 @@ export default function UnifiedQueueManagement() {
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-2 ml-4">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => setViewQueueItem(item)}
-                                  data-testid={`button-view-${item.id}`}
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-
-                                {item.status === "pending" && (
+                              {/* Direct action buttons prominently displayed */}
+                              <div className="flex flex-col gap-2 ml-4 min-w-fit">
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setViewQueueItem(item)}
+                                    data-testid={`button-view-${item.id}`}
+                                  >
+                                    <Eye className="h-4 w-4 mr-1" />
+                                    View
+                                  </Button>
+                                  
+                                  {/* Prominent Work/Edit button */}
+                                  {item.status === "pending" && item.assignedTo === user?.id && (
+                                    <Button
+                                      size="sm"
+                                      className="bg-green-600 hover:bg-green-700 text-white font-medium shadow-md"
+                                      onClick={() => handleStartWork(item)}
+                                      disabled={startWorkMutation.isPending}
+                                      data-testid={`button-start-work-${item.id}`}
+                                    >
+                                      <Play className="h-4 w-4 mr-1" />
+                                      Start Work
+                                    </Button>
+                                  )}
+                                  
+                                  {item.status === "in_progress" && item.assignedTo === user?.id && (
+                                    <Button
+                                      size="sm"
+                                      className="bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md"
+                                      onClick={() => handleCompleteTask(item)}
+                                      disabled={completeMutation.isPending}
+                                      data-testid={`button-complete-${item.id}`}
+                                    >
+                                      <CheckCircle className="h-4 w-4 mr-1" />
+                                      Complete
+                                    </Button>
+                                  )}
+                                </div>
+                                
+                                {/* Assignment dropdown for unassigned items */}
+                                {item.status === "pending" && !item.assignedTo && (
                                   <Select
                                     onValueChange={(assigneeId) => handleAssignTask(item, assigneeId)}
                                   >
-                                    <SelectTrigger className="w-32" data-testid={`select-assign-${item.id}`}>
-                                      <SelectValue placeholder="Assign" />
+                                    <SelectTrigger className="w-full" data-testid={`select-assign-${item.id}`}>
+                                      <SelectValue placeholder="Assign Task" />
                                     </SelectTrigger>
                                     <SelectContent>
                                       {users
@@ -699,15 +800,18 @@ export default function UnifiedQueueManagement() {
                                     </SelectContent>
                                   </Select>
                                 )}
-
-                                {item.status === "in_progress" && item.assignedTo === user?.id && (
+                                
+                                {/* Assign to me button for unassigned items */}
+                                {item.status === "pending" && !item.assignedTo && (
                                   <Button
+                                    variant="outline"
                                     size="sm"
-                                    onClick={() => handleCompleteTask(item)}
-                                    disabled={completeMutation.isPending}
-                                    data-testid={`button-complete-${item.id}`}
+                                    onClick={() => handleAssignTask(item, user?.id || "")}
+                                    disabled={assignMutation.isPending}
+                                    data-testid={`button-assign-me-${item.id}`}
                                   >
-                                    <CheckCircle className="h-4 w-4" />
+                                    <User className="h-4 w-4 mr-1" />
+                                    Assign to Me
                                   </Button>
                                 )}
                               </div>
