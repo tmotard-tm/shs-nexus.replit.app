@@ -64,7 +64,7 @@ export default function AnalyticsBoard() {
 
   // Seed database mutation
   const seedVehiclesMutation = useMutation({
-    mutationFn: () => apiRequest('/api/vehicles/seed', 'POST'),
+    mutationFn: () => apiRequest('POST', '/api/vehicles/seed'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/vehicles'] });
       toast({
