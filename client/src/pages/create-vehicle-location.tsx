@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { Car, User } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { type InsertVehicle } from "@shared/schema";
+import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 
 export default function CreateVehicle() {
   const { toast } = useToast();
@@ -91,6 +92,54 @@ export default function CreateVehicle() {
     { id: "3", name: "Emily Davis", department: "Marketing" },
     { id: "4", name: "Robert Wilson", department: "Finance" }
   ];
+
+  // Apply prefill data from query parameters on component mount
+  useEffect(() => {
+    const vehicleFields = [
+      'vin', 'vehicleNumber', 'modelYear', 'makeName', 'modelName', 'vehicleType',
+      'color', 'licensePlate', 'licenseState', 'branding', 'interior', 'tuneStatus',
+      'region', 'district', 'deliveryAddress', 'city', 'state', 'zip', 'status'
+    ];
+    
+    const employeeFields = [
+      'firstName', 'lastName', 'email', 'phone', 'department', 'position', 'manager',
+      'enterpriseId', 'region', 'district', 'requisitionId', 'techId', 'proposedRouteStartDate',
+      'emergencyContact', 'emergencyPhone'
+    ];
+
+    const validators = {
+      email: commonValidators.email,
+      phone: commonValidators.phone,
+      vehicleNumber: commonValidators.vehicleNumber,
+      firstName: commonValidators.employeeName,
+      lastName: commonValidators.employeeName,
+      proposedRouteStartDate: commonValidators.date,
+      modelYear: commonValidators.number,
+      emergencyContact: commonValidators.employeeName,
+      emergencyPhone: commonValidators.phone
+    };
+
+    const vehiclePrefill = getPrefillParams(vehicleFields, validators);
+    const employeePrefill = getPrefillParams(employeeFields, validators);
+
+    // Apply vehicle prefill data
+    if (Object.keys(vehiclePrefill).length > 0) {
+      setVehicleForm(prev => ({
+        ...prev,
+        ...vehiclePrefill,
+        // Convert modelYear to number if provided
+        ...(vehiclePrefill.modelYear && { modelYear: parseInt(vehiclePrefill.modelYear as string, 10) || new Date().getFullYear() })
+      }));
+    }
+
+    // Apply employee prefill data
+    if (Object.keys(employeePrefill).length > 0) {
+      setEmployeeData(prev => ({
+        ...prev,
+        ...employeePrefill
+      }));
+    }
+  }, []);
 
   const handleVehicleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

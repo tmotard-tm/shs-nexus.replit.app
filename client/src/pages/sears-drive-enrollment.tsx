@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { apiRequest } from "@/lib/queryClient";
 import { Upload, FileImage, Truck, User, MapPin, Briefcase, Upload as UploadIcon } from "lucide-react";
+import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 
 // Form validation schema
 const enrollmentSchema = z.object({
@@ -55,20 +56,55 @@ export default function SearsDriveEnrollment() {
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, File>>({});
   const [uploadPreviews, setUploadPreviews] = useState<Record<string, string>>({});
 
+  // Get prefill data from query parameters
+  const getFormDefaultValues = (): EnrollmentFormData => {
+    const formFields = [
+      'districtNumber', 'currentTruckNumber', 'techFirstName', 'techLastName', 
+      'ldap', 'techEmail', 'referredBy', 'city', 'state', 'industry'
+    ];
+
+    const validators = {
+      techEmail: commonValidators.email,
+      techFirstName: commonValidators.employeeName,
+      techLastName: commonValidators.employeeName,
+      ldap: commonValidators.text,
+      referredBy: commonValidators.employeeName,
+      city: commonValidators.text,
+      state: commonValidators.text,
+      districtNumber: commonValidators.text,
+      currentTruckNumber: commonValidators.vehicleNumber,
+      industry: (value: string): string[] => {
+        try {
+          // Handle array string format like "Cook,Dish,Microwave" or JSON array
+          if (value.startsWith('[') && value.endsWith(']')) {
+            return JSON.parse(value);
+          }
+          return value.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        } catch {
+          return [value]; // Fallback to single item array
+        }
+      }
+    };
+
+    const prefillData = getPrefillParams(formFields, validators);
+
+    return {
+      districtNumber: prefillData.districtNumber || "",
+      currentTruckNumber: prefillData.currentTruckNumber || "",
+      techFirstName: prefillData.techFirstName || "",
+      techLastName: prefillData.techLastName || "",
+      ldap: prefillData.ldap || "",
+      techEmail: prefillData.techEmail || "",
+      referredBy: prefillData.referredBy || "",
+      city: prefillData.city || "",
+      state: prefillData.state || "",
+      industry: prefillData.industry || [],
+    };
+  };
+
   const form = useForm<EnrollmentFormData>({
     resolver: zodResolver(enrollmentSchema),
-    defaultValues: {
-      districtNumber: "",
-      currentTruckNumber: "",
-      techFirstName: "",
-      techLastName: "",
-      ldap: "",
-      techEmail: "",
-      referredBy: "",
-      city: "",
-      state: "",
-      industry: [],
-    },
+    defaultValues: getFormDefaultValues(),
   });
 
   // Submit mutation

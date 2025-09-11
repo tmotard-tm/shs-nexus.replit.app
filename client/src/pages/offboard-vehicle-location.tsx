@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Car, MapPin, AlertTriangle, Trash2, Archive } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 
 export default function OffboardVehicleLocation() {
   const { toast } = useToast();
@@ -73,6 +74,42 @@ export default function OffboardVehicleLocation() {
     "Relocation",
     "Other"
   ];
+
+  // Apply prefill data from query parameters on component mount
+  useEffect(() => {
+    const vehicleOffboardFields = [
+      'vehicleId', 'techRacfId', 'techName', 'employeeId', 'lastDayWorked',
+      'vehicleNumber', 'vehicleLocation', 'reason', 'effectiveDate', 'notes', 'returnCondition'
+    ];
+    const locationOffboardFields = [
+      'locationId', 'reason', 'effectiveDate', 'notes', 'equipmentDisposal'
+    ];
+
+    const validators = {
+      techName: commonValidators.employeeName,
+      employeeId: (value: string) => value.replace(/\D/g, '').slice(0, 11), // Keep only digits, max 11
+      techRacfId: (value: string) => value.replace(/[^a-zA-Z0-9]/g, '').slice(0, 7), // Alphanumeric only, max 7
+      lastDayWorked: commonValidators.date,
+      effectiveDate: commonValidators.date,
+      vehicleNumber: commonValidators.vehicleNumber,
+      notes: commonValidators.text,
+      vehicleLocation: commonValidators.text,
+      equipmentDisposal: commonValidators.text
+    };
+
+    const vehiclePrefill = getPrefillParams(vehicleOffboardFields, validators);
+    const locationPrefill = getPrefillParams(locationOffboardFields, validators);
+
+    // Apply vehicle offboard prefill data
+    if (Object.keys(vehiclePrefill).length > 0) {
+      setVehicleOffboard(prev => ({ ...prev, ...vehiclePrefill }));
+    }
+
+    // Apply location offboard prefill data
+    if (Object.keys(locationPrefill).length > 0) {
+      setLocationOffboard(prev => ({ ...prev, ...locationPrefill }));
+    }
+  }, []);
 
   const handleVehicleOffboard = async (e: React.FormEvent) => {
     e.preventDefault();

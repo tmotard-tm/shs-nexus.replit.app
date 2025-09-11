@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import licensePlateIcon from "@assets/generated_images/Generic_license_plate_ico
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getAvailableVehicles, getBrandingOptions, getInteriorOptions, getTuneStatusOptions, getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
+import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 
 export default function AssignVehicleLocation() {
   const { toast } = useToast();
@@ -105,6 +106,62 @@ export default function AssignVehicleLocation() {
     { id: "3", name: "Emily Davis", department: "Marketing" },
     { id: "4", name: "Robert Wilson", department: "Finance" }
   ];
+
+  // Apply prefill data from query parameters on component mount
+  useEffect(() => {
+    const assignmentFields = ['employeeId', 'vehicleId', 'startDate', 'endDate', 'purpose'];
+    const employeeFields = [
+      'firstName', 'lastName', 'email', 'phone', 'department', 'position', 'manager',
+      'enterpriseId', 'region', 'district', 'requisitionId', 'techId', 'proposedRouteStartDate',
+      'emergencyContact', 'emergencyPhone'
+    ];
+    const rentalFields = ['isRental', 'rentalVanNumber', 'assignmentReason'];
+    const searchFields = ['searchQuery', 'brandingFilter', 'interiorFilter', 'targetZipcode'];
+
+    const validators = {
+      email: commonValidators.email,
+      phone: commonValidators.phone,
+      startDate: commonValidators.date,
+      endDate: commonValidators.date,
+      proposedRouteStartDate: commonValidators.date,
+      firstName: commonValidators.employeeName,
+      lastName: commonValidators.employeeName,
+      emergencyContact: commonValidators.employeeName,
+      emergencyPhone: commonValidators.phone,
+      rentalVanNumber: commonValidators.vehicleNumber
+    };
+
+    const assignmentPrefill = getPrefillParams(assignmentFields, validators);
+    const employeePrefill = getPrefillParams(employeeFields, validators);
+    const rentalPrefill = getPrefillParams(rentalFields, validators);
+    const searchPrefill = getPrefillParams(searchFields, validators);
+
+    // Apply assignment prefill data
+    if (Object.keys(assignmentPrefill).length > 0) {
+      setVehicleAssignment(prev => ({ ...prev, ...assignmentPrefill }));
+    }
+
+    // Apply employee prefill data
+    if (Object.keys(employeePrefill).length > 0) {
+      setEmployeeData(prev => ({ ...prev, ...employeePrefill }));
+    }
+
+    // Apply rental prefill data
+    if (Object.keys(rentalPrefill).length > 0) {
+      setRentalInfo(prev => ({ 
+        ...prev, 
+        ...rentalPrefill,
+        // Convert string 'true'/'false' to boolean for isRental
+        ...(rentalPrefill.isRental && { isRental: rentalPrefill.isRental === 'true' })
+      }));
+    }
+
+    // Apply search prefill data
+    if (searchPrefill.searchQuery) setSearchQuery(searchPrefill.searchQuery as string);
+    if (searchPrefill.brandingFilter) setBrandingFilter(searchPrefill.brandingFilter as string);
+    if (searchPrefill.interiorFilter) setInteriorFilter(searchPrefill.interiorFilter as string);
+    if (searchPrefill.targetZipcode) setTargetZipcode(searchPrefill.targetZipcode as string);
+  }, []);
 
   // Simple distance calculation based on zip code numerical difference
   // This is a basic approximation - can be enhanced with proper geocoding later

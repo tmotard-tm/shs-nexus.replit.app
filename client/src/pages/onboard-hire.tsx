@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 
 export default function OnboardHire() {
   const { toast } = useToast();
@@ -98,6 +99,52 @@ export default function OnboardHire() {
     { id: "4", name: "Robert Wilson", department: "Finance" }
   ];
 
+  // Apply prefill data from query parameters on component mount
+  useEffect(() => {
+    const employeeFields = [
+      'firstName', 'lastName', 'email', 'phone', 'street', 'city', 'state', 'zipCode',
+      'department', 'position', 'startDate', 'manager', 'employeeId', 'region', 'district',
+      'requisitionId', 'enterpriseId', 'techId', 'proposedRouteStartDate', 'isGeneralist'
+    ];
+    const vehicleFields = ['autoAssign', 'workZipcode'];
+
+    const validators = {
+      email: commonValidators.email,
+      phone: commonValidators.phone,
+      startDate: commonValidators.date,
+      proposedRouteStartDate: commonValidators.date,
+      firstName: commonValidators.employeeName,
+      lastName: commonValidators.employeeName,
+      zipCode: (value: string) => value.replace(/\D/g, '').slice(0, 5), // Keep only digits, max 5
+      employeeId: (value: string) => value.replace(/\D/g, '').slice(0, 11), // Keep only digits, max 11
+      enterpriseId: commonValidators.text,
+      techId: commonValidators.text,
+      requisitionId: commonValidators.text
+    };
+
+    const employeePrefill = getPrefillParams(employeeFields, validators);
+    const vehiclePrefill = getPrefillParams(vehicleFields, validators);
+
+    // Apply employee prefill data
+    if (Object.keys(employeePrefill).length > 0) {
+      setEmployeeForm(prev => ({
+        ...prev,
+        ...employeePrefill,
+        // Convert string 'true'/'false' to boolean for isGeneralist
+        ...(employeePrefill.isGeneralist && { isGeneralist: employeePrefill.isGeneralist === 'true' })
+      }));
+    }
+
+    // Apply vehicle assignment prefill data
+    if (Object.keys(vehiclePrefill).length > 0) {
+      setVehicleAssignment(prev => ({
+        ...prev,
+        ...vehiclePrefill,
+        // Convert string 'true'/'false' to boolean for autoAssign
+        ...(vehiclePrefill.autoAssign && { autoAssign: vehiclePrefill.autoAssign === 'true' })
+      }));
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
