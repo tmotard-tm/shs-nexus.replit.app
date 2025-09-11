@@ -271,6 +271,12 @@ function Router() {
           <ActiveVehicles />
         </ProtectedRoute>
       </Route>
+
+      <Route path="/analytics-board">
+        <ProtectedRoute>
+          <AnalyticsBoard />
+        </ProtectedRoute>
+      </Route>
       
       <Route component={NotFound} />
     </Switch>
