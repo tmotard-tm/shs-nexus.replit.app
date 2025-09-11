@@ -276,6 +276,50 @@ export function WorkModuleDialog({
             </CardContent>
           </Card>
 
+          {/* Instructions/Checklist Section */}
+          {taskData.instructions && Array.isArray(taskData.instructions) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ClipboardCheck className="h-4 w-4" />
+                  Task Instructions
+                </CardTitle>
+                <CardDescription>
+                  Complete the following checklist items to finish this task
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {taskData.instructions.map((instruction: string, index: number) => (
+                    <div key={index} className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                      <Checkbox 
+                        id={`instruction-${index}`}
+                        className="mt-0.5"
+                        data-testid={`checkbox-instruction-${index}`}
+                      />
+                      <div className="flex-1">
+                        <Label 
+                          htmlFor={`instruction-${index}`}
+                          className="text-sm font-normal cursor-pointer leading-relaxed"
+                        >
+                          {instruction}
+                        </Label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-blue-700 dark:text-blue-300">
+                      Check off each item as you complete it. Once all items are completed, use the Final Disposition section below to mark the task as complete.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Financial Details Section */}
           <Card>
             <CardHeader>
