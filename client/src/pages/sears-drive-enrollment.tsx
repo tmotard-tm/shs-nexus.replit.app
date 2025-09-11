@@ -333,7 +333,7 @@ export default function SearsDriveEnrollment() {
                         <label className="text-sm font-medium text-foreground">
                           {upload.label} *
                         </label>
-                        <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-4 text-center hover:border-muted-foreground/50 transition-colors">
+                        <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-4 text-center hover:border-muted-foreground/50 transition-colors relative">
                           {uploadPreviews[upload.id] ? (
                             <div className="space-y-2">
                               <img 
@@ -358,7 +358,7 @@ export default function SearsDriveEnrollment() {
                               const file = e.target.files?.[0];
                               if (file) handleFileUpload(upload.id, file);
                             }}
-                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            className="absolute inset-0 opacity-0 cursor-pointer z-10"
                             data-testid={`input-file-${upload.id}`}
                           />
                         </div>
