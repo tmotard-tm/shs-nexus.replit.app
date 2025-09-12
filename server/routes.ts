@@ -10,8 +10,44 @@ import multer from "multer";
 import rateLimit from "express-rate-limit";
 import DOMPurify from "isomorphic-dompurify";
 
-// Simple session store for demo purposes
+// Persistent session store (survives server restarts)
+const SESSIONS_FILE = './sessions.json';
 const sessions = new Map<string, { userId: string; username: string; expiresAt: Date }>();
+
+// Load sessions from file on startup
+try {
+  if (require('fs').existsSync(SESSIONS_FILE)) {
+    const savedSessions = JSON.parse(require('fs').readFileSync(SESSIONS_FILE, 'utf-8'));
+    const now = new Date();
+    for (const [sessionId, sessionData] of Object.entries(savedSessions)) {
+      const session = sessionData as any;
+      // Only restore sessions that haven't expired
+      if (new Date(session.expiresAt) > now) {
+        sessions.set(sessionId, {
+          userId: session.userId,
+          username: session.username,
+          expiresAt: new Date(session.expiresAt)
+        });
+      }
+    }
+    console.log(`Restored ${sessions.size} valid sessions from storage`);
+  }
+} catch (error) {
+  console.warn('Failed to load sessions from storage:', error);
+}
+
+// Save sessions to file
+function saveSessions() {
+  try {
+    const sessionsObj = Object.fromEntries(sessions);
+    require('fs').writeFileSync(SESSIONS_FILE, JSON.stringify(sessionsObj, null, 2));
+  } catch (error) {
+    console.warn('Failed to save sessions:', error);
+  }
+}
+
+// Auto-save sessions every 30 seconds
+setInterval(saveSessions, 30000);
 
 // Human verification session store
 const humanVerificationSessions = new Map<string, { verified: boolean; expiresAt: Date; originalUrl: string }>();
@@ -147,15 +183,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // Create session
+      // Create session with longer timeout for better UX
       const sessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
       
       sessions.set(sessionId, {
         userId: user.id,
         username: user.username,
         expiresAt
       });
+      
+      // Save sessions immediately after creating new one
+      saveSessions();
 
       // Set httpOnly cookie
       res.cookie('sessionId', sessionId, {
