@@ -2557,7 +2557,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Parse existing metadata
-      let metadata = {};
+      let metadata: any = {};
       if (queueItem.metadata) {
         try {
           metadata = JSON.parse(queueItem.metadata);
