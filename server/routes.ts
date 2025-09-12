@@ -1786,68 +1786,187 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store the enrollment data
       const enrollmentId = `sears-drive-${Date.now()}`;
       
-      // Create fleet team queue item for BYOV review and van number assignment
-      let queueItem = null;
-      let queueItemId = null;
+      // Create multiple specific tasks across FLEET and NTAO departments for BYOV enrollment
+      const createdTasks = [];
+      const techFullName = `${formData.techFirstName} ${formData.techLastName}`;
+      const location = `${formData.city}, ${formData.state}`;
+      const workflowId = `byov-${enrollmentId}`;
       
+      // Common enrollment data for all tasks
+      const enrollmentData = {
+        enrollmentId,
+        submissionTimestamp: new Date().toISOString(),
+        techInfo: {
+          firstName: formData.techFirstName,
+          lastName: formData.techLastName,
+          email: formData.techEmail,
+          ldap: formData.ldap,
+          currentTruckNumber: formData.currentTruckNumber,
+          districtNumber: formData.districtNumber,
+          referredBy: formData.referredBy
+        },
+        location: {
+          city: formData.city,
+          state: formData.state
+        },
+        industry: formData.industry,
+        filesSubmitted: files.map((f: any) => ({ 
+          name: f.fieldname, 
+          size: f.size, 
+          mimetype: f.mimetype 
+        }))
+      };
+
       try {
-        const techFullName = `${formData.techFirstName} ${formData.techLastName}`;
-        const location = `${formData.city}, ${formData.state}`;
-        
-        // Prepare queue item data
-        const queueItemData = {
-          workflowType: "byov_assignment",
-          title: `BYOV Assignment Request - ${techFullName}`,
-          description: `Review Sears Drive Program enrollment and assign BYOV van number for ${techFullName} in ${location}. Tech is currently using truck ${formData.currentTruckNumber} in district ${formData.districtNumber}.`,
+        // FLEET Task 1: Assign new van
+        const assignVanTask = await storage.createFleetQueueItem({
+          workflowType: "van_assignment",
+          title: `Assign BYOV Van - ${techFullName}`,
+          description: `Assign new BYOV van number and setup for ${techFullName} in ${location}. Current truck: ${formData.currentTruckNumber}`,
           priority: "high" as const,
-          requesterId: "system", // Automated task from enrollment system
+          requesterId: "system",
           data: JSON.stringify({
-            enrollmentId,
-            submissionTimestamp: new Date().toISOString(),
-            techInfo: {
-              firstName: formData.techFirstName,
-              lastName: formData.techLastName,
-              email: formData.techEmail,
-              ldap: formData.ldap,
-              currentTruckNumber: formData.currentTruckNumber,
-              districtNumber: formData.districtNumber,
-              referredBy: formData.referredBy
-            },
-            location: {
-              city: formData.city,
-              state: formData.state
-            },
-            industry: formData.industry,
-            filesSubmitted: files.map((f: any) => ({ 
-              name: f.fieldname, 
-              size: f.size, 
-              mimetype: f.mimetype 
-            })),
+            ...enrollmentData,
             workflowStep: 1,
+            workflowId,
+            task: "assign_van",
             nextActions: [
-              "Review submitted vehicle photos and documents",
-              "Verify vehicle meets BYOV requirements", 
-              "Assign BYOV van number",
-              "Setup vehicle in fleet system",
-              "Notify technician of assignment"
+              "Review vehicle documentation and photos",
+              "Verify BYOV requirements compliance",
+              "Assign new van number",
+              "Setup vehicle in fleet management system"
             ]
           }),
           metadata: JSON.stringify({
             enrollmentId,
+            workflowId,
             source: "sears_drive_enrollment",
-            techEmail: formData.techEmail,
-            priority_reason: "new_byov_enrollment"
+            taskType: "assign_van"
           })
-        };
+        });
+        createdTasks.push({ department: 'FLEET', task: 'Assign Van', id: assignVanTask.id });
 
-        queueItem = await storage.createFleetQueueItem(queueItemData);
-        queueItemId = queueItem.id;
-        
-        console.log(`Created fleet queue item ${queueItemId} for BYOV enrollment ${enrollmentId}`);
+        // FLEET Task 2: Unassign previous van  
+        const unassignVanTask = await storage.createFleetQueueItem({
+          workflowType: "van_unassignment",
+          title: `Unassign Previous Van - ${formData.currentTruckNumber}`,
+          description: `Unassign and process previous truck ${formData.currentTruckNumber} from ${techFullName}`,
+          priority: "medium" as const,
+          requesterId: "system",
+          data: JSON.stringify({
+            ...enrollmentData,
+            workflowStep: 2,
+            workflowId,
+            task: "unassign_van",
+            dependsOn: assignVanTask.id,
+            nextActions: [
+              "Remove truck from technician assignment",
+              "Update fleet records",
+              "Schedule vehicle return/pickup"
+            ]
+          }),
+          metadata: JSON.stringify({
+            enrollmentId,
+            workflowId,
+            source: "sears_drive_enrollment",
+            taskType: "unassign_van"
+          })
+        });
+        createdTasks.push({ department: 'FLEET', task: 'Unassign Previous Van', id: unassignVanTask.id });
+
+        // FLEET Task 3: Update TPMS, AMS, and Holman systems
+        const updateSystemsTask = await storage.createFleetQueueItem({
+          workflowType: "system_updates",
+          title: `Update TPMS/AMS/Holman - ${techFullName}`,
+          description: `Update TPMS, AMS, and Holman systems for vehicle transition from ${formData.currentTruckNumber} to new BYOV`,
+          priority: "medium" as const,
+          requesterId: "system",
+          data: JSON.stringify({
+            ...enrollmentData,
+            workflowStep: 3,
+            workflowId,
+            task: "update_systems",
+            dependsOn: assignVanTask.id,
+            nextActions: [
+              "Update TPMS (Truck Parts Management System)",
+              "Update AMS (Asset Management System)", 
+              "Update Holman fleet system",
+              "Sync all system records"
+            ]
+          }),
+          metadata: JSON.stringify({
+            enrollmentId,
+            workflowId,
+            source: "sears_drive_enrollment",
+            taskType: "update_systems"
+          })
+        });
+        createdTasks.push({ department: 'FLEET', task: 'Update TPMS/AMS/Holman', id: updateSystemsTask.id });
+
+        // NTAO Task 1: Stop shipment for previous van
+        const stopShipmentTask = await storage.createNTAOQueueItem({
+          workflowType: "stop_shipment",
+          title: `Stop Parts Shipment - Truck ${formData.currentTruckNumber}`,
+          description: `Stop all part stock shipments to previous truck ${formData.currentTruckNumber} for ${techFullName}`,
+          priority: "high" as const,
+          requesterId: "system",
+          data: JSON.stringify({
+            ...enrollmentData,
+            workflowStep: 1,
+            workflowId,
+            task: "stop_shipment",
+            nextActions: [
+              "Halt all scheduled shipments to truck " + formData.currentTruckNumber,
+              "Update shipping system records",
+              "Notify warehouse of shipment changes"
+            ]
+          }),
+          metadata: JSON.stringify({
+            enrollmentId,
+            workflowId,
+            source: "sears_drive_enrollment",
+            taskType: "stop_shipment"
+          })
+        });
+        createdTasks.push({ department: 'NTAO', task: 'Stop Shipment to Previous Van', id: stopShipmentTask.id });
+
+        // NTAO Task 2: Setup shipment for new van (depends on van assignment)
+        const setupNewShipmentTask = await storage.createNTAOQueueItem({
+          workflowType: "setup_shipment",
+          title: `Setup Parts Shipment - New BYOV for ${techFullName}`,
+          description: `Setup part stock shipment routing for new BYOV assigned to ${techFullName}`,
+          priority: "medium" as const,
+          requesterId: "system",
+          data: JSON.stringify({
+            ...enrollmentData,
+            workflowStep: 2,
+            workflowId,
+            task: "setup_new_shipment",
+            dependsOn: assignVanTask.id,
+            nextActions: [
+              "Wait for new van number assignment",
+              "Setup shipment routing for new BYOV",
+              "Configure inventory management for new vehicle",
+              "Test shipment workflow"
+            ]
+          }),
+          metadata: JSON.stringify({
+            enrollmentId,
+            workflowId,
+            source: "sears_drive_enrollment",
+            taskType: "setup_new_shipment"
+          })
+        });
+        createdTasks.push({ department: 'NTAO', task: 'Ship to New Van', id: setupNewShipmentTask.id });
+
+        console.log(`Created ${createdTasks.length} tasks for BYOV enrollment ${enrollmentId}:`);
+        createdTasks.forEach(task => {
+          console.log(`  - ${task.department}: ${task.task} (${task.id})`);
+        });
         
       } catch (queueError) {
         // Log the error but don't fail the enrollment submission
-        console.error('Failed to create fleet queue item for enrollment:', queueError);
+        console.error('Failed to create queue tasks for enrollment:', queueError);
       }
       
       res.json({ 
@@ -1855,11 +1974,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         enrollmentId,
         submittedData: formData,
         filesReceived: files.length,
-        queueItemId,
-        fleetTaskCreated: queueItemId !== null,
-        nextSteps: queueItemId 
-          ? "A fleet team task has been created for BYOV review and van number assignment. You will be contacted once your vehicle has been processed."
-          : "Your enrollment has been submitted. A fleet team member will review your submission and contact you soon."
+        tasksCreated: createdTasks.length,
+        taskDetails: createdTasks,
+        workflowId,
+        nextSteps: createdTasks.length > 0
+          ? `${createdTasks.length} tasks have been created across FLEET and NTAO departments. FLEET will handle van assignment/unassignment and system updates. NTAO will manage shipment routing changes. You will be contacted as tasks are completed.`
+          : "Your enrollment has been submitted. Department teams will review your submission and contact you soon."
       });
     } catch (error) {
       console.error('Error submitting Sears Drive enrollment:', error);
