@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { storage } from "./storage";
 import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema } from "@shared/schema";
 import { z } from "zod";
@@ -15,9 +16,10 @@ const SESSIONS_FILE = './sessions.json';
 const sessions = new Map<string, { userId: string; username: string; expiresAt: Date }>();
 
 // Load sessions from file on startup
+
 try {
-  if (require('fs').existsSync(SESSIONS_FILE)) {
-    const savedSessions = JSON.parse(require('fs').readFileSync(SESSIONS_FILE, 'utf-8'));
+  if (existsSync(SESSIONS_FILE)) {
+    const savedSessions = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
     const now = new Date();
     for (const [sessionId, sessionData] of Object.entries(savedSessions)) {
       const session = sessionData as any;
@@ -40,7 +42,7 @@ try {
 function saveSessions() {
   try {
     const sessionsObj = Object.fromEntries(sessions);
-    require('fs').writeFileSync(SESSIONS_FILE, JSON.stringify(sessionsObj, null, 2));
+    writeFileSync(SESSIONS_FILE, JSON.stringify(sessionsObj, null, 2));
   } catch (error) {
     console.warn('Failed to save sessions:', error);
   }
