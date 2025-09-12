@@ -1,0 +1,117 @@
+{
+  "id": "ntao_setup_shipment_v1",
+  "name": "Setup New BYOV Shipment Process",
+  "department": "NTAO",
+  "workflowType": "setup_shipment",
+  "version": "1.0",
+  "description": "Setup parts shipment routing for new BYOV vehicle",
+  "estimatedDuration": 20,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "wait_van_assignment",
+      "title": "Wait for Van Number Assignment",
+      "description": "Wait for FLEET to assign new van number",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "coordination",
+      "substeps": [
+        {
+          "id": "check_van_assignment_status",
+          "title": "Check van assignment status",
+          "description": "Verify that new van number has been assigned by FLEET",
+          "required": true
+        },
+        {
+          "id": "confirm_van_details",
+          "title": "Confirm new van details",
+          "description": "Verify van number and technician assignment details",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "setup_shipping_profile",
+      "title": "Setup Shipping Profile",
+      "description": "Create shipping profile for new BYOV vehicle",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "create_vehicle_shipping_profile",
+          "title": "Create vehicle shipping profile",
+          "description": "Set up new vehicle in shipping management system",
+          "required": true
+        },
+        {
+          "id": "configure_delivery_address",
+          "title": "Configure delivery address",
+          "description": "Set up delivery location for parts shipments",
+          "required": true
+        },
+        {
+          "id": "setup_routing_preferences",
+          "title": "Setup routing and delivery preferences",
+          "description": "Configure preferred delivery methods and timing",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "test_workflow",
+      "title": "Test Shipment Workflow",
+      "description": "Verify new shipment process works correctly",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "run_test_shipment",
+          "title": "Run test shipment process",
+          "description": "Test that shipment routing works for new vehicle",
+          "required": true
+        },
+        {
+          "id": "verify_inventory_connection",
+          "title": "Verify inventory management connection",
+          "description": "Confirm new vehicle appears in inventory management system",
+          "required": true
+        },
+        {
+          "id": "confirm_workflow_active",
+          "title": "Confirm workflow is active",
+          "description": "Verify that shipments can now be processed for new vehicle",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "shipment_setup_complete",
+        "label": "Shipment Setup Successfully Completed",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_van_assignment",
+        "label": "Pending Van Number Assignment",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_technical_support",
+        "label": "Requires Technical Support",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-12T05:00:00Z",
+    "createdBy": "system",
+    "tags": ["shipment", "setup", "ntao", "byov"],
+    "isActive": true
+  }
+}

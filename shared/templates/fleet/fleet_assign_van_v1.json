@@ -1,0 +1,129 @@
+{
+  "id": "fleet_assign_van_v1",
+  "name": "BYOV Van Assignment Process",
+  "department": "FLEET",
+  "workflowType": "van_assignment",
+  "version": "1.0",
+  "description": "Complete process for assigning a new BYOV van to a technician",
+  "estimatedDuration": 30,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "review_documentation",
+      "title": "Review Vehicle Documentation",
+      "description": "Review all submitted vehicle photos and documents",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "check_vehicle_photos",
+          "title": "Review vehicle photos (front, back, left, right)",
+          "description": "Inspect all submitted vehicle photos for condition and compliance",
+          "required": true
+        },
+        {
+          "id": "verify_vin",
+          "title": "Verify VIN number documentation",
+          "description": "Confirm VIN number is clearly visible and matches records",
+          "required": true
+        },
+        {
+          "id": "check_insurance",
+          "title": "Review insurance card",
+          "description": "Verify insurance coverage meets BYOV requirements",
+          "required": true
+        },
+        {
+          "id": "check_registration",
+          "title": "Review vehicle registration",
+          "description": "Confirm registration is current and in technician's name",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "verify_requirements",
+      "title": "Verify BYOV Requirements",
+      "description": "Confirm vehicle meets all BYOV program requirements",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "assessment",
+      "substeps": [
+        {
+          "id": "check_vehicle_size",
+          "title": "Verify vehicle size requirements",
+          "description": "Confirm vehicle meets cargo space and size requirements",
+          "required": true
+        },
+        {
+          "id": "assess_condition",
+          "title": "Assess overall vehicle condition",
+          "description": "Evaluate if vehicle condition meets company standards",
+          "required": true
+        },
+        {
+          "id": "verify_safety_features",
+          "title": "Verify required safety features",
+          "description": "Check for required safety equipment and features",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "assign_van_number",
+      "title": "Assign Van Number",
+      "description": "Assign new BYOV van number and update systems",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "generate_van_number",
+          "title": "Generate new van number",
+          "description": "Create unique van number for BYOV vehicle",
+          "required": true
+        },
+        {
+          "id": "update_fleet_system",
+          "title": "Update fleet management system",
+          "description": "Enter new BYOV vehicle into fleet tracking system",
+          "required": true
+        },
+        {
+          "id": "notify_technician",
+          "title": "Notify technician of van assignment",
+          "description": "Send van number and next steps to technician",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "van_assigned",
+        "label": "BYOV Van Successfully Assigned",
+        "requiresApproval": false
+      },
+      {
+        "value": "requirements_not_met",
+        "label": "Vehicle Does Not Meet Requirements",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_documentation",
+        "label": "Pending Additional Documentation",
+        "requiresApproval": false
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-12T05:00:00Z",
+    "createdBy": "system",
+    "tags": ["byov", "van", "assignment", "fleet"],
+    "isActive": true
+  }
+}

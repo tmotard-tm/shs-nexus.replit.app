@@ -1,0 +1,111 @@
+{
+  "id": "fleet_unassign_van_v1",
+  "name": "Van Unassignment Process",
+  "department": "FLEET",
+  "workflowType": "van_unassignment",
+  "version": "1.0",
+  "description": "Process for unassigning previous truck from technician",
+  "estimatedDuration": 20,
+  "difficulty": "easy",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "remove_assignment",
+      "title": "Remove Truck Assignment",
+      "description": "Remove truck from technician's profile",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "update_tech_profile",
+          "title": "Update technician profile",
+          "description": "Remove truck assignment from technician's record",
+          "required": true
+        },
+        {
+          "id": "update_vehicle_status",
+          "title": "Update vehicle status to 'unassigned'",
+          "description": "Change vehicle status in fleet management system",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "schedule_return",
+      "title": "Schedule Vehicle Return",
+      "description": "Arrange for vehicle pickup or return",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "coordination",
+      "substeps": [
+        {
+          "id": "contact_technician",
+          "title": "Contact technician for return scheduling",
+          "description": "Coordinate with technician to schedule vehicle return",
+          "required": true
+        },
+        {
+          "id": "arrange_pickup",
+          "title": "Arrange vehicle pickup or drop-off",
+          "description": "Schedule logistics for vehicle collection",
+          "required": true
+        },
+        {
+          "id": "notify_stakeholders",
+          "title": "Notify relevant departments",
+          "description": "Inform other departments of pending vehicle return",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "update_records",
+      "title": "Update Fleet Records",
+      "description": "Complete documentation for vehicle unassignment",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "record_unassignment_date",
+          "title": "Record unassignment effective date",
+          "description": "Document when unassignment becomes effective",
+          "required": true
+        },
+        {
+          "id": "update_fleet_dashboard",
+          "title": "Update fleet tracking dashboard",
+          "description": "Ensure unassignment appears on fleet management dashboard",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "unassigned",
+        "label": "Vehicle Successfully Unassigned",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_return",
+        "label": "Pending Vehicle Return",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_follow_up",
+        "label": "Requires Follow-up Action",
+        "requiresApproval": false
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-12T05:00:00Z",
+    "createdBy": "system",
+    "tags": ["van", "unassignment", "fleet", "return"],
+    "isActive": true
+  }
+}

@@ -30,6 +30,36 @@
       "ASSETS": ["assets_byov_inspection_v1"],
       "NTAO": ["ntao_byov_inspection_v1"]
     },
+    "van_assignment": {
+      "FLEET": ["fleet_assign_van_v1"],
+      "INVENTORY": [],
+      "ASSETS": [],
+      "NTAO": []
+    },
+    "van_unassignment": {
+      "FLEET": ["fleet_unassign_van_v1"],
+      "INVENTORY": [],
+      "ASSETS": [],
+      "NTAO": []
+    },
+    "system_updates": {
+      "FLEET": ["fleet_update_systems_v1"],
+      "INVENTORY": [],
+      "ASSETS": [],
+      "NTAO": []
+    },
+    "stop_shipment": {
+      "FLEET": [],
+      "INVENTORY": [],
+      "ASSETS": [],
+      "NTAO": ["ntao_stop_shipment_v1"]
+    },
+    "setup_shipment": {
+      "FLEET": [],
+      "INVENTORY": [],
+      "ASSETS": [],
+      "NTAO": ["ntao_setup_shipment_v1"]
+    },
     "storage_request": {
       "FLEET": [],
       "INVENTORY": [],

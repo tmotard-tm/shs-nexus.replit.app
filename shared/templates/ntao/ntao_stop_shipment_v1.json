@@ -1,0 +1,105 @@
+{
+  "id": "ntao_stop_shipment_v1",
+  "name": "Stop Parts Shipment Process",
+  "department": "NTAO",
+  "workflowType": "stop_shipment",
+  "version": "1.0",
+  "description": "Stop all parts shipments to previous vehicle",
+  "estimatedDuration": 15,
+  "difficulty": "easy",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "halt_shipments",
+      "title": "Halt All Scheduled Shipments",
+      "description": "Stop all pending and future shipments to old vehicle",
+      "required": true,
+      "estimatedTime": 8,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "identify_pending_shipments",
+          "title": "Identify all pending shipments",
+          "description": "Find all scheduled shipments to the old truck number",
+          "required": true
+        },
+        {
+          "id": "cancel_pending_orders",
+          "title": "Cancel pending parts orders",
+          "description": "Stop all parts orders scheduled for delivery to old vehicle",
+          "required": true
+        },
+        {
+          "id": "update_shipping_system",
+          "title": "Update shipping system status",
+          "description": "Mark old vehicle as inactive for shipping purposes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "notify_warehouse",
+      "title": "Notify Warehouse Operations",
+      "description": "Inform warehouse teams of shipment changes",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "communication",
+      "substeps": [
+        {
+          "id": "send_warehouse_notification",
+          "title": "Send notification to warehouse team",
+          "description": "Alert warehouse of vehicle transition and shipment halt",
+          "required": true
+        },
+        {
+          "id": "update_picking_instructions",
+          "title": "Update picking and packing instructions",
+          "description": "Ensure warehouse stops preparing shipments for old vehicle",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "document_changes",
+      "title": "Document Shipment Changes",
+      "description": "Record all shipment modifications and reasons",
+      "required": true,
+      "estimatedTime": 2,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "log_shipment_halt",
+          "title": "Log shipment halt in system",
+          "description": "Record when and why shipments were stopped",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "shipments_stopped",
+        "label": "All Shipments Successfully Stopped",
+        "requiresApproval": false
+      },
+      {
+        "value": "partial_stop",
+        "label": "Some Shipments May Still Be Pending",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_escalation",
+        "label": "Requires Escalation to Supervisor",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-12T05:00:00Z",
+    "createdBy": "system",
+    "tags": ["shipment", "stop", "ntao", "parts"],
+    "isActive": true
+  }
+}

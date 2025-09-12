@@ -1,0 +1,123 @@
+{
+  "id": "fleet_update_systems_v1",
+  "name": "Fleet Systems Update Process",
+  "department": "FLEET",
+  "workflowType": "system_updates",
+  "version": "1.0",
+  "description": "Update TPMS, AMS, and Holman systems for vehicle transition",
+  "estimatedDuration": 25,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "update_tpms",
+      "title": "Update TPMS (Truck Parts Management System)",
+      "description": "Update parts management system with new vehicle information",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "remove_old_vehicle_tpms",
+          "title": "Remove old vehicle from TPMS",
+          "description": "Remove previous truck from parts management system",
+          "required": true
+        },
+        {
+          "id": "add_new_vehicle_tpms",
+          "title": "Add new BYOV to TPMS",
+          "description": "Enter new BYOV vehicle into parts management system",
+          "required": true
+        },
+        {
+          "id": "verify_tpms_update",
+          "title": "Verify TPMS update completed",
+          "description": "Confirm changes are properly reflected in TPMS",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "update_ams",
+      "title": "Update AMS (Asset Management System)",
+      "description": "Update asset management system records",
+      "required": true,
+      "estimatedTime": 8,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "update_asset_records",
+          "title": "Update asset management records",
+          "description": "Modify asset tracking for vehicle transition",
+          "required": true
+        },
+        {
+          "id": "transfer_equipment_records",
+          "title": "Transfer equipment assignments",
+          "description": "Move equipment assignments from old to new vehicle",
+          "required": true
+        },
+        {
+          "id": "verify_ams_update",
+          "title": "Verify AMS update completed",
+          "description": "Confirm changes are properly reflected in AMS",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "update_holman",
+      "title": "Update Holman Fleet System",
+      "description": "Update Holman fleet management system",
+      "required": true,
+      "estimatedTime": 7,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "update_holman_records",
+          "title": "Update Holman fleet records",
+          "description": "Modify fleet tracking in Holman system",
+          "required": true
+        },
+        {
+          "id": "sync_vehicle_data",
+          "title": "Sync vehicle data across systems",
+          "description": "Ensure all systems have consistent vehicle information",
+          "required": true
+        },
+        {
+          "id": "verify_holman_update",
+          "title": "Verify Holman update completed",
+          "description": "Confirm changes are properly reflected in Holman system",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "systems_updated",
+        "label": "All Systems Successfully Updated",
+        "requiresApproval": false
+      },
+      {
+        "value": "partial_update",
+        "label": "Partial Update - Some Systems Pending",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_technical_support",
+        "label": "Requires Technical Support",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-12T05:00:00Z",
+    "createdBy": "system",
+    "tags": ["systems", "tpms", "ams", "holman", "fleet"],
+    "isActive": true
+  }
+}
