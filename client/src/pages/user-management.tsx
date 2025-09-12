@@ -40,6 +40,7 @@ import { useToast } from "@/hooks/use-toast";
 const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 const createUserSchema = insertUserSchema.extend({
   confirmPassword: z.string().min(6),
+  departmentAccess: z.array(z.string()).optional(),
 }).refine(data => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ["confirmPassword"],
@@ -131,6 +132,7 @@ export default function UserManagement() {
       password: "",
       confirmPassword: "",
       role: "field",
+      departmentAccess: [],
     },
   });
 
@@ -278,6 +280,41 @@ export default function UserManagement() {
                 {form.formState.errors.department && (
                   <p className="text-sm text-red-500">{form.formState.errors.department.message}</p>
                 )}
+              </div>
+              <div>
+                <Label>Department Access Permissions</Label>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  {[
+                    { code: 'NTAO', label: 'NTAO' },
+                    { code: 'ASSETS', label: 'Assets Management' },
+                    { code: 'INVENTORY', label: 'Inventory Control' },
+                    { code: 'FLEET', label: 'Fleet Management' }
+                  ].map(dept => (
+                    <div key={dept.code} className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id={`dept-${dept.code}`}
+                        checked={form.watch("departmentAccess")?.includes(dept.code) || false}
+                        onChange={(e) => {
+                          const currentAccess = form.watch("departmentAccess") || [];
+                          if (e.target.checked) {
+                            form.setValue("departmentAccess", [...currentAccess, dept.code]);
+                          } else {
+                            form.setValue("departmentAccess", currentAccess.filter(d => d !== dept.code));
+                          }
+                        }}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        data-testid={`checkbox-dept-${dept.code.toLowerCase()}`}
+                      />
+                      <Label htmlFor={`dept-${dept.code}`} className="text-sm font-normal">
+                        {dept.label}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Select which queue departments this user can access
+                </p>
               </div>
               <div>
                 <Label htmlFor="password">Password</Label>
@@ -467,6 +504,7 @@ export default function UserManagement() {
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Department</TableHead>
+                  <TableHead>Queue Access</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -591,6 +629,41 @@ export default function UserManagement() {
                   <SelectItem value="Decommissions">Decommissions</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label>Department Access Permissions</Label>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {[
+                  { code: 'NTAO', label: 'NTAO' },
+                  { code: 'ASSETS', label: 'Assets Management' },
+                  { code: 'INVENTORY', label: 'Inventory Control' },
+                  { code: 'FLEET', label: 'Fleet Management' }
+                ].map(dept => (
+                  <div key={dept.code} className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id={`edit-dept-${dept.code}`}
+                      checked={editForm.watch("departmentAccess")?.includes(dept.code) || false}
+                      onChange={(e) => {
+                        const currentAccess = editForm.watch("departmentAccess") || [];
+                        if (e.target.checked) {
+                          editForm.setValue("departmentAccess", [...currentAccess, dept.code]);
+                        } else {
+                          editForm.setValue("departmentAccess", currentAccess.filter(d => d !== dept.code));
+                        }
+                      }}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      data-testid={`checkbox-edit-dept-${dept.code.toLowerCase()}`}
+                    />
+                    <Label htmlFor={`edit-dept-${dept.code}`} className="text-sm font-normal">
+                      {dept.label}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Select which queue departments this user can access
+              </p>
             </div>
             <div className="flex justify-end space-x-2">
               <Button type="button" variant="outline" onClick={() => setEditingUser(null)}>

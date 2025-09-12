@@ -178,8 +178,8 @@ export class MemStorage implements IStorage {
         password: "passwords", // In real app, this would be hashed
         role: "requester",
         department: "NTAO",
+        departmentAccess: ['NTAO'],
         createdAt: new Date(),
-        accessibleQueues: ['ntao'],
       },
       {
         id: randomUUID(),
@@ -188,8 +188,8 @@ export class MemStorage implements IStorage {
         password: "passwords", // In real app, this would be hashed
         role: "approver",
         department: "Assets Management",
+        departmentAccess: ['ASSETS', 'FLEET'],
         createdAt: new Date(),
-        accessibleQueues: ['assets', 'fleet'],
       },
       {
         id: randomUUID(),
@@ -198,8 +198,8 @@ export class MemStorage implements IStorage {
         password: "passwords", // In real app, this would be hashed
         role: "superadmin",
         department: null,
+        departmentAccess: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
         createdAt: new Date(),
-        accessibleQueues: ['ntao', 'assets', 'inventory', 'fleet'],
       },
       // Additional role-specific users
       {
@@ -209,8 +209,8 @@ export class MemStorage implements IStorage {
         password: "passwords", // In real app, this would be hashed
         role: "field",
         department: "NTAO",
+        departmentAccess: ['NTAO'],
         createdAt: new Date(),
-        accessibleQueues: ['ntao'],
       },
       {
         id: randomUUID(),
@@ -219,8 +219,8 @@ export class MemStorage implements IStorage {
         password: "passwords", // In real app, this would be hashed
         role: "agent",
         department: "Assets Management",
+        departmentAccess: ['ASSETS'],
         createdAt: new Date(),
-        accessibleQueues: ['assets'],
       },
       {
         id: randomUUID(),
@@ -229,8 +229,8 @@ export class MemStorage implements IStorage {
         password: "passwords", // In real app, this would be hashed
         role: "approver",
         department: "Inventory Control",
+        departmentAccess: ['INVENTORY'],
         createdAt: new Date(),
-        accessibleQueues: ['inventory'],
       },
       {
         id: randomUUID(),
@@ -239,8 +239,8 @@ export class MemStorage implements IStorage {
         password: "passwords", // In real app, this would be hashed
         role: "approver",
         department: "Fleet Management",
+        departmentAccess: ['FLEET'],
         createdAt: new Date(),
-        accessibleQueues: ['fleet'],
       },
       {
         id: randomUUID(),
@@ -249,8 +249,8 @@ export class MemStorage implements IStorage {
         password: "passwords", // In real app, this would be hashed
         role: "superadmin",
         department: null,
+        departmentAccess: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
         createdAt: new Date(),
-        accessibleQueues: ['ntao', 'assets', 'inventory', 'fleet'],
       },
     ];
     

@@ -46,6 +46,45 @@ const moduleLabels = {
   fleet: "Fleet Management"
 };
 
+// Department code to queue module mapping
+function departmentToQueueModule(department: string): QueueModule | null {
+  switch (department.toUpperCase()) {
+    case 'NTAO':
+      return 'ntao';
+    case 'ASSETS':
+      return 'assets';
+    case 'INVENTORY':
+      return 'inventory';
+    case 'FLEET':
+      return 'fleet';
+    default:
+      return null;
+  }
+}
+
+// Get accessible queue modules for a user
+function getUserAccessibleModules(user: UserType): QueueModule[] {
+  // Superadmin has access to everything
+  if (user.role === 'superadmin') {
+    return ['ntao', 'assets', 'inventory', 'fleet'];
+  }
+  
+  // Use departmentAccess array to determine accessible modules
+  if (user.departmentAccess && Array.isArray(user.departmentAccess)) {
+    return user.departmentAccess
+      .map(dept => departmentToQueueModule(dept))
+      .filter((module: QueueModule | null) => module !== null) as QueueModule[];
+  }
+  
+  // Fallback to single department for backwards compatibility
+  if (user.department) {
+    const module = departmentToQueueModule(user.department);
+    return module ? [module] : [];
+  }
+  
+  return [];
+}
+
 export default function UnifiedQueueManagement() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -71,44 +110,11 @@ export default function UnifiedQueueManagement() {
   const [workModuleItem, setWorkModuleItem] = useState<CombinedQueueItem | null>(null);
   const [isWorkModuleOpen, setIsWorkModuleOpen] = useState(false);
 
-  // Auto-populate module selection based on user's accessible queues
+  // Auto-populate module selection based on user's department access
   useEffect(() => {
     if (user) {
-      // Auto-select all accessible modules for the user
-      const accessibleModules: QueueModule[] = [];
-      
-      // If user has accessibleQueues, use those; otherwise determine by department/role
-      if (user.accessibleQueues && user.accessibleQueues.length > 0) {
-        accessibleModules.push(...user.accessibleQueues);
-      } else {
-        // Auto-determine based on department and role
-        if (user.role === "superadmin") {
-          accessibleModules.push("ntao", "assets", "inventory", "fleet");
-        } else {
-          // Map departments to queue modules
-          switch (user.department) {
-            case "NTAO":
-              accessibleModules.push("ntao");
-              break;
-            case "Assets Management":
-              accessibleModules.push("assets");
-              break;
-            case "Inventory Control":
-              accessibleModules.push("inventory");
-              break;
-            case "Fleet Management":
-              accessibleModules.push("fleet");
-              break;
-            default:
-              // If no specific department, default to agent role with access to ntao
-              if (user.role === "agent") {
-                accessibleModules.push("ntao");
-              }
-              break;
-          }
-        }
-      }
-      
+      // Get accessible modules using the new departmentAccess system
+      const accessibleModules = getUserAccessibleModules(user);
       setSelectedModules(accessibleModules);
     } else {
       setSelectedModules([]);
@@ -459,7 +465,8 @@ export default function UnifiedQueueManagement() {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
               {(Object.keys(moduleLabels) as QueueModule[]).map((module) => {
                 // Only show modules the user has access to
-                const userCanAccess = !user?.accessibleQueues || user.accessibleQueues.includes(module);
+                const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
+                const userCanAccess = userAccessibleModules.includes(module);
                 if (!userCanAccess) return null;
                 
                 return (
@@ -893,7 +900,10 @@ export default function UnifiedQueueManagement() {
                                                   </SelectTrigger>
                                                   <SelectContent>
                                                     {users
-                                                      .filter((u: UserType) => !user?.accessibleQueues || user.accessibleQueues.includes(item.module))
+                                                      .filter((u: UserType) => {
+                                                        const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
+                                                        return userAccessibleModules.includes(item.module);
+                                                      })
                                                       .map((assigneeUser: UserType) => (
                                                         <SelectItem key={assigneeUser.id} value={assigneeUser.id}>
                                                           {assigneeUser.username}

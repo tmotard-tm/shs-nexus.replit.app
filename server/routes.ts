@@ -61,6 +61,53 @@ function checkAnonymousRateLimit(req: any, res: any, next: any): any {
   return next();
 }
 
+// Department to queue module mapping
+function departmentToQueueModule(department: string): QueueModule | null {
+  switch (department.toUpperCase()) {
+    case 'NTAO':
+      return 'ntao';
+    case 'ASSETS':
+      return 'assets';
+    case 'INVENTORY':
+      return 'inventory';
+    case 'FLEET':
+      return 'fleet';
+    default:
+      return null;
+  }
+}
+
+// Check if user has access to a specific queue module
+function hasQueueAccess(user: any, module: QueueModule): boolean {
+  // Superadmin has access to everything
+  if (user.role === 'superadmin') {
+    return true;
+  }
+  
+  // Check departmentAccess array
+  if (user.departmentAccess && Array.isArray(user.departmentAccess)) {
+    const requiredDepartment = module.toUpperCase();
+    return user.departmentAccess.includes(requiredDepartment);
+  }
+  
+  return false;
+}
+
+// Get accessible queue modules for a user
+function getAccessibleQueueModules(user: any): QueueModule[] {
+  if (user.role === 'superadmin') {
+    return ['ntao', 'assets', 'inventory', 'fleet'];
+  }
+  
+  if (user.departmentAccess && Array.isArray(user.departmentAccess)) {
+    return user.departmentAccess
+      .map((dept: string) => departmentToQueueModule(dept))
+      .filter((module: QueueModule | null) => module !== null) as QueueModule[];
+  }
+  
+  return [];
+}
+
 // Authentication middleware
 function requireAuth(req: any, res: any, next: any): any {
   const cookieHeader = req.headers.cookie;
@@ -1029,15 +1076,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control
-      let allowedModules: string[];
-      if (currentUser.role === "superadmin") {
-        allowedModules = requestedModules; // Superadmin can access all
-      } else if (currentUser.accessibleQueues && currentUser.accessibleQueues.length > 0) {
-        allowedModules = requestedModules.filter(module => currentUser.accessibleQueues!.includes(module));
-      } else {
+      // Enforce access control using new departmentAccess system
+      const accessibleModules = getAccessibleQueueModules(currentUser);
+      if (accessibleModules.length === 0) {
         return res.status(403).json({ message: "No queue access permissions" });
       }
+
+      const allowedModules = requestedModules.filter(module => 
+        accessibleModules.includes(module as QueueModule)
+      );
       
       if (allowedModules.length === 0) {
         return res.status(403).json({ message: "Access denied to requested queues" });
@@ -1075,15 +1122,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control
-      let allowedModules: string[];
-      if (currentUser.role === "superadmin") {
-        allowedModules = requestedModules; // Superadmin can access all
-      } else if (currentUser.accessibleQueues && currentUser.accessibleQueues.length > 0) {
-        allowedModules = requestedModules.filter(module => currentUser.accessibleQueues!.includes(module));
-      } else {
+      // Enforce access control using new departmentAccess system
+      const accessibleModules = getAccessibleQueueModules(currentUser);
+      if (accessibleModules.length === 0) {
         return res.status(403).json({ message: "No queue access permissions" });
       }
+
+      const allowedModules = requestedModules.filter(module => 
+        accessibleModules.includes(module as QueueModule)
+      );
       
       if (allowedModules.length === 0) {
         return res.status(403).json({ message: "Access denied to requested queues" });
@@ -1124,9 +1171,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control
-      if (currentUser.role !== "superadmin" && 
-          (!currentUser.accessibleQueues || !currentUser.accessibleQueues.includes(module as any))) {
+      // Enforce access control using new departmentAccess system
+      if (!hasQueueAccess(currentUser, module as QueueModule)) {
         return res.status(403).json({ message: "Access denied to this queue" });
       }
       
@@ -1159,9 +1205,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control
-      if (currentUser.role !== "superadmin" && 
-          (!currentUser.accessibleQueues || !currentUser.accessibleQueues.includes(module as any))) {
+      // Enforce access control using new departmentAccess system
+      if (!hasQueueAccess(currentUser, module as QueueModule)) {
         return res.status(403).json({ message: "Access denied to this queue" });
       }
       
@@ -1204,9 +1249,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control
-      if (currentUser.role !== "superadmin" && 
-          (!currentUser.accessibleQueues || !currentUser.accessibleQueues.includes(module as any))) {
+      // Enforce access control using new departmentAccess system
+      if (!hasQueueAccess(currentUser, module as QueueModule)) {
         return res.status(403).json({ message: "Access denied to this queue" });
       }
       
@@ -1278,9 +1322,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control
-      if (currentUser.role !== "superadmin" && 
-          (!currentUser.accessibleQueues || !currentUser.accessibleQueues.includes(module as any))) {
+      // Enforce access control using new departmentAccess system
+      if (!hasQueueAccess(currentUser, module as QueueModule)) {
         return res.status(403).json({ message: "Access denied to this queue" });
       }
       

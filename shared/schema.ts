@@ -13,6 +13,7 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
   role: text("role").notNull().default("field"), // superadmin, agent, field
   department: text("department"), // NTAO, Assets Management, Inventory Control, Fleet Management
+  departmentAccess: text("department_access").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET']
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -287,9 +288,7 @@ export const anonymousByovEnrollmentSchema = z.object({
 }).strict();
 
 // Types
-export type User = typeof users.$inferSelect & {
-  accessibleQueues?: QueueModule[];
-};
+export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Request = typeof requests.$inferSelect;
 export type InsertRequest = z.infer<typeof insertRequestSchema>;
