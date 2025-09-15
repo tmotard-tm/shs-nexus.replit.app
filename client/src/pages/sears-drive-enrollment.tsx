@@ -123,7 +123,7 @@ export default function SearsDriveEnrollment() {
     onSuccess: () => {
       toast({
         title: "Success",
-        description: "Sears Drive Program enrollment submitted successfully!",
+        description: "Sears BYOV Program enrollment submitted successfully!",
       });
       form.reset();
       setUploadedFiles({});

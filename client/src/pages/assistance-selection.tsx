@@ -50,8 +50,8 @@ export default function AssistanceSelection() {
     },
     {
       id: "sears-drive-enrollment",
-      title: "Sears Drive Program",
-      description: "Submit Drive Program Enrollment",
+      title: "Sears BYOV Program",
+      description: "Submit BYOV Program Enrollment",
       icon: FileText,
       bgColor: "bg-orange-100 dark:bg-orange-900/20",
       iconColor: "text-orange-600 dark:text-orange-400",
@@ -365,7 +365,7 @@ export default function AssistanceSelection() {
               </CardContent>
             </Card>
 
-            {/* Sears Drive Program Enrollment Form Module */}
+            {/* Sears BYOV Program Enrollment Form Module */}
             <Card 
               className="backdrop-blur-sm border-white/20 hover:shadow-lg transition-all duration-200 relative"
               style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
@@ -384,8 +384,8 @@ export default function AssistanceSelection() {
                     <FileText className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <CardTitle className="text-lg text-gray-800">Sears Drive Program</CardTitle>
-                    <CardDescription className="text-gray-600">Submit Drive Program Enrollment</CardDescription>
+                    <CardTitle className="text-lg text-gray-800">Sears BYOV Program</CardTitle>
+                    <CardDescription className="text-gray-600">Submit BYOV Program Enrollment</CardDescription>
                   </div>
                 </div>
               </CardHeader>
@@ -419,7 +419,7 @@ export default function AssistanceSelection() {
                   className="w-full mt-4"
                   data-testid="button-sears-drive"
                 >
-                  Submit BYOV Program Enrollment <ArrowRight className="ml-2 h-4 w-4" />
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </CardContent>
             </Card>
