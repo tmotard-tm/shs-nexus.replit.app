@@ -286,6 +286,27 @@ export default function UnifiedQueueManagement() {
     assignMutation.mutate({ module: item.module, id: item.id, assigneeId });
   };
 
+  const handlePickUpTask = (item: CombinedQueueItem) => {
+    if (!user?.id) {
+      toast({
+        title: "Error",
+        description: "User not authenticated",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    console.log("Picking up task for current user:", {
+      taskId: item.id,
+      userId: user.id,
+      userDept: user.department
+    });
+    
+    // Directly assign to current user and set pickup item for work module
+    setPickUpItem(item);
+    assignMutation.mutate({ module: item.module, id: item.id, assigneeId: user.id });
+  };
+
   const handleStartWork = (item: CombinedQueueItem) => {
     setWorkModuleItem(item);
     setIsWorkModuleOpen(true);
@@ -928,7 +949,7 @@ export default function UnifiedQueueManagement() {
                                                 <Button
                                                   variant="outline"
                                                   size="sm"
-                                                  onClick={() => setPickUpItem(item)}
+                                                  onClick={() => handlePickUpTask(item)}
                                                   disabled={assignMutation.isPending}
                                                   data-testid={`button-pick-up-${item.id}`}
                                                 >
