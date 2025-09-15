@@ -175,7 +175,7 @@ export default function SearsDriveEnrollment() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-2xl font-bold flex items-center gap-3">
                 <Truck className="h-8 w-8" />
-                Sears Drive Program Enrollment Submission
+                Sears BYOV Program Enrollment Submission
               </CardTitle>
               <CopyLinkButton
                 variant="icon"
@@ -441,7 +441,7 @@ export default function SearsDriveEnrollment() {
                     ) : (
                       <>
                         <Upload className="h-4 w-4 mr-2" />
-                        Submit BYOV Program Enrollment
+                        Start Process
                       </>
                     )}
                   </Button>
