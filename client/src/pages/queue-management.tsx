@@ -195,11 +195,21 @@ export default function UnifiedQueueManagement() {
       queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
       queryClient.invalidateQueries({ queryKey: ["/api/queues/stats"] });
       
+      console.log("Task assignment successful:", {
+        assigneeId: variables.assigneeId,
+        userId: user?.id,
+        pickUpItem: pickUpItem?.id
+      });
+      
       // If the task was assigned to the current user, open the work module dialog
       if (variables.assigneeId === user?.id && pickUpItem) {
+        console.log("Opening work module for assigned task");
         setWorkModuleItem(pickUpItem);
         setIsWorkModuleOpen(true);
         setPickUpItem(null); // Close the pickup dialog
+      } else {
+        // Just close the pickup dialog for assignments to other users
+        setPickUpItem(null);
       }
       
       toast({
