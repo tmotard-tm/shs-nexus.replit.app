@@ -5,8 +5,6 @@
   "workflowType": "onboarding",
   "version": "1.0",
   "description": "Onboarding process for NTAO technician",
-  "estimatedDuration": 45,
-  "difficulty": "easy",
   "requiredRole": "agent",
   "steps": [
     {
@@ -14,7 +12,6 @@
       "title": "Design ideal truck stock",
       "description": "verify the correct truck assortment is applied to this truck",
       "required": true,
-      "estimatedTime": 5,
       "category": "verification"
     },
     {
@@ -22,15 +19,17 @@
       "title": "Verify if the tech signed the release to ship parts to their home",
       "description": "Confirm signed authorization for parts shipment to technician's home address",
       "required": true,
-      "estimatedTime": 5,
-      "category": "verification"
+      "category": "verification",
+      "conditionalLogic": {
+        "showWhen": "not_fssl",
+        "condition": "If tech is FSSL flagged, this step does not apply"
+      }
     },
     {
       "id": "parts_verification",
       "title": "Verify parts to ship",
       "description": "Review and confirm the complete parts list for the new technician",
       "required": true,
-      "estimatedTime": 10,
       "category": "verification"
     },
     {
@@ -38,7 +37,6 @@
       "title": "Ship part stock to new hire",
       "description": "Process and ship approved parts inventory to technician's address",
       "required": true,
-      "estimatedTime": 25,
       "category": "system_action"
     }
   ],
