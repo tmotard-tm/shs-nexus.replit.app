@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -591,24 +592,31 @@ export default function UnifiedQueueManagement() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                <div>
-                  <Label htmlFor="filter">Status Filter</Label>
-                  <Select value={selectedFilter} onValueChange={setSelectedFilter}>
-                    <SelectTrigger data-testid="select-status-filter">
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Items</SelectItem>
-                      <SelectItem value="my-items">My Items</SelectItem>
-                      <SelectItem value="assigned-to-me">Assigned to Me</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="in_progress">In Progress</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="failed">Failed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              {/* Status Tabs */}
+              <div className="mb-6">
+                <Tabs value={selectedFilter} onValueChange={setSelectedFilter} className="w-full">
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="pending" data-testid="tab-pending" className="flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      New Tasks ({queueStats.pending})
+                    </TabsTrigger>
+                    <TabsTrigger value="in_progress" data-testid="tab-in-progress" className="flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      In Progress ({queueStats.in_progress})
+                    </TabsTrigger>
+                    <TabsTrigger value="completed" data-testid="tab-completed" className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4" />
+                      Completed ({queueStats.completed})
+                    </TabsTrigger>
+                    <TabsTrigger value="all" data-testid="tab-all" className="flex items-center gap-2">
+                      <List className="h-4 w-4" />
+                      All Requests
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-4">
 
                 <div>
                   <Label htmlFor="workflow-type">Workflow Type</Label>
