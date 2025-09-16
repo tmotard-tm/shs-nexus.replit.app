@@ -349,8 +349,8 @@ export function WorkModuleDialog({
                 Task Checklist
               </TabsTrigger>
               <TabsTrigger value="instructions" className="flex items-center gap-2">
-                <BookOpen className="h-4 w-4" />
-                Additional Info
+                <User className="h-4 w-4" />
+                Tech Details
               </TabsTrigger>
             </TabsList>
             
@@ -451,45 +451,146 @@ export function WorkModuleDialog({
             </TabsContent>
 
             <TabsContent value="instructions" className="space-y-4">
-              {/* Additional task information and context */}
+              {/* Technician Details Information */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <BookOpen className="h-4 w-4" />
-                    Task Context & Information
+                    <User className="h-4 w-4" />
+                    Technician Information
                   </CardTitle>
                   <CardDescription>
-                    Additional details and context for this task
+                    Complete technician details and onboarding information
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  {taskData.description && (
+                <CardContent className="space-y-6">
+                  {/* Personal Information */}
+                  {(taskData.employee || taskData.firstName || taskData.lastName) && (
                     <div>
-                      <Label className="text-sm font-medium">Description</Label>
-                      <p className="text-sm text-muted-foreground mt-1">{taskData.description}</p>
-                    </div>
-                  )}
-                  
-                  {taskData.notes && (
-                    <div>
-                      <Label className="text-sm font-medium">Additional Notes</Label>
-                      <p className="text-sm text-muted-foreground mt-1">{taskData.notes}</p>
+                      <Label className="text-sm font-medium text-primary">Personal Information</Label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Full Name</Label>
+                          <p className="text-sm font-medium" data-testid="text-tech-name">
+                            {taskData.employee?.firstName && taskData.employee?.lastName 
+                              ? `${taskData.employee.firstName} ${taskData.employee.lastName}`
+                              : taskData.firstName && taskData.lastName
+                              ? `${taskData.firstName} ${taskData.lastName}`
+                              : taskData.employee?.name || "N/A"}
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Employee ID</Label>
+                          <p className="font-mono text-sm" data-testid="text-employee-id">
+                            {taskData.employee?.enterpriseId || taskData.employeeId || taskData.employee?.racfId || "N/A"}
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   )}
 
-                  {template && (
+                  {/* Contact Information */}
+                  {(taskData.employee?.address || taskData.address || taskData.employee?.phone || taskData.phone) && (
                     <div>
-                      <Label className="text-sm font-medium">Template Information</Label>
-                      <div className="mt-2 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">{template.department}</Badge>
-                          <Badge variant="secondary">v{template.version}</Badge>
-                          <Badge variant={template.difficulty === 'easy' ? 'default' : template.difficulty === 'hard' ? 'destructive' : 'secondary'}>
-                            {template.difficulty}
-                          </Badge>
+                      <Label className="text-sm font-medium text-primary">Contact Information</Label>
+                      <div className="grid grid-cols-1 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                        {(taskData.employee?.address || taskData.address) && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Address</Label>
+                            <p className="text-sm" data-testid="text-address">
+                              {taskData.employee?.address || taskData.address || "N/A"}
+                            </p>
+                          </div>
+                        )}
+                        {(taskData.employee?.phone || taskData.phone) && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Phone Number</Label>
+                            <p className="text-sm" data-testid="text-phone">
+                              {taskData.employee?.phone || taskData.phone || "N/A"}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Employment Information */}
+                  <div>
+                    <Label className="text-sm font-medium text-primary">Employment Information</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Department</Label>
+                        <p className="text-sm" data-testid="text-department">
+                          {taskData.employee?.department || taskData.department || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Position</Label>
+                        <p className="text-sm" data-testid="text-position">
+                          {taskData.employee?.position || taskData.position || "Technician"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Start Date</Label>
+                        <p className="text-sm" data-testid="text-start-date">
+                          {taskData.employee?.startDate || taskData.startDate || taskData.proposedStartDate || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">District</Label>
+                        <p className="text-sm" data-testid="text-district">
+                          {taskData.employee?.district || taskData.district || "N/A"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Technical Information */}
+                  {(taskData.employee?.techId || taskData.techId || taskData.employee?.enterpriseId) && (
+                    <div>
+                      <Label className="text-sm font-medium text-primary">Technical Information</Label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Tech ID</Label>
+                          <p className="font-mono text-sm" data-testid="text-tech-id-detail">
+                            {taskData.employee?.techId || taskData.techId || taskData.employee?.enterpriseId || "N/A"}
+                          </p>
                         </div>
-                        {template.description && (
-                          <p className="text-sm text-muted-foreground">{template.description}</p>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">RACF ID</Label>
+                          <p className="font-mono text-sm" data-testid="text-racf-id">
+                            {taskData.employee?.racfId || taskData.racfId || "N/A"}
+                          </p>
+                        </div>
+                        {(taskData.employee?.specialties || taskData.specialties) && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Specialties</Label>
+                            <p className="text-sm" data-testid="text-specialties">
+                              {Array.isArray(taskData.employee?.specialties || taskData.specialties)
+                                ? (taskData.employee?.specialties || taskData.specialties).join(", ")
+                                : taskData.employee?.specialties || taskData.specialties || "N/A"}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Additional Notes */}
+                  {(taskData.description || taskData.notes) && (
+                    <div>
+                      <Label className="text-sm font-medium text-primary">Additional Information</Label>
+                      <div className="mt-3 p-4 bg-muted/30 rounded-lg">
+                        {taskData.description && (
+                          <div className="mb-3">
+                            <Label className="text-sm font-medium text-muted-foreground">Description</Label>
+                            <p className="text-sm text-muted-foreground mt-1">{taskData.description}</p>
+                          </div>
+                        )}
+                        {taskData.notes && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Notes</Label>
+                            <p className="text-sm text-muted-foreground mt-1">{taskData.notes}</p>
+                          </div>
                         )}
                       </div>
                     </div>
