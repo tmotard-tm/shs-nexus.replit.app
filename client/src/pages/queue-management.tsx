@@ -199,19 +199,24 @@ export default function UnifiedQueueManagement() {
       console.log("Task assignment successful:", {
         assigneeId: variables.assigneeId,
         userId: user?.id,
-        pickUpItem: pickUpItem?.id
+        pickUpItem: pickUpItem?.id,
+        userMatch: variables.assigneeId === user?.id,
+        pickUpItemExists: !!pickUpItem
       });
       
       // If the task was assigned to the current user, open the work module dialog
       if (variables.assigneeId === user?.id && pickUpItem) {
-        console.log("Opening work module for assigned task");
-        setWorkModuleItem(pickUpItem);
+        console.log("Opening work module for assigned task", {
+          taskId: pickUpItem.id,
+          status: pickUpItem.status,
+          assignedTo: pickUpItem.assignedTo
+        });
+        setWorkModuleItem({...pickUpItem, assignedTo: variables.assigneeId, status: "pending"});
         setIsWorkModuleOpen(true);
-        setPickUpItem(null); // Close the pickup dialog
-      } else {
-        // Just close the pickup dialog for assignments to other users
-        setPickUpItem(null);
       }
+      
+      // Always close the pickup dialog after assignment
+      setPickUpItem(null);
       
       toast({
         title: "Success",
