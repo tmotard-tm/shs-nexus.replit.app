@@ -340,23 +340,13 @@ export default function OnboardHire() {
         description += ` ${allMessages.join(" ")}`;
       }
 
-      // Create queue item for onboarding process
+      // Create queue item for onboarding process - use compliant payload
       try {
         await apiRequest("POST", "/api/queue", {
           workflowType: "onboarding",
           title: `Onboard New Employee - ${employeeForm.firstName} ${employeeForm.lastName}`,
           description: `Complete onboarding process for ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.department}). ${requestsCreated.length > 0 ? `Requests created: ${requestsCreated.join(", ")}.` : ""}`,
           priority: "high",
-          requesterId: user?.id || "anonymous",
-          submitterInfo: user ? {
-            id: user.id,
-            name: user.username || user.email,
-            email: user.email
-          } : {
-            id: "anonymous",
-            name: "Anonymous User",
-            email: null
-          },
           data: JSON.stringify({
             submitter: user ? {
               name: user.username || user.email || "Unknown User",
