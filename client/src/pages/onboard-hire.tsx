@@ -266,22 +266,12 @@ export default function OnboardHire() {
         }
       }
       
-      // Create task for manual vehicle assignment
+      // Create task for manual vehicle assignment - use compliant payload
       await apiRequest("POST", "/api/fleet-queue", {
         workflowType: "vehicle_assignment",
         title: `Vehicle Assignment - ${employeeForm.firstName} ${employeeForm.lastName}`,
         description: `Manually assign vehicle to new employee ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}) in ${employeeForm.region}.`,
         priority: "high",
-        requesterId: user?.id || "anonymous",
-        submitterInfo: user ? {
-          id: user.id,
-          name: user.username || user.email,
-          email: user.email
-        } : {
-          id: "anonymous",
-          name: "Anonymous User",
-          email: null
-        },
         data: JSON.stringify({
           submitter: user ? {
             name: user.username || user.email || "Unknown User",
