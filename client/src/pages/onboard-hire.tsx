@@ -229,110 +229,41 @@ export default function OnboardHire() {
         onboardingDepartmentTasks.push({ dept: 'NTAO', priority: 'medium', taskType: 'Parts Stock Allocation' });
       }
 
-      // Create separate queue tasks for each department
+      // Create department-specific tasks with compliant payloads
       for (const { dept, priority, taskType } of onboardingDepartmentTasks) {
-        // Route to correct department-specific queue
-        let queueEndpoint = "/api/queue"; // fallback
-        switch (dept) {
-          case "NTAO":
-            queueEndpoint = "/api/ntao-queue";
-            break;
-          case "Assets Management":
-          case "Assets & Supplies":
-            queueEndpoint = "/api/assets-queue";
-            break;
-          case "Inventory Control":
-            queueEndpoint = "/api/inventory-queue";
-            break;
-          case "Fleet Management":
-            queueEndpoint = "/api/fleet-queue";
-            break;
-          case "Decommissions":
-            queueEndpoint = "/api/decommissions-queue";
-            break;
-        }
-        
-        const deptQueueItem = await apiRequest("POST", queueEndpoint, {
-          workflowType: "department_notification",
-          title: `${dept} - Employee Onboarding Task (Auto-triggered)`,
-          description: `${taskType} task for ${dept} regarding new employee onboarding. Employee: ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}). Department: ${employeeForm.department}. Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}.`,
-          priority: priority,
-          requesterId: user?.id || "anonymous",
-          submitterInfo: user ? {
-            id: user.id,
-            name: user.username || user.email,
-            email: user.email
-          } : {
-            id: "anonymous",
-            name: "Anonymous User",
-            email: null
-          },
-          data: JSON.stringify({
-            submitter: user ? {
-              name: user.username || user.email || "Unknown User",
-              submittedAt: new Date().toISOString()
-            } : {
-              name: "Anonymous User",
-              submittedAt: new Date().toISOString()
-            },
-            department: dept,
-            notificationType: "Employee Onboarding",
-            taskType: taskType,
-            employee: {
-              firstName: employeeForm.firstName,
-              lastName: employeeForm.lastName,
-              enterpriseId: employeeForm.enterpriseId,
-              department: employeeForm.department,
-              startDate: employeeForm.startDate,
-              region: employeeForm.region,
-              district: employeeForm.district,
-              specialties: employeeForm.isGeneralist ? specialtyOptions.filter(s => s !== "HVAC") : employeeForm.specialties,
-              techId: employeeForm.techId,
-              address: {
-                street: employeeForm.street,
-                city: employeeForm.city,
-                state: employeeForm.state,
-                zipCode: employeeForm.zipCode
-              }
-            },
-            workLocation: vehicleAssignment.workZipcode || 'TBD',
-            autoTriggered: true,
-            triggeredBy: "employee_onboarding",
-            ...(dept === "Assets & Supplies" && {
-              checklist: [
-                {
-                  id: "phone_order",
-                  task: "Verify new phone order has been placed",
-                  description: "Confirm mobile phone order is submitted for new employee",
-                  completed: false,
-                  required: true
-                },
-                {
-                  id: "uniform_order", 
-                  task: "Verify new uniform order has been placed",
-                  description: "Confirm uniform/apparel order is submitted for new employee",
-                  completed: false,
-                  required: true
-                },
-                {
-                  id: "tpms_update",
-                  task: "Update TPMS with employee address and tech ID",
-                  description: `Update TPMS system with employee address: ${employeeForm.street}, ${employeeForm.city}, ${employeeForm.state} ${employeeForm.zipCode} and Tech ID: ${employeeForm.techId}`,
-                  completed: false,
-                  required: true
-                }
-              ],
-              instructions: [
-                "Complete all checklist items for new employee setup",
-                "Verify all orders are placed in appropriate systems", 
-                "Update TPMS with accurate employee information",
-                "Mark task complete only after all checklist items are verified"
-              ]
+        if (dept === "Assets & Supplies") {
+          // Assets queue - use strict anonymous schema
+          const assetsPayload = {
+            workflowType: "onboarding" as const,
+            title: `Assets & Supplies - Employee Onboarding Task`,
+            description: `${taskType} task for new employee: ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId}). Department: ${employeeForm.department}. Start date: ${employeeForm.startDate}. Region: ${employeeForm.region}, District: ${employeeForm.district}.`,
+            priority: priority as "high" | "medium" | "low",
+            data: JSON.stringify({
+              employee: employeeForm,
+              taskType,
+              department: dept
             })
-          })
-        });
-        requestsCreated.push(`${dept} ${taskType.toLowerCase()}`);
-        orderMessages.push(`${dept} task created for ${taskType.toLowerCase()}`);
+          };
+          
+          await apiRequest("POST", "/api/assets-queue", assetsPayload);
+          requestsCreated.push(`${dept} ${taskType.toLowerCase()}`);
+          orderMessages.push(`${dept} task created for ${taskType.toLowerCase()}`);
+        } else if (dept === "NTAO") {
+          // NTAO queue task
+          await apiRequest("POST", "/api/ntao-queue", {
+            workflowType: "onboarding",
+            title: `NTAO - Employee Onboarding Task`,
+            description: `${taskType} task for new employee: ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId})`,
+            priority: priority,
+            data: JSON.stringify({
+              employee: employeeForm,
+              taskType,
+              department: dept
+            })
+          });
+          requestsCreated.push(`${dept} ${taskType.toLowerCase()}`);
+          orderMessages.push(`${dept} task created for ${taskType.toLowerCase()}`);
+        }
       }
       
       // Create task for manual vehicle assignment
