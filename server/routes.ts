@@ -2741,14 +2741,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid department" });
       }
 
-      const template = await getTemplateForTask(workflowType, department.toLowerCase() as QueueModule);
+      const result = await templateLoader.getTemplateForWorkflow(workflowType, department.toLowerCase() as QueueModule);
+      const template = result.template;
       
       if (template) {
         res.json({ template });
       } else {
         res.status(404).json({ 
           message: "Template not found",
-          error: `No template available for workflow ${workflowType} in department ${department}`
+          error: result.error || `No template available for workflow ${workflowType} in department ${department}`,
+          suggestions: result.suggestions
         });
       }
     } catch (error) {
