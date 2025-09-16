@@ -598,12 +598,23 @@ export function WorkModuleDialog({
                           </p>
                         </div>
                         {(taskData.employee?.specialties || taskData.specialties) && (
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Specialties</Label>
-                            <p className="text-sm" data-testid="text-specialties">
-                              {Array.isArray(taskData.employee?.specialties || taskData.specialties)
-                                ? (taskData.employee?.specialties || taskData.specialties).join(", ")
-                                : taskData.employee?.specialties || taskData.specialties || "N/A"}
+                          <div className="md:col-span-2">
+                            <Label className="text-sm font-medium text-primary">Parts to Ship - Technician Specialties</Label>
+                            <div className="flex flex-wrap gap-2 mt-2" data-testid="specialties-badges">
+                              {(Array.isArray(taskData.employee?.specialties || taskData.specialties)
+                                ? (taskData.employee?.specialties || taskData.specialties)
+                                : [taskData.employee?.specialties || taskData.specialties]
+                              ).filter(Boolean).map((specialty: string, index: number) => (
+                                <span 
+                                  key={specialty || index} 
+                                  className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-700"
+                                >
+                                  🔧 {specialty}
+                                </span>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-2 italic">
+                              💡 Ship parts/equipment for the specialties shown above
                             </p>
                           </div>
                         )}
