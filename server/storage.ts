@@ -345,6 +345,27 @@ export class MemStorage implements IStorage {
         departmentAccess: ['FLEET'],
         createdAt: new Date(),
       },
+      // NTAO department employees
+      {
+        id: randomUUID(),
+        username: "goutami.walsang",
+        email: "goutami.walsang@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "NTAO",
+        departmentAccess: ['NTAO'],
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "oscar.santana",
+        email: "oscar.santana@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "NTAO",
+        departmentAccess: ['NTAO'],
+        createdAt: new Date(),
+      },
     ];
     
     // Add anonymous user for anonymous form submissions
