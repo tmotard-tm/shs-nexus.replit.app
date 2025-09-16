@@ -929,35 +929,12 @@ export default function UnifiedQueueManagement() {
                                                 )}
                                               </div>
                                               
-                                              {/* Assignment dropdown for unassigned items */}
-                                              {item.status === "pending" && !item.assignedTo && (
-                                                <Select
-                                                  onValueChange={(assigneeId) => handleAssignTask(item, assigneeId)}
-                                                >
-                                                  <SelectTrigger className="w-full" data-testid={`select-assign-${item.id}`}>
-                                                    <SelectValue placeholder="Assign Task" />
-                                                  </SelectTrigger>
-                                                  <SelectContent>
-                                                    {users
-                                                      .filter((u: UserType) => {
-                                                        const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
-                                                        return userAccessibleModules.includes(item.module);
-                                                      })
-                                                      .map((assigneeUser: UserType) => (
-                                                        <SelectItem key={assigneeUser.id} value={assigneeUser.id}>
-                                                          {assigneeUser.username}
-                                                        </SelectItem>
-                                                      ))}
-                                                  </SelectContent>
-                                                </Select>
-                                              )}
-                                              
-                                              {/* Pick up button for unassigned items */}
+                                              {/* Single Pick Up button for unassigned items */}
                                               {item.status === "pending" && !item.assignedTo && (
                                                 <Button
                                                   variant="outline"
                                                   size="sm"
-                                                  onClick={() => handlePickUpTask(item)}
+                                                  onClick={() => setPickUpItem(item)}
                                                   disabled={assignMutation.isPending}
                                                   data-testid={`button-pick-up-${item.id}`}
                                                 >
