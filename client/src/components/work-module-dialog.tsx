@@ -607,6 +607,16 @@ export function WorkModuleDialog({
                             </p>
                           </div>
                         )}
+                        {(taskData.employee?.isFSSLTech || taskData.isFSSLTech) && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">FSSL Tech Status</Label>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium">
+                                🏆 FSSL Tech (Field Service Support Lead)
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

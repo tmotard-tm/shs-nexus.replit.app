@@ -42,7 +42,8 @@ export default function OnboardHire() {
     proposedRouteStartDate: "",
 
     specialties: [] as string[],
-    isGeneralist: false
+    isGeneralist: false,
+    isFSSLTech: false
   });
 
   const [onboardingTasks, setOnboardingTasks] = useState([
@@ -104,7 +105,7 @@ export default function OnboardHire() {
     const employeeFields = [
       'firstName', 'lastName', 'email', 'phone', 'street', 'city', 'state', 'zipCode',
       'department', 'position', 'startDate', 'manager', 'employeeId', 'region', 'district',
-      'requisitionId', 'enterpriseId', 'techId', 'proposedRouteStartDate', 'isGeneralist'
+      'requisitionId', 'enterpriseId', 'techId', 'proposedRouteStartDate', 'isGeneralist', 'isFSSLTech'
     ];
     const vehicleFields = ['autoAssign', 'workZipcode'];
 
@@ -126,6 +127,7 @@ export default function OnboardHire() {
       if (employeePrefill.techId) processedData.techId = commonValidators.text(employeePrefill.techId);
       if (employeePrefill.requisitionId) processedData.requisitionId = commonValidators.text(employeePrefill.requisitionId);
       if (employeePrefill.isGeneralist) processedData.isGeneralist = employeePrefill.isGeneralist === 'true';
+      if (employeePrefill.isFSSLTech) processedData.isFSSLTech = employeePrefill.isFSSLTech === 'true';
       
       Object.keys(employeePrefill).forEach(key => {
         if (!processedData.hasOwnProperty(key) && employeePrefill[key]) {
@@ -882,6 +884,29 @@ export default function OnboardHire() {
                           </span>
                         </div>
 
+                        {/* FSSL Tech Option */}
+                        <div className="flex items-center space-x-2 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                          <Checkbox
+                            id="fssl-tech"
+                            checked={employeeForm.isFSSLTech}
+                            onCheckedChange={(checked) => {
+                              setEmployeeForm(prev => ({
+                                ...prev,
+                                isFSSLTech: !!checked
+                              }));
+                            }}
+                            data-testid="checkbox-fssl-tech"
+                          />
+                          <div>
+                            <Label htmlFor="fssl-tech" className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                              FSSL Tech (Field Service Support Lead)
+                            </Label>
+                            <span className="text-xs text-orange-600 dark:text-orange-300 ml-2">
+                              Check this if the technician is designated as an FSSL tech
+                            </span>
+                          </div>
+                        </div>
+
                         {/* Individual Specialty Checkboxes */}
                         {!employeeForm.isGeneralist && (
                           <div className="space-y-2">
@@ -912,21 +937,25 @@ export default function OnboardHire() {
                         )}
 
                         {/* Selected Specialties Display */}
-                        {(employeeForm.isGeneralist || employeeForm.specialties.length > 0) && (
+                        {(employeeForm.isGeneralist || employeeForm.specialties.length > 0 || employeeForm.isFSSLTech) && (
                           <div className="p-3 bg-muted rounded-lg">
                             <p className="text-sm font-medium mb-2">Selected Specialties:</p>
                             <div className="flex flex-wrap gap-1">
-                              {employeeForm.isGeneralist ? (
+                              {employeeForm.isGeneralist && (
                                 <span className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 font-medium">
                                   🌟 Generalist (All Specialties except HVAC)
                                 </span>
-                              ) : (
-                                employeeForm.specialties.map((specialty) => (
-                                  <span key={specialty} className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
-                                    {specialty}
-                                  </span>
-                                ))
                               )}
+                              {employeeForm.isFSSLTech && (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium">
+                                  🏆 FSSL Tech
+                                </span>
+                              )}
+                              {!employeeForm.isGeneralist && employeeForm.specialties.map((specialty) => (
+                                <span key={specialty} className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
+                                  {specialty}
+                                </span>
+                              ))}
                             </div>
                           </div>
                         )}
