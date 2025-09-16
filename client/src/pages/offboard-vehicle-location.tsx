@@ -27,6 +27,7 @@ export default function OffboardVehicleLocation() {
     lastDayWorked: "",
     vehicleNumber: "",
     vehicleLocation: "",
+    vehicleType: "",
     reason: "",
     effectiveDate: "",
     notes: "",
@@ -79,7 +80,7 @@ export default function OffboardVehicleLocation() {
   useEffect(() => {
     const vehicleOffboardFields = [
       'vehicleId', 'techRacfId', 'techName', 'employeeId', 'lastDayWorked',
-      'vehicleNumber', 'vehicleLocation', 'reason', 'effectiveDate', 'notes', 'returnCondition'
+      'vehicleNumber', 'vehicleLocation', 'vehicleType', 'reason', 'effectiveDate', 'notes', 'returnCondition'
     ];
     const locationOffboardFields = [
       'locationId', 'reason', 'effectiveDate', 'notes', 'equipmentDisposal'
@@ -523,6 +524,29 @@ export default function OffboardVehicleLocation() {
                             placeholder="Enter current location"
                             data-testid="input-vehicle-location"
                           />
+                        </div>
+
+                        {/* Vehicle Type Field */}
+                        <div className="space-y-2">
+                          <Label htmlFor="vehicleType">Vehicle Type *</Label>
+                          <Select
+                            value={vehicleOffboard.vehicleType}
+                            onValueChange={(value) => setVehicleOffboard(prev => ({ ...prev, vehicleType: value }))}
+                            required
+                            data-testid="select-vehicle-type"
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select vehicle type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="sears-fleet">Sears Fleet</SelectItem>
+                              <SelectItem value="byov">BYOV (Bring Your Own Vehicle)</SelectItem>
+                              <SelectItem value="rental">Rental</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-sm text-muted-foreground">
+                            We need to know what kind of vehicle it is so we can trigger the correct things
+                          </p>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
