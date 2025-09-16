@@ -491,7 +491,8 @@ export default function OnboardHire() {
       proposedRouteStartDate: "",
   
       specialties: [],
-      isGeneralist: false
+      isGeneralist: false,
+      isFSSLTech: false
     });
 
     setOnboardingTasks(tasks => tasks.map(task => ({ ...task, completed: false })));
