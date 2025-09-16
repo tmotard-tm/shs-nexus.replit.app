@@ -21,8 +21,9 @@
       "required": true,
       "category": "verification",
       "conditionalLogic": {
-        "showWhen": "not_fssl",
-        "condition": "If tech is FSSL flagged, this step does not apply"
+        "dependsOn": "tech_fssl_status",
+        "condition": "not_equals",
+        "value": "fssl_flagged"
       }
     },
     {
