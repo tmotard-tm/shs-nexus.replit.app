@@ -12,7 +12,7 @@
     {
       "id": "systems_verification",
       "title": "Design ideal truck stock",
-      "description": "Confirm all diagnostic and service software is up to date",
+      "description": "verify the correct truck assortment is applied to this truck",
       "required": true,
       "estimatedTime": 5,
       "category": "verification"
