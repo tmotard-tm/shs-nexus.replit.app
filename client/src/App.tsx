@@ -308,11 +308,11 @@ function Router() {
       </Route>
       
       <Route path="/users">
-        <ProtectedRoute>
+        <PermissionProtectedRoute formKey="user-management" redirectOnDenied={true}>
           <MainContent>
             <UserManagement />
           </MainContent>
-        </ProtectedRoute>
+        </PermissionProtectedRoute>
       </Route>
       
       <Route path="/activity">

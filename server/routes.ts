@@ -308,9 +308,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // User management routes
-  app.get("/api/users", async (req, res) => {
+  // User management routes (restricted to superadmin and admin only)
+  app.get("/api/users", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. User management requires superadmin or admin role." });
+      }
+      
       const users = await storage.getUsers();
       // Remove passwords from response
       const safeUsers = users.map(user => ({ ...user, password: undefined }));
@@ -320,8 +325,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. User management requires superadmin or admin role." });
+      }
+      
       const userData = insertUserSchema.parse(req.body);
       
       // Check if user already exists
@@ -355,8 +365,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/users/:id", async (req, res) => {
+  app.patch("/api/users/:id", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. User management requires superadmin or admin role." });
+      }
+      
       const { id } = req.params;
       const updates = req.body;
       
@@ -385,8 +400,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/users/:id", async (req, res) => {
+  app.delete("/api/users/:id", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. User management requires superadmin or admin role." });
+      }
+      
       const { id } = req.params;
       
       const user = await storage.getUser(id);
