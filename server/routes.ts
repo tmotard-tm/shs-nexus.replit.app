@@ -57,7 +57,7 @@ const humanVerificationSessions = new Map<string, { verified: boolean; expiresAt
 // Rate limiting store for anonymous form submissions
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 5 * 60 * 1000; // 5 minutes
-const RATE_LIMIT_MAX_REQUESTS = 10; // 10 requests per window
+const RATE_LIMIT_MAX_REQUESTS = 50; // Increased to 50 requests per window for testing
 
 // Input sanitization function
 function sanitizeInput(obj: any): any {
@@ -436,7 +436,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Basic bot detection: check if request was too fast (less than 1 second)
       const requestTime = Date.now() - timestamp;
-      if (requestTime < 1000) {
+      if (requestTime < 500) { // Reduced from 1000ms to 500ms for better UX
         return res.status(429).json({ message: "Verification failed: too fast" });
       }
       
