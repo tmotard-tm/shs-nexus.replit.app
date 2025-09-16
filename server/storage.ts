@@ -252,6 +252,99 @@ export class MemStorage implements IStorage {
         departmentAccess: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
         createdAt: new Date(),
       },
+      // Assets department employees
+      {
+        id: randomUUID(),
+        username: "bob.banfill",
+        email: "bob.banfill@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "Assets Management",
+        departmentAccess: ['ASSETS'],
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "claudia.dominguez",
+        email: "claudia.dominguez@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "Assets Management",
+        departmentAccess: ['ASSETS'],
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "monica.jenkins",
+        email: "monica.jenkins@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "Assets Management",
+        departmentAccess: ['ASSETS'],
+        createdAt: new Date(),
+      },
+      // Inventory department employees
+      {
+        id: randomUUID(),
+        username: "jennifer.dyer",
+        email: "jennifer.dyer@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "Inventory Control",
+        departmentAccess: ['INVENTORY'],
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "andrea.catapano",
+        email: "andrea.catapano@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "Inventory Control",
+        departmentAccess: ['INVENTORY'],
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "tashsa.corenevsky",
+        email: "tashsa.corenevsky@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "Inventory Control",
+        departmentAccess: ['INVENTORY'],
+        createdAt: new Date(),
+      },
+      // Fleet department employees
+      {
+        id: randomUUID(),
+        username: "cheryl.groce",
+        email: "cheryl.groce@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "Fleet Management",
+        departmentAccess: ['FLEET'],
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "robert.delgaldo",
+        email: "robert.delgaldo@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "Fleet Management",
+        departmentAccess: ['FLEET'],
+        createdAt: new Date(),
+      },
+      {
+        id: randomUUID(),
+        username: "carol.collins",
+        email: "carol.collins@sears.com",
+        password: "passwords",
+        role: "agent",
+        department: "Fleet Management",
+        departmentAccess: ['FLEET'],
+        createdAt: new Date(),
+      },
     ];
     
     // Add anonymous user for anonymous form submissions
@@ -262,8 +355,8 @@ export class MemStorage implements IStorage {
       password: "no-password", // Cannot be used for login
       role: "field", // Minimal permissions
       department: null,
+      departmentAccess: [], // No queue access for anonymous user
       createdAt: new Date(),
-      accessibleQueues: [], // No queue access for anonymous user
     };
     enterpriseUsers.push(anonymousUser);
     
@@ -603,6 +696,7 @@ export class MemStorage implements IStorage {
       ...insertUser,
       role: insertUser.role || "field",
       department: insertUser.department || null,
+      departmentAccess: insertUser.departmentAccess || null,
       id, 
       createdAt: new Date(),
     };
