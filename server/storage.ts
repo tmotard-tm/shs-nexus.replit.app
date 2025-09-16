@@ -1280,21 +1280,32 @@ export class MemStorage implements IStorage {
   }
 
 
-  // Workflow automation function - triggers next step in sequential workflows
+  // Workflow automation function - triggers Phase 2 after ALL Day 0 tasks complete
   async triggerNextWorkflowStep(completedItem: QueueItem): Promise<void> {
     // Only proceed if this item is part of a workflow
     if (!completedItem.workflowId || !completedItem.workflowStep) return;
 
     try {
-      const triggerData = completedItem.triggerData ? JSON.parse(completedItem.triggerData) : null;
+      const itemData = completedItem.data ? JSON.parse(completedItem.data) : null;
+      if (!itemData) return;
+
+      // Two-Phase Offboarding System:
+      // Phase 1 (Day 0): Tasks 1-4 run in parallel (NTAO, Equipment, Fleet, Inventory)
+      // Phase 2 (Day 1-5): Auto-generate Fleet follow-up tasks ONLY after ALL Day 0 tasks complete
+      
+      // Check if this is a Day 0 task completion
+      if (itemData.isDay0Task && itemData.phase === "day0") {
+        await this.checkAllDay0TasksAndTriggerPhase2(completedItem);
+        return;
+      }
+
+      // Legacy workflow support - keeping existing logic for non-Day0 workflows
+      const triggerData = completedItem.triggerData ? JSON.parse(completedItem.triggerData) : itemData;
       if (!triggerData) return;
 
-      // Check for Fleet Management completion (step 3) to trigger final tasks
-      // Steps 1 (NTAO), 2 (Assets), and 3 (Fleet) run in parallel
-      // Only Fleet completion triggers the final combined Inventory/Assets task
-      if (completedItem.workflowStep === 3 && completedItem.department === "Fleet Management") {
+      if (completedItem.workflowStep === 3 && completedItem.department === "Fleet Management" && !itemData.isDay0Task) {
         
-        // Check for existing final tasks to prevent duplicates
+        // Legacy workflow - Check for existing final tasks to prevent duplicates
         const existingInventoryTasks = await this.getInventoryQueueItems();
         const existingAssetsTasks = await this.getAssetsQueueItems();
         
@@ -1311,7 +1322,7 @@ export class MemStorage implements IStorage {
         );
 
         if (duplicateInventoryTask || duplicateAssetsTask) {
-          console.log(`Final workflow tasks already exist for workflow ${completedItem.workflowId}`);
+          console.log(`Legacy workflow tasks already exist for workflow ${completedItem.workflowId}`);
           return;
         }
         
@@ -1387,9 +1398,10 @@ export class MemStorage implements IStorage {
         console.log(`Auto-triggered step 4 workflow tasks for workflow ${completedItem.workflowId}: Inventory Control + Assets Management`);
       } 
       
-      // Check if both Inventory Control and Assets Management step 4 tasks are completed to trigger final Fleet task
+      // Legacy workflow - Check if both Inventory Control and Assets Management step 4 tasks are completed to trigger final Fleet task
       else if (completedItem.workflowStep === 4 && 
-               (completedItem.department === "Inventory Control" || completedItem.department === "Assets Management")) {
+               (completedItem.department === "Inventory Control" || completedItem.department === "Assets Management") &&
+               !itemData.isDay0Task) {
         
         // Get all tasks for this workflow at step 4
         const allInventoryTasks = await this.getInventoryQueueItems();
@@ -1455,10 +1467,10 @@ export class MemStorage implements IStorage {
             };
 
             await this.createFleetQueueItem(finalFleetTask as any);
-            console.log(`Auto-triggered final Fleet readiness task for workflow ${completedItem.workflowId}`);
+            console.log(`Legacy workflow: Auto-triggered final Fleet readiness task for workflow ${completedItem.workflowId}`);
           }
         } else {
-          console.log(`Step 4 task completed for workflow ${completedItem.workflowId}, waiting for other step 4 task to complete`);
+          console.log(`Legacy workflow: Step 4 task completed for workflow ${completedItem.workflowId}, waiting for other step 4 task to complete`);
         }
       } else {
         // No more steps to trigger for other completed tasks
@@ -1466,6 +1478,233 @@ export class MemStorage implements IStorage {
       }
     } catch (error) {
       console.error('Error triggering next workflow step:', error);
+    }
+  }
+
+  // New function to check Day 0 task completion and trigger Phase 2
+  async checkAllDay0TasksAndTriggerPhase2(completedItem: QueueItem): Promise<void> {
+    try {
+      const itemData = JSON.parse(completedItem.data || '{}');
+      const workflowId = completedItem.workflowId;
+      
+      if (!workflowId) {
+        console.log('No workflow ID found for Day 0 task');
+        return;
+      }
+
+      console.log(`Day 0 task completed: ${completedItem.title} (${completedItem.department})`);
+
+      // Get all tasks for this workflow
+      const allNtaoTasks = await this.getNTAOQueueItems();
+      const allAssetsTasks = await this.getAssetsQueueItems();
+      const allFleetTasks = await this.getFleetQueueItems();
+      const allInventoryTasks = await this.getInventoryQueueItems();
+
+      // Find all Day 0 tasks for this workflow
+      const day0Tasks = [
+        ...allNtaoTasks.filter(task => 
+          task.workflowId === workflowId && 
+          task.data?.includes('"isDay0Task":true')
+        ),
+        ...allAssetsTasks.filter(task => 
+          task.workflowId === workflowId && 
+          task.data?.includes('"isDay0Task":true')
+        ),
+        ...allFleetTasks.filter(task => 
+          task.workflowId === workflowId && 
+          task.data?.includes('"isDay0Task":true')
+        ),
+        ...allInventoryTasks.filter(task => 
+          task.workflowId === workflowId && 
+          task.data?.includes('"isDay0Task":true')
+        )
+      ];
+
+      console.log(`Found ${day0Tasks.length} Day 0 tasks for workflow ${workflowId}`);
+      
+      // Check if ALL Day 0 tasks are completed
+      const completedDay0Tasks = day0Tasks.filter(task => task.status === 'completed');
+      const totalDay0Tasks = day0Tasks.length;
+      const completedCount = completedDay0Tasks.length;
+
+      console.log(`Day 0 tasks status: ${completedCount}/${totalDay0Tasks} completed`);
+
+      if (totalDay0Tasks === 4 && completedCount === 4) {
+        console.log(`🎉 ALL Day 0 tasks completed for workflow ${workflowId}! Triggering Phase 2...`);
+        
+        // Check if Phase 2 tasks already exist to prevent duplicates
+        const existingPhase2Tasks = [
+          ...allFleetTasks.filter(task => 
+            task.workflowId === workflowId && 
+            task.data?.includes('"phase":"phase2"')
+          )
+        ];
+
+        if (existingPhase2Tasks.length > 0) {
+          console.log(`Phase 2 tasks already exist for workflow ${workflowId}, skipping creation`);
+          return;
+        }
+
+        // Trigger Phase 2 (Day 1-5) tasks
+        await this.createPhase2FleetTasks(workflowId, itemData);
+      } else {
+        console.log(`Waiting for remaining Day 0 tasks to complete (${completedCount}/${totalDay0Tasks})`);
+      }
+    } catch (error) {
+      console.error('Error checking Day 0 tasks completion:', error);
+    }
+  }
+
+  // Create Phase 2 Fleet tasks based on vehicle type
+  async createPhase2FleetTasks(workflowId: string, triggerData: any): Promise<void> {
+    try {
+      const vehicleType = triggerData.vehicleType || triggerData.vehicle?.type || 'sears-fleet';
+      
+      console.log(`Creating Phase 2 Fleet tasks for vehicle type: ${vehicleType}`);
+
+      // Phase 2 Task 1: Vehicle Retrieval and Transport (Day 1-3)
+      const retrievalTask = {
+        workflowType: "offboarding",
+        title: `Phase 2: Vehicle Retrieval - ${triggerData.vehicle?.vehicleNumber}`,
+        description: `PHASE 2 (Day 1-3): Retrieve vehicle from technician and transport to appropriate location. Vehicle: ${triggerData.vehicle?.vehicleNumber}. Employee: ${triggerData.employee?.name} (${triggerData.employee?.racfId}). All Day 0 tasks completed - proceed with Phase 2.`,
+        priority: "medium",
+        requesterId: "system",
+        department: "Fleet Management",
+        workflowId: workflowId,
+        workflowStep: 10, // Phase 2 steps start at 10
+        phase: "phase2",
+        autoTrigger: true,
+        data: JSON.stringify({
+          workflowType: "offboarding_sequence",
+          step: "fleet_vehicle_retrieval_phase2",
+          phase: "phase2",
+          vehicleType: vehicleType,
+          ...triggerData,
+          instructions: this.getVehicleRetrievalInstructions(vehicleType)
+        })
+      };
+
+      // Phase 2 Task 2: Shop Coordination (Day 3-5)
+      const shopTask = {
+        workflowType: "offboarding",
+        title: `Phase 2: Shop Coordination - ${triggerData.vehicle?.vehicleNumber}`,
+        description: `PHASE 2 (Day 3-5): Coordinate vehicle processing at shop/service center. Vehicle: ${triggerData.vehicle?.vehicleNumber}. Complete maintenance, inventory, and preparation for reassignment.`,
+        priority: "medium",
+        requesterId: "system",
+        department: "Fleet Management",
+        workflowId: workflowId,
+        workflowStep: 11, // Phase 2 second step
+        phase: "phase2",
+        autoTrigger: true,
+        data: JSON.stringify({
+          workflowType: "offboarding_sequence",
+          step: "fleet_shop_coordination_phase2",
+          phase: "phase2",
+          vehicleType: vehicleType,
+          ...triggerData,
+          instructions: this.getShopCoordinationInstructions(vehicleType)
+        })
+      };
+
+      // Create the Phase 2 Fleet tasks
+      await this.createFleetQueueItem(retrievalTask as any);
+      await this.createFleetQueueItem(shopTask as any);
+
+      console.log(`✅ Created Phase 2 Fleet tasks for workflow ${workflowId} (vehicle type: ${vehicleType})`);
+    } catch (error) {
+      console.error('Error creating Phase 2 Fleet tasks:', error);
+    }
+  }
+
+  // Get vehicle retrieval instructions based on vehicle type
+  private getVehicleRetrievalInstructions(vehicleType: string): string[] {
+    const baseInstructions = [
+      "Contact technician to schedule vehicle pickup",
+      "Confirm vehicle location and accessibility",
+      "Coordinate pickup logistics and timing"
+    ];
+
+    switch (vehicleType) {
+      case 'sears-fleet':
+        return [
+          ...baseInstructions,
+          "Arrange towing to Pep Boys location (preferred) or local repair shop",
+          "Update AMS and Holman systems with transport details",
+          "Set vehicle status to 'In Transit - Offboarding'",
+          "Ensure proper fleet tracking documentation",
+          "Coordinate with Pep Boys for intake scheduling"
+        ];
+      
+      case 'byov':
+        return [
+          ...baseInstructions,
+          "Coordinate return of company equipment from BYOV",
+          "Verify removal of all Sears branding/equipment",
+          "Document final mileage and condition",
+          "Complete BYOV program exit procedures",
+          "Update BYOV tracking systems"
+        ];
+      
+      case 'rental':
+        return [
+          ...baseInstructions,
+          "Contact rental company for return procedures",
+          "Schedule rental return appointment",
+          "Coordinate final inspection with rental agency",
+          "Process rental return documentation",
+          "Update rental fleet management system"
+        ];
+      
+      default:
+        return baseInstructions;
+    }
+  }
+
+  // Get shop coordination instructions based on vehicle type
+  private getShopCoordinationInstructions(vehicleType: string): string[] {
+    const baseInstructions = [
+      "Confirm vehicle arrival at service location",
+      "Schedule comprehensive vehicle inspection"
+    ];
+
+    switch (vehicleType) {
+      case 'sears-fleet':
+        return [
+          ...baseInstructions,
+          "Complete full parts and tools inventory at shop",
+          "Perform preventive maintenance (PM) service",
+          "Assess vehicle condition and repair needs",
+          "Clean interior and exterior thoroughly",
+          "Update Holman and AMS systems to 'Spare' status",
+          "Prepare vehicle for reassignment pool",
+          "Generate final inspection report",
+          "Mark vehicle ready for assignment"
+        ];
+      
+      case 'byov':
+        return [
+          ...baseInstructions,
+          "Verify complete removal of company equipment",
+          "Confirm all Sears branding removed",
+          "Document final vehicle condition",
+          "Complete BYOV exit documentation",
+          "Close BYOV participant record",
+          "Archive BYOV program files"
+        ];
+      
+      case 'rental':
+        return [
+          ...baseInstructions,
+          "Complete rental return inspection with agency",
+          "Process final rental charges and fees",
+          "Obtain rental return receipt",
+          "Submit rental expense documentation",
+          "Close rental agreement",
+          "Update expense tracking systems"
+        ];
+      
+      default:
+        return baseInstructions;
     }
   }
 

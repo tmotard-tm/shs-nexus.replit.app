@@ -159,6 +159,7 @@ export default function OffboardVehicleLocation() {
       // Create shared trigger data for all workflow tasks
       const sharedTriggerData = {
         workflowId: workflowId,
+        vehicleType: vehicleOffboard.vehicleType,
         employee: {
           name: vehicleOffboard.techName,
           racfId: vehicleOffboard.techRacfId,
@@ -171,7 +172,8 @@ export default function OffboardVehicleLocation() {
           vehicleName: vehicle?.name || vehicleOffboard.vehicleNumber,
           reason: vehicleOffboard.reason,
           location: vehicleOffboard.vehicleLocation,
-          condition: vehicleOffboard.returnCondition
+          condition: vehicleOffboard.returnCondition,
+          type: vehicleOffboard.vehicleType
         },
         submitter: user ? {
           name: user.username || user.email || "Unknown User",
@@ -182,16 +184,20 @@ export default function OffboardVehicleLocation() {
         }
       };
 
-      // Step 1: Create NTAO task (stop truck stock replenishment)
+      // PHASE 1 (Day 0) - Create immediate tasks for all 4 teams
+      
+      // Day 0 Task 1: NTAO - Stop truck stock replenishment (immediate)
       await apiRequest("POST", "/api/ntao-queue", {
         workflowType: "offboarding",
-        title: `Stop Truck Stock Replenishment - ${vehicleOffboard.techName}`,
-        description: `Stop truck stock replenishment for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}. Complete this task once removed from truck replenishment system.`,
+        title: `Day 0: Stop Truck Stock Replenishment - ${vehicleOffboard.techName}`,
+        description: `IMMEDIATE TASK: Stop truck stock replenishment for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
         priority: "high",
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
-          step: "ntao_stop_replenishment",
+          step: "ntao_stop_replenishment_day0",
           workflowStep: 1,
+          phase: "day0",
+          isDay0Task: true,
           submitterInfo: user ? {
             id: user.id,
             name: user.username || user.email,
@@ -204,22 +210,27 @@ export default function OffboardVehicleLocation() {
           ...sharedTriggerData,
           instructions: [
             "Place a shipping hold to prevent future shipments",
-            "Cancel any pending orders",
-            "Cancel all backorders"
+            "Cancel any pending orders for this technician",
+            "Cancel all backorders associated with the vehicle",
+            "Remove technician from automatic replenishment system",
+            "Update truck status in NTAO system",
+            "Complete Day 0 task - no follow-up tasks until all teams complete Day 0"
           ]
         })
       });
 
-      // Step 2: Create Assets task (recover phone) - runs in parallel
+      // Day 0 Task 2: Equipment/Assets - Recover company devices (immediate)
       await apiRequest("POST", "/api/assets-queue", {
         workflowType: "offboarding",
-        title: `Recover Company Phone - ${vehicleOffboard.techName}`,
-        description: `Recover company phone from ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Contact employee to arrange pickup or return of company phone and any other mobile devices.`,
+        title: `Day 0: Recover Company Equipment - ${vehicleOffboard.techName}`,
+        description: `IMMEDIATE TASK: Recover company equipment from ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Contact employee immediately to arrange pickup/return of all company devices and equipment. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
         priority: "high",
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
-          step: "assets_recover_phone",
+          step: "equipment_recover_devices_day0",
           workflowStep: 2,
+          phase: "day0",
+          isDay0Task: true,
           submitterInfo: user ? {
             id: user.id,
             name: user.username || user.email,
@@ -231,26 +242,30 @@ export default function OffboardVehicleLocation() {
           },
           ...sharedTriggerData,
           instructions: [
-            "Contact employee to arrange phone return",
-            "Verify phone is company-issued device",
-            "Check for any accessories (charger, case)",
-            "Wipe device data per security protocol",
-            "Update asset management system",
-            "Mark task complete when phone recovered"
+            "Contact employee immediately to arrange equipment return",
+            "Recover company phone and verify it's company-issued",
+            "Collect any tablets, mobile hotspots, or other devices",
+            "Retrieve company credit cards (coordinate with OneCard Help Desk if needed)",
+            "Check for accessories (chargers, cases, cables)",
+            "Wipe all device data per security protocol",
+            "Update asset management system with returned items",
+            "Complete Day 0 task - mark complete once all equipment recovered"
           ]
         })
       });
 
-      // Step 3: Create Fleet task (move van to central location/shop) - runs in parallel, triggers final step when complete
+      // Day 0 Task 3: Fleet - Initial vehicle coordination (immediate)
       await apiRequest("POST", "/api/fleet-queue", {
         workflowType: "offboarding",
-        title: `Fleet Offboarding Checklist - ${vehicleOffboard.vehicleNumber}`,
-        description: `Complete fleet offboarding checklist for vehicle ${vehicleOffboard.vehicleNumber}. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Contact technician, arrange towing to Pep Boys/shop, update AMS and Holman systems, and prepare for PM.`,
+        title: `Day 0: Initial Vehicle Coordination - ${vehicleOffboard.vehicleNumber}`,
+        description: `IMMEDIATE TASK: Begin initial coordination for vehicle ${vehicleOffboard.vehicleNumber}. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Contact technician and begin preliminary arrangements. This is a Day 0 task - must be completed before Phase 2 (Day 1-5) Fleet tasks are triggered.`,
         priority: "high",
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
-          step: "fleet_move_to_pepboys",
+          step: "fleet_initial_coordination_day0",
           workflowStep: 3,
+          phase: "day0",
+          isDay0Task: true,
           submitterInfo: user ? {
             id: user.id,
             name: user.username || user.email,
@@ -262,27 +277,29 @@ export default function OffboardVehicleLocation() {
           },
           ...sharedTriggerData,
           instructions: [
-            "Contact technician to schedule retrieval of the truck",
-            "Arrange for the truck to be towed:",
-            "  • To a Pep Boys location, if one is available in the area",
-            "  • If not, to a local repair shop",
-            "Record vehicle information and location in AMS and Holman and update to 'Spare' Truck Status",
-            "Once the truck completes its Preventive Maintenance (PM), it is ready for reassignment",
-            "Mark task complete when all steps above are finished"
+            "Contact technician immediately to notify of offboarding process",
+            "Arrange preliminary meeting/call to discuss vehicle handover",
+            "Obtain current vehicle location and condition information",
+            "Begin coordination with technician for vehicle retrieval timing",
+            "Assess any immediate vehicle security or safety concerns",
+            "Document initial vehicle status and location",
+            "Complete Day 0 task - detailed Fleet work will follow in Phase 2"
           ]
         })
       });
 
-      // Step 4: Create Inventory task (remove vehicle from TPMS) - runs in parallel
+      // Day 0 Task 4: Inventory - Remove from TPMS and stop orders (immediate)
       await apiRequest("POST", "/api/inventory-queue", {
         workflowType: "offboarding",
-        title: `Remove Vehicle from TPMS - ${vehicleOffboard.vehicleNumber}`,
-        description: `Remove terminated technician's truck ${vehicleOffboard.vehicleNumber} from TPMS assignment. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Remove the vehicle assignment from the Truck Parts Management System.`,
+        title: `Day 0: Remove from TPMS & Stop Orders - ${vehicleOffboard.vehicleNumber}`,
+        description: `IMMEDIATE TASK: Remove terminated technician's truck ${vehicleOffboard.vehicleNumber} from TPMS assignment and stop all inventory processes. Employee: ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
         priority: "high",
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
-          step: "inventory_remove_from_tpms",
+          step: "inventory_remove_tpms_day0",
           workflowStep: 4,
+          phase: "day0",
+          isDay0Task: true,
           submitterInfo: user ? {
             id: user.id,
             name: user.username || user.email,
@@ -294,12 +311,14 @@ export default function OffboardVehicleLocation() {
           },
           ...sharedTriggerData,
           instructions: [
-            "Access TPMS (Truck Parts Management System)",
+            "Access TPMS (Truck Parts Management System) immediately",
             "Locate vehicle assignment for terminated technician",
             `Remove vehicle ${vehicleOffboard.vehicleNumber} from TPMS assignment`,
-            "Update vehicle status to unassigned/available",
-            "Clear any pending parts orders for this vehicle/technician combination",
-            "Mark task complete when vehicle is removed from TPMS"
+            "Update vehicle status to unassigned/pending-offboard",
+            "Clear and cancel any pending parts orders for this vehicle/technician",
+            "Stop any automatic inventory replenishment processes",
+            "Document current inventory assignment status",
+            "Complete Day 0 task - detailed inventory work will follow in Phase 2"
           ]
         })
       });
@@ -333,15 +352,15 @@ export default function OffboardVehicleLocation() {
     }
 
     toast({
-      title: "Offboarding Workflow Started",
-      description: `4 parallel tasks created for ${vehicleOffboard.techName}: NTAO, Assets, Fleet Management, and Inventory (TPMS removal).`,
+      title: "Two-Phase Offboarding Started",
+      description: `Phase 1 (Day 0) tasks created for ${vehicleOffboard.techName}: NTAO, Equipment, Fleet, and Inventory teams. Phase 2 tasks will auto-trigger after all Day 0 tasks complete.`,
     });
     
     // Show secondary notification about workflow sequence
     setTimeout(() => {
       toast({
-        title: "Workflow Sequence",
-        description: `✅ NTAO + Assets + Fleet + Inventory TPMS (parallel) → Inventory & Assets (parts count) → Fleet (vehicle readiness)`,
+        title: "Workflow Phases",
+        description: `✅ PHASE 1: Day 0 tasks (all 4 teams) → PHASE 2: Day 1-5 Fleet follow-up tasks (auto-generated)`,
         variant: "default"
       });
     }, 2000);
@@ -354,6 +373,7 @@ export default function OffboardVehicleLocation() {
       lastDayWorked: "",
       vehicleNumber: "",
       vehicleLocation: "",
+      vehicleType: "",
       reason: "",
       effectiveDate: "",
       notes: "",
@@ -434,15 +454,17 @@ export default function OffboardVehicleLocation() {
                               <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
                               <div className="text-sm">
                                 <p className="font-medium text-yellow-800 dark:text-yellow-200">Workflow Sequence</p>
-                                <p className="text-yellow-700 dark:text-yellow-300">Upon submission, these departments will get immediate tasks:</p>
+                                <p className="text-yellow-700 dark:text-yellow-300"><strong>Phase 1 (Day 0)</strong> - Immediate tasks for all departments:</p>
                                 <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
-                                  <li>NTAO (Stop truck replenishment)</li>
-                                  <li>Assets Management (Recover phone)</li>
-                                  <li>Fleet Management (Fleet vehicle to central location/shop)</li>
-                                  <li>Inventory Control (Remove vehicle from TPMS)</li>
+                                  <li>NTAO (Stop truck replenishment immediately)</li>
+                                  <li>Equipment/Assets (Recover company devices immediately)</li>
+                                  <li>Fleet (Initial vehicle coordination)</li>
+                                  <li>Inventory (Remove from TPMS, stop orders immediately)</li>
                                 </ul>
-                                <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">After Fleet moves the van, Inventory Control + Assets Management each receive a task to complete count.</p>
-                                <p className="text-yellow-700 dark:text-yellow-300 mt-1 text-xs">Once both teams complete their count tasks, Fleet Management will get final vehicle readiness verification task.</p>
+                                <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs"><strong>Phase 2 (Day 1-5)</strong> - Auto-generated ONLY after ALL Day 0 tasks complete:</p>
+                                <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
+                                  <li>Fleet follow-up tasks (vehicle retrieval, shop coordination, etc.)</li>
+                                </ul>
                               </div>
                             </div>
                           </div>
@@ -545,7 +567,7 @@ export default function OffboardVehicleLocation() {
                             </SelectContent>
                           </Select>
                           <p className="text-sm text-muted-foreground">
-                            We need to know what kind of vehicle it is so we can trigger the correct things
+                            Vehicle type determines which Phase 2 tasks are generated after Day 0 completion
                           </p>
                         </div>
 

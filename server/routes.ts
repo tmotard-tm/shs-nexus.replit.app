@@ -2305,12 +2305,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Priority 1 tasks (parallel execution)
             const fleetTask1 = await storage.createFleetQueueItem({
               workflowType: "offboarding",
-              title: "Stop Truck Stock Replenishment",
-              description: `Stop replenishment for ${offboardingData.techName || 'technician'}`,
+              title: "Day 0: Stop Truck Stock Replenishment",
+              description: `DAY 0 TASK: Stop replenishment for ${offboardingData.techName || 'technician'}`,
               priority: "high",
               requesterId: "anonymous",
               department: "FLEET",
-              data: JSON.stringify(offboardingData),
+              data: JSON.stringify({
+                ...offboardingData,
+                isDay0Task: true,
+                phase: "day0",
+                workflowId,
+                workflowStep: 1
+              }),
               workflowId,
               workflowStep: 1,
               metadata: JSON.stringify({
@@ -2324,12 +2330,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             const inventoryTask1 = await storage.createInventoryQueueItem({
               workflowType: "offboarding",
-              title: "Full Truck Count & Return",
-              description: `Perform full inventory count for ${offboardingData.techName || 'technician'}`,
+              title: "Day 0: Full Truck Count & Return",
+              description: `DAY 0 TASK: Perform full inventory count for ${offboardingData.techName || 'technician'}`,
               priority: "high",
               requesterId: "anonymous",
               department: "INVENTORY",
-              data: JSON.stringify(offboardingData),
+              data: JSON.stringify({
+                ...offboardingData,
+                isDay0Task: true,
+                phase: "day0",
+                workflowId,
+                workflowStep: 1
+              }),
               workflowId,
               workflowStep: 1,
               metadata: JSON.stringify({
@@ -2343,12 +2355,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             const assetsTask1 = await storage.createAssetsQueueItem({
               workflowType: "offboarding",
-              title: "Collect Company Assets",
-              description: `Collect all company assets from ${offboardingData.techName || 'technician'}`,
+              title: "Day 0: Collect Company Assets",
+              description: `DAY 0 TASK: Collect all company assets from ${offboardingData.techName || 'technician'}`,
               priority: "high",
               requesterId: "anonymous",
               department: "ASSETS",
-              data: JSON.stringify(offboardingData),
+              data: JSON.stringify({
+                ...offboardingData,
+                isDay0Task: true,
+                phase: "day0",
+                workflowId,
+                workflowStep: 1
+              }),
               workflowId,
               workflowStep: 1,
               metadata: JSON.stringify({
@@ -2362,12 +2380,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             const ntaoTask1 = await storage.createNTAOQueueItem({
               workflowType: "offboarding",
-              title: "Access Removal / Separation Notice",
-              description: `Process access removal for ${offboardingData.techName || 'technician'}`,
+              title: "Day 0: Access Removal / Separation Notice",
+              description: `DAY 0 TASK: Process access removal for ${offboardingData.techName || 'technician'}`,
               priority: "high",
               requesterId: "anonymous",
               department: "NTAO",
-              data: JSON.stringify(offboardingData),
+              data: JSON.stringify({
+                ...offboardingData,
+                isDay0Task: true,
+                phase: "day0",
+                workflowId,
+                workflowStep: 1
+              }),
               workflowId,
               workflowStep: 1,
               metadata: JSON.stringify({

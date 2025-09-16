@@ -261,6 +261,7 @@ export const anonymousOffboardingSchema = z.object({
   reason: z.string().max(500, "Reason must be 500 characters or less").optional(),
   returnDate: z.string().datetime().optional(),
   notes: z.string().max(1000, "Notes must be 1000 characters or less").optional(),
+  vehicleType: z.enum(["sears-fleet", "byov", "rental"]).default("sears-fleet").optional(),
   // Additional offboarding-specific fields
 }).strict();
 
