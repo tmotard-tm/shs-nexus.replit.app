@@ -166,7 +166,7 @@ export function WorkModuleDialog({
         ? `/api/queues/${module}/${queueItem?.id}/start-work`
         : `/api/queue-items/${queueItem?.id}/start-work`;
       
-      return apiRequest("PATCH", endpoint, { workerId: currentUser?.id });
+      return apiRequest("PATCH", endpoint);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
