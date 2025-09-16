@@ -568,7 +568,7 @@ export function WorkModuleDialog({
                       <div>
                         <Label className="text-sm font-medium text-muted-foreground">Proposed Route Start Date</Label>
                         <p className="text-sm" data-testid="text-proposed-date">
-                          {taskData.proposedStartDate || taskData.proposedRouteStartDate || taskData.employee?.proposedStartDate || "N/A"}
+                          {taskData.employee?.proposedRouteStartDate || taskData.proposedRouteStartDate || taskData.proposedStartDate || "N/A"}
                         </p>
                       </div>
                       <div>
