@@ -1062,7 +1062,8 @@ export default function UnifiedQueueManagement() {
               console.log("PickUp dialog calling handleAssignTask with:", {
                 pickUpItemId: pickUpItem.id,
                 agentId,
-                currentUserId: user?.id
+                currentUserId: user?.id,
+                agentUsername: users.find((u: UserType) => u.id === agentId)?.username
               });
               handleAssignTask(pickUpItem, agentId);
             }
@@ -1070,6 +1071,7 @@ export default function UnifiedQueueManagement() {
           users={users}
           queueModule={pickUpItem?.module}
           isLoading={assignMutation.isPending}
+          currentUser={user || undefined}
         />
 
         {/* Work Module Dialog */}

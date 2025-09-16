@@ -13,6 +13,7 @@ interface PickUpRequestDialogProps {
   queueModule?: QueueModule;
   department?: string;
   isLoading?: boolean;
+  currentUser?: User;
 }
 
 export function PickUpRequestDialog({
@@ -23,12 +24,13 @@ export function PickUpRequestDialog({
   queueModule,
   department,
   isLoading = false,
+  currentUser,
 }: PickUpRequestDialogProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
 
   // Filter agents based on department, queue access, and role
   const getEligibleAgents = () => {
-    return users.filter(user => {
+    const filtered = users.filter(user => {
       // Always include superadmins
       if (user.role === "superadmin") {
         return true;
@@ -65,6 +67,13 @@ export function PickUpRequestDialog({
       // Include agents and admins by default
       return user.role === "agent" || user.role === "admin";
     });
+    
+    // Always ensure the current user is included first, even if they don't match filters
+    if (currentUser && !filtered.some(u => u.id === currentUser.id)) {
+      return [currentUser, ...filtered];
+    }
+    
+    return filtered;
   };
 
   const eligibleAgents = getEligibleAgents();
@@ -111,15 +120,18 @@ export function PickUpRequestDialog({
                     No eligible agents available
                   </SelectItem>
                 ) : (
-                  eligibleAgents.map((user) => (
-                    <SelectItem 
-                      key={user.id} 
-                      value={user.id} 
-                      data-testid={`option-agent-${user.id}`}
-                    >
-                      {user.username} ({user.department || "No Department"})
-                    </SelectItem>
-                  ))
+                  eligibleAgents.map((user) => {
+                    const isCurrentUser = currentUser && user.id === currentUser.id;
+                    return (
+                      <SelectItem 
+                        key={user.id} 
+                        value={user.id} 
+                        data-testid={`option-agent-${user.id}`}
+                      >
+                        {user.username} {isCurrentUser ? "(You)" : `(${user.department || "No Department"})`}
+                      </SelectItem>
+                    );
+                  })
                 )}
               </SelectContent>
             </Select>
