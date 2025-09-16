@@ -225,15 +225,6 @@ export function WorkModuleDialog({
   };
 
   const handleCompleteTask = () => {
-    if (!completeFinal) {
-      toast({
-        title: "Action Required",
-        description: "Please check the completion checkbox to finalize this task.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     // Check if template requires all steps to be completed
     if (template) {
       const requiredStepsCompleted = template.steps
@@ -508,35 +499,6 @@ export function WorkModuleDialog({
             </TabsContent>
           </Tabs>
 
-          {/* Financial Details Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <DollarSign className="h-4 w-4" />
-                Financial Details
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Labor Refund</Label>
-                  <p className="font-mono text-sm font-medium" data-testid="text-labor-refund">{financialDetails.laborRefund}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Parts Refund</Label>
-                  <p className="font-mono text-sm font-medium" data-testid="text-parts-refund">{financialDetails.partsRefund}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Taxes</Label>
-                  <p className="font-mono text-sm font-medium" data-testid="text-taxes">{financialDetails.taxes}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Total Amount</Label>
-                  <p className="font-mono text-sm font-bold" data-testid="text-total-amount">{financialDetails.total}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
 
           {/* Assignment Information Section */}
           <Card>
@@ -574,97 +536,6 @@ export function WorkModuleDialog({
             </CardContent>
           </Card>
 
-          {/* Final Disposition Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CheckCircle className="h-4 w-4" />
-                Final Disposition
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label className="text-sm font-medium">Decision Type</Label>
-                <RadioGroup value={decisionType} onValueChange={setDecisionType} className="mt-2">
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="final_disposition" id="final-disposition" data-testid="radio-final-disposition" />
-                    <Label htmlFor="final-disposition" className="text-sm font-medium">
-                      Final Disposition
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="requires_review" id="requires-review-radio" data-testid="radio-requires-review" />
-                    <Label htmlFor="requires-review-radio" className="text-sm font-medium">
-                      Requires Further Review
-                    </Label>
-                  </div>
-                </RadioGroup>
-              </div>
-
-              <div>
-                <Label htmlFor="final-resolution">Final Resolution</Label>
-                <Select value={finalResolution} onValueChange={setFinalResolution}>
-                  <SelectTrigger data-testid="select-final-resolution">
-                    <SelectValue placeholder="Select Resolution..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="full_refund_approved">Full Refund Approved</SelectItem>
-                    <SelectItem value="partial_refund_approved">Partial Refund Approved</SelectItem>
-                    <SelectItem value="denied">Denied</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Approved Amount Field - Show only when Final Disposition is selected */}
-              {decisionType === "final_disposition" && (
-                <div>
-                  <Label htmlFor="approved-amount">Approved Amount</Label>
-                  <div className="relative">
-                    <Input
-                      id="approved-amount"
-                      type="text"
-                      placeholder="0.00"
-                      value={approvedAmount}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        // Allow empty string, digits, and single decimal point
-                        if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
-                          setApprovedAmount(value);
-                        }
-                      }}
-                      className="pl-6"
-                      data-testid="input-approved-amount"
-                    />
-                    <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-muted-foreground">$</span>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center space-x-2">
-                <Checkbox 
-                  id="complete-final"
-                  checked={completeFinal}
-                  onCheckedChange={(checked) => setCompleteFinal(checked as boolean)}
-                  data-testid="checkbox-complete-final"
-                />
-                <Label htmlFor="complete-final" className="text-sm font-medium">
-                  Complete this request with a final decision
-                </Label>
-              </div>
-
-              <div>
-                <Label htmlFor="work-notes">Work Notes</Label>
-                <Textarea
-                  id="work-notes"
-                  placeholder="Add your notes about this decision..."
-                  value={workNotes}
-                  onChange={(e) => setWorkNotes(e.target.value)}
-                  rows={4}
-                  data-testid="textarea-work-notes"
-                />
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Action Buttons */}
@@ -697,7 +568,7 @@ export function WorkModuleDialog({
             
             <Button 
               onClick={handleCompleteTask}
-              disabled={!completeFinal || completeTaskMutation.isPending}
+              disabled={completeTaskMutation.isPending}
               data-testid="button-complete-task"
             >
               <CheckCircle className="h-4 w-4 mr-2" />
