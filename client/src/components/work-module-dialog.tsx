@@ -463,33 +463,31 @@ export function WorkModuleDialog({
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {/* Personal Information */}
-                  {(taskData.employee || taskData.firstName || taskData.lastName) && (
-                    <div>
-                      <Label className="text-sm font-medium text-primary">Personal Information</Label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
-                        <div>
-                          <Label className="text-sm font-medium text-muted-foreground">Full Name</Label>
-                          <p className="text-sm font-medium" data-testid="text-tech-name">
-                            {taskData.employee?.firstName && taskData.employee?.lastName 
-                              ? `${taskData.employee.firstName} ${taskData.employee.lastName}`
-                              : taskData.firstName && taskData.lastName
-                              ? `${taskData.firstName} ${taskData.lastName}`
-                              : taskData.employee?.name || "N/A"}
-                          </p>
-                        </div>
-                        <div>
-                          <Label className="text-sm font-medium text-muted-foreground">Employee ID</Label>
-                          <p className="font-mono text-sm" data-testid="text-employee-id">
-                            {taskData.employee?.enterpriseId || taskData.employeeId || taskData.employee?.racfId || "N/A"}
-                          </p>
-                        </div>
+                  {/* Personal Information - Always Show */}
+                  <div>
+                    <Label className="text-sm font-medium text-primary">Personal Information</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Full Name</Label>
+                        <p className="text-sm font-medium" data-testid="text-tech-name">
+                          {taskData.employee?.firstName && taskData.employee?.lastName 
+                            ? `${taskData.employee.firstName} ${taskData.employee.lastName}`
+                            : taskData.firstName && taskData.lastName
+                            ? `${taskData.firstName} ${taskData.lastName}`
+                            : taskData.employee?.name || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Employee ID</Label>
+                        <p className="font-mono text-sm" data-testid="text-employee-id">
+                          {taskData.employee?.enterpriseId || taskData.employeeId || taskData.employee?.racfId || "N/A"}
+                        </p>
                       </div>
                     </div>
-                  )}
+                  </div>
 
-                  {/* Contact Information */}
-                  {(taskData.employee?.address || taskData.address || taskData.employee?.phone || taskData.phone) && (
+                  {/* Contact Information - Always Show */}
+                  <div>
                     <div>
                       <Label className="text-sm font-medium text-primary">Contact Information</Label>
                       <div className="grid grid-cols-1 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
@@ -541,7 +539,7 @@ export function WorkModuleDialog({
                         )}
                       </div>
                     </div>
-                  )}
+                  </div>
 
                   {/* Employment Information */}
                   <div>
@@ -580,57 +578,59 @@ export function WorkModuleDialog({
                     </div>
                   </div>
 
-                  {/* Technical Information */}
-                  {(taskData.employee?.techId || taskData.techId || taskData.employee?.enterpriseId) && (
-                    <div>
-                      <Label className="text-sm font-medium text-primary">Technical Information</Label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
-                        <div>
-                          <Label className="text-sm font-medium text-muted-foreground">Tech ID</Label>
-                          <p className="font-mono text-sm" data-testid="text-tech-id-detail">
-                            {taskData.employee?.techId || taskData.techId || taskData.employee?.enterpriseId || "N/A"}
-                          </p>
-                        </div>
-                        <div>
-                          <Label className="text-sm font-medium text-muted-foreground">RACF ID</Label>
-                          <p className="font-mono text-sm" data-testid="text-racf-id">
-                            {taskData.employee?.racfId || taskData.racfId || "N/A"}
-                          </p>
-                        </div>
-                        {(taskData.employee?.specialties || taskData.specialties) && (
-                          <div className="md:col-span-2">
-                            <Label className="text-sm font-medium text-primary">Parts to Ship - Technician Specialties</Label>
-                            <div className="flex flex-wrap gap-2 mt-2" data-testid="specialties-badges">
-                              {(Array.isArray(taskData.employee?.specialties || taskData.specialties)
-                                ? (taskData.employee?.specialties || taskData.specialties)
-                                : [taskData.employee?.specialties || taskData.specialties]
-                              ).filter(Boolean).map((specialty: string, index: number) => (
-                                <span 
-                                  key={specialty || index} 
-                                  className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-700"
-                                >
-                                  🔧 {specialty}
-                                </span>
-                              ))}
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-2 italic">
-                              💡 Ship parts/equipment for the specialties shown above
-                            </p>
-                          </div>
-                        )}
-                        {(taskData.employee?.isFSSLTech || taskData.isFSSLTech) && (
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">FSSL Tech Status</Label>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium">
-                                🏆 FSSL Tech (Field Service Support Lead)
+                  {/* Technical Information - Always Show */}
+                  <div>
+                    <Label className="text-sm font-medium text-primary">Technical Information</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Tech ID</Label>
+                        <p className="font-mono text-sm" data-testid="text-tech-id-detail">
+                          {taskData.employee?.techId || taskData.techId || taskData.employee?.enterpriseId || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">RACF ID</Label>
+                        <p className="font-mono text-sm" data-testid="text-racf-id">
+                          {taskData.employee?.racfId || taskData.racfId || "N/A"}
+                        </p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <Label className="text-sm font-medium text-primary">Parts to Ship - Technician Specialties</Label>
+                        {(taskData.employee?.specialties || taskData.specialties) ? (
+                          <div className="flex flex-wrap gap-2 mt-2" data-testid="specialties-badges">
+                            {(Array.isArray(taskData.employee?.specialties || taskData.specialties)
+                              ? (taskData.employee?.specialties || taskData.specialties)
+                              : [taskData.employee?.specialties || taskData.specialties]
+                            ).filter(Boolean).map((specialty: string, index: number) => (
+                              <span 
+                                key={specialty || index} 
+                                className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-700"
+                              >
+                                🔧 {specialty}
                               </span>
-                            </div>
+                            ))}
                           </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground mt-2">No specialties specified</p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-2 italic">
+                          💡 Ship parts/equipment for the specialties shown above
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">FSSL Tech Status</Label>
+                        {(taskData.employee?.isFSSLTech || taskData.isFSSLTech) ? (
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium">
+                              🏆 FSSL Tech (Field Service Support Lead)
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground mt-1">Standard Technician</p>
                         )}
                       </div>
                     </div>
-                  )}
+                  </div>
 
                   {/* Additional Notes */}
                   {(taskData.description || taskData.notes) && (
