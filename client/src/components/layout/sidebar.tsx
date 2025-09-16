@@ -79,21 +79,21 @@ export function Sidebar() {
             const Icon = item.icon;
             
             return (
-              <Link key={item.name} href={item.href}>
-                <a
-                  className={cn(
-                    "flex items-center gap-3 p-3 rounded-lg transition-colors",
-                    isActive 
-                      ? "bg-accent text-accent-foreground font-medium" 
-                      : "hover:bg-accent hover:text-accent-foreground",
-                    isCollapsed && "justify-center"
-                  )}
-                  data-testid={`link-nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
-                  title={isCollapsed ? item.name : undefined}
-                >
-                  <Icon className="h-4 w-4" />
-                  {!isCollapsed && item.name}
-                </a>
+              <Link
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-3 p-3 rounded-lg transition-colors",
+                  isActive 
+                    ? "bg-accent text-accent-foreground font-medium" 
+                    : "hover:bg-accent hover:text-accent-foreground",
+                  isCollapsed && "justify-center"
+                )}
+                data-testid={`link-nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                title={isCollapsed ? item.name : undefined}
+              >
+                <Icon className="h-4 w-4" />
+                {!isCollapsed && item.name}
               </Link>
             );
           })}
