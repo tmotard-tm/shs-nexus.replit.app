@@ -6,111 +6,69 @@
   "version": "1.0",
   "description": "Onboarding process for NTAO technician",
   "estimatedDuration": 45,
-  "difficulty": "medium",
+  "difficulty": "easy",
   "requiredRole": "agent",
   "steps": [
     {
-      "id": "tech_information",
-      "title": "Collect Technician Information",
-      "description": "Gather all required technician information and contact details",
+      "id": "systems_verification",
+      "title": "Verify All Systems Are Updated",
+      "description": "Ensure all systems and software are current and operational",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "system_updates",
+          "title": "4.1 Verify all systems are updated",
+          "description": "Confirm all diagnostic and service software is up to date",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "release_verification",
+      "title": "Verify Tech Release Authorization",
+      "description": "Confirm technician has signed release to ship parts to home",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "home_shipping_release",
+          "title": "Verify if the tech signed the release to ship parts to their home",
+          "description": "Confirm signed authorization for parts shipment to technician's home address",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "parts_verification",
+      "title": "Verify Parts to Ship",
+      "description": "Review and confirm parts list for shipment to new hire",
       "required": true,
       "estimatedTime": 10,
       "category": "verification",
       "substeps": [
         {
-          "id": "personal_info",
-          "title": "Verify technician personal information",
-          "description": "Confirm name, address, phone number, and emergency contacts",
-          "required": true
-        },
-        {
-          "id": "start_date",
-          "title": "Confirm proposed start date",
-          "description": "Verify and document the technician's proposed start date",
-          "required": true
-        },
-        {
-          "id": "documentation",
-          "title": "Complete required documentation",
-          "description": "Ensure all onboarding paperwork and forms are completed",
+          "id": "parts_list_review",
+          "title": "Verify parts to ship",
+          "description": "Review and confirm the complete parts list for the new technician",
           "required": true
         }
       ]
     },
     {
-      "id": "vehicle_assignment",
-      "title": "Vehicle Assignment Verification",
-      "description": "Verify technician has assigned vehicle and complete vehicle setup",
+      "id": "parts_shipment",
+      "title": "Ship Part Stock to New Hire",
+      "description": "Process and ship parts inventory to new technician",
       "required": true,
-      "estimatedTime": 15,
-      "category": "verification",
-      "substeps": [
-        {
-          "id": "assigned_van_check",
-          "title": "Does the tech have an assigned van?",
-          "description": "Verify that the technician has been assigned a service vehicle",
-          "required": true
-        },
-        {
-          "id": "vehicle_condition",
-          "title": "Verify vehicle condition and readiness",
-          "description": "Ensure assigned vehicle is ready for service and properly equipped",
-          "required": false
-        },
-        {
-          "id": "vehicle_documentation",
-          "title": "Complete vehicle assignment documentation",
-          "description": "Document vehicle assignment and provide vehicle information to technician",
-          "required": true
-        }
-      ]
-    },
-    {
-      "id": "truck_stock_process",
-      "title": "Process Truck Stock",
-      "description": "Ensure truck is properly stocked with parts and equipment",
-      "required": true,
-      "estimatedTime": 15,
+      "estimatedTime": 25,
       "category": "system_action",
       "substeps": [
         {
-          "id": "inventory_check",
-          "title": "Verify truck inventory levels",
-          "description": "Check that truck is stocked with required parts and tools",
-          "required": true
-        },
-        {
-          "id": "equipment_verification",
-          "title": "Verify all required equipment is present",
-          "description": "Ensure technician has all necessary tools and diagnostic equipment",
-          "required": true
-        },
-        {
-          "id": "stock_documentation",
-          "title": "Document stock levels and equipment",
-          "description": "Record initial stock levels and equipment inventory",
-          "required": true
-        }
-      ]
-    },
-    {
-      "id": "systems_update",
-      "title": "Ensure All Systems Are Up to Date",
-      "description": "Verify all systems and software are current and operational",
-      "required": true,
-      "estimatedTime": 5,
-      "category": "system_action",
-      "substeps": [
-        {
-          "id": "software_updates",
-          "title": "Verify all software is updated",
-          "description": "Ensure diagnostic and service software is up to date",
-          "required": true
-        },
-        {
-          "id": "system_access",
-          "title": "Confirm system access and credentials",
-          "description": "Verify technician can access all required systems and applications",
+          "id": "process_shipment",
+          "title": "Ship part stock to new hire",
+          "description": "Process and ship approved parts inventory to technician's address",
           "required": true
         }
       ]
