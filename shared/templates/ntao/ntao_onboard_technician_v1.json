@@ -11,67 +11,35 @@
   "steps": [
     {
       "id": "systems_verification",
-      "title": "Verify All Systems Are Updated",
-      "description": "Ensure all systems and software are current and operational",
+      "title": "Verify all systems are updated",
+      "description": "Confirm all diagnostic and service software is up to date",
       "required": true,
       "estimatedTime": 5,
-      "category": "verification",
-      "substeps": [
-        {
-          "id": "system_updates",
-          "title": "4.1 Verify all systems are updated",
-          "description": "Confirm all diagnostic and service software is up to date",
-          "required": true
-        }
-      ]
+      "category": "verification"
     },
     {
-      "id": "release_verification",
-      "title": "Verify Tech Release Authorization",
-      "description": "Confirm technician has signed release to ship parts to home",
+      "id": "release_verification", 
+      "title": "Verify if the tech signed the release to ship parts to their home",
+      "description": "Confirm signed authorization for parts shipment to technician's home address",
       "required": true,
       "estimatedTime": 5,
-      "category": "verification",
-      "substeps": [
-        {
-          "id": "home_shipping_release",
-          "title": "Verify if the tech signed the release to ship parts to their home",
-          "description": "Confirm signed authorization for parts shipment to technician's home address",
-          "required": true
-        }
-      ]
+      "category": "verification"
     },
     {
       "id": "parts_verification",
-      "title": "Verify Parts to Ship",
-      "description": "Review and confirm parts list for shipment to new hire",
+      "title": "Verify parts to ship",
+      "description": "Review and confirm the complete parts list for the new technician",
       "required": true,
       "estimatedTime": 10,
-      "category": "verification",
-      "substeps": [
-        {
-          "id": "parts_list_review",
-          "title": "Verify parts to ship",
-          "description": "Review and confirm the complete parts list for the new technician",
-          "required": true
-        }
-      ]
+      "category": "verification"
     },
     {
       "id": "parts_shipment",
-      "title": "Ship Part Stock to New Hire",
-      "description": "Process and ship parts inventory to new technician",
+      "title": "Ship part stock to new hire",
+      "description": "Process and ship approved parts inventory to technician's address",
       "required": true,
       "estimatedTime": 25,
-      "category": "system_action",
-      "substeps": [
-        {
-          "id": "process_shipment",
-          "title": "Ship part stock to new hire",
-          "description": "Process and ship approved parts inventory to technician's address",
-          "required": true
-        }
-      ]
+      "category": "system_action"
     }
   ],
   "finalDisposition": {
