@@ -493,12 +493,42 @@ export function WorkModuleDialog({
                     <div>
                       <Label className="text-sm font-medium text-primary">Contact Information</Label>
                       <div className="grid grid-cols-1 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
-                        {(taskData.employee?.address || taskData.address) && (
+                        {(taskData.employee?.address || taskData.address || taskData.employee?.street || taskData.street) && (
                           <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Address</Label>
-                            <p className="text-sm" data-testid="text-address">
-                              {taskData.employee?.address || taskData.address || "N/A"}
-                            </p>
+                            <Label className="text-sm font-medium text-muted-foreground">Full Address</Label>
+                            <div className="text-sm space-y-1" data-testid="text-address">
+                              {/* If we have a complete address string */}
+                              {(taskData.employee?.address || taskData.address) ? (
+                                <p>{taskData.employee?.address || taskData.address}</p>
+                              ) : (
+                                /* If we have separate address fields, combine them */
+                                <div>
+                                  {(taskData.employee?.street || taskData.street) && (
+                                    <p>{taskData.employee?.street || taskData.street}</p>
+                                  )}
+                                  <p>
+                                    {[
+                                      taskData.employee?.city || taskData.city,
+                                      taskData.employee?.state || taskData.state,
+                                      taskData.employee?.zip || taskData.zipCode || taskData.zip
+                                    ].filter(Boolean).join(", ")}
+                                  </p>
+                                </div>
+                              )}
+                              
+                              {/* Always show individual components if available */}
+                              {((taskData.employee?.city || taskData.city) || 
+                                (taskData.employee?.state || taskData.state) || 
+                                (taskData.employee?.zip || taskData.zipCode || taskData.zip)) && 
+                                (taskData.employee?.address || taskData.address) && (
+                                <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
+                                  <p><strong>Street:</strong> {taskData.employee?.street || taskData.street || "N/A"}</p>
+                                  <p><strong>City:</strong> {taskData.employee?.city || taskData.city || "N/A"}</p>
+                                  <p><strong>State:</strong> {taskData.employee?.state || taskData.state || "N/A"}</p>
+                                  <p><strong>ZIP:</strong> {taskData.employee?.zip || taskData.zipCode || taskData.zip || "N/A"}</p>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         )}
                         {(taskData.employee?.phone || taskData.phone) && (
