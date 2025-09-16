@@ -14,9 +14,20 @@ export function HumanVerificationGate({ onVerificationComplete, originalUrl }: H
   const [isChecked, setIsChecked] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationStep, setVerificationStep] = useState<'initial' | 'processing' | 'success'>('initial');
+  const [checkboxTimestamp, setCheckboxTimestamp] = useState<number | null>(null);
+
+  const handleCheckboxChange = (checked: boolean) => {
+    setIsChecked(checked);
+    if (checked) {
+      // Record timestamp when user checks the box
+      setCheckboxTimestamp(Date.now());
+    } else {
+      setCheckboxTimestamp(null);
+    }
+  };
 
   const handleVerify = async () => {
-    if (!isChecked) return;
+    if (!isChecked || !checkboxTimestamp) return;
 
     setIsVerifying(true);
     setVerificationStep('processing');
@@ -33,7 +44,7 @@ export function HumanVerificationGate({ onVerificationComplete, originalUrl }: H
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          timestamp: startTime,
+          timestamp: checkboxTimestamp, // Use checkbox timestamp instead
           originalUrl: originalUrl,
         }),
       });
@@ -94,7 +105,7 @@ export function HumanVerificationGate({ onVerificationComplete, originalUrl }: H
                 <Checkbox
                   id="human-verification"
                   checked={isChecked}
-                  onCheckedChange={(checked) => setIsChecked(checked === true)}
+                  onCheckedChange={handleCheckboxChange}
                   disabled={isVerifying}
                   data-testid="checkbox-human-verification"
                 />
