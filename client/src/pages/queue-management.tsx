@@ -575,7 +575,7 @@ export default function UnifiedQueueManagement() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold" data-testid="text-total-requests-count">
-                  {queueStats.total}
+                  {queueStats?.total || 0}
                 </div>
               </CardContent>
             </Card>
@@ -598,15 +598,15 @@ export default function UnifiedQueueManagement() {
                   <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="pending" data-testid="tab-pending" className="flex items-center gap-2">
                       <Clock className="h-4 w-4" />
-                      New Tasks ({queueStats.pending})
+                      New Tasks ({queueStats?.pending || 0})
                     </TabsTrigger>
                     <TabsTrigger value="in_progress" data-testid="tab-in-progress" className="flex items-center gap-2">
                       <User className="h-4 w-4" />
-                      In Progress ({queueStats.in_progress})
+                      In Progress ({queueStats?.in_progress || 0})
                     </TabsTrigger>
                     <TabsTrigger value="completed" data-testid="tab-completed" className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4" />
-                      Completed ({queueStats.completed})
+                      Completed ({queueStats?.completed || 0})
                     </TabsTrigger>
                     <TabsTrigger value="all" data-testid="tab-all" className="flex items-center gap-2">
                       <List className="h-4 w-4" />
