@@ -39,7 +39,9 @@ export class TemplateLoader {
       const registryPath = path.join(this.templatesDir, 'template-registry.json');
       const registryData = await fs.promises.readFile(registryPath, 'utf-8');
       const parsedRegistry = JSON.parse(registryData);
-      this.registryCache = parsedRegistry.registry;
+      // Handle both { registry: {...} } and direct {...} formats
+      this.registryCache = parsedRegistry.registry ?? parsedRegistry;
+      console.log('Template registry loaded with keys:', Object.keys(this.registryCache));
       return this.registryCache || {};
     } catch (error) {
       console.error('Failed to load template registry:', error);
