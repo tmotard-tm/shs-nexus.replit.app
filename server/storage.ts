@@ -133,6 +133,12 @@ export interface IStorage {
   assignUnifiedQueueItem(module: QueueModule, id: string, assigneeId: string): Promise<QueueItem | undefined>;
   startWorkUnifiedQueueItem(module: QueueModule, id: string, workerId: string): Promise<QueueItem | undefined>;
   completeUnifiedQueueItem(module: QueueModule, id: string, completedBy: string): Promise<QueueItem | undefined>;
+  
+  // Duplicate Detection Functions
+  checkOffboardingTaskDuplicates(employeeId: string, techRacfId: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }>;
+  checkByovEnrollmentDuplicates(ldap: string, email: string, currentTruckNumber: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }>;
+  getRecentQueueItemsByTimeWindow(modules: QueueModule[], timeWindowMs: number): Promise<{ module: QueueModule; items: QueueItem[] }[]>;
+  findQueueItemsByDataMatch(modules: QueueModule[], searchFunction: (data: any) => boolean): Promise<{ module: QueueModule; items: QueueItem[] }[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -2049,6 +2055,197 @@ export class MemStorage implements IStorage {
 
   async deleteVehicle(id: string): Promise<boolean> {
     return this.vehicles.delete(id);
+  }
+
+  // Duplicate Detection Functions Implementation
+  async checkOffboardingTaskDuplicates(
+    employeeId: string, 
+    techRacfId: string, 
+    timeWindowMs: number = 5 * 60 * 1000
+  ): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }> {
+    try {
+      const cutoffTime = new Date(Date.now() - timeWindowMs);
+      const modules: QueueModule[] = ['ntao', 'assets', 'inventory', 'fleet'];
+      
+      for (const module of modules) {
+        const items = await this.getQueueItemsByModule(module);
+        
+        for (const item of items) {
+          if (item.createdAt && new Date(item.createdAt) >= cutoffTime) {
+            try {
+              let itemData = item.data;
+              if (typeof itemData === 'string') {
+                itemData = JSON.parse(itemData);
+              }
+              
+              if (itemData?.workflowType === 'offboarding_sequence') {
+                const itemEmployeeId = itemData?.employee?.employeeId || itemData?.employeeId;
+                const itemTechRacfId = itemData?.employee?.racfId || itemData?.techRacfId || itemData?.employee?.enterpriseId;
+                
+                const employeeIdMatch = employeeId && itemEmployeeId && employeeId === itemEmployeeId;
+                const techRacfIdMatch = techRacfId && itemTechRacfId && techRacfId === itemTechRacfId;
+                
+                if (employeeIdMatch || techRacfIdMatch) {
+                  return {
+                    isDuplicate: true,
+                    message: `Duplicate offboarding workflow detected. A recent offboarding task already exists for this employee (${employeeIdMatch ? `Employee ID: ${employeeId}` : `RACF ID: ${techRacfId}`}) in ${module.toUpperCase()} queue.`,
+                    existingTask: item
+                  };
+                }
+              }
+            } catch (parseError) {
+              console.error('Error parsing queue item data for duplicate check:', parseError);
+              continue;
+            }
+          }
+        }
+      }
+      
+      return { isDuplicate: false };
+    } catch (error) {
+      console.error('Error in offboarding duplicate detection:', error);
+      return { isDuplicate: false }; // Allow creation if duplicate check fails
+    }
+  }
+  
+  async checkByovEnrollmentDuplicates(
+    ldap: string, 
+    email: string, 
+    currentTruckNumber: string, 
+    timeWindowMs: number = 5 * 60 * 1000
+  ): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }> {
+    try {
+      const cutoffTime = new Date(Date.now() - timeWindowMs);
+      const modules: QueueModule[] = ['fleet', 'ntao'];
+      
+      for (const module of modules) {
+        const items = await this.getQueueItemsByModule(module);
+        
+        for (const item of items) {
+          if (item.createdAt && new Date(item.createdAt) >= cutoffTime) {
+            try {
+              let itemData = item.data;
+              if (typeof itemData === 'string') {
+                itemData = JSON.parse(itemData);
+              }
+              
+              // Check if this is a BYOV enrollment workflow
+              let isByovWorkflow = false;
+              if (item.metadata) {
+                try {
+                  const metadata = JSON.parse(item.metadata);
+                  isByovWorkflow = metadata.source === 'sears_drive_enrollment';
+                } catch (metadataError) {
+                  // Continue with other checks if metadata parsing fails
+                }
+              }
+              
+              if (!isByovWorkflow) {
+                isByovWorkflow = itemData?.workflowId?.startsWith('byov-') ||
+                  ['van_assignment', 'van_unassignment', 'system_updates', 'stop_shipment', 'setup_shipment'].includes(item.workflowType);
+              }
+              
+              if (isByovWorkflow && itemData?.techInfo) {
+                const itemLdap = itemData.techInfo.ldap;
+                const itemEmail = itemData.techInfo.email;
+                const itemTruckNumber = itemData.techInfo.currentTruckNumber;
+                
+                const ldapMatch = ldap && itemLdap && ldap.toLowerCase() === itemLdap.toLowerCase();
+                const emailMatch = email && itemEmail && email.toLowerCase() === itemEmail.toLowerCase();
+                const truckMatch = currentTruckNumber && itemTruckNumber && currentTruckNumber === itemTruckNumber;
+                
+                if (ldapMatch || emailMatch || truckMatch) {
+                  let matchType = '';
+                  if (ldapMatch) matchType = `LDAP: ${ldap}`;
+                  else if (emailMatch) matchType = `Email: ${email}`;
+                  else if (truckMatch) matchType = `Truck: ${currentTruckNumber}`;
+                  
+                  return {
+                    isDuplicate: true,
+                    message: `Duplicate BYOV enrollment detected. A recent enrollment already exists for this technician (${matchType}) in ${module.toUpperCase()} queue.`,
+                    existingTask: item
+                  };
+                }
+              }
+            } catch (parseError) {
+              console.error('Error parsing queue item data for BYOV duplicate check:', parseError);
+              continue;
+            }
+          }
+        }
+      }
+      
+      return { isDuplicate: false };
+    } catch (error) {
+      console.error('Error in BYOV enrollment duplicate detection:', error);
+      return { isDuplicate: false }; // Allow creation if duplicate check fails
+    }
+  }
+  
+  async getRecentQueueItemsByTimeWindow(
+    modules: QueueModule[], 
+    timeWindowMs: number
+  ): Promise<{ module: QueueModule; items: QueueItem[] }[]> {
+    const cutoffTime = new Date(Date.now() - timeWindowMs);
+    const result: { module: QueueModule; items: QueueItem[] }[] = [];
+    
+    for (const module of modules) {
+      const items = await this.getQueueItemsByModule(module);
+      const recentItems = items.filter(item => 
+        item.createdAt && new Date(item.createdAt) >= cutoffTime
+      );
+      
+      result.push({ module, items: recentItems });
+    }
+    
+    return result;
+  }
+  
+  async findQueueItemsByDataMatch(
+    modules: QueueModule[], 
+    searchFunction: (data: any) => boolean
+  ): Promise<{ module: QueueModule; items: QueueItem[] }[]> {
+    const result: { module: QueueModule; items: QueueItem[] }[] = [];
+    
+    for (const module of modules) {
+      const items = await this.getQueueItemsByModule(module);
+      const matchingItems: QueueItem[] = [];
+      
+      for (const item of items) {
+        try {
+          let itemData = item.data;
+          if (typeof itemData === 'string') {
+            itemData = JSON.parse(itemData);
+          }
+          
+          if (searchFunction(itemData)) {
+            matchingItems.push(item);
+          }
+        } catch (parseError) {
+          console.error('Error parsing queue item data for search:', parseError);
+          continue;
+        }
+      }
+      
+      result.push({ module, items: matchingItems });
+    }
+    
+    return result;
+  }
+  
+  private async getQueueItemsByModule(module: QueueModule): Promise<QueueItem[]> {
+    switch (module) {
+      case 'ntao':
+        return this.getNTAOQueueItems();
+      case 'assets':
+        return this.getAssetsQueueItems();
+      case 'inventory':
+        return this.getInventoryQueueItems();
+      case 'fleet':
+        return this.getFleetQueueItems();
+      default:
+        return [];
+    }
   }
 }
 

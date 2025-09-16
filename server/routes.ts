@@ -77,6 +77,188 @@ function sanitizeInput(obj: any): any {
   return obj;
 }
 
+// Duplicate task detection for BYOV enrollment workflows
+async function checkByovEnrollmentDuplicates(formData: any): Promise<{ isDuplicate: boolean, message?: string }> {
+  try {
+    const ldap = formData?.ldap;
+    const email = formData?.techEmail;
+    const currentTruckNumber = formData?.currentTruckNumber;
+    const techFullName = `${formData?.techFirstName || ''} ${formData?.techLastName || ''}`.trim();
+    
+    // Must have key identifiers to check duplicates
+    if (!ldap && !email && !currentTruckNumber) {
+      return { isDuplicate: false };
+    }
+    
+    // Define time window for duplicate detection (5 minutes)
+    const duplicateWindowMs = 5 * 60 * 1000;
+    const cutoffTime = new Date(Date.now() - duplicateWindowMs);
+    
+    // Check FLEET and NTAO queues for recent BYOV enrollment tasks
+    const modules = ['fleet', 'ntao'];
+    
+    for (const module of modules) {
+      let queueItems: any[] = [];
+      
+      try {
+        switch (module) {
+          case 'fleet':
+            queueItems = await storage.getFleetQueueItems();
+            break;
+          case 'ntao':
+            queueItems = await storage.getNTAOQueueItems();
+            break;
+        }
+      } catch (error) {
+        console.error(`Error checking ${module} queue for BYOV duplicates:`, error);
+        continue;
+      }
+      
+      // Check for recent BYOV enrollment tasks with matching identifiers
+      for (const item of queueItems) {
+        if (item.createdAt && new Date(item.createdAt) >= cutoffTime) {
+          try {
+            let itemData = item.data;
+            if (typeof itemData === 'string') {
+              itemData = JSON.parse(itemData);
+            }
+            
+            // Check if this is a BYOV enrollment workflow
+            const isByovWorkflow = 
+              item.metadata && JSON.parse(item.metadata || '{}').source === 'sears_drive_enrollment' ||
+              itemData?.workflowId?.startsWith('byov-') ||
+              ['van_assignment', 'van_unassignment', 'system_updates', 'stop_shipment', 'setup_shipment'].includes(item.workflowType);
+            
+            if (isByovWorkflow && itemData?.techInfo) {
+              const itemLdap = itemData.techInfo.ldap;
+              const itemEmail = itemData.techInfo.email;
+              const itemTruckNumber = itemData.techInfo.currentTruckNumber;
+              
+              // Check if key identifiers match
+              const ldapMatch = ldap && itemLdap && ldap.toLowerCase() === itemLdap.toLowerCase();
+              const emailMatch = email && itemEmail && email.toLowerCase() === itemEmail.toLowerCase();
+              const truckMatch = currentTruckNumber && itemTruckNumber && currentTruckNumber === itemTruckNumber;
+              
+              if (ldapMatch || emailMatch || truckMatch) {
+                let matchType = '';
+                if (ldapMatch) matchType = `LDAP: ${ldap}`;
+                else if (emailMatch) matchType = `Email: ${email}`;
+                else if (truckMatch) matchType = `Truck: ${currentTruckNumber}`;
+                
+                return {
+                  isDuplicate: true,
+                  message: `Duplicate BYOV enrollment detected. A recent enrollment already exists for this technician (${matchType}) in ${module.toUpperCase()} queue. Please wait 5 minutes before submitting another BYOV enrollment.`
+                };
+              }
+            }
+          } catch (parseError) {
+            console.error('Error parsing queue item data for BYOV duplicate check:', parseError);
+            continue;
+          }
+        }
+      }
+    }
+    
+    return { isDuplicate: false };
+  } catch (error) {
+    console.error('Error in BYOV duplicate detection:', error);
+    return { isDuplicate: false }; // Allow creation if duplicate check fails
+  }
+}
+
+// Duplicate task detection for offboarding workflows
+async function checkOffboardingDuplicates(data: any, department: string): Promise<{ isDuplicate: boolean, message?: string }> {
+  try {
+    // Parse data if it's a JSON string
+    let parsedData = data;
+    if (typeof data === 'string') {
+      parsedData = JSON.parse(data);
+    }
+    
+    // Extract employee identifiers
+    const employeeId = parsedData?.employee?.employeeId || parsedData?.employeeId;
+    const techRacfId = parsedData?.employee?.racfId || parsedData?.techRacfId || parsedData?.employee?.enterpriseId;
+    const workflowType = parsedData?.workflowType;
+    
+    // Only check for offboarding workflows
+    if (!workflowType || workflowType !== 'offboarding_sequence') {
+      return { isDuplicate: false };
+    }
+    
+    // Must have employee identifiers to check duplicates
+    if (!employeeId && !techRacfId) {
+      return { isDuplicate: false };
+    }
+    
+    // Define time window for duplicate detection (5 minutes)
+    const duplicateWindowMs = 5 * 60 * 1000;
+    const cutoffTime = new Date(Date.now() - duplicateWindowMs);
+    
+    // Check each queue module for recent offboarding tasks with same employee
+    const modules = ['ntao', 'assets', 'inventory', 'fleet'];
+    
+    for (const module of modules) {
+      let queueItems: any[] = [];
+      
+      try {
+        switch (module) {
+          case 'ntao':
+            queueItems = await storage.getNTAOQueueItems();
+            break;
+          case 'assets':
+            queueItems = await storage.getAssetsQueueItems();
+            break;
+          case 'inventory':
+            queueItems = await storage.getInventoryQueueItems();
+            break;
+          case 'fleet':
+            queueItems = await storage.getFleetQueueItems();
+            break;
+        }
+      } catch (error) {
+        console.error(`Error checking ${module} queue for duplicates:`, error);
+        continue; // Continue checking other modules even if one fails
+      }
+      
+      // Check for recent offboarding tasks with matching employee data
+      for (const item of queueItems) {
+        if (item.createdAt && new Date(item.createdAt) >= cutoffTime) {
+          try {
+            let itemData = item.data;
+            if (typeof itemData === 'string') {
+              itemData = JSON.parse(itemData);
+            }
+            
+            if (itemData?.workflowType === 'offboarding_sequence') {
+              const itemEmployeeId = itemData?.employee?.employeeId || itemData?.employeeId;
+              const itemTechRacfId = itemData?.employee?.racfId || itemData?.techRacfId || itemData?.employee?.enterpriseId;
+              
+              // Check if employee identifiers match
+              const employeeIdMatch = employeeId && itemEmployeeId && employeeId === itemEmployeeId;
+              const techRacfIdMatch = techRacfId && itemTechRacfId && techRacfId === itemTechRacfId;
+              
+              if (employeeIdMatch || techRacfIdMatch) {
+                return {
+                  isDuplicate: true,
+                  message: `Duplicate offboarding workflow detected. A recent offboarding task already exists for this employee (${employeeIdMatch ? `Employee ID: ${employeeId}` : `RACF ID: ${techRacfId}`}) in ${module.toUpperCase()} queue. Please wait 5 minutes before creating another offboarding workflow.`
+                };
+              }
+            }
+          } catch (parseError) {
+            console.error('Error parsing queue item data for duplicate check:', parseError);
+            continue;
+          }
+        }
+      }
+    }
+    
+    return { isDuplicate: false };
+  } catch (error) {
+    console.error('Error in duplicate detection:', error);
+    return { isDuplicate: false }; // Allow creation if duplicate check fails
+  }
+}
+
 // Rate limiting middleware for anonymous endpoints
 function checkAnonymousRateLimit(req: any, res: any, next: any): any {
   const ip = req.ip || req.connection.remoteAddress || 'unknown';
@@ -647,6 +829,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sanitizedData = sanitizeInput(req.body);
       const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
       
+      // Check for duplicate offboarding workflows
+      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'NTAO');
+      if (duplicateCheck.isDuplicate) {
+        return res.status(409).json({ 
+          message: duplicateCheck.message || "Duplicate submission detected",
+          code: "DUPLICATE_OFFBOARDING"
+        });
+      }
+      
       const queueItemData = {
         ...validatedData,
         requesterId: "anonymous",
@@ -732,6 +923,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Sanitize and validate with anonymous schema
       const sanitizedData = sanitizeInput(req.body);
       const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
+      
+      // Check for duplicate offboarding workflows
+      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'ASSETS');
+      if (duplicateCheck.isDuplicate) {
+        return res.status(409).json({ 
+          message: duplicateCheck.message || "Duplicate submission detected",
+          code: "DUPLICATE_OFFBOARDING"
+        });
+      }
       
       const queueItemData = {
         ...validatedData,
@@ -819,6 +1019,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sanitizedData = sanitizeInput(req.body);
       const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
       
+      // Check for duplicate offboarding workflows
+      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'INVENTORY');
+      if (duplicateCheck.isDuplicate) {
+        return res.status(409).json({ 
+          message: duplicateCheck.message || "Duplicate submission detected",
+          code: "DUPLICATE_OFFBOARDING"
+        });
+      }
+      
       const queueItemData = {
         ...validatedData,
         requesterId: "anonymous",
@@ -904,6 +1113,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Sanitize and validate with anonymous schema
       const sanitizedData = sanitizeInput(req.body);
       const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
+      
+      // Check for duplicate offboarding workflows
+      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'FLEET');
+      if (duplicateCheck.isDuplicate) {
+        return res.status(409).json({ 
+          message: duplicateCheck.message || "Duplicate submission detected",
+          code: "DUPLICATE_OFFBOARDING"
+        });
+      }
       
       const queueItemData = {
         ...validatedData,
@@ -1810,6 +2028,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       const formData = formSchema.parse(parsedBody);
+      
+      // Check for duplicate BYOV enrollment submissions
+      const duplicateCheck = await checkByovEnrollmentDuplicates(formData);
+      if (duplicateCheck.isDuplicate) {
+        return res.status(409).json({ 
+          message: duplicateCheck.message || "Duplicate BYOV enrollment detected",
+          code: "DUPLICATE_BYOV_ENROLLMENT"
+        });
+      }
       const files = (req as any).files || [];
 
       // Required file types

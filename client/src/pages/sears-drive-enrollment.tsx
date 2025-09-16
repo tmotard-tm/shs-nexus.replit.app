@@ -55,6 +55,10 @@ export default function SearsDriveEnrollment() {
   const { toast } = useToast();
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, File>>({});
   const [uploadPreviews, setUploadPreviews] = useState<Record<string, string>>({});
+  
+  // Additional duplicate prevention state
+  const [lastSubmissionTime, setLastSubmissionTime] = useState<number>(0);
+  const [isManuallyBlocked, setIsManuallyBlocked] = useState(false);
 
   // Get prefill data from query parameters
   const getFormDefaultValues = (): EnrollmentFormData => {
@@ -128,6 +132,8 @@ export default function SearsDriveEnrollment() {
       form.reset();
       setUploadedFiles({});
       setUploadPreviews({});
+      // Clear manual block after successful submission
+      setIsManuallyBlocked(false);
     },
     onError: (error: any) => {
       toast({
@@ -135,6 +141,8 @@ export default function SearsDriveEnrollment() {
         description: error.message || "Failed to submit enrollment form",
         variant: "destructive",
       });
+      // Clear manual block after error to allow retry
+      setIsManuallyBlocked(false);
     },
   });
 
@@ -152,6 +160,27 @@ export default function SearsDriveEnrollment() {
   };
 
   const onSubmit = (data: EnrollmentFormData) => {
+    // Prevent duplicate submissions if already submitting
+    if (submitMutation.isPending || isManuallyBlocked) {
+      toast({
+        title: "Submission In Progress",
+        description: "Please wait for the current submission to complete.",
+        variant: "default"
+      });
+      return;
+    }
+    
+    // Prevent rapid duplicate submissions - check time since last submission
+    const now = Date.now();
+    if (lastSubmissionTime && (now - lastSubmissionTime) < 5000) { // 5 second window
+      toast({
+        title: "Duplicate Submission Prevented",
+        description: "Please wait at least 5 seconds between enrollment submissions.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     // Validate all required files are uploaded
     const missingUploads = requiredUploads.filter(upload => !uploadedFiles[upload.id]);
     
@@ -164,6 +193,10 @@ export default function SearsDriveEnrollment() {
       return;
     }
 
+    // Set manual block and record submission time
+    setIsManuallyBlocked(true);
+    setLastSubmissionTime(now);
+    
     submitMutation.mutate(data);
   };
 

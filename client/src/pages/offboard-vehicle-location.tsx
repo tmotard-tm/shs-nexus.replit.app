@@ -42,6 +42,11 @@ export default function OffboardVehicleLocation() {
     equipmentDisposal: ""
   });
 
+  // Submission state tracking for duplicate prevention
+  const [isVehicleSubmitting, setIsVehicleSubmitting] = useState(false);
+  const [isLocationSubmitting, setIsLocationSubmitting] = useState(false);
+  const [lastSubmissionTime, setLastSubmissionTime] = useState<{[key: string]: number}>({});
+
   // Mock data
   const vehicles = [
     { id: "1", name: "Toyota Camry (ABC-1234)", status: "assigned", assignedTo: "John Doe" },
@@ -130,6 +135,29 @@ export default function OffboardVehicleLocation() {
   const handleVehicleOffboard = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Prevent duplicate submissions - check if already submitting
+    if (isVehicleSubmitting) {
+      toast({
+        title: "Submission In Progress",
+        description: "Please wait for the current submission to complete.",
+        variant: "default"
+      });
+      return;
+    }
+    
+    // Prevent rapid duplicate submissions - check time since last submission
+    const submissionKey = `vehicle_${vehicleOffboard.employeeId}_${vehicleOffboard.techRacfId}`;
+    const now = Date.now();
+    const lastSubmission = lastSubmissionTime[submissionKey];
+    if (lastSubmission && (now - lastSubmission) < 5000) { // 5 second window
+      toast({
+        title: "Duplicate Submission Prevented",
+        description: "Please wait at least 5 seconds between submissions for the same employee.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     // Validate Employee ID (must be exactly 11 digits)
     if (!/^\d{11}$/.test(vehicleOffboard.employeeId)) {
       toast({
@@ -149,6 +177,10 @@ export default function OffboardVehicleLocation() {
       });
       return;
     }
+    
+    // Set submitting state and record submission time
+    setIsVehicleSubmitting(true);
+    setLastSubmissionTime(prev => ({...prev, [submissionKey]: now}));
     
     const vehicle = vehicles.find(veh => veh.id === vehicleOffboard.vehicleId);
     
@@ -348,6 +380,7 @@ export default function OffboardVehicleLocation() {
         description: "Failed to create offboarding workflow. Please try again.",
         variant: "destructive"
       });
+      setIsVehicleSubmitting(false);
       return;
     }
 
@@ -379,24 +412,69 @@ export default function OffboardVehicleLocation() {
       notes: "",
       returnCondition: ""
     });
+    
+    // Reset submitting state after successful submission
+    setIsVehicleSubmitting(false);
   };
 
-  const handleLocationOffboard = (e: React.FormEvent) => {
+  const handleLocationOffboard = async (e: React.FormEvent) => {
     e.preventDefault();
-    const location = locations.find(loc => loc.id === locationOffboard.locationId);
     
-    toast({
-      title: "Location Offboarded",
-      description: `${location?.name} has been deactivated`,
-    });
+    // Prevent duplicate submissions - check if already submitting
+    if (isLocationSubmitting) {
+      toast({
+        title: "Submission In Progress",
+        description: "Please wait for the current submission to complete.",
+        variant: "default"
+      });
+      return;
+    }
     
-    setLocationOffboard({
-      locationId: "",
-      reason: "",
-      effectiveDate: "",
-      notes: "",
-      equipmentDisposal: ""
-    });
+    // Prevent rapid duplicate submissions - check time since last submission
+    const submissionKey = `location_${locationOffboard.locationId}`;
+    const now = Date.now();
+    const lastSubmission = lastSubmissionTime[submissionKey];
+    if (lastSubmission && (now - lastSubmission) < 5000) { // 5 second window
+      toast({
+        title: "Duplicate Submission Prevented",
+        description: "Please wait at least 5 seconds between submissions for the same location.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Set submitting state and record submission time
+    setIsLocationSubmitting(true);
+    setLastSubmissionTime(prev => ({...prev, [submissionKey]: now}));
+    
+    try {
+      const location = locations.find(loc => loc.id === locationOffboard.locationId);
+      
+      // Simulate API call delay (in real implementation this would be an actual API call)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      toast({
+        title: "Location Offboarded",
+        description: `${location?.name} has been deactivated`,
+      });
+      
+      setLocationOffboard({
+        locationId: "",
+        reason: "",
+        effectiveDate: "",
+        notes: "",
+        equipmentDisposal: ""
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to offboard location. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      // Reset submitting state
+      setIsLocationSubmitting(false);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -636,9 +714,23 @@ export default function OffboardVehicleLocation() {
                           />
                         </div>
 
-                        <Button type="submit" className="w-full" data-testid="button-offboard-vehicle">
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Offboard Vehicle & Notify Departments
+                        <Button 
+                          type="submit" 
+                          className="w-full" 
+                          data-testid="button-offboard-vehicle"
+                          disabled={isVehicleSubmitting}
+                        >
+                          {isVehicleSubmitting ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                              Processing Offboarding...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Offboard Vehicle & Notify Departments
+                            </>
+                          )}
                         </Button>
                       </form>
                     </CardContent>
@@ -806,9 +898,23 @@ export default function OffboardVehicleLocation() {
                           />
                         </div>
 
-                        <Button type="submit" className="w-full" data-testid="button-offboard-location">
-                          <Archive className="h-4 w-4 mr-2" />
-                          Deactivate Location
+                        <Button 
+                          type="submit" 
+                          className="w-full" 
+                          data-testid="button-offboard-location"
+                          disabled={isLocationSubmitting}
+                        >
+                          {isLocationSubmitting ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                              Processing Deactivation...
+                            </>
+                          ) : (
+                            <>
+                              <Archive className="h-4 w-4 mr-2" />
+                              Deactivate Location
+                            </>
+                          )}
                         </Button>
                       </form>
                     </CardContent>
