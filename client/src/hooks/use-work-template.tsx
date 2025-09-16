@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import type { WorkTemplate, QueueItem, CombinedQueueItem, QueueModule, WorkTemplateProgress } from "@shared/schema";
 
 interface UseWorkTemplateProps {
@@ -32,6 +33,10 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
   // Load template based on workflow type and department
   const { data: templateData, isLoading, error } = useQuery<{ template: WorkTemplate | null; error?: string }>({
     queryKey: [`/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`],
+    queryFn: async () => {
+      const url = `/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`;
+      return await apiRequest("GET", url);
+    },
     enabled: !!queueItem?.workflowType && !!(module || queueItem?.department),
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
@@ -44,6 +49,10 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     substepNotes?: Record<string, Record<string, string>>;
   }>({
     queryKey: [`/api/work-progress/${queueItem?.id}`],
+    queryFn: async () => {
+      const url = `/api/work-progress/${queueItem?.id}`;
+      return await apiRequest("GET", url);
+    },
     enabled: !!queueItem?.id,
   });
 

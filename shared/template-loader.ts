@@ -41,7 +41,7 @@ export class TemplateLoader {
       const parsedRegistry = JSON.parse(registryData);
       // Handle both { registry: {...} } and direct {...} formats
       this.registryCache = parsedRegistry.registry ?? parsedRegistry;
-      console.log('Template registry loaded with keys:', Object.keys(this.registryCache));
+      console.log('Template registry loaded with keys:', Object.keys(this.registryCache || {}));
       return this.registryCache || {};
     } catch (error) {
       console.error('Failed to load template registry:', error);
