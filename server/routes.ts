@@ -434,11 +434,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid verification request" });
       }
       
-      // Basic bot detection: check if request was too fast (less than 1 second)
-      const requestTime = Date.now() - timestamp;
-      if (requestTime < 500) { // Reduced from 1000ms to 500ms for better UX
-        return res.status(429).json({ message: "Verification failed: too fast" });
-      }
+      // Basic bot detection: disabled timing check for better user experience
+      // const requestTime = Date.now() - timestamp;
+      // Rate limiting is sufficient protection against bots
       
       // Create verification session
       const verificationId = Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -468,6 +466,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/forms/verify-status", async (req, res) => {
     try {
+      // Disable caching to prevent stale verification status
+      res.set({
+        'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+      
       const cookieHeader = req.headers.cookie;
       const verificationId = cookieHeader?.match(/humanVerified=([^;]+)/)?.[1];
       
