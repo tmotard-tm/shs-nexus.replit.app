@@ -934,18 +934,42 @@ export default function UnifiedQueueManagement() {
                                                 )}
                                               </div>
                                               
-                                              {/* Single Pick Up button for unassigned items */}
+                                              {/* Pick Up buttons for unassigned items */}
                                               {item.status === "pending" && !item.assignedTo && (
-                                                <Button
-                                                  variant="outline"
-                                                  size="sm"
-                                                  onClick={() => setPickUpItem(item)}
-                                                  disabled={assignMutation.isPending}
-                                                  data-testid={`button-pick-up-${item.id}`}
-                                                >
-                                                  <User className="h-4 w-4 mr-1" />
-                                                  Pick Up
-                                                </Button>
+                                                <div className="flex gap-2">
+                                                  <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                      if (user?.id) {
+                                                        console.log("Direct self-pickup:", {
+                                                          taskId: item.id,
+                                                          userId: user.id,
+                                                          username: user.username
+                                                        });
+                                                        // Directly assign to self and open work module
+                                                        setWorkModuleItem(item);
+                                                        setIsWorkModuleOpen(true);
+                                                        assignMutation.mutate({ module: item.module, id: item.id, assigneeId: user.id });
+                                                      }
+                                                    }}
+                                                    disabled={assignMutation.isPending}
+                                                    data-testid={`button-pick-up-self-${item.id}`}
+                                                  >
+                                                    <User className="h-4 w-4 mr-1" />
+                                                    Pick Up for Me
+                                                  </Button>
+                                                  <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setPickUpItem(item)}
+                                                    disabled={assignMutation.isPending}
+                                                    data-testid={`button-assign-other-${item.id}`}
+                                                  >
+                                                    <Users className="h-4 w-4 mr-1" />
+                                                    Assign to Other
+                                                  </Button>
+                                                </div>
                                               )}
                                             </div>
                                           </div>
