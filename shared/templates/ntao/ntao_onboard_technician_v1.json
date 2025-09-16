@@ -4,125 +4,113 @@
   "department": "NTAO",
   "workflowType": "onboarding",
   "version": "1.0",
-  "description": "Onboarding process for NTAO (Network Territory Assignment Optimization) technician",
-  "estimatedDuration": 70,
-  "difficulty": "hard",
+  "description": "Onboarding process for NTAO technician",
+  "estimatedDuration": 45,
+  "difficulty": "medium",
   "requiredRole": "agent",
   "steps": [
     {
-      "id": "technical_verification",
-      "title": "Verify Technical Qualifications",
-      "description": "Confirm technical skills and certifications required for NTAO",
+      "id": "tech_information",
+      "title": "Collect Technician Information",
+      "description": "Gather all required technician information and contact details",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "personal_info",
+          "title": "Verify technician personal information",
+          "description": "Confirm name, address, phone number, and emergency contacts",
+          "required": true
+        },
+        {
+          "id": "start_date",
+          "title": "Confirm proposed start date",
+          "description": "Verify and document the technician's proposed start date",
+          "required": true
+        },
+        {
+          "id": "documentation",
+          "title": "Complete required documentation",
+          "description": "Ensure all onboarding paperwork and forms are completed",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "vehicle_assignment",
+      "title": "Vehicle Assignment Verification",
+      "description": "Verify technician has assigned vehicle and complete vehicle setup",
       "required": true,
       "estimatedTime": 15,
       "category": "verification",
       "substeps": [
         {
-          "id": "certification_check",
-          "title": "Verify technical certifications",
-          "description": "Confirm relevant certifications for network optimization",
+          "id": "assigned_van_check",
+          "title": "Does the tech have an assigned van?",
+          "description": "Verify that the technician has been assigned a service vehicle",
           "required": true
         },
         {
-          "id": "experience_validation",
-          "title": "Validate relevant work experience",
-          "description": "Review previous experience in network or territory management",
-          "required": true
+          "id": "vehicle_condition",
+          "title": "Verify vehicle condition and readiness",
+          "description": "Ensure assigned vehicle is ready for service and properly equipped",
+          "required": false
         },
         {
-          "id": "skills_assessment",
-          "title": "Complete technical skills assessment",
-          "description": "Evaluate analytical and problem-solving capabilities",
+          "id": "vehicle_documentation",
+          "title": "Complete vehicle assignment documentation",
+          "description": "Document vehicle assignment and provide vehicle information to technician",
           "required": true
         }
       ]
     },
     {
-      "id": "ntao_system_access",
-      "title": "Configure NTAO System Access",
-      "description": "Set up access to specialized NTAO tools and systems",
+      "id": "truck_stock_process",
+      "title": "Process Truck Stock",
+      "description": "Ensure truck is properly stocked with parts and equipment",
       "required": true,
-      "estimatedTime": 25,
+      "estimatedTime": 15,
       "category": "system_action",
       "substeps": [
         {
-          "id": "analytics_platform_access",
-          "title": "Grant access to analytics platform",
-          "description": "Configure access to network analysis and optimization tools",
+          "id": "inventory_check",
+          "title": "Verify truck inventory levels",
+          "description": "Check that truck is stocked with required parts and tools",
           "required": true
         },
         {
-          "id": "territory_mapping_tools",
-          "title": "Set up territory mapping system access",
-          "description": "Provide access to geographic mapping and territory tools",
+          "id": "equipment_verification",
+          "title": "Verify all required equipment is present",
+          "description": "Ensure technician has all necessary tools and diagnostic equipment",
           "required": true
         },
         {
-          "id": "optimization_software",
-          "title": "Configure optimization software licenses",
-          "description": "Assign licenses for route and territory optimization software",
-          "required": true
-        },
-        {
-          "id": "reporting_dashboard_access",
-          "title": "Set up reporting dashboard access",
-          "description": "Configure access to performance metrics and reporting tools",
+          "id": "stock_documentation",
+          "title": "Document stock levels and equipment",
+          "description": "Record initial stock levels and equipment inventory",
           "required": true
         }
       ]
     },
     {
-      "id": "specialized_training",
-      "title": "Complete NTAO Specialized Training",
-      "description": "Undergo training specific to NTAO responsibilities",
-      "required": true,
-      "estimatedTime": 25,
-      "category": "verification",
-      "substeps": [
-        {
-          "id": "network_analysis_training",
-          "title": "Complete network analysis methodology training",
-          "description": "Learn techniques for analyzing network efficiency and performance",
-          "required": true
-        },
-        {
-          "id": "optimization_algorithms",
-          "title": "Study optimization algorithms and techniques",
-          "description": "Understand algorithms used for territory and route optimization",
-          "required": true
-        },
-        {
-          "id": "data_interpretation",
-          "title": "Complete data interpretation training",
-          "description": "Learn to analyze and interpret performance metrics and KPIs",
-          "required": true
-        },
-        {
-          "id": "stakeholder_communication",
-          "title": "Training on stakeholder communication",
-          "description": "Learn to present findings and recommendations effectively",
-          "required": true
-        }
-      ]
-    },
-    {
-      "id": "integration_setup",
-      "title": "Complete Integration and Setup",
-      "description": "Finalize integration with NTAO team and processes",
+      "id": "systems_update",
+      "title": "Ensure All Systems Are Up to Date",
+      "description": "Verify all systems and software are current and operational",
       "required": true,
       "estimatedTime": 5,
-      "category": "documentation",
+      "category": "system_action",
       "substeps": [
         {
-          "id": "team_integration",
-          "title": "Integrate with NTAO team",
-          "description": "Meet team members and understand team dynamics",
+          "id": "software_updates",
+          "title": "Verify all software is updated",
+          "description": "Ensure diagnostic and service software is up to date",
           "required": true
         },
         {
-          "id": "assign_initial_projects",
-          "title": "Assign initial projects",
-          "description": "Provide first assignments to begin productive work",
+          "id": "system_access",
+          "title": "Confirm system access and credentials",
+          "description": "Verify technician can access all required systems and applications",
           "required": true
         }
       ]
