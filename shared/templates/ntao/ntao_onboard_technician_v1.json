@@ -11,7 +11,7 @@
   "steps": [
     {
       "id": "systems_verification",
-      "title": "Verify all systems are updated",
+      "title": "Design ideal truck stock",
       "description": "Confirm all diagnostic and service software is up to date",
       "required": true,
       "estimatedTime": 5,
