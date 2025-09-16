@@ -1059,6 +1059,11 @@ export default function UnifiedQueueManagement() {
           onClose={() => setPickUpItem(null)}
           onPickUp={(agentId) => {
             if (pickUpItem) {
+              console.log("PickUp dialog calling handleAssignTask with:", {
+                pickUpItemId: pickUpItem.id,
+                agentId,
+                currentUserId: user?.id
+              });
               handleAssignTask(pickUpItem, agentId);
             }
           }}

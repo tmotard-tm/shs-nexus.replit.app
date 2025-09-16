@@ -34,10 +34,16 @@ export function PickUpRequestDialog({
         return true;
       }
 
-      // If we have a specific queue module, check user's accessible queues
+      // If we have a specific queue module, check user's department access
       if (queueModule) {
-        if (user.accessibleQueues && user.accessibleQueues.length > 0) {
-          return user.accessibleQueues.includes(queueModule);
+        if (user.departmentAccess && user.departmentAccess.length > 0) {
+          const queueModuleMap: Record<QueueModule, string> = {
+            ntao: "NTAO",
+            assets: "ASSETS", 
+            inventory: "INVENTORY",
+            fleet: "FLEET"
+          };
+          return user.departmentAccess.includes(queueModuleMap[queueModule]);
         }
         
         // Fallback to department-based filtering if no accessibleQueues
@@ -67,7 +73,7 @@ export function PickUpRequestDialog({
     if (selectedAgentId) {
       onPickUp(selectedAgentId);
       setSelectedAgentId(""); // Reset selection
-      onClose();
+      // Don't call onClose() immediately - let the assignment success handler close it
     }
   };
 
