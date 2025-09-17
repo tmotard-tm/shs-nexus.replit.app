@@ -423,11 +423,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Save sessions immediately after creating new one
       saveSessions();
 
-      // Set httpOnly cookie
+      // Set httpOnly cookie with strict security settings
       res.cookie('sessionId', sessionId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        sameSite: 'strict', // Upgraded from 'lax' for better CSRF protection
         expires: expiresAt
       });
 
@@ -567,7 +567,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.cookie('humanVerified', verificationId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        sameSite: 'strict', // Upgraded from 'lax' for better CSRF protection
         expires: expiresAt,
         path: '/' // Available to all paths including /forms and /api/forms
       });
