@@ -15,7 +15,7 @@
       "description": "Handle operational aspects of technician departure",
       "required": true,
       "estimatedTime": 15,
-      "category": "operations",
+      "category": "system_action",
       "substeps": [
         {
           "id": "reassign_open_tickets",
@@ -43,7 +43,7 @@
       "description": "Deactivate operational system access",
       "required": true,
       "estimatedTime": 5,
-      "category": "security",
+      "category": "system_action",
       "substeps": [
         {
           "id": "deactivate_routing_access",
