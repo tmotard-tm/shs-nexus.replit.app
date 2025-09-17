@@ -268,5 +268,15 @@
     "userId": "user-001",
     "username": "cdomin",
     "expiresAt": "2025-09-24T22:31:17.396Z"
+  },
+  "5f24b23dea369886dd8de09c0b7a8c35d1f4ffea40c0be308c2504a5f4610a9f": {
+    "userId": "user-019",
+    "username": "CGONZAL",
+    "expiresAt": "2025-09-24T22:35:09.784Z"
+  },
+  "a2ac7f9c2a67cad3cd9150d0618ce33b7c8f99dee393512355d3a4cf7830013c": {
+    "userId": "user-019",
+    "username": "CGONZAL",
+    "expiresAt": "2025-09-24T22:35:18.212Z"
   }
 }
