@@ -946,17 +946,17 @@ export default function UnifiedQueueManagement() {
                                                   </Button>
                                                 )}
                                                 
-                                                {/* Complete button */}
+                                                {/* Continue Work button - opens dialog for editing */}
                                                 {item.status === "in_progress" && item.assignedTo === user?.id && (
                                                   <Button
                                                     size="sm"
                                                     className="bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md"
-                                                    onClick={() => handleCompleteTask(item)}
+                                                    onClick={() => handleStartWork(item)}
                                                     disabled={completeMutation.isPending}
-                                                    data-testid={`button-complete-${item.id}`}
+                                                    data-testid={`button-continue-work-${item.id}`}
                                                   >
-                                                    <CheckCircle className="h-4 w-4 mr-1" />
-                                                    Complete
+                                                    <Play className="h-4 w-4 mr-1" />
+                                                    Continue Work
                                                   </Button>
                                                 )}
                                               </div>
