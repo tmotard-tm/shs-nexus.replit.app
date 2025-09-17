@@ -959,11 +959,19 @@ export class MemStorage implements IStorage {
     const item = this.ntaoQueueItems.get(id);
     if (!item) return undefined;
     
-    // Only allow starting work if item is pending and assigned to the worker
-    if (item.status !== "pending" || item.assignedTo !== workerId) {
+    // Allow starting work if:
+    // 1. Item is pending and assigned to worker, OR  
+    // 2. Item is already in_progress and assigned to same worker (idempotent)
+    if (item.assignedTo !== workerId || (item.status !== "pending" && item.status !== "in_progress")) {
       return undefined;
     }
     
+    // If already in progress, just return the item (idempotent)
+    if (item.status === "in_progress") {
+      return item;
+    }
+    
+    // Update status from pending to in_progress
     const updatedItem = { 
       ...item, 
       status: "in_progress",
@@ -1057,11 +1065,19 @@ export class MemStorage implements IStorage {
     const item = this.assetsQueueItems.get(id);
     if (!item) return undefined;
     
-    // Only allow starting work if item is pending and assigned to the worker
-    if (item.status !== "pending" || item.assignedTo !== workerId) {
+    // Allow starting work if:
+    // 1. Item is pending and assigned to worker, OR  
+    // 2. Item is already in_progress and assigned to same worker (idempotent)
+    if (item.assignedTo !== workerId || (item.status !== "pending" && item.status !== "in_progress")) {
       return undefined;
     }
     
+    // If already in progress, just return the item (idempotent)
+    if (item.status === "in_progress") {
+      return item;
+    }
+    
+    // Update status from pending to in_progress
     const updatedItem = { 
       ...item, 
       status: "in_progress",
@@ -1155,11 +1171,19 @@ export class MemStorage implements IStorage {
     const item = this.inventoryQueueItems.get(id);
     if (!item) return undefined;
     
-    // Only allow starting work if item is pending and assigned to the worker
-    if (item.status !== "pending" || item.assignedTo !== workerId) {
+    // Allow starting work if:
+    // 1. Item is pending and assigned to worker, OR  
+    // 2. Item is already in_progress and assigned to same worker (idempotent)
+    if (item.assignedTo !== workerId || (item.status !== "pending" && item.status !== "in_progress")) {
       return undefined;
     }
     
+    // If already in progress, just return the item (idempotent)
+    if (item.status === "in_progress") {
+      return item;
+    }
+    
+    // Update status from pending to in_progress
     const updatedItem = { 
       ...item, 
       status: "in_progress",
@@ -1253,11 +1277,19 @@ export class MemStorage implements IStorage {
     const item = this.fleetQueueItems.get(id);
     if (!item) return undefined;
     
-    // Only allow starting work if item is pending and assigned to the worker
-    if (item.status !== "pending" || item.assignedTo !== workerId) {
+    // Allow starting work if:
+    // 1. Item is pending and assigned to worker, OR  
+    // 2. Item is already in_progress and assigned to same worker (idempotent)
+    if (item.assignedTo !== workerId || (item.status !== "pending" && item.status !== "in_progress")) {
       return undefined;
     }
     
+    // If already in progress, just return the item (idempotent)
+    if (item.status === "in_progress") {
+      return item;
+    }
+    
+    // Update status from pending to in_progress
     const updatedItem = { 
       ...item, 
       status: "in_progress",
