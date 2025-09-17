@@ -130,6 +130,84 @@ export class TemplateLoader {
   }
 
   /**
+   * Get template for a specific task with enhanced step-based selection
+   * Prioritizes specific templates for Day 0 tasks based on step data
+   */
+  async getTemplateForTask(workflowType: string, department: QueueModule, taskData?: any): Promise<TemplateLoadResult> {
+    try {
+      // Parse task data if it's a string
+      let parsedData = taskData;
+      if (typeof taskData === 'string') {
+        try {
+          parsedData = JSON.parse(taskData);
+        } catch {
+          parsedData = null;
+        }
+      }
+
+      // Check for specific step mappings for Day 0 tasks
+      if (parsedData?.step && parsedData?.phase === 'day0' && parsedData?.isDay0Task) {
+        const specificWorkflowType = this.mapStepToWorkflowType(parsedData.step);
+        if (specificWorkflowType && specificWorkflowType !== workflowType) {
+          console.log(`Template selection: Using specific workflow type '${specificWorkflowType}' instead of '${workflowType}' for step '${parsedData.step}'`);
+          const specificResult = await this.getTemplateForWorkflow(specificWorkflowType, department);
+          if (specificResult.template) {
+            return specificResult;
+          }
+        }
+      }
+
+      // Check for other specific step patterns
+      if (parsedData?.step) {
+        const specificWorkflowType = this.mapStepToWorkflowType(parsedData.step);
+        if (specificWorkflowType && specificWorkflowType !== workflowType) {
+          console.log(`Template selection: Using specific workflow type '${specificWorkflowType}' instead of '${workflowType}' for step '${parsedData.step}'`);
+          const specificResult = await this.getTemplateForWorkflow(specificWorkflowType, department);
+          if (specificResult.template) {
+            return specificResult;
+          }
+        }
+      }
+
+      // Fallback to original workflow type
+      return await this.getTemplateForWorkflow(workflowType, department);
+    } catch (error) {
+      return {
+        template: null,
+        error: `Failed to get template for task: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  /**
+   * Map workflow step to specific workflow type for better template selection
+   */
+  private mapStepToWorkflowType(step: string): string | null {
+    // Day 0 specific step mappings
+    const stepMappings: Record<string, string> = {
+      // NTAO Day 0 steps
+      'ntao_stop_replenishment_day0': 'stop_shipment',
+      
+      // Equipment/Assets Day 0 steps  
+      'equipment_recover_devices_day0': 'equipment_recovery',
+      
+      // Fleet Day 0 steps - keep as offboarding for now
+      'fleet_initial_coordination_day0': 'offboarding',
+      
+      // Inventory Day 0 steps - keep as offboarding for now
+      'inventory_remove_tpms_day0': 'offboarding',
+      
+      // Other specific workflow steps
+      'fleet_vehicle_retrieval_phase2': 'offboarding',
+      'fleet_shop_coordination_phase2': 'offboarding',
+      'assist_parts_count': 'offboarding',
+      'vehicle_readiness': 'offboarding',
+    };
+
+    return stepMappings[step] || null;
+  }
+
+  /**
    * Get all available templates for a department
    */
   async getTemplatesForDepartment(department: QueueModule): Promise<WorkTemplate[]> {
@@ -254,8 +332,8 @@ export class TemplateLoader {
 export const templateLoader = TemplateLoader.getInstance();
 
 // Helper functions for common use cases
-export async function getTemplateForTask(workflowType: string, department: QueueModule): Promise<WorkTemplate | null> {
-  const result = await templateLoader.getTemplateForWorkflow(workflowType, department);
+export async function getTemplateForTask(workflowType: string, department: QueueModule, taskData?: any): Promise<WorkTemplate | null> {
+  const result = await templateLoader.getTemplateForTask(workflowType, department, taskData);
   return result.template;
 }
 

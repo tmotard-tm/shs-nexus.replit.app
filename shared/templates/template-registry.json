@@ -60,6 +60,12 @@
       "ASSETS": [],
       "NTAO": ["ntao_setup_shipment_v1"]
     },
+    "equipment_recovery": {
+      "FLEET": [],
+      "INVENTORY": [],
+      "ASSETS": ["assets_offboard_technician_v1"],
+      "NTAO": []
+    },
     "storage_request": {
       "FLEET": [],
       "INVENTORY": [],

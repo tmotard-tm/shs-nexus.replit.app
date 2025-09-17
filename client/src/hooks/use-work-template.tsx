@@ -30,11 +30,18 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
   const [stepNotes, setStepNotes] = useState<Record<string, string>>({});
   const [substepNotes, setSubstepNotes] = useState<Record<string, Record<string, string>>>({});
 
-  // Load template based on workflow type and department
+  // Load template based on workflow type and department, with task data for enhanced selection
   const { data: templateData, isLoading, error } = useQuery<{ template: WorkTemplate | null; error?: string }>({
-    queryKey: [`/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`],
+    queryKey: [`/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`, queueItem?.data],
     queryFn: async () => {
-      const url = `/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`;
+      let url = `/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`;
+      
+      // Add task data as query parameter for enhanced template selection
+      if (queueItem?.data) {
+        const taskDataParam = encodeURIComponent(queueItem.data);
+        url += `?taskData=${taskDataParam}`;
+      }
+      
       const response = await apiRequest("GET", url);
       return await response.json();
     },

@@ -2753,12 +2753,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/work-templates/:workflowType/:department", requireAuth, async (req, res) => {
     try {
       const { workflowType, department } = req.params;
+      const { taskData } = req.query; // Accept task data from query params
       
       if (!["FLEET", "INVENTORY", "ASSETS", "NTAO"].includes(department.toUpperCase())) {
         return res.status(400).json({ message: "Invalid department" });
       }
 
-      const result = await templateLoader.getTemplateForWorkflow(workflowType, department.toLowerCase() as QueueModule);
+      // Parse task data if provided
+      let parsedTaskData = null;
+      if (taskData && typeof taskData === 'string') {
+        try {
+          parsedTaskData = JSON.parse(decodeURIComponent(taskData));
+          console.log(`Template API: Received task data for ${workflowType}/${department}:`, parsedTaskData?.step || 'no-step');
+        } catch (error) {
+          console.warn('Template API: Failed to parse task data:', error);
+        }
+      }
+
+      // Use enhanced template selection that considers task data
+      const result = await templateLoader.getTemplateForTask(workflowType, department.toLowerCase() as QueueModule, parsedTaskData);
       const template = result.template;
       
       if (template) {
