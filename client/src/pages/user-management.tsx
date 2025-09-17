@@ -264,12 +264,12 @@ export default function UserManagement() {
               </div>
               <div>
                 <Label htmlFor="department">Department</Label>
-                <Select value={form.watch("department") || "none"} onValueChange={(value) => form.setValue("department", value === "none" ? null : value)}>
+                <Select value={form.watch("department") || "forms-only"} onValueChange={(value) => form.setValue("department", value === "forms-only" ? null : value)}>
                   <SelectTrigger data-testid="select-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                     <SelectValue placeholder="Select department (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No Department</SelectItem>
+                    <SelectItem value="forms-only">Forms Only</SelectItem>
                     <SelectItem value="NTAO">NTAO</SelectItem>
                     <SelectItem value="Assets Management">Assets Management</SelectItem>
                     <SelectItem value="Inventory Control">Inventory Control</SelectItem>
@@ -504,7 +504,7 @@ export default function UserManagement() {
                           {user.department}
                         </Badge>
                       ) : (
-                        <span className="text-muted-foreground text-sm">No Department</span>
+                        <span className="text-muted-foreground text-sm">Forms Only</span>
                       )}
                     </TableCell>
                     <TableCell data-testid={`text-created-${user.id}`}>
@@ -592,14 +592,14 @@ export default function UserManagement() {
             <div>
               <Label htmlFor="edit-department">Department</Label>
               <Select 
-                value={editForm.watch("department") || "none"} 
-                onValueChange={(value) => editForm.setValue("department", value === "none" ? null : value)}
+                value={editForm.watch("department") || "forms-only"} 
+                onValueChange={(value) => editForm.setValue("department", value === "forms-only" ? null : value)}
               >
                 <SelectTrigger data-testid="select-edit-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                   <SelectValue placeholder="Select department (optional)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No Department</SelectItem>
+                  <SelectItem value="forms-only">Forms Only</SelectItem>
                   <SelectItem value="NTAO">NTAO</SelectItem>
                   <SelectItem value="Assets Management">Assets Management</SelectItem>
                   <SelectItem value="Inventory Control">Inventory Control</SelectItem>
