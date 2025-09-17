@@ -120,13 +120,6 @@ export default function Login() {
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
-          <div className="mt-4 text-center text-sm text-muted-foreground">
-            <p>Demo credentials:</p>
-            <p><strong>Requesters:</strong> ENT1234</p>
-            <p><strong>Approvers:</strong> ENT1235</p>
-            <p><strong>Administrators:</strong> ADMIN123</p>
-            <p><strong>Password:</strong> passwords</p>
-          </div>
         </CardContent>
       </Card>
     </div>
