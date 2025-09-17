@@ -145,10 +145,6 @@ export default function UnifiedQueueManagement() {
         items = items.filter(item => item.assignedTo === user?.id);
       }
       
-      if (selectedAgent !== "all") {
-        items = items.filter(item => item.assignedTo === selectedAgent);
-      }
-      
       return items;
     },
     enabled: selectedModules.length > 0,
@@ -424,9 +420,14 @@ export default function UnifiedQueueManagement() {
     }
   };
 
-  // Filter items based on date criteria
+  // Filter items based on date and agent criteria
   const getFilteredItems = (items: CombinedQueueItem[]) => {
     let filtered = items;
+
+    // Apply agent filter
+    if (selectedAgent !== "all") {
+      filtered = filtered.filter(item => item.assignedTo === selectedAgent);
+    }
 
     // Apply date filters
     if (dateFrom) {
