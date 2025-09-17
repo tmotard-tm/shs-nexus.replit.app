@@ -1,0 +1,133 @@
+{
+  "id": "assets_onboarding_day1_5_v1",
+  "name": "Assets Day 1-5 Technician Onboarding",
+  "department": "ASSETS",
+  "workflowType": "onboarding_day1_5",
+  "version": "1.0",
+  "description": "Day 1-5 assets management onboarding and equipment provisioning",
+  "estimatedDuration": 60,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "equipment_delivery_tracking",
+      "title": "Track Equipment Deliveries",
+      "description": "Monitor and confirm delivery of ordered equipment",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "received",
+      "substeps": [
+        {
+          "id": "confirm_phone_delivery",
+          "title": "Confirm phone delivery",
+          "description": "Verify company phone has been delivered and activated",
+          "required": true
+        },
+        {
+          "id": "confirm_uniform_delivery",
+          "title": "Confirm uniform delivery",
+          "description": "Verify work uniforms have been delivered and fit properly",
+          "required": true
+        },
+        {
+          "id": "confirm_safety_equipment_delivery",
+          "title": "Confirm safety equipment delivery",
+          "description": "Verify all safety equipment has been received and inspected",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "specialized_tools_ordering",
+      "title": "Order Specialized Tools",
+      "description": "Process orders for role-specific tools and equipment",
+      "required": true,
+      "estimatedTime": 25,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "finalize_tool_requirements",
+          "title": "Finalize specialized tool requirements",
+          "description": "Complete assessment of specialized tools needed based on role",
+          "required": true
+        },
+        {
+          "id": "place_tool_orders",
+          "title": "Place specialized tool orders",
+          "description": "Submit orders for all verified specialized tools and equipment",
+          "required": true
+        },
+        {
+          "id": "setup_tool_tracking",
+          "title": "Setup tool tracking and accountability",
+          "description": "Register tools in asset management system and establish accountability",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "parts_inventory_setup",
+      "title": "Setup Parts and Inventory Access",
+      "description": "Configure access to parts inventory and shipping systems",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "setup_parts_shipping",
+          "title": "Setup initial parts shipment",
+          "description": "Arrange for initial parts inventory shipment to technician",
+          "required": true
+        },
+        {
+          "id": "configure_inventory_access",
+          "title": "Configure inventory system access",
+          "description": "Setup access to parts ordering and inventory management systems",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "asset_accountability",
+      "title": "Complete Asset Accountability Setup",
+      "description": "Finalize asset tracking and accountability processes",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "complete_asset_inventory",
+          "title": "Complete initial asset inventory",
+          "description": "Document all assets assigned to technician in tracking system",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "assets_fully_provisioned",
+        "label": "All Assets Fully Provisioned",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_specialized_tools",
+        "label": "Pending Specialized Tool Delivery",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_additional_equipment",
+        "label": "Requires Additional Equipment Authorization",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-17T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["onboarding", "day1-5", "assets", "equipment", "provisioning"],
+    "isActive": true
+  }
+}

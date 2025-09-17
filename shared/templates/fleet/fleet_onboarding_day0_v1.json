@@ -1,0 +1,111 @@
+{
+  "id": "fleet_onboarding_day0_v1",
+  "name": "Fleet Day 0 Technician Onboarding",
+  "department": "FLEET",
+  "workflowType": "onboarding_day0",
+  "version": "1.0",
+  "description": "Critical Day 0 onboarding tasks for fleet technicians",
+  "estimatedDuration": 30,
+  "difficulty": "high",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "immediate_system_setup",
+      "title": "Immediate System Setup",
+      "description": "Setup critical systems and access on Day 0",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "create_enterprise_credentials",
+          "title": "Create Enterprise ID credentials",
+          "description": "Generate Enterprise ID and initial password for technician",
+          "required": true
+        },
+        {
+          "id": "activate_mobile_access",
+          "title": "Activate mobile device access",
+          "description": "Provision mobile device with fleet management apps",
+          "required": true
+        },
+        {
+          "id": "setup_emergency_contacts",
+          "title": "Setup emergency contact system",
+          "description": "Configure emergency contact information and protocols",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "safety_protocols",
+      "title": "Critical Safety Protocol Setup",
+      "description": "Establish essential safety and security measures",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "security",
+      "substeps": [
+        {
+          "id": "safety_briefing_completion",
+          "title": "Complete critical safety briefing",
+          "description": "Deliver and confirm understanding of essential safety protocols",
+          "required": true
+        },
+        {
+          "id": "emergency_procedure_training",
+          "title": "Emergency procedure training",
+          "description": "Train on emergency response procedures and contacts",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "communication_setup",
+      "title": "Communication System Setup",
+      "description": "Establish communication channels and notifications",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "communication",
+      "substeps": [
+        {
+          "id": "notify_fleet_management",
+          "title": "Notify fleet management team",
+          "description": "Alert fleet supervisors of new technician start date",
+          "required": true
+        },
+        {
+          "id": "setup_communication_channels",
+          "title": "Setup communication channels",
+          "description": "Configure radio, phone, and messaging systems",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "day0_completed",
+        "label": "Day 0 Onboarding Completed Successfully",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_system_access",
+        "label": "Pending System Access Setup",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_escalation",
+        "label": "Requires Management Escalation",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-17T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["onboarding", "day0", "fleet", "critical"],
+    "isActive": true
+  }
+}

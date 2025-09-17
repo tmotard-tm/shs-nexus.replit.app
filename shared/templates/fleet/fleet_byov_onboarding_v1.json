@@ -1,0 +1,135 @@
+{
+  "id": "fleet_byov_onboarding_v1",
+  "name": "Fleet BYOV Technician Onboarding",
+  "department": "FLEET",
+  "workflowType": "byov_onboarding",
+  "version": "1.0",
+  "description": "Complete BYOV (Bring Your Own Vehicle) onboarding process for fleet technicians",
+  "estimatedDuration": 45,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "vehicle_verification",
+      "title": "Verify BYOV Vehicle Requirements",
+      "description": "Confirm vehicle meets all BYOV program requirements",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "inspect_vehicle_photos",
+          "title": "Review submitted vehicle photos",
+          "description": "Verify front, back, left, right side photos meet quality standards",
+          "required": true
+        },
+        {
+          "id": "verify_vin_documentation",
+          "title": "Verify VIN number documentation",
+          "description": "Confirm VIN matches vehicle and is properly documented",
+          "required": true
+        },
+        {
+          "id": "validate_insurance_coverage",
+          "title": "Validate insurance coverage",
+          "description": "Ensure insurance meets BYOV program minimum requirements",
+          "required": true
+        },
+        {
+          "id": "check_registration_status",
+          "title": "Check vehicle registration status",
+          "description": "Verify current registration and compliance with local laws",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "van_assignment",
+      "title": "Assign New Van Number",
+      "description": "Process van number assignment and system setup",
+      "required": true,
+      "estimatedTime": 20,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "generate_van_number",
+          "title": "Generate new van number",
+          "description": "Create unique van number for BYOV vehicle in fleet system",
+          "required": true
+        },
+        {
+          "id": "update_fleet_system",
+          "title": "Update fleet management system",
+          "description": "Add BYOV vehicle to fleet tracking and management systems",
+          "required": true
+        },
+        {
+          "id": "configure_gps_tracking",
+          "title": "Configure GPS tracking",
+          "description": "Set up vehicle tracking for the new BYOV assignment",
+          "required": true
+        },
+        {
+          "id": "notify_previous_vehicle_change",
+          "title": "Process previous vehicle transition",
+          "description": "Handle transition from current truck to new BYOV vehicle",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "compliance_setup",
+      "title": "Complete BYOV Compliance Setup",
+      "description": "Ensure all compliance and safety requirements are met",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "byov_agreement_signed",
+          "title": "Confirm BYOV agreement signed",
+          "description": "Verify technician has signed BYOV program agreement",
+          "required": true
+        },
+        {
+          "id": "safety_inspection_scheduled",
+          "title": "Schedule safety inspection",
+          "description": "Arrange for initial BYOV vehicle safety inspection",
+          "required": true
+        },
+        {
+          "id": "update_hr_records",
+          "title": "Update HR and payroll records",
+          "description": "Ensure HR systems reflect BYOV program participation",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "byov_approved",
+        "label": "BYOV Vehicle Approved and Assigned",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_additional_documentation",
+        "label": "Requires Additional Documentation",
+        "requiresApproval": false
+      },
+      {
+        "value": "vehicle_rejected",
+        "label": "Vehicle Does Not Meet BYOV Requirements",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-17T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["byov", "onboarding", "fleet", "vehicle"],
+    "isActive": true
+  }
+}

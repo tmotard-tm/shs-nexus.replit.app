@@ -1,0 +1,105 @@
+{
+  "id": "assets_onboarding_day0_v1",
+  "name": "Assets Day 0 Technician Onboarding",
+  "department": "ASSETS",
+  "workflowType": "onboarding_day0",
+  "version": "1.0",
+  "description": "Critical Day 0 assets management onboarding tasks",
+  "estimatedDuration": 25,
+  "difficulty": "high",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "urgent_equipment_orders",
+      "title": "Place Urgent Equipment Orders",
+      "description": "Order critical equipment needed immediately",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "order_phone_device",
+          "title": "Order company phone",
+          "description": "Place urgent order for company mobile phone",
+          "required": true
+        },
+        {
+          "id": "order_safety_equipment",
+          "title": "Order essential safety equipment",
+          "description": "Order critical safety gear required for Day 1",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "asset_verification",
+      "title": "Verify Asset Requirements",
+      "description": "Assess and verify technician asset needs",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "verify_role_specialties",
+          "title": "Verify role and specialties",
+          "description": "Confirm technician role and required specializations",
+          "required": true
+        },
+        {
+          "id": "assess_tool_requirements",
+          "title": "Assess immediate tool requirements",
+          "description": "Identify critical tools needed for first day operations",
+          "required": true
+        },
+        {
+          "id": "verify_workspace_needs",
+          "title": "Verify workspace setup needs",
+          "description": "Assess immediate workspace and storage requirements",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "documentation_setup",
+      "title": "Setup Critical Documentation",
+      "description": "Complete essential documentation and approvals",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "document_asset_assignments",
+          "title": "Document asset assignments",
+          "description": "Record initial asset assignments in tracking system",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "day0_assets_ready",
+        "label": "Day 0 Asset Setup Completed",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_equipment_delivery",
+        "label": "Pending Equipment Delivery",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_approval",
+        "label": "Requires Additional Approvals",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-17T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["onboarding", "day0", "assets", "critical", "equipment"],
+    "isActive": true
+  }
+}

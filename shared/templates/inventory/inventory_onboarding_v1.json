@@ -1,0 +1,151 @@
+{
+  "id": "inventory_onboarding_v1",
+  "name": "Inventory Management Technician Onboarding",
+  "department": "INVENTORY",
+  "workflowType": "onboarding_general",
+  "version": "1.0",
+  "description": "Comprehensive inventory management onboarding process",
+  "estimatedDuration": 55,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "credentials_verification",
+      "title": "Complete Credential Verification",
+      "description": "Verify all required credentials and clearances",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "background_check_review",
+          "title": "Review background check results",
+          "description": "Confirm satisfactory background check for inventory access",
+          "required": true
+        },
+        {
+          "id": "security_clearance_verification",
+          "title": "Verify security clearance levels",
+          "description": "Confirm appropriate security clearance for inventory responsibilities",
+          "required": true
+        },
+        {
+          "id": "drug_screening_confirmation",
+          "title": "Confirm drug screening completion",
+          "description": "Verify satisfactory drug screening results",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "inventory_system_configuration",
+      "title": "Configure Inventory System Access",
+      "description": "Setup comprehensive inventory system access and permissions",
+      "required": true,
+      "estimatedTime": 25,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "create_inventory_accounts",
+          "title": "Create inventory system accounts",
+          "description": "Setup login credentials for all inventory management systems",
+          "required": true
+        },
+        {
+          "id": "configure_access_permissions",
+          "title": "Configure role-based access permissions",
+          "description": "Set appropriate access levels based on role and responsibilities",
+          "required": true
+        },
+        {
+          "id": "setup_barcode_equipment",
+          "title": "Setup barcode scanning equipment",
+          "description": "Configure and test handheld barcode scanners and mobile devices",
+          "required": true
+        },
+        {
+          "id": "assign_warehouse_zones",
+          "title": "Assign warehouse management zones",
+          "description": "Define specific warehouse areas and inventory zones for management",
+          "required": true
+        },
+        {
+          "id": "configure_reporting_access",
+          "title": "Configure reporting and analytics access",
+          "description": "Setup access to inventory reports and analytics dashboards",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "comprehensive_training",
+      "title": "Complete Comprehensive Inventory Training",
+      "description": "Complete all required training modules for inventory management",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "inventory_procedures_training",
+          "title": "Complete inventory procedures training",
+          "description": "Complete training on cycle counting, receiving, and shipping procedures",
+          "required": true
+        },
+        {
+          "id": "safety_compliance_training",
+          "title": "Complete safety and compliance training",
+          "description": "Complete warehouse safety and regulatory compliance training",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "finalize_onboarding_process",
+      "title": "Finalize Onboarding Setup",
+      "description": "Complete final onboarding tasks and documentation",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "update_personnel_database",
+          "title": "Update personnel and HR database",
+          "description": "Add technician to inventory department personnel records",
+          "required": true
+        },
+        {
+          "id": "assign_mentor_guidance",
+          "title": "Assign mentor for ongoing guidance",
+          "description": "Pair new technician with experienced mentor for initial guidance period",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "fully_onboarded",
+        "label": "Technician Fully Onboarded and Ready",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_training_completion",
+        "label": "Pending Training Module Completion",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_additional_verification",
+        "label": "Requires Additional Security Verification",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-17T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["onboarding", "inventory", "comprehensive", "management"],
+    "isActive": true
+  }
+}
