@@ -678,29 +678,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { id } = req.params;
-      const updates = req.body;
       
-      // Remove password and id from updates if present
-      delete updates.password;
-      delete updates.id;
-      delete updates.createdAt;
-
-      const updatedUser = await storage.updateUser(id, updates);
-      if (!updatedUser) {
+      // Protect seed accounts from modification
+      if (id === 'emergency-admin-2025-id') {
+        return res.status(403).json({ message: "Access denied. Cannot modify seed accounts." });
+      }
+      
+      // Get the target user first to verify it exists
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
         return res.status(404).json({ message: "User not found" });
       }
+      
+      const updates = req.body;
+      
+      // Strict field validation - only allow safe fields to be updated
+      const allowedFields = ['email', 'fullName', 'department', 'role', 'departmentAccess', 'isActive'];
+      const sanitizedUpdates: any = {};
+      
+      for (const [key, value] of Object.entries(updates)) {
+        if (allowedFields.includes(key)) {
+          sanitizedUpdates[key] = value;
+        }
+      }
+      
+      // Never allow these critical fields to be updated through this route
+      delete sanitizedUpdates.password;
+      delete sanitizedUpdates.id;
+      delete sanitizedUpdates.username; // Critical: prevent username corruption
+      delete sanitizedUpdates.createdAt;
+      
+      // Validate role if being updated
+      if (sanitizedUpdates.role) {
+        const validRoles = ['superadmin', 'agent', 'field', 'approver', 'requester'];
+        if (!validRoles.includes(sanitizedUpdates.role)) {
+          return res.status(400).json({ message: "Invalid role specified" });
+        }
+      }
+      
+      // Validate department access if being updated
+      if (sanitizedUpdates.departmentAccess) {
+        const validDepartments = ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'];
+        if (!Array.isArray(sanitizedUpdates.departmentAccess)) {
+          return res.status(400).json({ message: "Department access must be an array" });
+        }
+        for (const dept of sanitizedUpdates.departmentAccess) {
+          if (!validDepartments.includes(dept)) {
+            return res.status(400).json({ message: `Invalid department access: ${dept}` });
+          }
+        }
+      }
+      
+      // If no valid updates, return error
+      if (Object.keys(sanitizedUpdates).length === 0) {
+        return res.status(400).json({ message: "No valid fields to update" });
+      }
 
-      // Log activity
+      const updatedUser = await storage.updateUser(id, sanitizedUpdates);
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to update user" });
+      }
+
+      // Log activity with details of what was changed
       await storage.createActivityLog({
-        userId: id,
+        userId: currentUser.id,
         action: "user_updated",
         entityType: "user",
         entityId: id,
-        details: `User ${updatedUser.username} updated`,
+        details: `Admin ${currentUser.username} updated user ${targetUser.username}. Fields: ${Object.keys(sanitizedUpdates).join(', ')}`,
       });
 
       res.json({ ...updatedUser, password: undefined });
     } catch (error) {
+      console.error('User update error:', error);
       res.status(500).json({ message: "Failed to update user" });
     }
   });
@@ -714,9 +764,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const { id } = req.params;
       
+      // Protect seed accounts from deletion
+      if (id === 'emergency-admin-2025-id') {
+        return res.status(403).json({ message: "Access denied. Cannot delete seed accounts." });
+      }
+      
       const user = await storage.getUser(id);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
+      }
+      
+      // Prevent self-deletion
+      if (user.id === currentUser.id) {
+        return res.status(403).json({ message: "Cannot delete your own account" });
       }
 
       const deleted = await storage.deleteUser(id);
@@ -726,15 +786,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Log activity
       await storage.createActivityLog({
-        userId: id,
+        userId: currentUser.id,
         action: "user_deleted",
         entityType: "user",
         entityId: id,
-        details: `User ${user.username} deleted`,
+        details: `Admin ${currentUser.username} deleted user ${user.username}`,
       });
 
       res.json({ message: "User deleted successfully" });
     } catch (error) {
+      console.error('User deletion error:', error);
       res.status(500).json({ message: "Failed to delete user" });
     }
   });
@@ -748,6 +809,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { id } = req.params;
+      
+      // Protect seed accounts from password reset by other admins
+      if (id === 'emergency-admin-2025-id' && currentUser.id !== id) {
+        return res.status(403).json({ message: "Access denied. Cannot reset password for seed accounts." });
+      }
+      
       const { temporaryPassword } = req.body;
       
       // Validate temporary password meets requirements
@@ -870,6 +937,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { id } = req.params;
+      
+      // Protect seed accounts from role changes
+      if (id === 'emergency-admin-2025-id') {
+        return res.status(403).json({ message: "Access denied. Cannot modify role for seed accounts." });
+      }
+      
       const { role, department, departmentAccess } = req.body;
       
       // Validate role if provided
