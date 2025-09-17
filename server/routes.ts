@@ -373,23 +373,11 @@ function requireAuth(req: any, res: any, next: any): any {
   const cookieHeader = req.headers.cookie;
   const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
   
-  // DEBUG: Log session ID extraction
-  console.log('[DEBUG] requireAuth - sessionId found:', sessionId ? 'YES' : 'NO');
-  
   if (!sessionId) {
     return res.status(401).json({ message: "Authentication required" });
   }
   
   const session = sessions.get(sessionId);
-  
-  // DEBUG: Log session lookup
-  console.log('[DEBUG] requireAuth - session found:', session ? 'YES' : 'NO');
-  if (session) {
-    console.log('[DEBUG] requireAuth - session.userId:', session.userId);
-    console.log('[DEBUG] requireAuth - session.username:', session.username);
-    console.log('[DEBUG] requireAuth - session.expiresAt:', session.expiresAt);
-    console.log('[DEBUG] requireAuth - session expired:', session.expiresAt < new Date());
-  }
   
   if (!session || session.expiresAt < new Date()) {
     sessions.delete(sessionId);
@@ -397,9 +385,6 @@ function requireAuth(req: any, res: any, next: any): any {
   }
   
   req.user = { id: session.userId, username: session.username };
-  
-  // DEBUG: Log what we're setting in req.user
-  console.log('[DEBUG] requireAuth - setting req.user:', req.user);
   
   return next();
 }
@@ -433,13 +418,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create session with longer timeout for better UX
       const sessionId = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-      
-      // DEBUG: Log login info
-      console.log('[DEBUG] LOGIN - user found for enterpriseId:', enterpriseId);
-      console.log('[DEBUG] LOGIN - user.id:', user.id);
-      console.log('[DEBUG] LOGIN - user.username:', user.username);
-      console.log('[DEBUG] LOGIN - user.role:', user.role);
-      console.log('[DEBUG] LOGIN - Creating session with ID:', sessionId);
       
       sessions.set(sessionId, {
         userId: user.id,
@@ -640,28 +618,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // User management routes (restricted to superadmin and admin only)
   app.get("/api/users", requireAuth, async (req: any, res) => {
     try {
-      // DEBUG: Log authentication info
-      console.log('[DEBUG] GET /api/users - req.user:', req.user);
-      console.log('[DEBUG] GET /api/users - req.user.username:', req.user.username);
-      
       const currentUser = await storage.getUserByUsername(req.user.username);
       
-      // DEBUG: Log what we got from storage
-      console.log('[DEBUG] GET /api/users - currentUser found:', currentUser ? 'YES' : 'NO');
-      if (currentUser) {
-        console.log('[DEBUG] GET /api/users - currentUser.id:', currentUser.id);
-        console.log('[DEBUG] GET /api/users - currentUser.username:', currentUser.username);
-        console.log('[DEBUG] GET /api/users - currentUser.role:', currentUser.role);
-      }
-      
       if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        console.log('[DEBUG] GET /api/users - Authorization FAILED');
-        console.log('[DEBUG] GET /api/users - currentUser exists:', !!currentUser);
-        console.log('[DEBUG] GET /api/users - currentUser.role:', currentUser?.role || 'N/A');
         return res.status(403).json({ message: "Access denied. User management requires superadmin or admin role." });
       }
-      
-      console.log('[DEBUG] GET /api/users - Authorization PASSED');
       
       const users = await storage.getUsers();
       // Remove passwords from response

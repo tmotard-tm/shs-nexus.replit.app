@@ -18,6 +18,8 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { join } from "path";
 
 export interface IStorage {
   // Users
@@ -170,8 +172,46 @@ export class MemStorage implements IStorage {
     this.inventoryQueueItems = new Map();
     this.fleetQueueItems = new Map();
     
-    // Initialize with admin user
+    // Load users from file first, then fallback to defaults
+    this.loadUsersFromFile();
     this.initializeDefaultData();
+  }
+
+  // File I/O helper methods for user persistence
+  private readonly usersFilePath = join(process.cwd(), 'users.json');
+
+  private loadUsersFromFile(): void {
+    try {
+      if (existsSync(this.usersFilePath)) {
+        const fileContent = readFileSync(this.usersFilePath, 'utf-8');
+        const userData = JSON.parse(fileContent);
+        
+        // Convert array back to Map with proper date objects
+        if (Array.isArray(userData)) {
+          userData.forEach((user: any) => {
+            // Restore Date objects
+            if (user.createdAt) user.createdAt = new Date(user.createdAt);
+            this.users.set(user.id, user);
+          });
+          console.log(`Loaded ${userData.length} users from ${this.usersFilePath}`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load users from file, will use defaults:', error);
+      // Clear corrupted data and let defaults be loaded
+      this.users.clear();
+    }
+  }
+
+  private saveUsersToFile(): void {
+    try {
+      // Convert Map to array for JSON serialization
+      const usersArray = Array.from(this.users.values());
+      writeFileSync(this.usersFilePath, JSON.stringify(usersArray, null, 2), 'utf-8');
+      console.log(`Saved ${usersArray.length} users to ${this.usersFilePath}`);
+    } catch (error) {
+      console.error('Failed to save users to file:', error);
+    }
   }
 
   private async initializeDefaultData() {
@@ -399,9 +439,22 @@ export class MemStorage implements IStorage {
     };
     enterpriseUsers.push(anonymousUser);
     
-    enterpriseUsers.forEach(user => this.users.set(user.id, user));
-    // Also add anonymous user by username for lookups
-    this.users.set("anonymous", anonymousUser);
+    // Only add default users if they don't already exist (preserves users loaded from file)
+    enterpriseUsers.forEach(user => {
+      if (!this.users.has(user.id) && !this.users.has(user.username)) {
+        this.users.set(user.id, user);
+      }
+    });
+    
+    // Also add anonymous user by username for lookups if not already present
+    if (!this.users.has("anonymous")) {
+      this.users.set("anonymous", anonymousUser);
+    }
+
+    // Save initial users to file if this is a fresh start (no existing file)
+    if (!existsSync(this.usersFilePath)) {
+      this.saveUsersToFile();
+    }
 
     // Create sample API configurations
     const sampleApis: ApiConfiguration[] = [
@@ -740,6 +793,7 @@ export class MemStorage implements IStorage {
       createdAt: new Date(),
     };
     this.users.set(id, user);
+    this.saveUsersToFile();
     return user;
   }
 
@@ -749,11 +803,16 @@ export class MemStorage implements IStorage {
     
     const updatedUser = { ...user, ...updates };
     this.users.set(id, updatedUser);
+    this.saveUsersToFile();
     return updatedUser;
   }
 
   async deleteUser(id: string): Promise<boolean> {
-    return this.users.delete(id);
+    const result = this.users.delete(id);
+    if (result) {
+      this.saveUsersToFile();
+    }
+    return result;
   }
 
   // Requests
