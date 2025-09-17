@@ -104,7 +104,20 @@ export function WorkModuleDialog({
   const saveProgressMutation = useMutation({
     mutationFn: async (data: any) => {
       console.log('Saving progress for task:', queueItem?.id, 'Current status:', queueItem?.status);
-      return apiRequest("PATCH", `/api/work-progress/${queueItem?.id}`, data);
+      
+      if (!module) {
+        throw new Error('Module is required for saving progress');
+      }
+      
+      if (!queueItem?.id) {
+        throw new Error('Queue item ID is required for saving progress');
+      }
+      
+      // Use the correct endpoint for general queue item progress
+      const endpoint = `/api/queues/${module}/${queueItem.id}/save-progress`;
+      
+      console.log('Calling save progress endpoint:', endpoint);
+      return apiRequest("PATCH", endpoint, data);
     },
     onSuccess: (data) => {
       console.log('Progress saved successfully for task:', queueItem?.id, 'Response:', data);
