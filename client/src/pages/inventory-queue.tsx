@@ -47,17 +47,11 @@ export default function InventoryQueuePage() {
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>
       apiRequest("PATCH", `/api/inventory-queue/${queueItemId}/assign`, { assigneeId }),
-    onSuccess: (_, { queueItemId }) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory-queue"] });
-      // Find the assigned item and open work module automatically
-      const assignedItem = queueItems.find(item => item.id === queueItemId);
-      if (assignedItem) {
-        setWorkModuleItem(assignedItem);
-        setIsWorkModuleOpen(true);
-      }
       toast({
-        title: "Task Picked Up",
-        description: "You've been assigned to this task. The work module is now open.",
+        title: "Success",
+        description: "Queue item assigned successfully.",
       });
     },
     onError: (error: Error) => {
@@ -268,11 +262,7 @@ export default function InventoryQueuePage() {
                           {item.status === "pending" && (
                             <Button
                               size="sm"
-                              onClick={() => assignMutation.mutate({ 
-                                queueItemId: item.id, 
-                                assigneeId: user?.id || "" 
-                              })}
-                              disabled={assignMutation.isPending}
+                              onClick={() => setPickUpItem(item)}
                               data-testid={`button-pickup-${item.id}`}
                             >
                               Pick Up
@@ -355,11 +345,10 @@ export default function InventoryQueuePage() {
               <div className="flex gap-2 pt-4 border-t">
                 {viewQueueItem.status === "pending" && (
                   <Button 
-                    onClick={() => assignMutation.mutate({ 
-                      queueItemId: viewQueueItem.id, 
-                      assigneeId: user?.id || "" 
-                    })}
-                    disabled={assignMutation.isPending}
+                    onClick={() => {
+                      setPickUpItem(viewQueueItem);
+                      setViewQueueItem(null);
+                    }}
                   >
                     Pick Up Task
                   </Button>
@@ -388,6 +377,21 @@ export default function InventoryQueuePage() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Pick Up Request Dialog */}
+        <PickUpRequestDialog
+          isOpen={!!pickUpItem}
+          onClose={() => setPickUpItem(null)}
+          onPickUp={(agentId) => {
+            if (pickUpItem) {
+              assignMutation.mutate({ queueItemId: pickUpItem.id, assigneeId: agentId });
+            }
+          }}
+          users={users}
+          queueModule="inventory"
+          isLoading={assignMutation.isPending}
+          currentUser={user}
+        />
 
         {/* Work Module Dialog */}
         <WorkModuleDialog

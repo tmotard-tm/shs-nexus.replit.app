@@ -480,6 +480,7 @@ export default function NTAOQueuePage() {
           users={users}
           queueModule="ntao"
           isLoading={assignMutation.isPending}
+          currentUser={user}
         />
 
         {/* Work Module Dialog */}

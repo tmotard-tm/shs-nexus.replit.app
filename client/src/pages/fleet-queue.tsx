@@ -480,6 +480,7 @@ export default function FleetQueuePage() {
           users={users}
           queueModule="fleet"
           isLoading={assignMutation.isPending}
+          currentUser={user}
         />
 
         {/* Work Module Dialog */}

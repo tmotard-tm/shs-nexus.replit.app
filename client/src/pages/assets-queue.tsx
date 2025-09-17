@@ -480,6 +480,7 @@ export default function AssetsQueuePage() {
           users={users}
           queueModule="assets"
           isLoading={assignMutation.isPending}
+          currentUser={user}
         />
 
         {/* Work Module Dialog */}
