@@ -248,7 +248,7 @@ export default function UserManagement() {
               </div>
               <div>
                 <Label htmlFor="role">Role</Label>
-                <Select value={form.watch("role")} onValueChange={(value) => form.setValue("role", value as "superadmin" | "agent" | "field")}>
+                <Select value={form.watch("role") || "agent"} onValueChange={(value) => form.setValue("role", value as "superadmin" | "agent" | "field")}>
                   <SelectTrigger data-testid="select-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                     <SelectValue />
                   </SelectTrigger>
@@ -264,12 +264,12 @@ export default function UserManagement() {
               </div>
               <div>
                 <Label htmlFor="department">Department</Label>
-                <Select value={form.watch("department") || ""} onValueChange={(value) => form.setValue("department", value || null)}>
+                <Select value={form.watch("department") || "none"} onValueChange={(value) => form.setValue("department", value === "none" ? null : value)}>
                   <SelectTrigger data-testid="select-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                     <SelectValue placeholder="Select department (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No Department</SelectItem>
+                    <SelectItem value="none">No Department</SelectItem>
                     <SelectItem value="NTAO">NTAO</SelectItem>
                     <SelectItem value="Assets Management">Assets Management</SelectItem>
                     <SelectItem value="Inventory Control">Inventory Control</SelectItem>
