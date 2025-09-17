@@ -83,5 +83,15 @@
     "userId": "18a95ddf-9c9f-433e-991d-201345f2829c",
     "username": "ENT1234",
     "expiresAt": "2025-09-24T19:04:53.447Z"
+  },
+  "25284953d4f44dcfed589bf890b86e964247120b20370301e9ce2b99c3b74cf9": {
+    "userId": "emergency-admin-2025-id",
+    "username": "emergency-admin",
+    "expiresAt": "2025-09-24T19:29:02.773Z"
+  },
+  "4e6532df3e3af2fc060524a0b7b7a7594df90bd2567a3473e445fc641e737f46": {
+    "userId": "emergency-admin-2025-id",
+    "username": "emergency-admin",
+    "expiresAt": "2025-09-24T19:29:09.030Z"
   }
 }
