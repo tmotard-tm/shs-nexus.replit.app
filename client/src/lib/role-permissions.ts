@@ -9,30 +9,84 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/',
     '/assets-queue',
     '/change-password', // All users can change their password
+    // Form routes - all users can submit forms
+    '/forms/create-vehicle',
+    '/forms/assign-vehicle', 
+    '/forms/onboarding',
+    '/forms/offboarding',
+    '/forms/byov-enrollment',
+    // Legacy form routes
+    '/create-vehicle-location',
+    '/assign-vehicle-location',
+    '/onboard-hire',
+    '/offboard-vehicle-location',
+    '/sears-drive-enrollment',
   ],
   fleet: [
     '/',
     '/fleet-queue',
     '/change-password', // All users can change their password
+    // Form routes - all users can submit forms
+    '/forms/create-vehicle',
+    '/forms/assign-vehicle',
+    '/forms/onboarding', 
+    '/forms/offboarding',
+    '/forms/byov-enrollment',
+    // Legacy form routes
+    '/create-vehicle-location',
+    '/assign-vehicle-location',
+    '/onboard-hire',
+    '/offboard-vehicle-location',
+    '/sears-drive-enrollment',
   ],
   inventory: [
     '/',
     '/inventory-queue',
     '/change-password', // All users can change their password
+    // Form routes - all users can submit forms
+    '/forms/create-vehicle',
+    '/forms/assign-vehicle',
+    '/forms/onboarding',
+    '/forms/offboarding', 
+    '/forms/byov-enrollment',
+    // Legacy form routes
+    '/create-vehicle-location',
+    '/assign-vehicle-location',
+    '/onboard-hire',
+    '/offboard-vehicle-location',
+    '/sears-drive-enrollment',
   ],
   ntao: [
     '/',
     '/ntao-queue',
     '/change-password', // All users can change their password
-  ],
-  field: [
-    '/',
-    // Field users can also access public form routes
+    // Form routes - all users can submit forms
     '/forms/create-vehicle',
     '/forms/assign-vehicle',
     '/forms/onboarding',
     '/forms/offboarding',
     '/forms/byov-enrollment',
+    // Legacy form routes  
+    '/create-vehicle-location',
+    '/assign-vehicle-location',
+    '/onboard-hire',
+    '/offboard-vehicle-location',
+    '/sears-drive-enrollment',
+  ],
+  field: [
+    '/',
+    // Form routes - all users can submit forms
+    '/forms/create-vehicle',
+    '/forms/assign-vehicle',
+    '/forms/onboarding',
+    '/forms/offboarding',
+    '/forms/byov-enrollment',
+    // Legacy form routes
+    '/create-vehicle-location',
+    '/assign-vehicle-location', 
+    '/onboard-hire',
+    '/offboard-vehicle-location',
+    '/sears-drive-enrollment',
     '/change-password', // All users can change their password
   ],
   superadmin: [
