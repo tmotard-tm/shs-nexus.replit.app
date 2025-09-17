@@ -1562,6 +1562,190 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to fetch productivity statistics" });
     }
   });
+
+  // Productivity Dashboard Export API (Superadmin only)
+  app.get("/api/productivity-export/:department", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Export requires superadmin role." });
+      }
+
+      const { department } = req.params;
+      const validDepartments = ['ntao', 'assets', 'inventory', 'fleet'];
+      
+      if (!validDepartments.includes(department)) {
+        return res.status(400).json({ 
+          message: `Invalid department: ${department}. Valid departments: ${validDepartments.join(', ')}` 
+        });
+      }
+
+      // Fetch queue items for the specified department
+      let queueItems: any[] = [];
+      try {
+        switch (department) {
+          case 'ntao':
+            queueItems = await storage.getNTAOQueueItems();
+            break;
+          case 'assets':
+            queueItems = await storage.getAssetsQueueItems();
+            break;
+          case 'inventory':
+            queueItems = await storage.getInventoryQueueItems();
+            break;
+          case 'fleet':
+            queueItems = await storage.getFleetQueueItems();
+            break;
+        }
+      } catch (error) {
+        console.error(`Error fetching ${department} queue items for export:`, error);
+        return res.status(500).json({ message: "Failed to fetch queue items" });
+      }
+
+      // Helper function to safely escape CSV values
+      const escapeCsvValue = (value: any): string => {
+        if (value === null || value === undefined) {
+          return '';
+        }
+        const str = String(value);
+        // If the value contains comma, quotes, or newlines, wrap in quotes and escape internal quotes
+        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+
+      // Helper function to format date
+      const formatDate = (dateString: string | null): string => {
+        if (!dateString) return '';
+        try {
+          return new Date(dateString).toLocaleString('en-US', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          });
+        } catch {
+          return dateString;
+        }
+      };
+
+      // Helper function to calculate response time
+      const calculateResponseTime = (createdAt: string, completedAt: string | null): string => {
+        if (!completedAt || !createdAt) return '';
+        try {
+          const created = new Date(createdAt).getTime();
+          const completed = new Date(completedAt).getTime();
+          const diffMs = completed - created;
+          const hours = Math.round(diffMs / (1000 * 60 * 60) * 10) / 10;
+          
+          if (hours < 1) {
+            const minutes = Math.round(diffMs / (1000 * 60));
+            return `${minutes} min`;
+          } else if (hours < 24) {
+            return `${hours} hrs`;
+          } else {
+            const days = Math.round(hours / 24 * 10) / 10;
+            return `${days} days`;
+          }
+        } catch {
+          return '';
+        }
+      };
+
+      // Helper function to extract employee name/ID from data
+      const extractEmployeeInfo = (data: string | null): string => {
+        if (!data) return '';
+        try {
+          const parsedData = JSON.parse(data);
+          
+          // Try different paths for employee information
+          const paths = [
+            // Employee object paths
+            parsedData?.employee?.fullName,
+            parsedData?.employee?.firstName && parsedData?.employee?.lastName 
+              ? `${parsedData.employee.firstName} ${parsedData.employee.lastName}`
+              : null,
+            parsedData?.employee?.employeeId,
+            parsedData?.employee?.racfId,
+            parsedData?.employee?.enterpriseId,
+            
+            // Tech info paths
+            parsedData?.techInfo?.fullName,
+            parsedData?.techInfo?.firstName && parsedData?.techInfo?.lastName 
+              ? `${parsedData.techInfo.firstName} ${parsedData.techInfo.lastName}`
+              : null,
+            parsedData?.techInfo?.employeeId,
+            parsedData?.techInfo?.ldap,
+            parsedData?.techInfo?.email,
+            
+            // Direct paths
+            parsedData?.techFirstName && parsedData?.techLastName 
+              ? `${parsedData.techFirstName} ${parsedData.techLastName}`
+              : null,
+            parsedData?.employeeId,
+            parsedData?.techRacfId,
+            parsedData?.ldap
+          ].filter(Boolean);
+          
+          return paths[0] || '';
+        } catch {
+          return '';
+        }
+      };
+
+      // Generate CSV headers
+      const headers = [
+        'Request ID',
+        'Title', 
+        'Status',
+        'Created Date',
+        'Assigned To',
+        'Completed Date',
+        'Response Time',
+        'Employee Name/ID',
+        'Workflow Type',
+        'Priority',
+        'Department',
+        'Notes'
+      ];
+
+      // Generate CSV rows
+      const csvRows = [
+        headers.join(','),
+        ...queueItems.map(item => [
+          escapeCsvValue(item.id),
+          escapeCsvValue(item.title),
+          escapeCsvValue(item.status),
+          escapeCsvValue(formatDate(item.createdAt)),
+          escapeCsvValue(item.assignedTo || ''),
+          escapeCsvValue(formatDate(item.completedAt)),
+          escapeCsvValue(calculateResponseTime(item.createdAt, item.completedAt)),
+          escapeCsvValue(extractEmployeeInfo(item.data)),
+          escapeCsvValue(item.workflowType),
+          escapeCsvValue(item.priority),
+          escapeCsvValue(item.department || department.toUpperCase()),
+          escapeCsvValue(item.notes || '')
+        ].join(','))
+      ];
+
+      const csvContent = csvRows.join('\n');
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+      const filename = `${department.toUpperCase()}_queue_export_${timestamp}.csv`;
+
+      // Set CSV download headers
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Cache-Control', 'no-cache');
+      
+      res.send(csvContent);
+    } catch (error) {
+      console.error('Error exporting productivity data:', error);
+      res.status(500).json({ message: "Failed to export data" });
+    }
+  });
   
   app.patch("/api/queues/:module/:id/assign", requireAuth, async (req: any, res) => {
     try {

@@ -1,11 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { TopBar } from "@/components/layout/top-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BackButton } from "@/components/ui/back-button";
-import { TrendingUp, Clock, Users, CheckCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { TrendingUp, Clock, Users, CheckCircle, Download } from "lucide-react";
 import { useLocation } from "wouter";
 import { useEffect } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 interface DepartmentStats {
   name: string;
@@ -25,6 +27,7 @@ interface ProductivityStats {
 export default function ProductivityDashboard() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
 
   // Redirect non-superadmin users
   useEffect(() => {
@@ -41,6 +44,57 @@ export default function ProductivityDashboard() {
   const { data: productivityStats, isLoading, error } = useQuery<ProductivityStats>({
     queryKey: ["/api/productivity-stats"],
   });
+
+  // Export mutation
+  const exportMutation = useMutation({
+    mutationFn: async (department: string) => {
+      const response = await fetch(`/api/productivity-export/${department}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Export failed');
+      }
+
+      // Get the filename from the response headers
+      const contentDisposition = response.headers.get('Content-Disposition');
+      const filename = contentDisposition?.match(/filename="(.+)"/)?.[1] || `${department}_export.csv`;
+
+      // Get the CSV content as blob
+      const blob = await response.blob();
+      
+      // Create download link
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      return { department, filename };
+    },
+    onSuccess: ({ department, filename }) => {
+      toast({
+        title: "Export Successful",
+        description: `${department.toUpperCase()} queue data exported as ${filename}`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Export Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleExport = (department: string) => {
+    exportMutation.mutate(department);
+  };
 
   const formatResponseTime = (hours: number) => {
     if (hours === 0) return "N/A";
@@ -70,20 +124,37 @@ export default function ProductivityDashboard() {
     return (
       <Card key={key} className="relative overflow-hidden" data-testid={`card-department-${key}`}>
         <CardHeader className="pb-2">
-          <div className="flex items-center gap-2">
-            <div 
-              className={`w-8 h-8 rounded-lg flex items-center justify-center bg-[hsl(var(--chart-${colorClass})/.1)]`}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div 
+                className={`w-8 h-8 rounded-lg flex items-center justify-center bg-[hsl(var(--chart-${colorClass})/.1)]`}
+              >
+                <Icon className={`h-4 w-4 text-[hsl(var(--chart-${colorClass}))]`} />
+              </div>
+              <div>
+                <CardTitle className="text-lg font-semibold" data-testid={`text-${key}-name`}>
+                  {departmentData.name}
+                </CardTitle>
+                <p className="text-xs text-muted-foreground" data-testid={`text-${key}-description`}>
+                  {departmentData.description}
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleExport(key)}
+              disabled={exportMutation.isPending}
+              className="h-8 w-8 p-0"
+              data-testid={`button-export-${key}`}
+              title={`Export ${departmentData.name} queue data`}
             >
-              <Icon className={`h-4 w-4 text-[hsl(var(--chart-${colorClass}))]`} />
-            </div>
-            <div>
-              <CardTitle className="text-lg font-semibold" data-testid={`text-${key}-name`}>
-                {departmentData.name}
-              </CardTitle>
-              <p className="text-xs text-muted-foreground" data-testid={`text-${key}-description`}>
-                {departmentData.description}
-              </p>
-            </div>
+              {exportMutation.isPending && exportMutation.variables === key ? (
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+            </Button>
           </div>
         </CardHeader>
         
