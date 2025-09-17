@@ -203,6 +203,11 @@ export function WorkModuleDialog({
       console.log('Starting work on task:', queueItem?.id, 'Current status:', queueItem?.status);
       
       // Validate that task can be started
+      if (!queueItem?.id) {
+        console.error('Cannot start work: No task ID available');
+        throw new Error('No task ID available');
+      }
+      
       if (queueItem?.status !== 'pending') {
         console.warn('Task already started or completed:', queueItem?.id, 'Status:', queueItem?.status);
         return; // Don't make API call if already started
@@ -247,7 +252,7 @@ export function WorkModuleDialog({
       console.log('Auto-starting work for task:', queueItem?.id, 'Status:', queueItem?.status);
       startWorkMutation.mutate();
     }
-  }, [isOpen, queueItem?.status, currentUser?.id, startWorkMutation.isPending]);
+  }, [isOpen, queueItem?.status, startWorkMutation.isPending]); // Removed currentUser?.id to prevent unnecessary re-runs
 
   const handleSaveProgress = () => {
     // Collect stepNotes and substepNotes from template

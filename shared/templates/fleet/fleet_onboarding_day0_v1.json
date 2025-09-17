@@ -43,7 +43,7 @@
       "description": "Establish essential safety and security measures",
       "required": true,
       "estimatedTime": 10,
-      "category": "security",
+      "category": "system_action",
       "substeps": [
         {
           "id": "safety_briefing_completion",

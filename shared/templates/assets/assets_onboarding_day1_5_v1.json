@@ -15,7 +15,7 @@
       "description": "Monitor and confirm delivery of ordered equipment",
       "required": true,
       "estimatedTime": 15,
-      "category": "received",
+      "category": "verification",
       "substeps": [
         {
           "id": "confirm_phone_delivery",
