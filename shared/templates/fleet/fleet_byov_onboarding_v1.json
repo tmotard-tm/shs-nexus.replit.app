@@ -10,97 +10,61 @@
   "requiredRole": "field",
   "steps": [
     {
-      "id": "vehicle_verification",
-      "title": "Verify BYOV Vehicle Requirements",
-      "description": "Confirm vehicle meets all BYOV program requirements",
+      "id": "van_management",
+      "title": "Van Management",
+      "description": "Handle permanent van reassignment for BYOV transition",
       "required": true,
       "estimatedTime": 15,
-      "category": "verification",
+      "category": "vehicle_management",
       "substeps": [
         {
-          "id": "inspect_vehicle_photos",
-          "title": "Review submitted vehicle photos",
-          "description": "Verify front, back, left, right side photos meet quality standards",
+          "id": "unassign_permanent_van",
+          "title": "Unassign permanent van",
+          "description": "Remove current permanent van assignment from technician",
           "required": true
         },
         {
-          "id": "verify_vin_documentation",
-          "title": "Verify VIN number documentation",
-          "description": "Confirm VIN matches vehicle and is properly documented",
-          "required": true
-        },
-        {
-          "id": "validate_insurance_coverage",
-          "title": "Validate insurance coverage",
-          "description": "Ensure insurance meets BYOV program minimum requirements",
-          "required": true
-        },
-        {
-          "id": "check_registration_status",
-          "title": "Check vehicle registration status",
-          "description": "Verify current registration and compliance with local laws",
+          "id": "identify_assign_new_van_number",
+          "title": "Identify and Assign new permanent van #",
+          "description": "Locate and assign new permanent van number for BYOV vehicle",
           "required": true
         }
       ]
     },
     {
-      "id": "van_assignment",
-      "title": "Assign New Van Number",
-      "description": "Process van number assignment and system setup",
+      "id": "system_updates",
+      "title": "System Updates",
+      "description": "Update all fleet management systems with new van information",
       "required": true,
       "estimatedTime": 20,
       "category": "system_action",
       "substeps": [
         {
-          "id": "generate_van_number",
-          "title": "Generate new van number",
-          "description": "Create unique van number for BYOV vehicle in fleet system",
+          "id": "update_all_systems",
+          "title": "Update all systems, tpms, holman, ams",
+          "description": "Update TPMS, Holman, AMS and all other fleet systems with new van assignment",
           "required": true
         },
         {
-          "id": "update_fleet_system",
-          "title": "Update fleet management system",
-          "description": "Add BYOV vehicle to fleet tracking and management systems",
-          "required": true
-        },
-        {
-          "id": "configure_gps_tracking",
-          "title": "Configure GPS tracking",
-          "description": "Set up vehicle tracking for the new BYOV assignment",
-          "required": true
-        },
-        {
-          "id": "notify_previous_vehicle_change",
-          "title": "Process previous vehicle transition",
-          "description": "Handle transition from current truck to new BYOV vehicle",
+          "id": "update_truck_address_notes",
+          "title": "Update truck address and notes for the truck assignment and status",
+          "description": "Update vehicle address, assignment notes, and status information in fleet systems",
           "required": true
         }
       ]
     },
     {
-      "id": "compliance_setup",
-      "title": "Complete BYOV Compliance Setup",
-      "description": "Ensure all compliance and safety requirements are met",
+      "id": "communication",
+      "title": "Communication",
+      "description": "Notify stakeholders of new van number assignment",
       "required": true,
       "estimatedTime": 10,
-      "category": "documentation",
+      "category": "communication",
       "substeps": [
         {
-          "id": "byov_agreement_signed",
-          "title": "Confirm BYOV agreement signed",
-          "description": "Verify technician has signed BYOV program agreement",
-          "required": true
-        },
-        {
-          "id": "safety_inspection_scheduled",
-          "title": "Schedule safety inspection",
-          "description": "Arrange for initial BYOV vehicle safety inspection",
-          "required": true
-        },
-        {
-          "id": "update_hr_records",
-          "title": "Update HR and payroll records",
-          "description": "Ensure HR systems reflect BYOV program participation",
+          "id": "notify_original_submitter",
+          "title": "Ensure the original submitter is aware of the correct van # to use in tech hub",
+          "description": "Contact original submitter to provide new van number for tech hub usage",
           "required": true
         }
       ]
