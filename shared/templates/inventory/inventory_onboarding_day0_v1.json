@@ -1,0 +1,71 @@
+{
+  "id": "inventory_onboarding_day0_v1",
+  "name": "Inventory Day 0 Technician Onboarding",
+  "department": "INVENTORY",
+  "workflowType": "onboarding_day0",
+  "version": "1.0",
+  "description": "Critical Day 0 inventory management onboarding tasks",
+  "estimatedDuration": 20,
+  "difficulty": "high",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "tpms_setup_shipment_verification",
+      "title": "TPMS Setup and Shipment Verification",
+      "description": "Add technician to TPMS and verify shipment information",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "add_technician_tpms_confirm_shipment",
+          "title": "Add technician to TPMS and confirm shipment information",
+          "description": "Add new technician to TPMS system and verify all shipment and delivery information is accurate",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "inventory_count_scheduling",
+      "title": "Inventory Count Scheduling",
+      "description": "Schedule comprehensive inventory count process",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "schedule_full_count_inventory",
+          "title": "Schedule full count inventory count",
+          "description": "Schedule and coordinate a comprehensive full count inventory process for the new technician's assigned areas",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "day0_inventory_completed",
+        "label": "Day 0 Inventory Setup Completed",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_inventory_count",
+        "label": "Pending Inventory Count Scheduling",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_verification",
+        "label": "Requires Additional System Verification",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-17T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["onboarding", "day0", "inventory", "critical"],
+    "isActive": true
+  }
+}

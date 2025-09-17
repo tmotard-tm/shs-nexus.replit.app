@@ -10,67 +10,45 @@
   "requiredRole": "field",
   "steps": [
     {
-      "id": "urgent_equipment_orders",
-      "title": "Place Urgent Equipment Orders",
-      "description": "Order critical equipment needed immediately",
+      "id": "equipment_order_shipment",
+      "title": "Order and Ship Critical Equipment",
+      "description": "Order and ship essential equipment to new hire",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "order_ship_phone",
+          "title": "Order and ship phone to new hire",
+          "description": "Process order and arrange shipping of company mobile phone to new technician's address",
+          "required": true
+        },
+        {
+          "id": "order_ship_uniform",
+          "title": "Order and ship uniform to new hire",
+          "description": "Process order and arrange shipping of company uniform to new technician's address",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "system_updates_communication",
+      "title": "System Updates and Communication",
+      "description": "Update systems and communicate with new technician",
       "required": true,
       "estimatedTime": 10,
       "category": "system_action",
       "substeps": [
         {
-          "id": "order_phone_device",
-          "title": "Order company phone",
-          "description": "Place urgent order for company mobile phone",
+          "id": "update_tech_id_phone_tpms",
+          "title": "Update tech ID and phone number in TPMS",
+          "description": "Update technician ID and assigned phone number in the TPMS system",
           "required": true
         },
         {
-          "id": "order_safety_equipment",
-          "title": "Order essential safety equipment",
-          "description": "Order critical safety gear required for Day 1",
-          "required": true
-        }
-      ]
-    },
-    {
-      "id": "asset_verification",
-      "title": "Verify Asset Requirements",
-      "description": "Assess and verify technician asset needs",
-      "required": true,
-      "estimatedTime": 10,
-      "category": "verification",
-      "substeps": [
-        {
-          "id": "verify_role_specialties",
-          "title": "Verify role and specialties",
-          "description": "Confirm technician role and required specializations",
-          "required": true
-        },
-        {
-          "id": "assess_tool_requirements",
-          "title": "Assess immediate tool requirements",
-          "description": "Identify critical tools needed for first day operations",
-          "required": true
-        },
-        {
-          "id": "verify_workspace_needs",
-          "title": "Verify workspace setup needs",
-          "description": "Assess immediate workspace and storage requirements",
-          "required": true
-        }
-      ]
-    },
-    {
-      "id": "documentation_setup",
-      "title": "Setup Critical Documentation",
-      "description": "Complete essential documentation and approvals",
-      "required": true,
-      "estimatedTime": 5,
-      "category": "documentation",
-      "substeps": [
-        {
-          "id": "document_asset_assignments",
-          "title": "Document asset assignments",
-          "description": "Record initial asset assignments in tracking system",
+          "id": "send_welcome_email_tracking",
+          "title": "Send a welcome email to the technician with all the details including tracking for phone and uniform",
+          "description": "Send comprehensive welcome email with equipment tracking information, contact details, and next steps",
           "required": true
         }
       ]
