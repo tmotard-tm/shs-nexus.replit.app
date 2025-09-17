@@ -1506,8 +1506,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied to this queue" });
       }
       
+      // Debug logging to understand the issue
+      const queueItem = await storage.getUnifiedQueueItem(module as any, id);
+      console.log(`DEBUG - Start work attempt:`, {
+        module,
+        id,
+        workerId: currentUser.id,
+        currentUser: currentUser.username,
+        itemExists: !!queueItem,
+        itemStatus: queueItem?.status,
+        itemAssignedTo: queueItem?.assignedTo,
+        match: queueItem?.assignedTo === currentUser.id
+      });
+
       const updatedItem = await storage.startWorkUnifiedQueueItem(module as any, id, currentUser.id);
       if (!updatedItem) {
+        console.log(`DEBUG - Start work failed for ${id}:`, {
+          reason: !queueItem ? 'item not found' : 
+                  queueItem.status !== 'pending' ? `wrong status: ${queueItem.status}` :
+                  queueItem.assignedTo !== currentUser.id ? `assignment mismatch: assigned=${queueItem.assignedTo}, worker=${currentUser.id}` :
+                  'unknown reason'
+        });
         return res.status(404).json({ message: "Queue item not found or not eligible to start work" });
       }
       
