@@ -15,7 +15,7 @@
       "description": "Ensure all company assets are properly returned",
       "required": true,
       "estimatedTime": 20,
-      "category": "asset_verification",
+      "category": "verification",
       "substeps": [
         {
           "id": "check_asset_register",
@@ -49,7 +49,7 @@
       "description": "Verify all compliance requirements are met",
       "required": true,
       "estimatedTime": 10,
-      "category": "compliance",
+      "category": "documentation",
       "substeps": [
         {
           "id": "verify_return_documentation",
