@@ -19,7 +19,7 @@
     "username": "cdomin",
     "email": "claudia.dominguez@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "assets",
     "department": "Assets Management",
     "departmentAccess": [
       "ASSETS"
@@ -31,7 +31,7 @@
     "username": "mjenki1",
     "email": "Monica.Jenkins@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "assets",
     "department": "Assets Management",
     "departmentAccess": [
       "ASSETS"
@@ -43,7 +43,7 @@
     "username": "ccoll16",
     "email": "carol.collins@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "fleet",
     "department": "Fleet Management",
     "departmentAccess": [
       "FLEET"
@@ -55,7 +55,7 @@
     "username": "cgroce",
     "email": "cheryl.groce@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "fleet",
     "department": "Fleet Management",
     "departmentAccess": [
       "FLEET"
@@ -67,7 +67,7 @@
     "username": "rdelgal",
     "email": "Robert.Delgaldo@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "fleet",
     "department": "Fleet Management",
     "departmentAccess": [
       "FLEET"
@@ -79,7 +79,7 @@
     "username": "handers",
     "email": "Howard.Anderson@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "fleet",
     "department": "Fleet Management",
     "departmentAccess": [
       "FLEET"
@@ -91,7 +91,7 @@
     "username": "acatapa",
     "email": "andrea.catapano@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "inventory",
     "department": "Inventory Control",
     "departmentAccess": [
       "INVENTORY"
@@ -103,7 +103,7 @@
     "username": "tcorene",
     "email": "tashsa.corenevsky@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "inventory",
     "department": "Inventory Control",
     "departmentAccess": [
       "INVENTORY"
@@ -115,7 +115,7 @@
     "username": "gwalsan",
     "email": "Goutami.Walsang@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "ntao",
     "department": "NTAO",
     "departmentAccess": [
       "NTAO"
@@ -127,7 +127,7 @@
     "username": "osantan",
     "email": "Oscar.Santana@transformco.com",
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
-    "role": "agent",
+    "role": "ntao",
     "department": "NTAO",
     "departmentAccess": [
       "NTAO"
