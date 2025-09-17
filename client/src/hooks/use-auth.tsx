@@ -15,12 +15,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check for stored user session
-    const storedUser = localStorage.getItem("user");
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-    setIsLoading(false);
+    const verifySession = async () => {
+      try {
+        // Check for stored user session
+        const storedUser = localStorage.getItem("user");
+        if (storedUser) {
+          // Verify the session is still valid on the server
+          const response = await fetch("/api/users", {
+            credentials: "include",
+          });
+          
+          if (response.ok) {
+            // Session is valid, keep the stored user
+            setUser(JSON.parse(storedUser));
+          } else if (response.status === 401) {
+            // Session expired or invalid, clear storage
+            console.log("Session expired, clearing stored user");
+            localStorage.removeItem("user");
+            setUser(null);
+          } else {
+            // Other error, still keep stored user but log the issue
+            console.warn("Error verifying session:", response.status, response.statusText);
+            setUser(JSON.parse(storedUser));
+          }
+        }
+      } catch (error) {
+        console.error("Session verification error:", error);
+        // On error, keep stored user if it exists (offline tolerance)
+        const storedUser = localStorage.getItem("user");
+        if (storedUser) {
+          setUser(JSON.parse(storedUser));
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    verifySession();
   }, []);
 
   const login = async (enterpriseId: string, password: string): Promise<boolean> => {
@@ -29,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enterpriseId, password }),
+        credentials: "include", // Include cookies in the request
       });
 
       if (response.ok) {

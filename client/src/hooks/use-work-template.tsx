@@ -34,19 +34,44 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
   const { data: templateData, isLoading, error } = useQuery<{ template: WorkTemplate | null; error?: string }>({
     queryKey: [`/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`, queueItem?.data],
     queryFn: async () => {
-      let url = `/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`;
-      
-      // Add task data as query parameter for enhanced template selection
-      if (queueItem?.data) {
-        const taskDataParam = encodeURIComponent(queueItem.data);
-        url += `?taskData=${taskDataParam}`;
+      try {
+        let url = `/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`;
+        
+        // Add task data as query parameter for enhanced template selection
+        if (queueItem?.data) {
+          const taskDataParam = encodeURIComponent(queueItem.data);
+          url += `?taskData=${taskDataParam}`;
+        }
+        
+        console.log('Loading work template from:', url);
+        const response = await apiRequest("GET", url);
+        console.log('Template response status:', response.status);
+        const data = await response.json();
+        console.log('Template data loaded:', data?.template ? 'success' : 'no template');
+        return data;
+      } catch (err: any) {
+        console.error('Template loading error:', err);
+        
+        // Handle 401 authentication errors specifically
+        if (err.message?.includes('401')) {
+          console.warn('Authentication required for template loading - user may need to re-login');
+          throw new Error('Authentication required. Please log in again to access work templates.');
+        }
+        
+        // Re-throw other errors
+        throw err;
       }
-      
-      const response = await apiRequest("GET", url);
-      return await response.json();
     },
     enabled: !!queueItem?.workflowType && !!(module || queueItem?.department),
     staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: (failureCount, error) => {
+      // Don't retry authentication errors
+      if (error?.message?.includes('401') || error?.message?.includes('Authentication required')) {
+        return false;
+      }
+      // Retry other errors up to 2 times
+      return failureCount < 2;
+    },
   });
 
   // Load existing progress if available
@@ -58,11 +83,37 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
   }>({
     queryKey: [`/api/work-progress/${queueItem?.id}`],
     queryFn: async () => {
-      const url = `/api/work-progress/${queueItem?.id}`;
-      const response = await apiRequest("GET", url);
-      return await response.json();
+      try {
+        const url = `/api/work-progress/${queueItem?.id}`;
+        console.log('Loading work progress from:', url);
+        const response = await apiRequest("GET", url);
+        console.log('Progress response status:', response.status);
+        const data = await response.json();
+        console.log('Progress data loaded:', data ? 'success' : 'no data');
+        return data;
+      } catch (err: any) {
+        console.error('Progress loading error:', err);
+        
+        // Handle 401 authentication errors specifically
+        if (err.message?.includes('401')) {
+          console.warn('Authentication required for progress loading - user may need to re-login');
+          // Return empty progress data instead of throwing to prevent breaking the UI
+          return { progress: null, checklistState: {}, stepNotes: {}, substepNotes: {} };
+        }
+        
+        // Re-throw other errors
+        throw err;
+      }
     },
     enabled: !!queueItem?.id,
+    retry: (failureCount, error) => {
+      // Don't retry authentication errors
+      if (error?.message?.includes('401') || error?.message?.includes('Authentication required')) {
+        return false;
+      }
+      // Retry other errors up to 2 times
+      return failureCount < 2;
+    },
   });
 
   useEffect(() => {

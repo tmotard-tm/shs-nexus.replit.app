@@ -18,18 +18,21 @@ export class TemplateLoader {
 
   constructor(templatesDir?: string) {
     this.templatesDir = templatesDir || path.join(__dirname, 'templates');
-    console.log('TemplateLoader initialized:');
-    console.log('  - __dirname:', __dirname);
-    console.log('  - templatesDir:', this.templatesDir);
-    console.log('  - templates directory exists:', fs.existsSync(this.templatesDir));
     
-    // Log directory contents for debugging
-    if (fs.existsSync(this.templatesDir)) {
-      try {
-        const contents = fs.readdirSync(this.templatesDir);
-        console.log('  - templates directory contents:', contents);
-      } catch (error) {
-        console.error('  - failed to read templates directory:', error);
+    if (this.isDebugEnabled()) {
+      console.log('TemplateLoader initialized:');
+      console.log('  - __dirname:', __dirname);
+      console.log('  - templatesDir:', this.templatesDir);
+      console.log('  - templates directory exists:', fs.existsSync(this.templatesDir));
+      
+      // Log directory contents for debugging
+      if (fs.existsSync(this.templatesDir)) {
+        try {
+          const contents = fs.readdirSync(this.templatesDir);
+          console.log('  - templates directory contents:', contents);
+        } catch (error) {
+          console.error('  - failed to read templates directory:', error);
+        }
       }
     }
   }
@@ -46,25 +49,35 @@ export class TemplateLoader {
    */
   private async loadRegistry(): Promise<TemplateRegistry> {
     if (this.registryCache) {
-      console.log('Using cached template registry with keys:', Object.keys(this.registryCache || {}));
+      if (this.isDebugEnabled()) {
+        console.log('Using cached template registry with keys:', Object.keys(this.registryCache || {}));
+      }
       return this.registryCache;
     }
 
     try {
       const registryPath = path.join(this.templatesDir, 'template-registry.json');
-      console.log('Loading template registry from:', registryPath);
-      console.log('Registry file exists:', fs.existsSync(registryPath));
+      if (this.isDebugEnabled()) {
+        console.log('Loading template registry from:', registryPath);
+        console.log('Registry file exists:', fs.existsSync(registryPath));
+      }
       
       const registryData = await fs.promises.readFile(registryPath, 'utf-8');
-      console.log('Registry file read successfully, size:', registryData.length, 'bytes');
+      if (this.isDebugEnabled()) {
+        console.log('Registry file read successfully, size:', registryData.length, 'bytes');
+      }
       
       const parsedRegistry = JSON.parse(registryData);
-      console.log('Registry JSON parsed successfully');
+      if (this.isDebugEnabled()) {
+        console.log('Registry JSON parsed successfully');
+      }
       
       // Handle both { registry: {...} } and direct {...} formats
       this.registryCache = parsedRegistry.registry ?? parsedRegistry;
-      console.log('Template registry loaded with keys:', Object.keys(this.registryCache || {}));
-      console.log('Full registry structure:', JSON.stringify(this.registryCache, null, 2));
+      if (this.isDebugEnabled()) {
+        console.log('Template registry loaded with keys:', Object.keys(this.registryCache || {}));
+        console.log('Full registry structure:', JSON.stringify(this.registryCache, null, 2));
+      }
       return this.registryCache || {};
     } catch (error) {
       console.error('Failed to load template registry from path:', path.join(this.templatesDir, 'template-registry.json'));
@@ -77,11 +90,15 @@ export class TemplateLoader {
    * Load a specific template by ID
    */
   async loadTemplate(templateId: string): Promise<TemplateLoadResult> {
-    console.log(`\n=== Loading template: ${templateId} ===`);
+    if (this.isDebugEnabled()) {
+      console.log(`\n=== Loading template: ${templateId} ===`);
+    }
     
     // Check cache first
     if (this.templateCache.has(templateId)) {
-      console.log(`Template ${templateId} found in cache`);
+      if (this.isDebugEnabled()) {
+        console.log(`Template ${templateId} found in cache`);
+      }
       return {
         template: this.templateCache.get(templateId)!,
       };
@@ -90,51 +107,66 @@ export class TemplateLoader {
     try {
       // Determine which department directory to look in
       const department = this.extractDepartmentFromTemplateId(templateId);
-      console.log(`Extracted department: ${department} from templateId: ${templateId}`);
+      if (this.isDebugEnabled()) {
+        console.log(`Extracted department: ${department} from templateId: ${templateId}`);
+      }
       
       const departmentDir = path.join(this.templatesDir, department.toLowerCase());
       const templatePath = path.join(departmentDir, `${templateId}.json`);
-      console.log(`Template path: ${templatePath}`);
-      console.log(`Department directory exists: ${fs.existsSync(departmentDir)}`);
-      console.log(`Template file exists: ${fs.existsSync(templatePath)}`);
-      
-      // Log department directory contents if it exists
-      if (fs.existsSync(departmentDir)) {
-        try {
-          const deptContents = fs.readdirSync(departmentDir);
-          console.log(`Department ${department.toLowerCase()} directory contents:`, deptContents);
-        } catch (error) {
-          console.error(`Failed to read department directory ${departmentDir}:`, error);
+      if (this.isDebugEnabled()) {
+        console.log(`Template path: ${templatePath}`);
+        console.log(`Department directory exists: ${fs.existsSync(departmentDir)}`);
+        console.log(`Template file exists: ${fs.existsSync(templatePath)}`);
+        
+        // Log department directory contents if it exists
+        if (fs.existsSync(departmentDir)) {
+          try {
+            const deptContents = fs.readdirSync(departmentDir);
+            console.log(`Department ${department.toLowerCase()} directory contents:`, deptContents);
+          } catch (error) {
+            console.error(`Failed to read department directory ${departmentDir}:`, error);
+          }
         }
       }
       
       // Check if file exists
       if (!fs.existsSync(templatePath)) {
-        console.error(`Template file not found at: ${templatePath}`);
+        const errorMsg = `Template file not found: ${templateId}`;
+        if (this.isDebugEnabled()) {
+          console.error(`${errorMsg} at path: ${templatePath}`);
+        }
         const suggestions = await this.getSuggestedTemplates(templateId);
-        console.log(`Suggestions for ${templateId}:`, suggestions);
+        if (this.isDebugEnabled()) {
+          console.log(`Suggestions for ${templateId}:`, suggestions);
+        }
         return {
           template: null,
-          error: `Template file not found: ${templateId} at path: ${templatePath}`,
+          error: errorMsg,
           suggestions
         };
       }
 
       // Load and parse template
-      console.log(`Reading template file from: ${templatePath}`);
+      if (this.isDebugEnabled()) {
+        console.log(`Reading template file from: ${templatePath}`);
+      }
       const templateData = await fs.promises.readFile(templatePath, 'utf-8');
-      console.log(`Template file read successfully, size: ${templateData.length} bytes`);
+      if (this.isDebugEnabled()) {
+        console.log(`Template file read successfully, size: ${templateData.length} bytes`);
+      }
       
       const parsedTemplate = JSON.parse(templateData);
-      console.log(`Template JSON parsed successfully for: ${templateId}`);
-      console.log(`Template structure:`, {
-        id: parsedTemplate.id,
-        name: parsedTemplate.name,
-        department: parsedTemplate.department,
-        workflowType: parsedTemplate.workflowType,
-        version: parsedTemplate.version,
-        stepsCount: parsedTemplate.steps?.length || 0
-      });
+      if (this.isDebugEnabled()) {
+        console.log(`Template JSON parsed successfully for: ${templateId}`);
+        console.log(`Template structure:`, {
+          id: parsedTemplate.id,
+          name: parsedTemplate.name,
+          department: parsedTemplate.department,
+          workflowType: parsedTemplate.workflowType,
+          version: parsedTemplate.version,
+          stepsCount: parsedTemplate.steps?.length || 0
+        });
+      }
 
       // Validate template structure
       const validationResult = workTemplateSchema.safeParse(parsedTemplate);
@@ -150,7 +182,9 @@ export class TemplateLoader {
       // Cache and return
       const template = validationResult.data;
       this.templateCache.set(templateId, template);
-      console.log(`Template ${templateId} loaded and cached successfully`);
+      if (this.isDebugEnabled()) {
+        console.log(`Template ${templateId} loaded and cached successfully`);
+      }
       
       return { template };
     } catch (error) {
@@ -210,7 +244,9 @@ export class TemplateLoader {
       if (parsedData?.step && parsedData?.phase === 'day0' && parsedData?.isDay0Task) {
         const specificWorkflowType = this.mapStepToWorkflowType(parsedData.step);
         if (specificWorkflowType && specificWorkflowType !== workflowType) {
-          console.log(`Template selection: Using specific workflow type '${specificWorkflowType}' instead of '${workflowType}' for step '${parsedData.step}'`);
+          if (this.isDebugEnabled()) {
+            console.log(`Template selection: Using specific workflow type '${specificWorkflowType}' instead of '${workflowType}' for step '${parsedData.step}'`);
+          }
           const specificResult = await this.getTemplateForWorkflow(specificWorkflowType, department);
           if (specificResult.template) {
             return specificResult;
@@ -222,7 +258,9 @@ export class TemplateLoader {
       if (parsedData?.step) {
         const specificWorkflowType = this.mapStepToWorkflowType(parsedData.step);
         if (specificWorkflowType && specificWorkflowType !== workflowType) {
-          console.log(`Template selection: Using specific workflow type '${specificWorkflowType}' instead of '${workflowType}' for step '${parsedData.step}'`);
+          if (this.isDebugEnabled()) {
+            console.log(`Template selection: Using specific workflow type '${specificWorkflowType}' instead of '${workflowType}' for step '${parsedData.step}'`);
+          }
           const specificResult = await this.getTemplateForWorkflow(specificWorkflowType, department);
           if (specificResult.template) {
             return specificResult;
@@ -266,6 +304,13 @@ export class TemplateLoader {
     };
 
     return stepMappings[step] || null;
+  }
+
+  /**
+   * Check if debug logging is enabled
+   */
+  private isDebugEnabled(): boolean {
+    return process.env.DEBUG_TEMPLATES === 'true' || process.env.NODE_ENV === 'development';
   }
 
   /**
