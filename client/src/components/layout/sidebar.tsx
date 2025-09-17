@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin } from "lucide-react";
+import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
@@ -19,7 +19,8 @@ export function Sidebar() {
     return { name: "Queue Management", href: "/queue-management", icon: Clock };
   };
 
-  const navigation = [
+  // Base navigation items available to all users
+  const baseNavigation = [
     { name: "Home", href: "/", icon: Home },
     { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
     { name: "Analytics Board", href: "/analytics", icon: Activity },
@@ -32,6 +33,15 @@ export function Sidebar() {
     { name: "User Management", href: "/users", icon: Users },
     { name: "Activity Logs", href: "/activity", icon: Activity },
   ];
+
+  // Add superadmin-only navigation items
+  const navigation = user.role === 'superadmin' 
+    ? [
+        ...baseNavigation.slice(0, 3), // Home, Dashboard, Analytics Board
+        { name: "Productivity Dashboard", href: "/productivity", icon: TrendingUp },
+        ...baseNavigation.slice(3) // Rest of the items
+      ]
+    : baseNavigation;
 
   return (
     <div className={cn(

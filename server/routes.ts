@@ -1439,6 +1439,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to fetch queue stats" });
     }
   });
+
+  // Productivity Dashboard API (Superadmin only)
+  app.get("/api/productivity-stats", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Productivity dashboard requires superadmin role." });
+      }
+
+      // Get today's date range
+      const today = new Date();
+      const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const endOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+
+      // Initialize department stats
+      const departmentStats = {
+        ntao: {
+          name: "NTAO",
+          description: "Network Technical Assistance Office",
+          completedToday: 0,
+          avgResponseTime: 0,
+          activeStaff: 0
+        },
+        assets: {
+          name: "Assets Management", 
+          description: "Asset Tracking & Management",
+          completedToday: 0,
+          avgResponseTime: 0,
+          activeStaff: 0
+        },
+        inventory: {
+          name: "Inventory Control",
+          description: "Stock & Supply Management", 
+          completedToday: 0,
+          avgResponseTime: 0,
+          activeStaff: 0
+        },
+        fleet: {
+          name: "Fleet Management",
+          description: "Vehicle Operations & Maintenance",
+          completedToday: 0,
+          avgResponseTime: 0,
+          activeStaff: 0
+        }
+      };
+
+      // Calculate stats for each department
+      for (const module of ['ntao', 'assets', 'inventory', 'fleet'] as QueueModule[]) {
+        let queueItems: any[] = [];
+        
+        try {
+          switch (module) {
+            case 'ntao':
+              queueItems = await storage.getNTAOQueueItems();
+              break;
+            case 'assets':
+              queueItems = await storage.getAssetsQueueItems();
+              break;
+            case 'inventory':
+              queueItems = await storage.getInventoryQueueItems();
+              break;
+            case 'fleet':
+              queueItems = await storage.getFleetQueueItems();
+              break;
+          }
+        } catch (error) {
+          console.error(`Error fetching ${module} queue items:`, error);
+          continue;
+        }
+
+        // Calculate completed today
+        const completedToday = queueItems.filter(item => {
+          if (item.status === 'completed' && item.completedAt) {
+            const completedDate = new Date(item.completedAt);
+            return completedDate >= startOfToday && completedDate < endOfToday;
+          }
+          return false;
+        }).length;
+
+        // Calculate average response time (in hours) for completed items in last 30 days
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const recentCompletedItems = queueItems.filter(item => {
+          if (item.status === 'completed' && item.completedAt && item.createdAt) {
+            const completedDate = new Date(item.completedAt);
+            return completedDate >= thirtyDaysAgo;
+          }
+          return false;
+        });
+
+        let avgResponseTime = 0;
+        if (recentCompletedItems.length > 0) {
+          const totalResponseTime = recentCompletedItems.reduce((sum, item) => {
+            const created = new Date(item.createdAt).getTime();
+            const completed = new Date(item.completedAt).getTime();
+            return sum + (completed - created);
+          }, 0);
+          
+          // Convert from milliseconds to hours and round to 1 decimal place
+          avgResponseTime = Math.round((totalResponseTime / recentCompletedItems.length) / (1000 * 60 * 60) * 10) / 10;
+        }
+
+        // Calculate active staff (users assigned to in_progress items)
+        const inProgressItems = queueItems.filter(item => item.status === 'in_progress');
+        const activeStaffSet = new Set();
+        inProgressItems.forEach(item => {
+          if (item.assignedTo) {
+            activeStaffSet.add(item.assignedTo);
+          }
+        });
+        const activeStaff = activeStaffSet.size;
+
+        // Update department stats
+        departmentStats[module].completedToday = completedToday;
+        departmentStats[module].avgResponseTime = avgResponseTime;
+        departmentStats[module].activeStaff = activeStaff;
+      }
+
+      res.json(departmentStats);
+    } catch (error) {
+      console.error('Error fetching productivity stats:', error);
+      res.status(500).json({ message: "Failed to fetch productivity statistics" });
+    }
+  });
   
   app.patch("/api/queues/:module/:id/assign", requireAuth, async (req: any, res) => {
     try {

@@ -30,6 +30,7 @@ import FleetQueuePage from "@/pages/fleet-queue";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
 import AnalyticsBoard from "@/pages/analytics-board";
+import ProductivityDashboard from "@/pages/productivity-dashboard";
 import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import TaskWorkPage from "@/pages/task-work";
@@ -112,6 +113,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <AnalyticsBoard />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/productivity">
+        <ProtectedRoute>
+          <MainContent>
+            <ProductivityDashboard />
           </MainContent>
         </ProtectedRoute>
       </Route>
