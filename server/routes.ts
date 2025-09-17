@@ -11,6 +11,7 @@ import { createTestUsers } from "./create-test-users";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import DOMPurify from "isomorphic-dompurify";
+import bcrypt from "bcrypt";
 
 // Persistent session store (survives server restarts)
 const SESSIONS_FILE = './sessions.json';
@@ -376,7 +377,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { enterpriseId, password } = req.body;
       const user = await storage.getUserByUsername(enterpriseId);
       
-      if (!user || user.password !== password) {
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      // Use bcrypt to compare the provided password with the hashed password
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
@@ -417,7 +424,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Username already exists" });
       }
 
-      const user = await storage.createUser(userData);
+      // Hash the password before storing
+      const hashedPassword = await bcrypt.hash(userData.password, 10);
+      const userDataWithHashedPassword = {
+        ...userData,
+        password: hashedPassword
+      };
+
+      const user = await storage.createUser(userDataWithHashedPassword);
       
       // Log activity
       await storage.createActivityLog({
