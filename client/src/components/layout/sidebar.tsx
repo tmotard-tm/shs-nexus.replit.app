@@ -14,34 +14,74 @@ export function Sidebar() {
 
   if (!user) return null;
 
-  const getQueueManagementItem = () => {
-    // Everyone now uses the unified queue management dashboard
-    return { name: "Queue Management", href: "/queue-management", icon: Clock };
+  // Role-based navigation system
+  const getNavigationForRole = (userRole: string) => {
+    const baseItems = {
+      home: { name: "Home", href: "/", icon: Home },
+      dashboard: { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
+      analytics: { name: "Analytics Board", href: "/analytics", icon: Activity },
+      productivity: { name: "Productivity Dashboard", href: "/productivity", icon: TrendingUp },
+      queueManagement: { name: "Queue Management", href: "/queue-management", icon: Clock },
+      ntaoQueue: { name: "NTAO Queue", href: "/ntao-queue", icon: Clock },
+      assetsQueue: { name: "Assets Queue", href: "/assets-queue", icon: Clock },
+      inventoryQueue: { name: "Inventory Queue", href: "/inventory-queue", icon: Clock },
+      fleetQueue: { name: "Fleet Queue", href: "/fleet-queue", icon: Clock },
+      storageSpots: { name: "Storage Spots", href: "/storage-spots", icon: MapPin },
+      requests: { name: "Requests", href: "/requests", icon: FileText },
+      approvals: { name: "Approvals", href: "/approvals", icon: CheckCircle },
+      apiManagement: { name: "API Management", href: "/api-management", icon: Settings },
+      snowflake: { name: "Snowflake Config", href: "/snowflake", icon: Database },
+      userManagement: { name: "User Management", href: "/users", icon: Users },
+      activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity },
+    };
+
+    switch (userRole) {
+      case 'assets':
+        return [baseItems.home, baseItems.assetsQueue];
+      
+      case 'fleet':
+        return [baseItems.home, baseItems.fleetQueue];
+      
+      case 'inventory':
+        return [baseItems.home, baseItems.inventoryQueue];
+      
+      case 'ntao':
+        return [baseItems.home, baseItems.ntaoQueue];
+      
+      case 'field':
+        return [baseItems.home]; // Field users only see home page with forms
+      
+      case 'superadmin':
+        return [
+          baseItems.home,
+          baseItems.dashboard,
+          baseItems.analytics,
+          baseItems.productivity, // Standalone productivity dashboard
+          baseItems.queueManagement,
+          baseItems.storageSpots,
+          baseItems.requests,
+          baseItems.approvals,
+          baseItems.apiManagement,
+          baseItems.snowflake,
+          baseItems.userManagement,
+          baseItems.activityLogs,
+        ];
+      
+      default:
+        // Legacy fallback for existing users
+        return [
+          baseItems.home,
+          baseItems.dashboard,
+          baseItems.analytics,
+          baseItems.queueManagement,
+          baseItems.storageSpots,
+          baseItems.requests,
+          baseItems.approvals,
+        ];
+    }
   };
 
-  // Base navigation items available to all users
-  const baseNavigation = [
-    { name: "Home", href: "/", icon: Home },
-    { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
-    { name: "Analytics Board", href: "/analytics", icon: Activity },
-    getQueueManagementItem(),
-    { name: "Storage Spots", href: "/storage-spots", icon: MapPin },
-    { name: "Requests", href: "/requests", icon: FileText },
-    { name: "Approvals", href: "/approvals", icon: CheckCircle },
-    { name: "API Management", href: "/api-management", icon: Settings },
-    { name: "Snowflake Config", href: "/snowflake", icon: Database },
-    { name: "User Management", href: "/users", icon: Users },
-    { name: "Activity Logs", href: "/activity", icon: Activity },
-  ];
-
-  // Add superadmin-only navigation items
-  const navigation = user.role === 'superadmin' 
-    ? [
-        ...baseNavigation.slice(0, 3), // Home, Dashboard, Analytics Board
-        { name: "Productivity Dashboard", href: "/productivity", icon: TrendingUp },
-        ...baseNavigation.slice(3) // Rest of the items
-      ]
-    : baseNavigation;
+  const navigation = getNavigationForRole(user.role);
 
   return (
     <div className={cn(

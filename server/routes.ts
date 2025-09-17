@@ -7,6 +7,7 @@ import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
 import { templateLoader, getTemplateForTask } from "../shared/template-loader";
+import { createTestUsers } from "./create-test-users";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import DOMPurify from "isomorphic-dompurify";
@@ -433,6 +434,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid user data", errors: error.errors });
       }
       res.status(500).json({ message: "Registration failed" });
+    }
+  });
+
+  // Test user creation endpoint (development only)
+  app.post("/api/auth/create-test-users", requireAuth, async (req: any, res) => {
+    try {
+      // Environment check - only allow in non-production environments
+      const nodeEnv = process.env.NODE_ENV || 'development';
+      if (nodeEnv === 'production') {
+        return res.status(404).json({ message: "Not found" });
+      }
+
+      // Authentication and authorization check - require superadmin role
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ 
+          message: "Access denied. Test user creation requires superadmin role and development environment." 
+        });
+      }
+
+      await createTestUsers();
+      
+      // Log the security-sensitive activity
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "test_users_created",
+        entityType: "system",
+        entityId: "test-users",
+        details: `Test users created by ${currentUser.username} in ${nodeEnv} environment`,
+      });
+
+      res.json({ 
+        message: "Test users created successfully",
+        environment: nodeEnv,
+        users: [
+          { username: "assets_user", role: "assets" },
+          { username: "fleet_user", role: "fleet" },
+          { username: "inventory_user", role: "inventory" },
+          { username: "ntao_user", role: "ntao" },
+          { username: "field_user", role: "field" },
+          { username: "superadmin", role: "superadmin" }
+        ]
+      });
+    } catch (error) {
+      console.error("Failed to create test users:", error);
+      res.status(500).json({ message: "Failed to create test users" });
     }
   });
 

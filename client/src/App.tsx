@@ -38,53 +38,21 @@ import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
 import { PublicFormRoute } from "@/components/public-form-route";
+import { RoleProtectedRoute } from "@/components/role-protected-route";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
-  const [, setLocation] = useLocation();
-  const [redirected, setRedirected] = useState(false);
-
-  useEffect(() => {
-    if (!isLoading && !user && !redirected) {
-      const path = window.location.pathname;
-      const search = window.location.search || "";
-      const hash = window.location.hash || "";
-      setRedirected(true);
-      setLocation(`/login?next=${encodeURIComponent(`${path}${search}${hash}`)}`);
-    }
-  }, [isLoading, user, redirected, setLocation]);
-
-  if (isLoading) {
-    return (
+  return (
+    <RoleProtectedRoute>
       <>
         <div className="dev-banner">
           🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
         </div>
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading...</p>
-          </div>
+        <div className="min-h-screen bg-background flex">
+          <Sidebar />
+          {children}
         </div>
       </>
-    );
-  }
-
-  if (!user) {
-    // Return null during redirect
-    return null;
-  }
-
-  return (
-    <>
-      <div className="dev-banner">
-        🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
-      </div>
-      <div className="min-h-screen bg-background flex">
-        <Sidebar />
-        {children}
-      </div>
-    </>
+    </RoleProtectedRoute>
   );
 }
 
