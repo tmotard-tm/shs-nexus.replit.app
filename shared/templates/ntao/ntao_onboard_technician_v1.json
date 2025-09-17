@@ -8,35 +8,30 @@
   "requiredRole": "agent",
   "steps": [
     {
-      "id": "systems_verification",
-      "title": "Design ideal truck stock",
-      "description": "verify the correct truck assortment is applied to this truck",
+      "id": "stop_original_shipment",
+      "title": "Stop shipment to original van",
+      "description": "Stop shipment to original van",
+      "required": true,
+      "category": "system_action"
+    },
+    {
+      "id": "cancel_back_orders",
+      "title": "Cancel all back order parts",
+      "description": "Cancel all back order parts",
+      "required": true,
+      "category": "system_action"
+    },
+    {
+      "id": "verify_vehicle_details",
+      "title": "Verify vehicle details to identify the ideal truck stock",
+      "description": "Verify vehicle details to identify the ideal truck stock",
       "required": true,
       "category": "verification"
     },
     {
-      "id": "release_verification", 
-      "title": "Verify if the tech signed the release to ship parts to their home",
-      "description": "Confirm signed authorization for parts shipment to technician's home address",
-      "required": true,
-      "category": "verification",
-      "conditionalLogic": {
-        "dependsOn": "tech_fssl_status",
-        "condition": "not_equals",
-        "value": "fssl_flagged"
-      }
-    },
-    {
-      "id": "parts_verification",
-      "title": "Verify parts to ship",
-      "description": "Review and confirm the complete parts list for the new technician",
-      "required": true,
-      "category": "verification"
-    },
-    {
-      "id": "parts_shipment",
-      "title": "Ship part stock to new hire",
-      "description": "Process and ship approved parts inventory to technician's address",
+      "id": "start_new_shipment",
+      "title": "Start shipment of new truck stock to new byov",
+      "description": "Start shipment of new truck stock to new byov",
       "required": true,
       "category": "system_action"
     }

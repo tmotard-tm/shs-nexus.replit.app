@@ -38,7 +38,7 @@
     },
     "onboarding_day0": {
       "FLEET": ["fleet_onboarding_day0_v1"],
-      "INVENTORY": [],
+      "INVENTORY": ["inventory_onboarding_day0_v1"],
       "ASSETS": ["assets_onboarding_day0_v1"],
       "NTAO": []
     },

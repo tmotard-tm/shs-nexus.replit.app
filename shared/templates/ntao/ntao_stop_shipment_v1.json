@@ -5,7 +5,7 @@
   "workflowType": "stop_shipment",
   "version": "1.0",
   "description": "Stop all parts shipments to previous vehicle",
-  "estimatedDuration": 15,
+  "estimatedDuration": 10,
   "difficulty": "easy",
   "requiredRole": "field",
   "steps": [
@@ -33,28 +33,6 @@
           "id": "update_shipping_system",
           "title": "Update shipping system status",
           "description": "Mark old vehicle as inactive for shipping purposes",
-          "required": true
-        }
-      ]
-    },
-    {
-      "id": "notify_warehouse",
-      "title": "Notify Warehouse Operations",
-      "description": "Inform warehouse teams of shipment changes",
-      "required": true,
-      "estimatedTime": 5,
-      "category": "communication",
-      "substeps": [
-        {
-          "id": "send_warehouse_notification",
-          "title": "Send notification to warehouse team",
-          "description": "Alert warehouse of vehicle transition and shipment halt",
-          "required": true
-        },
-        {
-          "id": "update_picking_instructions",
-          "title": "Update picking and packing instructions",
-          "description": "Ensure warehouse stops preparing shipments for old vehicle",
           "required": true
         }
       ]
