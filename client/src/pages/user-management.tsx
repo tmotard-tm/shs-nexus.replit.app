@@ -402,7 +402,7 @@ export default function UserManagement() {
           <CardDescription>Users by department assignment</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">NTAO</CardTitle>
@@ -443,26 +443,6 @@ export default function UserManagement() {
                 <p className="text-xs text-muted-foreground">team members</p>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Decommissions</CardTitle>
-                <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-600" data-testid="stat-decommissions-users">{departmentStats.decommissions}</div>
-                <p className="text-xs text-muted-foreground">team members</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">No Dept</CardTitle>
-                <div className="w-3 h-3 bg-gray-500 rounded-full"></div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-gray-600" data-testid="stat-no-dept-users">{departmentStats.noDepartment}</div>
-                <p className="text-xs text-muted-foreground">unassigned</p>
-              </CardContent>
-            </Card>
           </div>
         </CardContent>
       </Card>
@@ -486,8 +466,6 @@ export default function UserManagement() {
                   <SelectItem value="Assets Management">Assets Management</SelectItem>
                   <SelectItem value="Inventory Control">Inventory Control</SelectItem>
                   <SelectItem value="Fleet Management">Fleet Management</SelectItem>
-                  <SelectItem value="Decommissions">Decommissions</SelectItem>
-                  <SelectItem value="no-department">No Department</SelectItem>
                 </SelectContent>
               </Select>
             </div>
