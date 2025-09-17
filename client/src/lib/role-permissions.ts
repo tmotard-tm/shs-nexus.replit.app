@@ -8,18 +8,22 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
   assets: [
     '/',
     '/assets-queue',
+    '/change-password', // All users can change their password
   ],
   fleet: [
     '/',
     '/fleet-queue',
+    '/change-password', // All users can change their password
   ],
   inventory: [
     '/',
     '/inventory-queue',
+    '/change-password', // All users can change their password
   ],
   ntao: [
     '/',
     '/ntao-queue',
+    '/change-password', // All users can change their password
   ],
   field: [
     '/',
@@ -29,6 +33,7 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/forms/onboarding',
     '/forms/offboarding',
     '/forms/byov-enrollment',
+    '/change-password', // All users can change their password
   ],
   superadmin: [
     '*', // Superadmin can access everything
