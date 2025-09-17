@@ -64,8 +64,9 @@ export function PickUpRequestDialog({
         return user.department === department;
       }
 
-      // Include agents and admins by default
-      return user.role === "agent" || user.role === "admin";
+      // Include all department-based roles by default
+      const validRoles = ["assets", "fleet", "inventory", "ntao", "superadmin", "field"];
+      return validRoles.includes(user.role);
     });
     
     // Always ensure the current user is included first, even if they don't match filters
