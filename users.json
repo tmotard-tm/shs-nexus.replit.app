@@ -15,248 +15,193 @@
     "createdAt": "2025-09-17T20:12:28.012Z"
   },
   {
-    "id": "9f96d3b2-311d-4910-a6d8-2c047549927a",
-    "username": "ENT1234",
-    "email": "requester@sears.com",
-    "password": "$2b$10$8E7Hp7f/bF4820IBx1bSEOHIH8szEO9u32ISU4g8FZI2E/OHFfOS.",
-    "role": "requester",
-    "department": "NTAO",
-    "departmentAccess": [
-      "NTAO"
-    ],
-    "createdAt": "2025-09-17T20:12:28.077Z"
-  },
-  {
-    "id": "9d94fd3c-5ec7-444b-b1af-9ae330160fb7",
-    "username": "ENT1235",
-    "email": "approver@sears.com",
-    "password": "$2b$10$tb3pa9B7kmRYwNmoswNv5.DtOrQLUEQ7eEc2iDlhPPzFyl/Zbi7Rq",
-    "role": "approver",
+    "id": "user-001",
+    "username": "cdomin",
+    "email": "claudia.dominguez@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
     "department": "Assets Management",
-    "departmentAccess": [
-      "ASSETS",
-      "FLEET"
-    ],
-    "createdAt": "2025-09-17T20:12:28.134Z"
+    "departmentAccess": ["ASSETS"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
-    "id": "6577cc9e-6cdd-4a02-bd63-4196ce5adb3f",
-    "username": "ADMIN123",
-    "email": "admin@sears.com",
-    "password": "$2b$10$OTvCP7KCdKeSzIdZuQYFSOPSQhCEmazMTsLRp0r81HxUlDj4K/Mw.",
+    "id": "user-002",
+    "username": "mjenki1",
+    "email": "Monica.Jenkins@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
+    "department": "Assets Management",
+    "departmentAccess": ["ASSETS"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-003",
+    "username": "ccoll16",
+    "email": "carol.collins@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
+    "department": "Fleet Management",
+    "departmentAccess": ["FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-004",
+    "username": "cgroce",
+    "email": "cheryl.groce@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
+    "department": "Fleet Management",
+    "departmentAccess": ["FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-005",
+    "username": "rdelgal",
+    "email": "Robert.Delgaldo@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
+    "department": "Fleet Management",
+    "departmentAccess": ["FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-006",
+    "username": "handers",
+    "email": "Howard.Anderson@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
+    "department": "Fleet Management",
+    "departmentAccess": ["FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-007",
+    "username": "acatapa",
+    "email": "andrea.catapano@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
+    "department": "Inventory Control",
+    "departmentAccess": ["INVENTORY"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-008",
+    "username": "tcorene",
+    "email": "tashsa.corenevsky@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
+    "department": "Inventory Control",
+    "departmentAccess": ["INVENTORY"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-009",
+    "username": "gwalsan",
+    "email": "Goutami.Walsang@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
+    "department": "NTAO",
+    "departmentAccess": ["NTAO"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-010",
+    "username": "osantan",
+    "email": "Oscar.Santana@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "agent",
+    "department": "NTAO",
+    "departmentAccess": ["NTAO"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-011",
+    "username": "jdyer2",
+    "email": "jennifer.dyer2@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": [
-      "NTAO",
-      "ASSETS",
-      "INVENTORY",
-      "FLEET"
-    ],
-    "createdAt": "2025-09-17T20:12:28.192Z"
+    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
-    "id": "b7e74f58-b6b6-4eea-91cd-017279f72238",
-    "username": "FIELD001",
-    "email": "field@sears.com",
-    "password": "$2b$10$L/UztFhjoymONJoT7DjOOu7hh3SqzscY5KM9c.s1wS6vcc/s/mqZm",
-    "role": "field",
-    "department": "NTAO",
-    "departmentAccess": [
-      "NTAO"
-    ],
-    "createdAt": "2025-09-17T20:12:28.248Z"
-  },
-  {
-    "id": "9a1f0492-36c8-43bf-847d-5df68a176e42",
-    "username": "AGENT001",
-    "email": "agent@sears.com",
-    "password": "$2b$10$J1VkQdSs/a5w9dfN7TvRB.c.9PY.VoykQy15ONokAMhQMu068AyPW",
-    "role": "agent",
-    "department": "Assets Management",
-    "departmentAccess": [
-      "ASSETS"
-    ],
-    "createdAt": "2025-09-17T20:12:28.305Z"
-  },
-  {
-    "id": "f1b45662-92d3-4a2a-bf99-547b46cf2a05",
-    "username": "INVENTORY001",
-    "email": "inventory@sears.com",
-    "password": "$2b$10$2rwM3VMalDiBNs1mNpHRaONyAlKiQsCo9WBKO9nDQvqsbocOBmdiu",
-    "role": "approver",
-    "department": "Inventory Control",
-    "departmentAccess": [
-      "INVENTORY"
-    ],
-    "createdAt": "2025-09-17T20:12:28.364Z"
-  },
-  {
-    "id": "1ade5c0d-bf2a-4225-b66a-3733a23cee5f",
-    "username": "FLEET001",
-    "email": "fleet@sears.com",
-    "password": "$2b$10$8u4eWcYWyjp4cjVKZhsr3.7aLpaC4Zm4CmQ.nwipABK1hqDYdWJ76",
-    "role": "approver",
-    "department": "Fleet Management",
-    "departmentAccess": [
-      "FLEET"
-    ],
-    "createdAt": "2025-09-17T20:12:28.422Z"
-  },
-  {
-    "id": "2d5bcbc2-12bb-4ab3-9996-8b65cab409c8",
-    "username": "SUPER001",
-    "email": "superadmin@sears.com",
-    "password": "$2b$10$nBEP0/4KZrfuVbFaQEM3fuYCNE0wTKJQRrn2R2a8QxGdqKZNUnqBW",
+    "id": "user-012",
+    "username": "mnels30",
+    "email": "melissa.l.nelson@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": [
-      "NTAO",
-      "ASSETS",
-      "INVENTORY",
-      "FLEET"
-    ],
-    "createdAt": "2025-09-17T20:12:28.481Z"
+    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
-    "id": "0ebff275-d6eb-4afd-959a-56437f4d0cf4",
-    "username": "bob.banfill",
-    "email": "bob.banfill@sears.com",
-    "password": "$2b$10$UBt8bVeCspYbMOHMmn.EhuGzccsO8RHdI0cejR/ZtsKpOtFjdbW3O",
-    "role": "agent",
-    "department": "Assets Management",
-    "departmentAccess": [
-      "ASSETS"
-    ],
-    "createdAt": "2025-09-17T20:12:28.547Z"
-  },
-  {
-    "id": "39e976eb-5363-4d0a-95d4-2a9e2cd4fcd0",
-    "username": "claudia.dominguez",
-    "email": "claudia.dominguez@sears.com",
-    "password": "$2b$10$ZdBofp/ExtTCo6w1aAMm8.xsAwJ0Lm7AzD72yDQky1DBwz0TZGIVy",
-    "role": "agent",
-    "department": "Assets Management",
-    "departmentAccess": [
-      "ASSETS"
-    ],
-    "createdAt": "2025-09-17T20:12:28.609Z"
-  },
-  {
-    "id": "97f6a13a-2bd3-436e-a740-48c70a85c79a",
-    "username": "monica.jenkins",
-    "email": "monica.jenkins@sears.com",
-    "password": "$2b$10$0hM6jxFBI5D/H2Qkyss3oOkKvSic7NCU56HJ3.QdiooLM4BEtQWDa",
-    "role": "agent",
-    "department": "Assets Management",
-    "departmentAccess": [
-      "ASSETS"
-    ],
-    "createdAt": "2025-09-17T20:12:28.668Z"
-  },
-  {
-    "id": "ae7ea7f9-2a86-4276-9205-118204c4330f",
-    "username": "jennifer.dyer",
-    "email": "jennifer.dyer@sears.com",
-    "password": "$2b$10$plHgTUl6ziFRfSkEuMxtKOxrgtSLU9PbW6fkH0YQ42FlnWI1CS4OC",
-    "role": "agent",
-    "department": "Inventory Control",
-    "departmentAccess": [
-      "INVENTORY"
-    ],
-    "createdAt": "2025-09-17T20:12:28.724Z"
-  },
-  {
-    "id": "70202599-efdf-4191-8ef2-7e4e3165237b",
-    "username": "andrea.catapano",
-    "email": "andrea.catapano@sears.com",
-    "password": "$2b$10$upmJMod9qAqBScPs8l8FcOhQKILGGaNDAWA.6jvd9byp1Bn5aibA2",
-    "role": "agent",
-    "department": "Inventory Control",
-    "departmentAccess": [
-      "INVENTORY"
-    ],
-    "createdAt": "2025-09-17T20:12:28.780Z"
-  },
-  {
-    "id": "33a37778-e883-48e7-bb59-fba92cd1fd66",
-    "username": "tashsa.corenevsky",
-    "email": "tashsa.corenevsky@sears.com",
-    "password": "$2b$10$.zR3OR.mBdiPpXhluaYHjugr/CTflRmJMDdlJVTHwoWgbVqF0EiNu",
-    "role": "agent",
-    "department": "Inventory Control",
-    "departmentAccess": [
-      "INVENTORY"
-    ],
-    "createdAt": "2025-09-17T20:12:28.837Z"
-  },
-  {
-    "id": "93a5d67d-19a6-4018-8a32-3217d3e65df1",
-    "username": "cheryl.groce",
-    "email": "cheryl.groce@sears.com",
-    "password": "$2b$10$GQitGht6wvzQAZ0HJ0ecIef4q5Y0Kci4VsdwvII4xAtRN.xx2WkfK",
-    "role": "agent",
-    "department": "Fleet Management",
-    "departmentAccess": [
-      "FLEET"
-    ],
-    "createdAt": "2025-09-17T20:12:28.895Z"
-  },
-  {
-    "id": "db20360b-0956-437c-bb4f-dbbaf0264651",
-    "username": "robert.delgaldo",
-    "email": "robert.delgaldo@sears.com",
-    "password": "$2b$10$VHaH6m4J/8X4n93z6ipJqucm3EPu5WhS.2sVAUNU8hlGcBwUxP3w2",
-    "role": "agent",
-    "department": "Fleet Management",
-    "departmentAccess": [
-      "FLEET"
-    ],
-    "createdAt": "2025-09-17T20:12:28.953Z"
-  },
-  {
-    "id": "58645a10-8d7c-43c7-8f0d-d9bfe46b0dbe",
-    "username": "carol.collins",
-    "email": "carol.collins@sears.com",
-    "password": "$2b$10$1PFwUSz7xcaozP4HXL81vui8.6mKe.IcbRWl8HKAsuUCCFnFnmYqu",
-    "role": "agent",
-    "department": "Fleet Management",
-    "departmentAccess": [
-      "FLEET"
-    ],
-    "createdAt": "2025-09-17T20:12:29.012Z"
-  },
-  {
-    "id": "9d9f779b-d591-4292-b8e6-96ffee66b49b",
-    "username": "goutami.walsang",
-    "email": "goutami.walsang@sears.com",
-    "password": "$2b$10$P2pNL4r2IeUWrATNQVGTiekYnhmuiK4pzFPJxRmI9eR0rktIiRSRa",
-    "role": "agent",
-    "department": "NTAO",
-    "departmentAccess": [
-      "NTAO"
-    ],
-    "createdAt": "2025-09-17T20:12:29.069Z"
-  },
-  {
-    "id": "7dc05850-9ea8-44b3-b5bc-4cab96ec103d",
-    "username": "oscar.santana",
-    "email": "oscar.santana@sears.com",
-    "password": "$2b$10$AFYAlHZxjUpYpzLPKc/P8.IuVIput2lqA6qIO/NUP4iPv9SihViOu",
-    "role": "agent",
-    "department": "NTAO",
-    "departmentAccess": [
-      "NTAO"
-    ],
-    "createdAt": "2025-09-17T20:12:29.129Z"
-  },
-  {
-    "id": "anonymous",
-    "username": "anonymous",
-    "email": "anonymous@system.com",
-    "password": "no-password",
-    "role": "field",
+    "id": "user-013",
+    "username": "rbanfil",
+    "email": "Robert.Banfill@aefactoryservice.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "superadmin",
     "department": null,
-    "departmentAccess": [],
-    "createdAt": "2025-09-17T20:12:29.129Z"
+    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-014",
+    "username": "swong05",
+    "email": "Stephen.Wong@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "superadmin",
+    "department": null,
+    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-015",
+    "username": "tmotard",
+    "email": "tmotard@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "superadmin",
+    "department": null,
+    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-016",
+    "username": "tmicha",
+    "email": "Timothy.Michael@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "superadmin",
+    "department": null,
+    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-017",
+    "username": "jper103",
+    "email": "javier.perez103@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "superadmin",
+    "department": null,
+    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-018",
+    "username": "jchild2",
+    "email": "John.Childres@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "superadmin",
+    "department": null,
+    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "user-019",
+    "username": "cgonzal",
+    "email": "claram.gonzalez@transformco.com",
+    "password": "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "superadmin",
+    "department": null,
+    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "createdAt": "2025-09-17T20:18:45.000Z"
   }
 ]
