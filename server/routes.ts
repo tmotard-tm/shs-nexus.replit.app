@@ -399,7 +399,10 @@ const upload = multer({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  console.log("=== STARTING ROUTE REGISTRATION ===");
+  
   // Auth routes
+  console.log("Registering auth routes...");
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { enterpriseId, password } = req.body;
@@ -3544,6 +3547,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Debug endpoint for template loading diagnostics (no auth for testing)
+  app.get("/api/debug/templates", async (req, res) => {
+    try {
+      console.log("\n=== DEBUG: Template Loading Diagnostics ===");
+      
+      const diagnostics = {
+        timestamp: new Date().toISOString(),
+        templateLoader: {
+          initialized: !!templateLoader,
+          instance: templateLoader.constructor.name
+        },
+        paths: {},
+        registry: {},
+        sampleTests: [],
+        errors: []
+      };
+
+      // Test path resolution
+      try {
+        const { templateLoader: debugLoader } = await import("../shared/template-loader");
+        
+        // Get a fresh instance for testing
+        const testLoader = new (debugLoader.constructor as any)();
+        
+        // Test registry loading
+        try {
+          console.log("Testing registry loading...");
+          const registry = await testLoader.loadRegistry();
+          diagnostics.registry = {
+            loaded: true,
+            keysCount: Object.keys(registry).length,
+            keys: Object.keys(registry),
+            sampleWorkflows: Object.keys(registry).slice(0, 3)
+          };
+        } catch (error) {
+          diagnostics.registry = {
+            loaded: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          };
+          diagnostics.errors.push(`Registry loading failed: ${error}`);
+        }
+
+        // Test loading a few sample templates
+        const sampleTemplates = [
+          'fleet_onboard_technician_v1',
+          'assets_onboard_technician_v1',
+          'inventory_onboard_technician_v1',
+          'ntao_onboard_technician_v1'
+        ];
+
+        for (const templateId of sampleTemplates) {
+          console.log(`Testing template load: ${templateId}`);
+          try {
+            const result = await testLoader.loadTemplate(templateId);
+            diagnostics.sampleTests.push({
+              templateId,
+              success: !!result.template,
+              error: result.error || null,
+              suggestions: result.suggestions || []
+            });
+          } catch (error) {
+            diagnostics.sampleTests.push({
+              templateId,
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error',
+              suggestions: []
+            });
+          }
+        }
+
+        // Test workflow-based template loading
+        try {
+          console.log("Testing workflow template loading...");
+          const workflowResult = await testLoader.getTemplateForWorkflow('onboarding', 'fleet');
+          diagnostics.workflowTest = {
+            success: !!workflowResult.template,
+            error: workflowResult.error || null,
+            templateId: workflowResult.template?.id || null
+          };
+        } catch (error) {
+          diagnostics.workflowTest = {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+            templateId: null
+          };
+        }
+
+      } catch (importError) {
+        diagnostics.errors.push(`Failed to import template loader: ${importError}`);
+      }
+
+      console.log("=== DEBUG: Diagnostics complete ===\n");
+      console.log("Diagnostics result:", JSON.stringify(diagnostics, null, 2));
+
+      res.json(diagnostics);
+    } catch (error) {
+      console.error("Debug endpoint error:", error);
+      res.status(500).json({ 
+        message: "Debug endpoint failed", 
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
   // Work Template Routes
   app.get("/api/work-templates/:workflowType/:department", requireAuth, async (req, res) => {
     try {
@@ -3723,6 +3830,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to save work progress" });
     }
   });
+
+  console.log("=== ROUTE REGISTRATION COMPLETED ===");
+  console.log("Registered API routes:");
+  app._router.stack
+    .filter((layer: any) => layer.route && layer.route.path && layer.route.path.startsWith('/api'))
+    .forEach((layer: any) => {
+      const methods = Object.keys(layer.route.methods).join(', ').toUpperCase();
+      console.log(`  ${methods} ${layer.route.path}`);
+    });
 
   const httpServer = createServer(app);
   return httpServer;
