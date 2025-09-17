@@ -17,6 +17,7 @@ import {
   type InsertVehicle,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 
 export interface IStorage {
   // Users
@@ -181,7 +182,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "ENT1234",
         email: "requester@sears.com",
-        password: "passwords", // In real app, this would be hashed
+        password: bcrypt.hashSync("passwords", 10),
         role: "requester",
         department: "NTAO",
         departmentAccess: ['NTAO'],
@@ -191,7 +192,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "ENT1235",
         email: "approver@sears.com",
-        password: "passwords", // In real app, this would be hashed
+        password: bcrypt.hashSync("passwords", 10),
         role: "approver",
         department: "Assets Management",
         departmentAccess: ['ASSETS', 'FLEET'],
@@ -201,7 +202,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "ADMIN123",
         email: "admin@sears.com",
-        password: "passwords", // In real app, this would be hashed
+        password: bcrypt.hashSync("passwords", 10),
         role: "superadmin",
         department: null,
         departmentAccess: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
@@ -212,7 +213,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "FIELD001",
         email: "field@sears.com",
-        password: "passwords", // In real app, this would be hashed
+        password: bcrypt.hashSync("passwords", 10),
         role: "field",
         department: "NTAO",
         departmentAccess: ['NTAO'],
@@ -222,7 +223,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "AGENT001",
         email: "agent@sears.com",
-        password: "passwords", // In real app, this would be hashed
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Assets Management",
         departmentAccess: ['ASSETS'],
@@ -232,7 +233,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "INVENTORY001",
         email: "inventory@sears.com",
-        password: "passwords", // In real app, this would be hashed
+        password: bcrypt.hashSync("passwords", 10),
         role: "approver",
         department: "Inventory Control",
         departmentAccess: ['INVENTORY'],
@@ -242,7 +243,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "FLEET001",
         email: "fleet@sears.com",
-        password: "passwords", // In real app, this would be hashed
+        password: bcrypt.hashSync("passwords", 10),
         role: "approver",
         department: "Fleet Management",
         departmentAccess: ['FLEET'],
@@ -252,7 +253,7 @@ export class MemStorage implements IStorage {
         id: "2d5bcbc2-12bb-4ab3-9996-8b65cab409c8", // Fixed UUID for SUPER001 to maintain session consistency
         username: "SUPER001",
         email: "superadmin@sears.com",
-        password: "passwords", // In real app, this would be hashed
+        password: bcrypt.hashSync("passwords", 10),
         role: "superadmin",
         department: null,
         departmentAccess: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
@@ -263,7 +264,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "bob.banfill",
         email: "bob.banfill@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Assets Management",
         departmentAccess: ['ASSETS'],
@@ -273,7 +274,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "claudia.dominguez",
         email: "claudia.dominguez@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Assets Management",
         departmentAccess: ['ASSETS'],
@@ -283,7 +284,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "monica.jenkins",
         email: "monica.jenkins@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Assets Management",
         departmentAccess: ['ASSETS'],
@@ -294,7 +295,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "jennifer.dyer",
         email: "jennifer.dyer@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Inventory Control",
         departmentAccess: ['INVENTORY'],
@@ -304,7 +305,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "andrea.catapano",
         email: "andrea.catapano@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Inventory Control",
         departmentAccess: ['INVENTORY'],
@@ -314,7 +315,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "tashsa.corenevsky",
         email: "tashsa.corenevsky@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Inventory Control",
         departmentAccess: ['INVENTORY'],
@@ -325,7 +326,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "cheryl.groce",
         email: "cheryl.groce@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Fleet Management",
         departmentAccess: ['FLEET'],
@@ -335,7 +336,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "robert.delgaldo",
         email: "robert.delgaldo@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Fleet Management",
         departmentAccess: ['FLEET'],
@@ -345,7 +346,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "carol.collins",
         email: "carol.collins@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "Fleet Management",
         departmentAccess: ['FLEET'],
@@ -356,7 +357,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "goutami.walsang",
         email: "goutami.walsang@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "NTAO",
         departmentAccess: ['NTAO'],
@@ -366,7 +367,7 @@ export class MemStorage implements IStorage {
         id: randomUUID(),
         username: "oscar.santana",
         email: "oscar.santana@sears.com",
-        password: "passwords",
+        password: bcrypt.hashSync("passwords", 10),
         role: "agent",
         department: "NTAO",
         departmentAccess: ['NTAO'],

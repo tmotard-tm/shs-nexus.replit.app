@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { existsSync, readFileSync, writeFileSync } from 'fs';
+import crypto from 'crypto';
 import { storage } from "./storage";
 import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema } from "@shared/schema";
 import { z } from "zod";
@@ -60,6 +61,27 @@ const humanVerificationSessions = new Map<string, { verified: boolean; expiresAt
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 5 * 60 * 1000; // 5 minutes
 const RATE_LIMIT_MAX_REQUESTS = 50; // Increased to 50 requests per window for testing
+
+// Login rate limiter with NIST-recommended settings
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 5, // 5 login attempts per window per IP
+  message: {
+    message: "Too many login attempts. Please try again in 15 minutes.",
+    retryAfter: 15 * 60 // 15 minutes in seconds
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  // Progressive delay on repeated failures
+  skipSuccessfulRequests: true, // Don't count successful requests
+  skipFailedRequests: false, // Count failed requests
+  handler: (req, res) => {
+    res.status(429).json({
+      message: "Too many login attempts. Please try again in 15 minutes.",
+      retryAfter: Math.ceil(15 * 60) // 15 minutes in seconds
+    });
+  }
+});
 
 // Input sanitization function
 function sanitizeInput(obj: any): any {
@@ -372,7 +394,7 @@ const upload = multer({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth routes
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
     try {
       const { enterpriseId, password } = req.body;
       const user = await storage.getUserByUsername(enterpriseId);
@@ -388,7 +410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create session with longer timeout for better UX
-      const sessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const sessionId = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
       
       sessions.set(sessionId, {
@@ -403,7 +425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Set httpOnly cookie
       res.cookie('sessionId', sessionId, {
         httpOnly: true,
-        secure: false, // Set to true in production with HTTPS
+        secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         expires: expiresAt
       });
@@ -512,7 +534,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Rate limiting is sufficient protection against bots
       
       // Create verification session
-      const verificationId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const verificationId = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
       
       humanVerificationSessions.set(verificationId, {
@@ -524,7 +546,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Set httpOnly cookie for verification
       res.cookie('humanVerified', verificationId, {
         httpOnly: true,
-        secure: false, // Set to true in production with HTTPS
+        secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         expires: expiresAt,
         path: '/' // Available to all paths including /forms and /api/forms
@@ -2705,7 +2727,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create workflow ID to link related tasks
-      const workflowId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const workflowId = crypto.randomBytes(16).toString('hex');
       const taskIds: string[] = [];
       const createdTasks: Array<{id: string, department: string, type: string}> = [];
 
