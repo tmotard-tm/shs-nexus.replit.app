@@ -153,5 +153,25 @@
     "userId": "user-019",
     "username": "CGONZAL",
     "expiresAt": "2025-09-24T20:26:51.658Z"
+  },
+  "9c6d517afd3d1e3a0dc818d5e85c4f8ddf4e88cd90d2e79a3442aef7dff88ace": {
+    "userId": "user-019",
+    "username": "CGONZAL",
+    "expiresAt": "2025-09-24T20:31:50.258Z"
+  },
+  "af5d43faa090d584a86e2cb397316c31ea03e669f3aad0cd8dab8fac230e09e4": {
+    "userId": "user-019",
+    "username": "CGONZAL",
+    "expiresAt": "2025-09-24T20:31:59.922Z"
+  },
+  "2127b7137f56d63a69f2e01c35d736077e8b188db874bf81f12c82e5a2497210": {
+    "userId": "user-001",
+    "username": "cdomin",
+    "expiresAt": "2025-09-24T20:32:18.956Z"
+  },
+  "b4011f72a305e897df6fa6ea62bac0cd009e1d9917d33e294515f91b0970b7ce": {
+    "userId": "user-001",
+    "username": "cdomin",
+    "expiresAt": "2025-09-24T20:32:19.139Z"
   }
 }

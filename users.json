@@ -21,7 +21,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "Assets Management",
-    "departmentAccess": ["ASSETS"],
+    "departmentAccess": [
+      "ASSETS"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -31,7 +33,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "Assets Management",
-    "departmentAccess": ["ASSETS"],
+    "departmentAccess": [
+      "ASSETS"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -41,7 +45,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "Fleet Management",
-    "departmentAccess": ["FLEET"],
+    "departmentAccess": [
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -51,7 +57,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "Fleet Management",
-    "departmentAccess": ["FLEET"],
+    "departmentAccess": [
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -61,7 +69,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "Fleet Management",
-    "departmentAccess": ["FLEET"],
+    "departmentAccess": [
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -71,7 +81,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "Fleet Management",
-    "departmentAccess": ["FLEET"],
+    "departmentAccess": [
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -81,7 +93,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "Inventory Control",
-    "departmentAccess": ["INVENTORY"],
+    "departmentAccess": [
+      "INVENTORY"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -91,7 +105,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "Inventory Control",
-    "departmentAccess": ["INVENTORY"],
+    "departmentAccess": [
+      "INVENTORY"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -101,7 +117,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "NTAO",
-    "departmentAccess": ["NTAO"],
+    "departmentAccess": [
+      "NTAO"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -111,7 +129,9 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "agent",
     "department": "NTAO",
-    "departmentAccess": ["NTAO"],
+    "departmentAccess": [
+      "NTAO"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -121,7 +141,12 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -131,7 +156,12 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -141,7 +171,12 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -151,7 +186,12 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -161,7 +201,12 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -171,7 +216,12 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -181,7 +231,12 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -191,7 +246,12 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
   },
   {
@@ -201,7 +261,185 @@
     "password": "$2b$10$vwY0aR74gZ3uZtGB70udoew.Kx4bDHVKMB/1aa8weMu8gz6gFNno.",
     "role": "superadmin",
     "department": null,
-    "departmentAccess": ["NTAO", "ASSETS", "INVENTORY", "FLEET"],
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
     "createdAt": "2025-09-17T20:18:45.000Z"
+  },
+  {
+    "id": "6f798fca-a767-4585-80ca-3d81643ff491",
+    "username": "ENT1234",
+    "email": "requester@sears.com",
+    "password": "$2b$10$XTIf9LYXsMoKNH6/EZs/be.5O0KtgBwHjUZCHAbUCzr7uHf/tVoxy",
+    "role": "requester",
+    "department": "NTAO",
+    "departmentAccess": [
+      "NTAO"
+    ],
+    "createdAt": "2025-09-17T20:31:21.770Z"
+  },
+  {
+    "id": "da6259b6-b515-490b-9f0d-3b80ea9a2e82",
+    "username": "ENT1235",
+    "email": "approver@sears.com",
+    "password": "$2b$10$F8RBMN.mV0oZE6FwnbgSmesxRAv1NKKhW.dTmSchWwocL92Q.tC0e",
+    "role": "approver",
+    "department": "Assets Management",
+    "departmentAccess": [
+      "ASSETS",
+      "FLEET"
+    ],
+    "createdAt": "2025-09-17T20:31:21.832Z"
+  },
+  {
+    "id": "48761d5b-d5ce-43ab-9363-8d125d415292",
+    "username": "ADMIN123",
+    "email": "admin@sears.com",
+    "password": "$2b$10$lm.syJhjpRFr2Q.Sdq0s7OB119/tNRkxD8FXmUETuBJsXEFbWpC8G",
+    "role": "superadmin",
+    "department": null,
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
+    "createdAt": "2025-09-17T20:31:21.895Z"
+  },
+  {
+    "id": "cc4b1ecb-e233-4ce0-b758-e6c020fec546",
+    "username": "FIELD001",
+    "email": "field@sears.com",
+    "password": "$2b$10$OuCiVirbF2Aur7tCEsOUJuG2cBMk.tEmHruLqqN1npIOiKO44wfJy",
+    "role": "field",
+    "department": "NTAO",
+    "departmentAccess": [
+      "NTAO"
+    ],
+    "createdAt": "2025-09-17T20:31:21.959Z"
+  },
+  {
+    "id": "a5714c18-ad32-4aea-9c9b-eefe8b7a839f",
+    "username": "AGENT001",
+    "email": "agent@sears.com",
+    "password": "$2b$10$.TMvMB9eMBWuxZxyKToLQuhc6VUsC3RfXpnjbqd6mwb9xaCU5uiFm",
+    "role": "agent",
+    "department": "Assets Management",
+    "departmentAccess": [
+      "ASSETS"
+    ],
+    "createdAt": "2025-09-17T20:31:22.016Z"
+  },
+  {
+    "id": "53a885ee-0d0a-47c6-afcb-506d9a7d6119",
+    "username": "INVENTORY001",
+    "email": "inventory@sears.com",
+    "password": "$2b$10$Gb40Zfe8h6wb3WD/EaJBi.APgy7sEAI0S9eWyHHnAWCPWlbeM30Ha",
+    "role": "approver",
+    "department": "Inventory Control",
+    "departmentAccess": [
+      "INVENTORY"
+    ],
+    "createdAt": "2025-09-17T20:31:22.073Z"
+  },
+  {
+    "id": "550d3268-96a6-4d76-a266-a1d750cb4f56",
+    "username": "FLEET001",
+    "email": "fleet@sears.com",
+    "password": "$2b$10$gS.RbImiTqERSCEwhANw/OAyhv/zBKpS4nNDbame496zgKxas4qbe",
+    "role": "approver",
+    "department": "Fleet Management",
+    "departmentAccess": [
+      "FLEET"
+    ],
+    "createdAt": "2025-09-17T20:31:22.133Z"
+  },
+  {
+    "id": "2d5bcbc2-12bb-4ab3-9996-8b65cab409c8",
+    "username": "SUPER001",
+    "email": "superadmin@sears.com",
+    "password": "$2b$10$Iz7qMd4ETqTQhzmmh00DoesyHE/H6lV8wlQ6l8dTPVWwBEXbOBRnq",
+    "role": "superadmin",
+    "department": null,
+    "departmentAccess": [
+      "NTAO",
+      "ASSETS",
+      "INVENTORY",
+      "FLEET"
+    ],
+    "createdAt": "2025-09-17T20:31:22.190Z"
+  },
+  {
+    "id": "eed5432f-392a-49c8-9ff3-9b8a20251e9f",
+    "username": "monica.jenkins",
+    "email": "monica.jenkins@sears.com",
+    "password": "$2b$10$Mlap1iszwc1TkyfpLRJjWOuRvbyvzUGHXl9bJdBU9ZgI1UDJm/hYi",
+    "role": "agent",
+    "department": "Assets Management",
+    "departmentAccess": [
+      "ASSETS"
+    ],
+    "createdAt": "2025-09-17T20:31:22.359Z"
+  },
+  {
+    "id": "fa812f86-e928-42dd-81c8-7455ba203f99",
+    "username": "jennifer.dyer",
+    "email": "jennifer.dyer@sears.com",
+    "password": "$2b$10$loyVdu4TeUO2IlEH/iecmeDf3yyuPTgudeqhaHVXMxwTpOA1cD5QW",
+    "role": "agent",
+    "department": "Inventory Control",
+    "departmentAccess": [
+      "INVENTORY"
+    ],
+    "createdAt": "2025-09-17T20:31:22.417Z"
+  },
+  {
+    "id": "9caae051-edba-4a2f-989d-31a3b5380605",
+    "username": "andrea.catapano",
+    "email": "andrea.catapano@sears.com",
+    "password": "$2b$10$RZ.SkMkMMhVpdNE32X3mVe4OdUCbHlKNmF.GPuubq798/XCNr02gO",
+    "role": "agent",
+    "department": "Inventory Control",
+    "departmentAccess": [
+      "INVENTORY"
+    ],
+    "createdAt": "2025-09-17T20:31:22.477Z"
+  },
+  {
+    "id": "4e176deb-5a73-452d-b04a-024ccd0853f2",
+    "username": "tashsa.corenevsky",
+    "email": "tashsa.corenevsky@sears.com",
+    "password": "$2b$10$cCGxziYAeBDvpvAa3aTDwu5WOLOmqxPycaQx02ZGUNvy8oZW3Yn/2",
+    "role": "agent",
+    "department": "Inventory Control",
+    "departmentAccess": [
+      "INVENTORY"
+    ],
+    "createdAt": "2025-09-17T20:31:22.535Z"
+  },
+  {
+    "id": "a3af0ed1-ecfd-427a-ae7f-7f0c63e58686",
+    "username": "cheryl.groce",
+    "email": "cheryl.groce@sears.com",
+    "password": "$2b$10$SlXbmI2fBwHu/ZlrADolAOoqUWB3cxg3UeiQTmclE9qcE/oKI7RQe",
+    "role": "agent",
+    "department": "Fleet Management",
+    "departmentAccess": [
+      "FLEET"
+    ],
+    "createdAt": "2025-09-17T20:31:22.613Z"
+  },
+  {
+    "id": "anonymous",
+    "username": "anonymous",
+    "email": "anonymous@system.com",
+    "password": "no-password",
+    "role": "field",
+    "department": null,
+    "departmentAccess": [],
+    "createdAt": "2025-09-17T20:31:22.849Z"
   }
 ]
