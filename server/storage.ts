@@ -177,6 +177,17 @@ export class MemStorage implements IStorage {
   private async initializeDefaultData() {
     // Create Enterprise ID users with new role system
     const enterpriseUsers: User[] = [
+      // EMERGENCY LOGIN - Use this account if other users can't login due to password requirements
+      {
+        id: "emergency-admin-2025-id",
+        username: "emergency-admin",
+        email: "emergency@sears.com",
+        password: bcrypt.hashSync("emergency-admin-2025-login!", 10),
+        role: "superadmin",
+        department: null,
+        departmentAccess: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
+        createdAt: new Date(),
+      },
       // Demo users matching login page credentials
       {
         id: randomUUID(),

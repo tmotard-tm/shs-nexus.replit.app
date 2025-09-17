@@ -29,6 +29,7 @@ import InventoryQueuePage from "@/pages/inventory-queue";
 import FleetQueuePage from "@/pages/fleet-queue";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
+import ChangePassword from "@/pages/change-password";
 import AnalyticsBoard from "@/pages/analytics-board";
 import ProductivityDashboard from "@/pages/productivity-dashboard";
 import StorageSpots from "@/pages/storage-spots";
@@ -311,6 +312,14 @@ function Router() {
       <Route path="/analytics-board">
         <ProtectedRoute>
           <AnalyticsBoard />
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/change-password">
+        <ProtectedRoute>
+          <MainContent>
+            <ChangePassword />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       

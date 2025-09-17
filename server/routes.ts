@@ -63,6 +63,9 @@ const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 5 * 60 * 1000; // 5 minutes
 const RATE_LIMIT_MAX_REQUESTS = 50; // Increased to 50 requests per window for testing
 
+// Password reset token store (in production, this would be in database)
+const passwordResetStore = new Map<string, { userId: string; token: string; expiresAt: Date }>();
+
 // Login rate limiter with NIST-recommended settings
 const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -733,6 +736,318 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "User deleted successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete user" });
+    }
+  });
+
+  // Admin Password Reset - Super admins can reset any user's password
+  app.post("/api/users/:id/reset-password", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Password reset requires superadmin role." });
+      }
+      
+      const { id } = req.params;
+      const { temporaryPassword } = req.body;
+      
+      // Validate temporary password meets requirements
+      if (!temporaryPassword || !validatePasswordRequirements(temporaryPassword)) {
+        return res.status(400).json({ 
+          message: "Temporary password must be at least 8 characters long." 
+        });
+      }
+      
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Screen password for known breaches
+      const screeningResult = await checkPasswordCompromised(temporaryPassword);
+      if (screeningResult.isCompromised) {
+        return res.status(400).json({ 
+          message: "This password has been found in data breaches and cannot be used. Please choose a different password." 
+        });
+      }
+
+      // Hash the new password
+      const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+      
+      // Update user's password
+      const updatedUser = await storage.updateUser(id, { password: hashedPassword });
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to update password" });
+      }
+
+      // Log security action
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "password_reset_admin",
+        entityType: "user",
+        entityId: id,
+        details: `Admin ${currentUser.username} reset password for user ${targetUser.username}`,
+      });
+
+      res.json({ message: "Password reset successfully", username: targetUser.username });
+    } catch (error) {
+      console.error("Admin password reset error:", error);
+      res.status(500).json({ message: "Failed to reset password" });
+    }
+  });
+
+  // User Self-Service Password Change
+  app.post("/api/auth/change-password", requireAuth, async (req: any, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: "Current password and new password are required" });
+      }
+
+      // Validate new password meets requirements
+      if (!validatePasswordRequirements(newPassword)) {
+        return res.status(400).json({ 
+          message: "New password must be at least 8 characters long." 
+        });
+      }
+
+      const user = await storage.getUserByUsername(req.user.username);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Verify current password
+      const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+      if (!isCurrentPasswordValid) {
+        return res.status(401).json({ message: "Current password is incorrect" });
+      }
+
+      // Check if new password is the same as current
+      const isSamePassword = await bcrypt.compare(newPassword, user.password);
+      if (isSamePassword) {
+        return res.status(400).json({ message: "New password must be different from current password" });
+      }
+
+      // Screen new password for known breaches
+      const screeningResult = await checkPasswordCompromised(newPassword);
+      if (screeningResult.isCompromised) {
+        return res.status(400).json({ 
+          message: "This password has been found in data breaches and cannot be used. Please choose a different password." 
+        });
+      }
+
+      // Hash the new password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      
+      // Update user's password
+      const updatedUser = await storage.updateUser(user.id, { password: hashedPassword });
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to update password" });
+      }
+
+      // Log security action
+      await storage.createActivityLog({
+        userId: user.id,
+        action: "password_changed_self",
+        entityType: "user",
+        entityId: user.id,
+        details: `User ${user.username} changed their own password`,
+      });
+
+      res.json({ message: "Password changed successfully" });
+    } catch (error) {
+      console.error("Password change error:", error);
+      res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
+  // Admin Role Management - Super admins can update user roles and department access
+  app.post("/api/users/:id/update-role", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Role management requires superadmin role." });
+      }
+      
+      const { id } = req.params;
+      const { role, department, departmentAccess } = req.body;
+      
+      // Validate role if provided
+      const validRoles = ['superadmin', 'agent', 'field', 'approver', 'requester'];
+      if (role && !validRoles.includes(role)) {
+        return res.status(400).json({ message: "Invalid role specified" });
+      }
+
+      // Validate department access if provided
+      const validDepartments = ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'];
+      if (departmentAccess && Array.isArray(departmentAccess)) {
+        for (const dept of departmentAccess) {
+          if (!validDepartments.includes(dept)) {
+            return res.status(400).json({ message: `Invalid department access: ${dept}` });
+          }
+        }
+      }
+
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Prepare updates object
+      const updates: any = {};
+      if (role !== undefined) updates.role = role;
+      if (department !== undefined) updates.department = department;
+      if (departmentAccess !== undefined) updates.departmentAccess = departmentAccess;
+
+      // Update user
+      const updatedUser = await storage.updateUser(id, updates);
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to update user role" });
+      }
+
+      // Log security action
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "user_role_updated",
+        entityType: "user",
+        entityId: id,
+        details: `Admin ${currentUser.username} updated role/access for user ${targetUser.username}. Changes: ${JSON.stringify(updates)}`,
+      });
+
+      res.json({ 
+        message: "User role updated successfully", 
+        user: { ...updatedUser, password: undefined } 
+      });
+    } catch (error) {
+      console.error("Role update error:", error);
+      res.status(500).json({ message: "Failed to update user role" });
+    }
+  });
+
+  // Forgot Password Initiation (generates temporary reset token and sends email)
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { email } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+      }
+
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        // Don't reveal if email exists - security best practice
+        return res.json({ message: "If an account with that email exists, a password reset link has been sent." });
+      }
+
+      // Generate secure reset token
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      // Store reset token (in production, you'd store this in database)
+      passwordResetStore.set(resetToken, {
+        userId: user.id,
+        token: resetToken,
+        expiresAt: resetTokenExpiry
+      });
+
+      // Send password reset email
+      try {
+        await sendEmail({
+          to: email,
+          subject: "Password Reset Request - Sears Operations Portal",
+          html: `
+            <h2>Password Reset Request</h2>
+            <p>Hello ${user.username},</p>
+            <p>You requested a password reset for your Sears Operations Portal account.</p>
+            <p>Your password reset token is: <strong>${resetToken}</strong></p>
+            <p>This token will expire in 1 hour.</p>
+            <p>If you did not request this reset, please ignore this email.</p>
+            <p>Best regards,<br>Sears Operations Portal Team</p>
+          `
+        });
+
+        // Log security action
+        await storage.createActivityLog({
+          userId: user.id,
+          action: "password_reset_requested",
+          entityType: "user",
+          entityId: user.id,
+          details: `Password reset requested for user ${user.username} (${email})`,
+        });
+
+      } catch (emailError) {
+        console.error("Failed to send password reset email:", emailError);
+        return res.status(500).json({ message: "Failed to send password reset email" });
+      }
+
+      res.json({ message: "If an account with that email exists, a password reset link has been sent." });
+    } catch (error) {
+      console.error("Forgot password error:", error);
+      res.status(500).json({ message: "Failed to process password reset request" });
+    }
+  });
+
+  // Password Reset Confirmation (using reset token)
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { resetToken, newPassword } = req.body;
+      
+      if (!resetToken || !newPassword) {
+        return res.status(400).json({ message: "Reset token and new password are required" });
+      }
+
+      // Validate new password meets requirements
+      if (!validatePasswordRequirements(newPassword)) {
+        return res.status(400).json({ 
+          message: "New password must be at least 8 characters long." 
+        });
+      }
+
+      // Check reset token (in production, retrieve from database)
+      const resetData = passwordResetStore.get(resetToken);
+      
+      if (!resetData || resetData.expiresAt < new Date()) {
+        return res.status(400).json({ message: "Invalid or expired reset token" });
+      }
+
+      const user = await storage.getUser(resetData.userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Screen new password for known breaches
+      const screeningResult = await checkPasswordCompromised(newPassword);
+      if (screeningResult.isCompromised) {
+        return res.status(400).json({ 
+          message: "This password has been found in data breaches and cannot be used. Please choose a different password." 
+        });
+      }
+
+      // Hash the new password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      
+      // Update user's password
+      const updatedUser = await storage.updateUser(user.id, { password: hashedPassword });
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to update password" });
+      }
+
+      // Remove used reset token
+      passwordResetStore.delete(resetToken);
+
+      // Log security action
+      await storage.createActivityLog({
+        userId: user.id,
+        action: "password_reset_completed",
+        entityType: "user",
+        entityId: user.id,
+        details: `Password reset completed for user ${user.username}`,
+      });
+
+      res.json({ message: "Password reset successfully" });
+    } catch (error) {
+      console.error("Password reset confirmation error:", error);
+      res.status(500).json({ message: "Failed to reset password" });
     }
   });
 

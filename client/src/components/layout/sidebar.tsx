@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp } from "lucide-react";
+import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp, Key } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
@@ -33,23 +33,24 @@ export function Sidebar() {
       snowflake: { name: "Snowflake Config", href: "/snowflake", icon: Database },
       userManagement: { name: "User Management", href: "/users", icon: Users },
       activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity },
+      changePassword: { name: "Change Password", href: "/change-password", icon: Key },
     };
 
     switch (userRole) {
       case 'assets':
-        return [baseItems.home, baseItems.assetsQueue];
+        return [baseItems.home, baseItems.assetsQueue, baseItems.changePassword];
       
       case 'fleet':
-        return [baseItems.home, baseItems.fleetQueue];
+        return [baseItems.home, baseItems.fleetQueue, baseItems.changePassword];
       
       case 'inventory':
-        return [baseItems.home, baseItems.inventoryQueue];
+        return [baseItems.home, baseItems.inventoryQueue, baseItems.changePassword];
       
       case 'ntao':
-        return [baseItems.home, baseItems.ntaoQueue];
+        return [baseItems.home, baseItems.ntaoQueue, baseItems.changePassword];
       
       case 'field':
-        return [baseItems.home]; // Field users only see home page with forms
+        return [baseItems.home, baseItems.changePassword]; // Field users can change their password
       
       case 'superadmin':
         return [
@@ -65,6 +66,7 @@ export function Sidebar() {
           baseItems.snowflake,
           baseItems.userManagement,
           baseItems.activityLogs,
+          baseItems.changePassword,
         ];
       
       default:

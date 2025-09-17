@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Edit, Trash2, Shield, Users, UserCheck } from "lucide-react";
+import { Plus, Edit, Trash2, Shield, Users, UserCheck, Key, Settings } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createInsertSchema } from "drizzle-zod";
@@ -35,6 +35,7 @@ import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 // Form validation schema
 const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
@@ -52,6 +53,8 @@ type User = typeof users.$inferSelect;
 export default function UserManagement() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [passwordResetUser, setPasswordResetUser] = useState<User | null>(null);
+  const [roleManagementUser, setRoleManagementUser] = useState<User | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("all");
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -123,6 +126,47 @@ export default function UserManagement() {
     },
   });
 
+  // Admin password reset mutation
+  const passwordResetMutation = useMutation({
+    mutationFn: ({ userId, temporaryPassword }: { userId: string; temporaryPassword: string }) =>
+      apiRequest("POST", `/api/users/${userId}/reset-password`, { temporaryPassword }),
+    onSuccess: (data: any) => {
+      setPasswordResetUser(null);
+      toast({
+        title: "Success",
+        description: `Password reset successfully for ${data.username}. User can now log in with the new temporary password.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Admin role management mutation
+  const roleUpdateMutation = useMutation({
+    mutationFn: ({ userId, updates }: { userId: string; updates: { role?: string; department?: string; departmentAccess?: string[] } }) =>
+      apiRequest("POST", `/api/users/${userId}/update-role`, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setRoleManagementUser(null);
+      toast({
+        title: "Success",
+        description: "User role and permissions updated successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Form setup
   const form = useForm<CreateUserFormData>({
     resolver: zodResolver(createUserSchema),
@@ -140,6 +184,24 @@ export default function UserManagement() {
     resolver: zodResolver(insertUserSchema.partial()),
   });
 
+  const passwordResetForm = useForm<{ temporaryPassword: string; confirmPassword: string }>({
+    resolver: zodResolver(z.object({
+      temporaryPassword: z.string().min(8, "Password must be at least 8 characters"),
+      confirmPassword: z.string().min(8, "Password must be at least 8 characters")
+    }).refine(data => data.temporaryPassword === data.confirmPassword, {
+      message: "Passwords don't match",
+      path: ["confirmPassword"],
+    })),
+  });
+
+  const roleManagementForm = useForm<{ role: string; department: string | null; departmentAccess: string[] }>({
+    resolver: zodResolver(z.object({
+      role: z.enum(["superadmin", "agent", "field", "approver", "requester"]),
+      department: z.string().nullable(),
+      departmentAccess: z.array(z.string())
+    })),
+  });
+
   const onSubmit = (data: CreateUserFormData) => {
     const { confirmPassword, ...userData } = data;
     createUserMutation.mutate(userData);
@@ -150,6 +212,22 @@ export default function UserManagement() {
       updateUserMutation.mutate({ id: editingUser.id, ...data });
     }
   };
+
+  const onPasswordResetSubmit = (data: { temporaryPassword: string; confirmPassword: string }) => {
+    if (passwordResetUser) {
+      passwordResetMutation.mutate({ userId: passwordResetUser.id, temporaryPassword: data.temporaryPassword });
+    }
+  };
+
+  const onRoleManagementSubmit = (data: { role: string; department: string | null; departmentAccess: string[] }) => {
+    if (roleManagementUser) {
+      roleUpdateMutation.mutate({ userId: roleManagementUser.id, updates: data });
+    }
+  };
+
+  // Get current user info to check if superadmin
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === 'superadmin';
 
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
@@ -200,6 +278,25 @@ export default function UserManagement() {
     fleet: allUsers.filter((u: User) => u.department === 'Fleet Management').length,
     decommissions: allUsers.filter((u: User) => u.department === 'Decommissions').length,
     noDepartment: allUsers.filter((u: User) => !u.department).length,
+  };
+
+  // Initialize role management form when user is selected
+  const handleRoleManagementOpen = (user: User) => {
+    setRoleManagementUser(user);
+    roleManagementForm.reset({
+      role: user.role as any,
+      department: user.department,
+      departmentAccess: user.departmentAccess || []
+    });
+  };
+
+  // Initialize password reset form when user is selected
+  const handlePasswordResetOpen = (user: User) => {
+    setPasswordResetUser(user);
+    passwordResetForm.reset({
+      temporaryPassword: "",
+      confirmPassword: ""
+    });
   };
 
   return (
@@ -507,11 +604,46 @@ export default function UserManagement() {
                         <span className="text-muted-foreground text-sm">Forms Only</span>
                       )}
                     </TableCell>
+                    <TableCell data-testid={`text-queue-access-${user.id}`}>
+                      {user.departmentAccess && user.departmentAccess.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {user.departmentAccess.map((dept: string) => (
+                            <Badge key={dept} variant="secondary" className="text-xs">
+                              {dept}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">None</span>
+                      )}
+                    </TableCell>
                     <TableCell data-testid={`text-created-${user.id}`}>
                       {new Date(user.createdAt).toLocaleDateString()}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        {isSuperAdmin && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePasswordResetOpen(user)}
+                              data-testid={`button-reset-password-${user.id}`}
+                              title="Reset Password"
+                            >
+                              <Key className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRoleManagementOpen(user)}
+                              data-testid={`button-manage-role-${user.id}`}
+                              title="Manage Role & Access"
+                            >
+                              <Settings className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
@@ -649,6 +781,171 @@ export default function UserManagement() {
               </Button>
               <Button type="submit" disabled={updateUserMutation.isPending} data-testid="button-update-user">
                 {updateUserMutation.isPending ? "Updating..." : "Update User"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Password Reset Dialog */}
+      <Dialog open={!!passwordResetUser} onOpenChange={() => setPasswordResetUser(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Reset User Password</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Reset password for {passwordResetUser?.username}. The user will need to log in with the new temporary password.
+            </p>
+          </DialogHeader>
+          <form onSubmit={passwordResetForm.handleSubmit(onPasswordResetSubmit)} className="space-y-4">
+            <div>
+              <Label htmlFor="temporaryPassword">New Temporary Password</Label>
+              <Input
+                id="temporaryPassword"
+                type="password"
+                data-testid="input-temporary-password"
+                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
+                placeholder="Enter secure temporary password (min 8 characters)"
+                {...passwordResetForm.register("temporaryPassword")}
+              />
+              {passwordResetForm.formState.errors.temporaryPassword && (
+                <p className="text-sm text-red-500">{passwordResetForm.formState.errors.temporaryPassword.message}</p>
+              )}
+            </div>
+            <div>
+              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                data-testid="input-confirm-password"
+                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
+                placeholder="Confirm the temporary password"
+                {...passwordResetForm.register("confirmPassword")}
+              />
+              {passwordResetForm.formState.errors.confirmPassword && (
+                <p className="text-sm text-red-500">{passwordResetForm.formState.errors.confirmPassword.message}</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPasswordResetUser(null)}
+                data-testid="button-cancel-password-reset"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={passwordResetMutation.isPending}
+                data-testid="button-confirm-password-reset"
+              >
+                {passwordResetMutation.isPending ? "Resetting..." : "Reset Password"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Role Management Dialog */}
+      <Dialog open={!!roleManagementUser} onOpenChange={() => setRoleManagementUser(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Manage User Role & Access</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Update role and department access for {roleManagementUser?.username}
+            </p>
+          </DialogHeader>
+          <form onSubmit={roleManagementForm.handleSubmit(onRoleManagementSubmit)} className="space-y-4">
+            <div>
+              <Label htmlFor="role">User Role</Label>
+              <Select 
+                value={roleManagementForm.watch("role")} 
+                onValueChange={(value) => roleManagementForm.setValue("role", value as any)}
+              >
+                <SelectTrigger data-testid="select-manage-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="superadmin">Super Admin</SelectItem>
+                  <SelectItem value="agent">Agent</SelectItem>
+                  <SelectItem value="field">Field User</SelectItem>
+                  <SelectItem value="approver">Approver</SelectItem>
+                  <SelectItem value="requester">Requester</SelectItem>
+                </SelectContent>
+              </Select>
+              {roleManagementForm.formState.errors.role && (
+                <p className="text-sm text-red-500">{roleManagementForm.formState.errors.role.message}</p>
+              )}
+            </div>
+            <div>
+              <Label htmlFor="department">Primary Department</Label>
+              <Select 
+                value={roleManagementForm.watch("department") || "forms-only"} 
+                onValueChange={(value) => roleManagementForm.setValue("department", value === "forms-only" ? null : value)}
+              >
+                <SelectTrigger data-testid="select-manage-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
+                  <SelectValue placeholder="Select primary department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="forms-only">Forms Only</SelectItem>
+                  <SelectItem value="NTAO">NTAO</SelectItem>
+                  <SelectItem value="Assets Management">Assets Management</SelectItem>
+                  <SelectItem value="Inventory Control">Inventory Control</SelectItem>
+                  <SelectItem value="Fleet Management">Fleet Management</SelectItem>
+                  <SelectItem value="Decommissions">Decommissions</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Queue Access Permissions</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Select which queues this user can access and work on
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { code: 'NTAO', label: 'NTAO' },
+                  { code: 'ASSETS', label: 'Assets Management' },
+                  { code: 'INVENTORY', label: 'Inventory Control' },
+                  { code: 'FLEET', label: 'Fleet Management' }
+                ].map(dept => (
+                  <div key={dept.code} className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id={`manage-dept-${dept.code}`}
+                      checked={roleManagementForm.watch("departmentAccess")?.includes(dept.code) || false}
+                      onChange={(e) => {
+                        const currentAccess = roleManagementForm.watch("departmentAccess") || [];
+                        if (e.target.checked) {
+                          roleManagementForm.setValue("departmentAccess", [...currentAccess, dept.code]);
+                        } else {
+                          roleManagementForm.setValue("departmentAccess", currentAccess.filter(d => d !== dept.code));
+                        }
+                      }}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      data-testid={`checkbox-manage-dept-${dept.code.toLowerCase()}`}
+                    />
+                    <Label htmlFor={`manage-dept-${dept.code}`} className="text-sm font-normal">
+                      {dept.label}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRoleManagementUser(null)}
+                data-testid="button-cancel-role-management"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={roleUpdateMutation.isPending}
+                data-testid="button-confirm-role-management"
+              >
+                {roleUpdateMutation.isPending ? "Updating..." : "Update Role & Access"}
               </Button>
             </div>
           </form>
