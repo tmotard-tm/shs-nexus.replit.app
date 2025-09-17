@@ -13,6 +13,7 @@ import multer from "multer";
 import rateLimit from "express-rate-limit";
 import DOMPurify from "isomorphic-dompurify";
 import bcrypt from "bcrypt";
+import { checkPasswordCompromised, validatePasswordRequirements } from "./password-screening";
 
 // Persistent session store (survives server restarts)
 const SESSIONS_FILE = './sessions.json';
@@ -444,6 +445,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existingUser = await storage.getUserByUsername(userData.username);
       if (existingUser) {
         return res.status(400).json({ message: "Username already exists" });
+      }
+
+      // NIST compliance: Screen password for known breaches
+      if (!validatePasswordRequirements(userData.password)) {
+        return res.status(400).json({ 
+          message: "Password does not meet security requirements. Please use a password with at least 8 characters." 
+        });
+      }
+      
+      const screeningResult = await checkPasswordCompromised(userData.password);
+      if (screeningResult.isCompromised) {
+        return res.status(400).json({ 
+          message: "This password has been found in data breaches and cannot be used. Please choose a different password." 
+        });
+      }
+      
+      // Log if screening service had issues (but password was allowed through)
+      if (screeningResult.error) {
+        console.warn('Password screening service issue during registration:', screeningResult.error);
       }
 
       // Hash the password before storing
