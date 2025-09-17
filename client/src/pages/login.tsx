@@ -80,9 +80,9 @@ export default function Login() {
               <Settings className="h-6 w-6 text-primary-foreground" />
             </div>
           </div>
-          <CardTitle className="text-2xl" data-testid="text-login-title">Sears Management Platform</CardTitle>
+          <CardTitle className="text-2xl" data-testid="text-login-title">SearsDrive Line Management</CardTitle>
           <CardDescription data-testid="text-login-description">
-            Sign in to access Sears Operations
+            <em>Where driving is made easy</em>
           </CardDescription>
         </CardHeader>
         <CardContent>
