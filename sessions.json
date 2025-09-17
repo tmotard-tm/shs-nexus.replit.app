@@ -253,5 +253,10 @@
     "userId": "user-004",
     "username": "cgroce",
     "expiresAt": "2025-09-24T21:56:40.380Z"
+  },
+  "268fc0d66cb38228d3067e0ca17bab3d61dff40c7445b18dc401ff89b2efe6fb": {
+    "userId": "user-001",
+    "username": "cdomin",
+    "expiresAt": "2025-09-24T22:26:50.335Z"
   }
 }
