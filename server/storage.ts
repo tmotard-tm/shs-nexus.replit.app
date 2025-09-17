@@ -249,7 +249,7 @@ export class MemStorage implements IStorage {
         createdAt: new Date(),
       },
       {
-        id: randomUUID(),
+        id: "2d5bcbc2-12bb-4ab3-9996-8b65cab409c8", // Fixed UUID for SUPER001 to maintain session consistency
         username: "SUPER001",
         email: "superadmin@sears.com",
         password: "passwords", // In real app, this would be hashed
