@@ -35,7 +35,8 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     queryKey: [`/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`],
     queryFn: async () => {
       const url = `/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`;
-      return await apiRequest("GET", url);
+      const response = await apiRequest("GET", url);
+      return await response.json();
     },
     enabled: !!queueItem?.workflowType && !!(module || queueItem?.department),
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -51,7 +52,8 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     queryKey: [`/api/work-progress/${queueItem?.id}`],
     queryFn: async () => {
       const url = `/api/work-progress/${queueItem?.id}`;
-      return await apiRequest("GET", url);
+      const response = await apiRequest("GET", url);
+      return await response.json();
     },
     enabled: !!queueItem?.id,
   });
