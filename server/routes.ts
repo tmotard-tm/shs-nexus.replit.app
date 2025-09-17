@@ -400,7 +400,7 @@ const upload = multer({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth routes
-  app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
+  app.post("/api/auth/login", async (req, res) => {
     try {
       const { enterpriseId, password } = req.body;
       const user = await storage.getUserByUsername(enterpriseId);
