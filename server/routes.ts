@@ -167,7 +167,7 @@ async function checkByovEnrollmentDuplicates(formData: any): Promise<{ isDuplica
 }
 
 // Duplicate task detection for offboarding workflows
-async function checkOffboardingDuplicates(data: any, department: string): Promise<{ isDuplicate: boolean, message?: string }> {
+async function checkOffboardingDuplicates(data: any, department: string, currentWorkflowId?: string): Promise<{ isDuplicate: boolean, message?: string }> {
   try {
     // Parse data if it's a JSON string
     let parsedData = data;
@@ -175,10 +175,14 @@ async function checkOffboardingDuplicates(data: any, department: string): Promis
       parsedData = JSON.parse(data);
     }
     
-    // Extract employee identifiers
+    // Extract employee identifiers and workflow ID
     const employeeId = parsedData?.employee?.employeeId || parsedData?.employeeId;
     const techRacfId = parsedData?.employee?.racfId || parsedData?.techRacfId || parsedData?.employee?.enterpriseId;
     const workflowType = parsedData?.workflowType;
+    const dataWorkflowId = parsedData?.workflowId;
+    
+    // Use the workflow ID from data or the passed parameter
+    const workflowId = currentWorkflowId || dataWorkflowId;
     
     // Only check for offboarding workflows
     if (!workflowType || workflowType !== 'offboarding_sequence') {
@@ -232,12 +236,20 @@ async function checkOffboardingDuplicates(data: any, department: string): Promis
             if (itemData?.workflowType === 'offboarding_sequence') {
               const itemEmployeeId = itemData?.employee?.employeeId || itemData?.employeeId;
               const itemTechRacfId = itemData?.employee?.racfId || itemData?.techRacfId || itemData?.employee?.enterpriseId;
+              const itemWorkflowId = item.workflowId || itemData?.workflowId;
               
               // Check if employee identifiers match
               const employeeIdMatch = employeeId && itemEmployeeId && employeeId === itemEmployeeId;
               const techRacfIdMatch = techRacfId && itemTechRacfId && techRacfId === itemTechRacfId;
               
               if (employeeIdMatch || techRacfIdMatch) {
+                // If both tasks have the same workflowId, they're part of the same multi-department workflow - allow it
+                if (workflowId && itemWorkflowId && workflowId === itemWorkflowId) {
+                  console.log(`Allowing multi-department task for same workflow ID: ${workflowId}, employee: ${employeeId || techRacfId}, departments: existing ${module.toUpperCase()}, new ${department.toUpperCase()}`);
+                  continue; // Allow this task - it's part of the same workflow
+                }
+                
+                // Different workflow IDs but same employee - this is a duplicate submission
                 return {
                   isDuplicate: true,
                   message: `Duplicate offboarding workflow detected. A recent offboarding task already exists for this employee (${employeeIdMatch ? `Employee ID: ${employeeId}` : `RACF ID: ${techRacfId}`}) in ${module.toUpperCase()} queue. Please wait 5 minutes before creating another offboarding workflow.`
@@ -835,7 +847,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
       
       // Check for duplicate offboarding workflows
-      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'NTAO');
+      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'NTAO', validatedData.workflowId);
       if (duplicateCheck.isDuplicate) {
         return res.status(409).json({ 
           message: duplicateCheck.message || "Duplicate submission detected",
@@ -930,7 +942,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
       
       // Check for duplicate offboarding workflows
-      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'ASSETS');
+      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'ASSETS', validatedData.workflowId);
       if (duplicateCheck.isDuplicate) {
         return res.status(409).json({ 
           message: duplicateCheck.message || "Duplicate submission detected",
@@ -1025,7 +1037,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
       
       // Check for duplicate offboarding workflows
-      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'INVENTORY');
+      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'INVENTORY', validatedData.workflowId);
       if (duplicateCheck.isDuplicate) {
         return res.status(409).json({ 
           message: duplicateCheck.message || "Duplicate submission detected",
@@ -1120,7 +1132,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
       
       // Check for duplicate offboarding workflows
-      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'FLEET');
+      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'FLEET', validatedData.workflowId);
       if (duplicateCheck.isDuplicate) {
         return res.status(409).json({ 
           message: duplicateCheck.message || "Duplicate submission detected",

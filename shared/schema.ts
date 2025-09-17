@@ -202,6 +202,7 @@ export const anonymousQueueItemSchema = z.object({
   priority: z.enum(["low", "medium", "high"]).default("medium"),
   data: z.string().max(10000, "Data must be 10000 characters or less").optional(), // JSON string
   scheduledFor: z.string().datetime().optional(),
+  workflowId: z.string().max(100, "Workflow ID must be 100 characters or less").optional(), // Groups related tasks in a workflow sequence
   // Note: requesterId, department, status, attempts are added by server, not submitted by client
 }).strict(); // .strict() ensures only allowed fields are accepted
 
