@@ -615,17 +615,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // User management routes (restricted to superadmin and admin only)
+  // User management routes (GET users available for all authenticated users for task assignment)
   app.get("/api/users", requireAuth, async (req: any, res) => {
     try {
-      const currentUser = await storage.getUserByUsername(req.user.username);
-      
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Access denied. User management requires superadmin or admin role." });
-      }
-      
       const users = await storage.getUsers();
-      // Remove passwords from response
+      // Remove passwords from response for security
       const safeUsers = users.map(user => ({ ...user, password: undefined }));
       res.json(safeUsers);
     } catch (error) {
