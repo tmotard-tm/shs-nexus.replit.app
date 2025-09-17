@@ -2,12 +2,12 @@ import { User } from "@shared/schema";
 
 // Form access mapping - defines which roles can access which forms (preserved for backward compatibility)
 export const FORM_ACCESS_MAP = {
-  'create-vehicle': ['superadmin', 'agent'], // Vehicle creation requires admin/agent privileges
-  'assign-vehicle': ['superadmin', 'agent'], // Vehicle assignment requires admin/agent privileges
-  'onboarding': ['superadmin', 'agent'], // Employee onboarding requires admin/agent privileges
-  'offboarding': ['superadmin', 'agent'], // Employee offboarding requires admin/agent privileges
-  'byov-enrollment': ['superadmin', 'agent', 'field'], // BYOV enrollment can be done by field workers too
-  'user-management': ['superadmin', 'admin'], // User management restricted to superadmin and admin only
+  'create-vehicle': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao'], // Vehicle creation requires admin or department privileges
+  'assign-vehicle': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao'], // Vehicle assignment requires admin or department privileges
+  'onboarding': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao'], // Employee onboarding requires admin or department privileges
+  'offboarding': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao'], // Employee offboarding requires admin or department privileges
+  'byov-enrollment': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao', 'field'], // BYOV enrollment can be done by department staff and field workers
+  'user-management': ['superadmin'], // User management restricted to superadmin only
 } as const;
 
 export type FormKey = keyof typeof FORM_ACCESS_MAP;
