@@ -614,14 +614,14 @@ export default function UserManagement() {
             <div>
               <Label htmlFor="edit-department">Department</Label>
               <Select 
-                value={editForm.watch("department") || ""} 
-                onValueChange={(value) => editForm.setValue("department", value || null)}
+                value={editForm.watch("department") || "none"} 
+                onValueChange={(value) => editForm.setValue("department", value === "none" ? null : value)}
               >
                 <SelectTrigger data-testid="select-edit-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                   <SelectValue placeholder="Select department (optional)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No Department</SelectItem>
+                  <SelectItem value="none">No Department</SelectItem>
                   <SelectItem value="NTAO">NTAO</SelectItem>
                   <SelectItem value="Assets Management">Assets Management</SelectItem>
                   <SelectItem value="Inventory Control">Inventory Control</SelectItem>
