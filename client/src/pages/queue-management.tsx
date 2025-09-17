@@ -193,8 +193,16 @@ export default function UnifiedQueueManagement() {
       return response.json();
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/queues/stats"] });
+      // Invalidate all related queue queries with proper patterns
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false // This allows partial matching for complex query keys
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues/stats"],
+        exact: false
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] }); // Refresh users data
       
       console.log("Task assignment successful:", {
         assigneeId: variables.assigneeId,
@@ -211,7 +219,14 @@ export default function UnifiedQueueManagement() {
           status: pickUpItem.status,
           assignedTo: pickUpItem.assignedTo
         });
-        setWorkModuleItem({...pickUpItem, assignedTo: variables.assigneeId, status: "pending"});
+        // Create updated item with fresh assignment data
+        const updatedItem = {
+          ...pickUpItem, 
+          assignedTo: variables.assigneeId, 
+          status: "pending" as const,
+          updatedAt: new Date() // Update timestamp for UI
+        };
+        setWorkModuleItem(updatedItem);
         setIsWorkModuleOpen(true);
       }
       
@@ -239,8 +254,14 @@ export default function UnifiedQueueManagement() {
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/queues/stats"] });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues/stats"],
+        exact: false
+      });
       toast({
         title: "Success",
         description: "Work started successfully! Task is now in progress.",
@@ -264,8 +285,14 @@ export default function UnifiedQueueManagement() {
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/queues/stats"] });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues/stats"],
+        exact: false
+      });
       toast({
         title: "Success",
         description: "Task completed successfully",

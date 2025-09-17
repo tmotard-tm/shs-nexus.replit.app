@@ -103,8 +103,14 @@ export function WorkModuleDialog({
       return apiRequest("PATCH", `/api/work-progress/${queueItem?.id}`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/${module}-queue`] });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: [`/api/${module}-queue`],
+        exact: false
+      });
       queryClient.invalidateQueries({ queryKey: [`/api/work-progress/${queueItem?.id}`] });
       toast({
         title: "Progress Saved",
@@ -141,8 +147,14 @@ export function WorkModuleDialog({
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/${module}-queue`] });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: [`/api/${module}-queue`],
+        exact: false
+      });
       toast({
         title: "Task Completed",
         description: "Task has been marked as complete.",
@@ -169,8 +181,14 @@ export function WorkModuleDialog({
       return apiRequest("PATCH", endpoint);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/queues"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/${module}-queue`] });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: [`/api/${module}-queue`],
+        exact: false
+      });
     },
   });
 
