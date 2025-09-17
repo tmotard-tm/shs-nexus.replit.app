@@ -132,11 +132,11 @@ export const storageSpots = pgTable("storage_spots", {
 });
 
 
-// NIST-compliant password validation schema
+// Password validation schema
 export const passwordValidationSchema = z.string()
-  .min(15, "Password must be at least 15 characters long. Consider using a passphrase like 'coffee-shop-morning-music-2025' for better security.")
+  .min(10, "Password must be at least 10 characters long. Consider using a passphrase for better security.")
   .max(128, "Password must not exceed 128 characters")
-  .describe("NIST 2025-compliant password: minimum 15 characters, supports spaces and special characters for passphrases");
+  .describe("Password policy: minimum 10 characters, supports spaces and special characters for passphrases");
 
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
