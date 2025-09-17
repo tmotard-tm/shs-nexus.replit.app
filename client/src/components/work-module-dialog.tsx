@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,9 @@ export function WorkModuleDialog({
   onTaskCompleted
 }: WorkModuleDialogProps) {
   const { toast } = useToast();
+  
+  // Use ref to track if we've already started work to prevent race conditions
+  const hasStartedWorkRef = useRef<string | null>(null);
   
   // Form state
   const [decisionType, setDecisionType] = useState<string>("");
@@ -248,11 +251,26 @@ export function WorkModuleDialog({
 
   useEffect(() => {
     // Auto-start work if opening dialog and task is still pending
-    if (isOpen && queueItem?.status === "pending" && currentUser && !startWorkMutation.isPending) {
+    // Use ref to prevent multiple start attempts for the same task
+    if (isOpen && 
+        queueItem?.status === "pending" && 
+        currentUser && 
+        !startWorkMutation.isPending && 
+        queueItem?.id && 
+        hasStartedWorkRef.current !== queueItem.id) {
+      
       console.log('Auto-starting work for task:', queueItem?.id, 'Status:', queueItem?.status);
+      hasStartedWorkRef.current = queueItem.id; // Mark this task as having start attempted
       startWorkMutation.mutate();
     }
-  }, [isOpen, queueItem?.status, startWorkMutation.isPending]); // Removed currentUser?.id to prevent unnecessary re-runs
+  }, [isOpen, queueItem?.status, queueItem?.id, currentUser]); // Only essential dependencies
+  
+  // Reset the ref when dialog closes or different item opens
+  useEffect(() => {
+    if (!isOpen) {
+      hasStartedWorkRef.current = null;
+    }
+  }, [isOpen]);
 
   const handleSaveProgress = () => {
     // Collect stepNotes and substepNotes from template
