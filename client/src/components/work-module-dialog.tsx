@@ -97,12 +97,20 @@ export function WorkModuleDialog({
     }
   }, [queueItem]);
 
-  // Save progress mutation
+  // Save progress mutation - Enhanced with better error handling and logging
   const saveProgressMutation = useMutation({
     mutationFn: async (data: any) => {
+      console.log('Saving progress for task:', queueItem?.id, 'Current status:', queueItem?.status);
       return apiRequest("PATCH", `/api/work-progress/${queueItem?.id}`, data);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log('Progress saved successfully for task:', queueItem?.id, 'Response:', data);
+      // Invalidate specific queue item queries first for immediate UI update
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues", { module, id: queueItem?.id }],
+        exact: false
+      });
+      // Then invalidate broader queries
       queryClient.invalidateQueries({ 
         queryKey: ["/api/queues"],
         exact: false
@@ -112,23 +120,32 @@ export function WorkModuleDialog({
         exact: false
       });
       queryClient.invalidateQueries({ queryKey: [`/api/work-progress/${queueItem?.id}`] });
+      
       toast({
         title: "Progress Saved",
         description: "Your work progress has been saved successfully.",
       });
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('Failed to save progress for task:', queueItem?.id, 'Error:', error);
       toast({
         title: "Error",
-        description: "Failed to save progress.",
+        description: "Failed to save progress. Please try again.",
         variant: "destructive",
       });
     },
   });
 
-  // Complete task mutation
+  // Complete task mutation - Enhanced with logging and validation
   const completeTaskMutation = useMutation({
     mutationFn: async () => {
+      console.log('Completing task:', queueItem?.id, 'Current status:', queueItem?.status);
+      
+      // Validate that task is in the correct state for completion
+      if (queueItem?.status !== 'in_progress') {
+        throw new Error(`Cannot complete task with status: ${queueItem?.status}. Task must be in_progress.`);
+      }
+      
       const endpoint = module 
         ? `/api/queues/${module}/${queueItem?.id}/complete`
         : `/api/queue-items/${queueItem?.id}/complete`;
@@ -146,7 +163,14 @@ export function WorkModuleDialog({
         templateId: template?.id
       });
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log('Task completed successfully:', queueItem?.id, 'Response:', data);
+      // Invalidate specific queries first for immediate update
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues", { module, id: queueItem?.id }],
+        exact: false
+      });
+      // Then invalidate broader queries
       queryClient.invalidateQueries({ 
         queryKey: ["/api/queues"],
         exact: false
@@ -155,6 +179,7 @@ export function WorkModuleDialog({
         queryKey: [`/api/${module}-queue`],
         exact: false
       });
+      
       toast({
         title: "Task Completed",
         description: "Task has been marked as complete.",
@@ -162,25 +187,41 @@ export function WorkModuleDialog({
       onTaskCompleted?.();
       onOpenChange(false);
     },
-    onError: () => {
+    onError: (error: any) => {
+      console.error('Failed to complete task:', queueItem?.id, 'Error:', error);
       toast({
         title: "Error",
-        description: "Failed to complete task.",
+        description: error.message || "Failed to complete task. Please try again.",
         variant: "destructive",
       });
     },
   });
 
-  // Start work mutation (if not already started)
+  // Start work mutation - Enhanced with logging and validation
   const startWorkMutation = useMutation({
     mutationFn: async () => {
+      console.log('Starting work on task:', queueItem?.id, 'Current status:', queueItem?.status);
+      
+      // Validate that task can be started
+      if (queueItem?.status !== 'pending') {
+        console.warn('Task already started or completed:', queueItem?.id, 'Status:', queueItem?.status);
+        return; // Don't make API call if already started
+      }
+      
       const endpoint = module 
         ? `/api/queues/${module}/${queueItem?.id}/start-work`
         : `/api/queue-items/${queueItem?.id}/start-work`;
       
       return apiRequest("PATCH", endpoint);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log('Work started successfully for task:', queueItem?.id, 'Response:', data);
+      // Immediately invalidate specific item query for fast UI update
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues", { module, id: queueItem?.id }],
+        exact: false
+      });
+      // Then invalidate broader queries
       queryClient.invalidateQueries({ 
         queryKey: ["/api/queues"],
         exact: false
@@ -190,14 +231,23 @@ export function WorkModuleDialog({
         exact: false
       });
     },
+    onError: (error) => {
+      console.error('Failed to start work on task:', queueItem?.id, 'Error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to start work on this task. Please try again.",
+        variant: "destructive",
+      });
+    },
   });
 
   useEffect(() => {
     // Auto-start work if opening dialog and task is still pending
-    if (isOpen && queueItem?.status === "pending" && currentUser) {
+    if (isOpen && queueItem?.status === "pending" && currentUser && !startWorkMutation.isPending) {
+      console.log('Auto-starting work for task:', queueItem?.id, 'Status:', queueItem?.status);
       startWorkMutation.mutate();
     }
-  }, [isOpen, queueItem?.status, currentUser?.id]);
+  }, [isOpen, queueItem?.status, currentUser?.id, startWorkMutation.isPending]);
 
   const handleSaveProgress = () => {
     // Collect stepNotes and substepNotes from template
@@ -270,6 +320,8 @@ export function WorkModuleDialog({
   };
 
   const handleCancel = () => {
+    console.log('Canceling dialog for task:', queueItem?.id, 'Current status:', queueItem?.status);
+    // Just close the dialog - no status changes
     onOpenChange(false);
   };
 
