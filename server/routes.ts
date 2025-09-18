@@ -3845,60 +3845,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid user" });
       }
 
-      const { filters } = buildQueueFilters(req.query);
-      const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+      // Get all queue items from in-memory storage (all modules)
+      const allModules = ['ntao', 'assets', 'inventory', 'fleet'];
+      const allItems = await storage.getUnifiedQueueItems(allModules, req.query.status);
 
-      // PostgreSQL query with field mapping for metrics
-      const query = `
-        SELECT 
-          id,
-          title,
-          description,
-          status,
-          priority,
-          assigned_to as assignee,
-          requester_id,
-          department,
-          team,
-          workflow_type as type,
-          data,
-          metadata,
-          notes,
-          scheduled_for,
-          attempts,
-          last_error,
-          completed_at,
-          started_at,
-          first_response_at,
-          workflow_id,
-          workflow_step,
-          depends_on,
-          auto_trigger,
-          trigger_data,
-          created_at,
-          updated_at,
-          CASE 
-            WHEN completed_at IS NOT NULL AND created_at IS NOT NULL THEN
-              EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600
-            ELSE NULL
-          END as response_time_hours,
-          CASE 
-            WHEN first_response_at IS NOT NULL AND created_at IS NOT NULL THEN
-              EXTRACT(EPOCH FROM (first_response_at - created_at)) / 3600
-            ELSE NULL  
-          END as first_response_time_hours,
-          CASE
-            WHEN started_at IS NOT NULL AND created_at IS NOT NULL THEN
-              EXTRACT(EPOCH FROM (started_at - created_at)) / 3600
-            ELSE NULL
-          END as time_to_start_hours
-        FROM queue_items 
-        ${whereClause}
-        ORDER BY created_at DESC
-      `;
+      // Apply client-side filtering based on query parameters
+      let filteredItems = allItems;
 
-      const result = await db.execute(sql.raw(query));
-      res.json(result.rows);
+      // Date range filtering
+      if (req.query.from_ts || req.query.from) {
+        const fromDate = new Date(req.query.from_ts || req.query.from);
+        filteredItems = filteredItems.filter(item => new Date(item.createdAt) >= fromDate);
+      }
+      if (req.query.to_ts || req.query.to) {
+        const toDate = new Date(req.query.to_ts || req.query.to);
+        filteredItems = filteredItems.filter(item => new Date(item.createdAt) <= toDate);
+      }
+
+      // Department filtering
+      if (req.query.departments) {
+        const departments = Array.isArray(req.query.departments) 
+          ? req.query.departments 
+          : req.query.departments.split(',').map((d: string) => d.trim());
+        filteredItems = filteredItems.filter(item => 
+          item.department && departments.includes(item.department));
+      }
+
+      // Status filtering
+      if (req.query.statuses) {
+        const statuses = Array.isArray(req.query.statuses)
+          ? req.query.statuses
+          : req.query.statuses.split(',').map((s: string) => s.trim());
+        filteredItems = filteredItems.filter(item => statuses.includes(item.status));
+      }
+
+      // Assignee filtering
+      if (req.query.assignees) {
+        const assignees = Array.isArray(req.query.assignees)
+          ? req.query.assignees
+          : req.query.assignees.split(',').map((a: string) => a.trim());
+        filteredItems = filteredItems.filter(item => 
+          item.assignedTo && assignees.includes(item.assignedTo));
+      }
+
+      // Transform items to match expected metrics format with calculated time fields
+      const metricsData = filteredItems.map(item => {
+        const createdAt = new Date(item.createdAt);
+        const completedAt = item.completedAt ? new Date(item.completedAt) : null;
+        const startedAt = item.startedAt ? new Date(item.startedAt) : null;
+        const firstResponseAt = item.firstResponseAt ? new Date(item.firstResponseAt) : null;
+
+        return {
+          id: item.id,
+          title: item.title,
+          description: item.description,
+          status: item.status,
+          priority: item.priority,
+          assignee: item.assignedTo,
+          requester_id: item.requesterId,
+          department: item.department,
+          team: item.team,
+          type: item.workflowType,
+          data: item.data,
+          metadata: item.metadata,
+          notes: item.notes,
+          completed_at: item.completedAt,
+          started_at: item.startedAt,
+          first_response_at: item.firstResponseAt,
+          created_at: item.createdAt,
+          updated_at: item.updatedAt,
+          response_time_hours: completedAt ? 
+            (completedAt.getTime() - createdAt.getTime()) / (1000 * 60 * 60) : null,
+          first_response_time_hours: firstResponseAt ? 
+            (firstResponseAt.getTime() - createdAt.getTime()) / (1000 * 60 * 60) : null,
+          time_to_start_hours: startedAt ? 
+            (startedAt.getTime() - createdAt.getTime()) / (1000 * 60 * 60) : null,
+        };
+      });
+
+      res.json(metricsData);
 
     } catch (error) {
       console.error('Error fetching metrics:', error);
