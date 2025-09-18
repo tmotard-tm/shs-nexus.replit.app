@@ -32,6 +32,25 @@
   z-index: 3;
 }
 
+/* Ensure markers are visible */
+.map-wrapper .leaflet-marker-pane {
+  z-index: 600 !important;
+}
+
+.map-wrapper .leaflet-overlay-pane {
+  z-index: 400 !important;
+}
+
+/* Force marker visibility */
+.map-wrapper svg.leaflet-zoom-animated {
+  z-index: 500 !important;
+}
+
+.map-wrapper path {
+  pointer-events: auto !important;
+  z-index: 600 !important;
+}
+
 /* Ensure other Leaflet containers have proper sizing */
 .leaflet-container {
   width: 100% !important;

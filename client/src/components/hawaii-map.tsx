@@ -83,14 +83,23 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
       
       const color = statusColors[vehicle.branding as keyof typeof statusColors] || statusColors.default;
       
-      const marker = L.circleMarker([lat, lng], {
-        radius: 8,
-        fillColor: color,
-        color: '#000',
-        weight: 2,
-        opacity: 1.0,
-        fillOpacity: 0.9
+      // Create a custom icon for better visibility
+      const customIcon = L.divIcon({
+        className: 'custom-marker',
+        html: `<div style="
+          width: 20px;
+          height: 20px;
+          background-color: ${color};
+          border: 3px solid #ffffff;
+          border-radius: 50%;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          z-index: 1000;
+        "></div>`,
+        iconSize: [20, 20],
+        iconAnchor: [10, 10]
       });
+      
+      const marker = L.marker([lat, lng], { icon: customIcon });
       
       marker.bindPopup(`
         <div style="font-family: system-ui, sans-serif; min-width: 180px;">
