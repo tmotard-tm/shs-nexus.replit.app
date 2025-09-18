@@ -108,7 +108,7 @@ export default function AssistanceSelection() {
         <div className="relative z-10 max-w-7xl mx-auto">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold mb-4" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-selection-title">
-              Welcome to Sears Vehicle and Asset Tool
+              Welcome to SearsDriveLine Management Systems
             </h2>
             <p className="text-lg" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>
               What can we help you with today?
