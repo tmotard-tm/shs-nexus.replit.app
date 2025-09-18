@@ -19,7 +19,7 @@ export function Sidebar() {
     const baseItems = {
       home: { name: "Home", href: "/", icon: Home },
       dashboard: { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
-      analytics: { name: "Analytics Board", href: "/analytics", icon: Activity },
+      analytics: { name: "Vehicle Assignment Dash", href: "/analytics", icon: Activity },
       operations: { name: "Operations Dashboard", href: "/operations", icon: BarChart3 },
       queueManagement: { name: "Queue Management", href: "/queue-management", icon: Clock },
       ntaoQueue: { name: "NTAO — National Truck Assortment Queue", href: "/ntao-queue", icon: Clock },
