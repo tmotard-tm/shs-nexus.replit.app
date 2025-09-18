@@ -356,7 +356,8 @@ export default function OperationsDashboard() {
     return `${Math.round((hours / 24) * 10) / 10}d`;
   };
 
-  if (error) {
+  // Check if user has permission to view operations dashboard
+  if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
     return (
       <MainContent>
         <TopBar title="Operations Dashboard" breadcrumbs={["Home", "Operations Dashboard"]} />
@@ -367,6 +368,24 @@ export default function OperationsDashboard() {
             <h2 className="text-xl font-semibold text-destructive mb-2">Access Denied</h2>
             <p className="text-muted-foreground">
               You don't have permission to view operations metrics.
+            </p>
+          </div>
+        </div>
+      </MainContent>
+    );
+  }
+
+  if (error) {
+    return (
+      <MainContent>
+        <TopBar title="Operations Dashboard" breadcrumbs={["Home", "Operations Dashboard"]} />
+        <div className="p-6">
+          <BackButton href="/dashboard" />
+          <div className="text-center py-8">
+            <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-destructive mb-2">Error Loading Data</h2>
+            <p className="text-muted-foreground">
+              Failed to load operations metrics. Please try again later.
             </p>
           </div>
         </div>

@@ -3769,8 +3769,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Helper function to build queue item query filters with robust array parsing
   const buildQueueFilters = (query: any) => {
     const filters: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
 
     // Helper function to parse array parameters correctly
     const parseArrayParam = (param: any): string[] => {
@@ -3790,23 +3788,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return [];
     };
 
+    // Helper function to safely quote values for SQL
+    const quoteSqlValue = (value: any): string => {
+      if (value === null || value === undefined) return 'NULL';
+      if (typeof value === 'string') {
+        return `'${value.replace(/'/g, "''")}'`; // Escape single quotes
+      }
+      return String(value);
+    };
+
     // Date range filters
-    if (query.from_ts) {
-      filters.push(`created_at >= $${paramIndex++}`);
-      params.push(new Date(query.from_ts));
+    if (query.from_ts || query.from) {
+      const fromDate = query.from_ts || query.from;
+      filters.push(`created_at >= ${quoteSqlValue(new Date(fromDate).toISOString())}`);
     }
-    if (query.to_ts) {
-      filters.push(`created_at <= $${paramIndex++}`);
-      params.push(new Date(query.to_ts));
+    if (query.to_ts || query.to) {
+      const toDate = query.to_ts || query.to;
+      filters.push(`created_at <= ${quoteSqlValue(new Date(toDate).toISOString())}`);
     }
 
     // Department filter (robust array support)
     if (query.departments) {
       const departments = parseArrayParam(query.departments);
       if (departments.length > 0) {
-        const placeholders = departments.map(() => `$${paramIndex++}`).join(',');
-        filters.push(`department = ANY(ARRAY[${placeholders}])`);
-        params.push(...departments);
+        const quotedDepts = departments.map(dept => quoteSqlValue(dept)).join(',');
+        filters.push(`department = ANY(ARRAY[${quotedDepts}])`);
       }
     }
 
@@ -3814,9 +3820,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (query.statuses) {
       const statuses = parseArrayParam(query.statuses);
       if (statuses.length > 0) {
-        const placeholders = statuses.map(() => `$${paramIndex++}`).join(',');
-        filters.push(`status = ANY(ARRAY[${placeholders}])`);
-        params.push(...statuses);
+        const quotedStatuses = statuses.map(status => quoteSqlValue(status)).join(',');
+        filters.push(`status = ANY(ARRAY[${quotedStatuses}])`);
       }
     }
 
@@ -3824,13 +3829,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (query.assignees) {
       const assignees = parseArrayParam(query.assignees);
       if (assignees.length > 0) {
-        const placeholders = assignees.map(() => `$${paramIndex++}`).join(',');
-        filters.push(`assigned_to = ANY(ARRAY[${placeholders}])`);
-        params.push(...assignees);
+        const quotedAssignees = assignees.map(assignee => quoteSqlValue(assignee)).join(',');
+        filters.push(`assigned_to = ANY(ARRAY[${quotedAssignees}])`);
       }
     }
 
-    return { filters, params };
+    return { filters };
   };
 
   // Metrics API Route
@@ -3841,7 +3845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid user" });
       }
 
-      const { filters, params } = buildQueueFilters(req.query);
+      const { filters } = buildQueueFilters(req.query);
       const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
 
       // PostgreSQL query with field mapping for metrics
