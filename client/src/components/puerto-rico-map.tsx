@@ -68,15 +68,25 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
 
   // Update markers when data changes
   useEffect(() => {
+    console.log('🏖️ Puerto Rico Map - filteredVehicles count:', filteredVehicles.length);
+    console.log('🏖️ Puerto Rico Map - puertoRicoVehicles count:', puertoRicoVehicles.length);
+    console.log('🏖️ Puerto Rico Map - sample PR vehicles:', puertoRicoVehicles.slice(0, 3));
+    
     if (!mapInstance.current || !markersLayerRef.current) return;
 
     // Clear existing markers
     markersLayerRef.current.clearLayers();
     
+    let markersAdded = 0;
+    
     // Add Puerto Rico vehicle markers
     puertoRicoVehicles.forEach((vehicle) => {
       const coordinates = puertoRicoCoordinates[vehicle.city.toUpperCase()];
-      if (!coordinates) return;
+      if (!coordinates) {
+        console.log('🏖️ Puerto Rico Map - No coordinates found for city:', vehicle.city);
+        return;
+      }
+      console.log('🏖️ Puerto Rico Map - Found coordinates for', vehicle.city, ':', coordinates);
       
       const lat = coordinates[0] + (Math.random() - 0.5) * 0.02;
       const lng = coordinates[1] + (Math.random() - 0.5) * 0.02;
@@ -102,7 +112,10 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
       `);
       
       markersLayerRef.current!.addLayer(marker);
+      markersAdded++;
     });
+    
+    console.log('🏖️ Puerto Rico Map - Total markers added:', markersAdded);
   }, [puertoRicoVehicles]);
 
   return (

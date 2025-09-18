@@ -68,15 +68,25 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
 
   // Update markers when data changes
   useEffect(() => {
+    console.log('🏝️ Hawaii Map - filteredVehicles count:', filteredVehicles.length);
+    console.log('🏝️ Hawaii Map - hawaiiVehicles count:', hawaiiVehicles.length);
+    console.log('🏝️ Hawaii Map - sample hawaii vehicles:', hawaiiVehicles.slice(0, 3));
+    
     if (!mapInstance.current || !markersLayerRef.current) return;
 
     // Clear existing markers
     markersLayerRef.current.clearLayers();
     
+    let markersAdded = 0;
+    
     // Add Hawaii vehicle markers
     hawaiiVehicles.forEach((vehicle) => {
       const coordinates = hawaiiCoordinates[vehicle.city.toUpperCase()];
-      if (!coordinates) return;
+      if (!coordinates) {
+        console.log('🏝️ Hawaii Map - No coordinates found for city:', vehicle.city);
+        return;
+      }
+      console.log('🏝️ Hawaii Map - Found coordinates for', vehicle.city, ':', coordinates);
       
       const lat = coordinates[0] + (Math.random() - 0.5) * 0.02;
       const lng = coordinates[1] + (Math.random() - 0.5) * 0.02;
@@ -102,7 +112,10 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
       `);
       
       markersLayerRef.current!.addLayer(marker);
+      markersAdded++;
     });
+    
+    console.log('🏝️ Hawaii Map - Total markers added:', markersAdded);
   }, [hawaiiVehicles]);
 
   return (
