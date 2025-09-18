@@ -3921,7 +3921,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { filters, params } = buildQueueFilters(req.query);
+      const { filters } = buildQueueFilters(req.query);
       const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
 
       const query = `
@@ -4001,7 +4001,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { filters, params } = buildQueueFilters(req.query);
+      const { filters } = buildQueueFilters(req.query);
       const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
 
       const query = `

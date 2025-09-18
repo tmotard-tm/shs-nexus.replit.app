@@ -31,7 +31,6 @@ import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
 import ChangePassword from "@/pages/change-password";
 import AnalyticsBoard from "@/pages/analytics-board";
-import ProductivityDashboard from "@/pages/productivity-dashboard";
 import OperationsDashboard from "@/pages/operations-dashboard";
 import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
@@ -87,13 +86,6 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/productivity">
-        <ProtectedRoute>
-          <MainContent>
-            <ProductivityDashboard />
-          </MainContent>
-        </ProtectedRoute>
-      </Route>
 
       <Route path="/operations">
         <ProtectedRoute>
