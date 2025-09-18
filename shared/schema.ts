@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -62,6 +62,7 @@ export const queueItems = pgTable("queue_items", {
   assignedTo: varchar("assigned_to"), // user ID of person assigned to work this item
   requesterId: varchar("requester_id").notNull(), // user ID who created this queue item
   department: text("department"), // NTAO, Assets Management, Inventory Control, Fleet Management - which department this queue item belongs to
+  team: text("team"), // Team identifier for metrics tracking
   data: text("data"), // JSON payload with workflow-specific data
   metadata: text("metadata"), // Additional metadata for automation hooks
   notes: text("notes"), // Agent notes for tracking work progress
@@ -69,6 +70,8 @@ export const queueItems = pgTable("queue_items", {
   attempts: integer("attempts").notNull().default(0), // For retry logic
   lastError: text("last_error"), // Error message from last failed attempt
   completedAt: timestamp("completed_at"),
+  startedAt: timestamp("started_at"), // When work started on this item
+  firstResponseAt: timestamp("first_response_at"), // When first response was made to this item
   // Workflow dependency fields
   workflowId: varchar("workflow_id"), // Groups related tasks in a workflow sequence
   workflowStep: integer("workflow_step"), // Order/step number in the workflow (1, 2, 3, 4)
@@ -77,6 +80,20 @@ export const queueItems = pgTable("queue_items", {
   triggerData: text("trigger_data"), // Data for auto-triggered tasks
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    // Performance indexes for metrics queries
+    departmentIdx: index("queue_items_department_idx").on(table.department),
+    statusIdx: index("queue_items_status_idx").on(table.status),
+    assignedToIdx: index("queue_items_assigned_to_idx").on(table.assignedTo),
+    createdAtIdx: index("queue_items_created_at_idx").on(table.createdAt),
+    startedAtIdx: index("queue_items_started_at_idx").on(table.startedAt),
+    completedAtIdx: index("queue_items_completed_at_idx").on(table.completedAt),
+    teamIdx: index("queue_items_team_idx").on(table.team),
+    // Composite indexes for common filtering patterns
+    departmentStatusIdx: index("queue_items_department_status_idx").on(table.department, table.status),
+    assignedToStatusIdx: index("queue_items_assigned_to_status_idx").on(table.assignedTo, table.status),
+  };
 });
 
 export const vehicles = pgTable("vehicles", {

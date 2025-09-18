@@ -14,6 +14,10 @@ import rateLimit from "express-rate-limit";
 import DOMPurify from "isomorphic-dompurify";
 import bcrypt from "bcrypt";
 import { checkPasswordCompromised, validatePasswordRequirements } from "./password-screening";
+import * as ExcelJS from "exceljs";
+import { stringify as csvStringify } from "csv-stringify";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 // Persistent session store (survives server restarts)
 const SESSIONS_FILE = './sessions.json';
@@ -1028,6 +1032,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         await sendEmail({
           to: email,
+          from: "noreply@sears.com",
           subject: "Password Reset Request - Sears Operations Portal",
           html: `
             <h2>Password Reset Request</h2>
@@ -3726,6 +3731,306 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error saving work progress:", error);
       res.status(500).json({ message: "Failed to save work progress" });
+    }
+  });
+
+  // Metrics and Export Routes
+  
+  // Helper function to build queue item query filters
+  const buildQueueFilters = (query: any) => {
+    const filters: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    // Date range filters
+    if (query.from_ts) {
+      filters.push(`created_at >= $${paramIndex++}`);
+      params.push(new Date(query.from_ts));
+    }
+    if (query.to_ts) {
+      filters.push(`created_at <= $${paramIndex++}`);
+      params.push(new Date(query.to_ts));
+    }
+
+    // Department filter (array support)
+    if (query.departments) {
+      const departments = Array.isArray(query.departments) ? query.departments : [query.departments];
+      if (departments.length > 0) {
+        const placeholders = departments.map(() => `$${paramIndex++}`).join(',');
+        filters.push(`department = ANY(ARRAY[${placeholders}])`);
+        params.push(...departments);
+      }
+    }
+
+    // Status filter (array support)
+    if (query.statuses) {
+      const statuses = Array.isArray(query.statuses) ? query.statuses : [query.statuses];
+      if (statuses.length > 0) {
+        const placeholders = statuses.map(() => `$${paramIndex++}`).join(',');
+        filters.push(`status = ANY(ARRAY[${placeholders}])`);
+        params.push(...statuses);
+      }
+    }
+
+    // Assignee filter (array support)
+    if (query.assignees) {
+      const assignees = Array.isArray(query.assignees) ? query.assignees : [query.assignees];
+      if (assignees.length > 0) {
+        const placeholders = assignees.map(() => `$${paramIndex++}`).join(',');
+        filters.push(`assigned_to = ANY(ARRAY[${placeholders}])`);
+        params.push(...assignees);
+      }
+    }
+
+    return { filters, params };
+  };
+
+  // Metrics API Route
+  app.get("/api/metrics", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+
+      const { filters, params } = buildQueueFilters(req.query);
+      const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+
+      // PostgreSQL query with field mapping for metrics
+      const query = `
+        SELECT 
+          id,
+          title,
+          description,
+          status,
+          priority,
+          assigned_to as assignee,
+          requester_id,
+          department,
+          team,
+          workflow_type as type,
+          data,
+          metadata,
+          notes,
+          scheduled_for,
+          attempts,
+          last_error,
+          completed_at,
+          started_at,
+          first_response_at,
+          workflow_id,
+          workflow_step,
+          depends_on,
+          auto_trigger,
+          trigger_data,
+          created_at,
+          updated_at,
+          CASE 
+            WHEN completed_at IS NOT NULL AND created_at IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600
+            ELSE NULL
+          END as response_time_hours,
+          CASE 
+            WHEN first_response_at IS NOT NULL AND created_at IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (first_response_at - created_at)) / 3600
+            ELSE NULL  
+          END as first_response_time_hours,
+          CASE
+            WHEN started_at IS NOT NULL AND created_at IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (started_at - created_at)) / 3600
+            ELSE NULL
+          END as time_to_start_hours
+        FROM queue_items 
+        ${whereClause}
+        ORDER BY created_at DESC
+      `;
+
+      const result = await db.execute(sql.raw(query));
+      res.json(result.rows);
+
+    } catch (error) {
+      console.error('Error fetching metrics:', error);
+      res.status(500).json({ message: "Failed to fetch metrics" });
+    }
+  });
+
+  // CSV Export Route
+  app.get("/api/exports/requests.csv", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+
+      const { filters, params } = buildQueueFilters(req.query);
+      const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+
+      const query = `
+        SELECT 
+          id,
+          title,
+          description,
+          status,
+          priority,
+          assigned_to as assignee,
+          requester_id,
+          department,
+          team,
+          workflow_type as type,
+          notes,
+          scheduled_for,
+          attempts,
+          last_error,
+          completed_at,
+          started_at,
+          first_response_at,
+          workflow_id,
+          workflow_step,
+          created_at,
+          updated_at
+        FROM queue_items 
+        ${whereClause}
+        ORDER BY created_at DESC
+      `;
+
+      const result = await db.execute(sql.raw(query));
+      const rows = result.rows;
+
+      // Create CSV content
+      const columns = [
+        'id', 'title', 'description', 'status', 'priority', 'assignee', 'requester_id',
+        'department', 'team', 'type', 'notes', 'scheduled_for', 'attempts', 'last_error',
+        'completed_at', 'started_at', 'first_response_at', 'workflow_id', 'workflow_step',
+        'created_at', 'updated_at'
+      ];
+
+      const csvData = await new Promise<string>((resolve, reject) => {
+        csvStringify(rows as any[], {
+          header: true,
+          columns: columns
+        }, (err, output) => {
+          if (err) reject(err);
+          else resolve(output);
+        });
+      });
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="requests_${new Date().toISOString().split('T')[0]}.csv"`);
+      res.send(csvData);
+
+    } catch (error) {
+      console.error('Error generating CSV export:', error);
+      res.status(500).json({ message: "Failed to generate CSV export" });
+    }
+  });
+
+  // Excel Export Route
+  app.get("/api/exports/requests.xlsx", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+
+      const { filters, params } = buildQueueFilters(req.query);
+      const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+
+      const query = `
+        SELECT 
+          id,
+          title,
+          description,
+          status,
+          priority,
+          assigned_to as assignee,
+          requester_id,
+          department,
+          team,
+          workflow_type as type,
+          notes,
+          scheduled_for,
+          attempts,
+          last_error,
+          completed_at,
+          started_at,
+          first_response_at,
+          workflow_id,
+          workflow_step,
+          created_at,
+          updated_at,
+          CASE 
+            WHEN completed_at IS NOT NULL AND created_at IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600
+            ELSE NULL
+          END as response_time_hours,
+          CASE 
+            WHEN first_response_at IS NOT NULL AND created_at IS NOT NULL THEN
+              EXTRACT(EPOCH FROM (first_response_at - created_at)) / 3600
+            ELSE NULL  
+          END as first_response_time_hours
+        FROM queue_items 
+        ${whereClause}
+        ORDER BY created_at DESC
+      `;
+
+      const result = await db.execute(sql.raw(query));
+      const rows = result.rows;
+
+      // Create Excel workbook
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Requests');
+
+      // Define columns
+      worksheet.columns = [
+        { header: 'ID', key: 'id', width: 36 },
+        { header: 'Title', key: 'title', width: 30 },
+        { header: 'Description', key: 'description', width: 50 },
+        { header: 'Status', key: 'status', width: 15 },
+        { header: 'Priority', key: 'priority', width: 15 },
+        { header: 'Assignee', key: 'assignee', width: 25 },
+        { header: 'Requester ID', key: 'requester_id', width: 25 },
+        { header: 'Department', key: 'department', width: 20 },
+        { header: 'Team', key: 'team', width: 20 },
+        { header: 'Type', key: 'type', width: 20 },
+        { header: 'Notes', key: 'notes', width: 40 },
+        { header: 'Scheduled For', key: 'scheduled_for', width: 20 },
+        { header: 'Attempts', key: 'attempts', width: 10 },
+        { header: 'Last Error', key: 'last_error', width: 40 },
+        { header: 'Completed At', key: 'completed_at', width: 20 },
+        { header: 'Started At', key: 'started_at', width: 20 },
+        { header: 'First Response At', key: 'first_response_at', width: 20 },
+        { header: 'Response Time (Hours)', key: 'response_time_hours', width: 20 },
+        { header: 'First Response Time (Hours)', key: 'first_response_time_hours', width: 25 },
+        { header: 'Workflow ID', key: 'workflow_id', width: 25 },
+        { header: 'Workflow Step', key: 'workflow_step', width: 15 },
+        { header: 'Created At', key: 'created_at', width: 20 },
+        { header: 'Updated At', key: 'updated_at', width: 20 }
+      ];
+
+      // Add data rows
+      (rows as any[]).forEach((row: any) => {
+        worksheet.addRow(row);
+      });
+
+      // Style header row
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE0E0E0' }
+      };
+
+      // Set response headers
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="requests_${new Date().toISOString().split('T')[0]}.xlsx"`);
+
+      // Write to response
+      await workbook.xlsx.write(res);
+      res.end();
+
+    } catch (error) {
+      console.error('Error generating Excel export:', error);
+      res.status(500).json({ message: "Failed to generate Excel export" });
     }
   });
 
