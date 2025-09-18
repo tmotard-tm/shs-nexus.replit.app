@@ -367,7 +367,7 @@ export default function UserManagement() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="forms-only">Forms Only</SelectItem>
-                    <SelectItem value="NTAO">NTAO</SelectItem>
+                    <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
                     <SelectItem value="Assets Management">Assets Management</SelectItem>
                     <SelectItem value="Inventory Control">Inventory Control</SelectItem>
                     <SelectItem value="Fleet Management">Fleet Management</SelectItem>
@@ -382,7 +382,7 @@ export default function UserManagement() {
                 <Label>Department Access Permissions</Label>
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   {[
-                    { code: 'NTAO', label: 'NTAO' },
+                    { code: 'NTAO', label: 'NTAO — National Truck Assortment' },
                     { code: 'ASSETS', label: 'Assets Management' },
                     { code: 'INVENTORY', label: 'Inventory Control' },
                     { code: 'FLEET', label: 'Fleet Management' }
@@ -502,7 +502,7 @@ export default function UserManagement() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">NTAO</CardTitle>
+                <CardTitle className="text-sm font-medium" title="NTAO — National Truck Assortment">NTAO</CardTitle>
                 <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
               </CardHeader>
               <CardContent>
@@ -559,7 +559,7 @@ export default function UserManagement() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Departments</SelectItem>
-                  <SelectItem value="NTAO">NTAO</SelectItem>
+                  <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
                   <SelectItem value="Assets Management">Assets Management</SelectItem>
                   <SelectItem value="Inventory Control">Inventory Control</SelectItem>
                   <SelectItem value="Fleet Management">Fleet Management</SelectItem>
@@ -732,7 +732,7 @@ export default function UserManagement() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="forms-only">Forms Only</SelectItem>
-                  <SelectItem value="NTAO">NTAO</SelectItem>
+                  <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
                   <SelectItem value="Assets Management">Assets Management</SelectItem>
                   <SelectItem value="Inventory Control">Inventory Control</SelectItem>
                   <SelectItem value="Fleet Management">Fleet Management</SelectItem>
@@ -888,7 +888,7 @@ export default function UserManagement() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="forms-only">Forms Only</SelectItem>
-                  <SelectItem value="NTAO">NTAO</SelectItem>
+                  <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
                   <SelectItem value="Assets Management">Assets Management</SelectItem>
                   <SelectItem value="Inventory Control">Inventory Control</SelectItem>
                   <SelectItem value="Fleet Management">Fleet Management</SelectItem>

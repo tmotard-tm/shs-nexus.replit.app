@@ -40,7 +40,7 @@ export function PickUpRequestDialog({
       if (queueModule) {
         if (user.departmentAccess && user.departmentAccess.length > 0) {
           const queueModuleMap: Record<QueueModule, string> = {
-            ntao: "NTAO",
+            ntao: "NTAO", // National Truck Assortment
             assets: "ASSETS", 
             inventory: "INVENTORY",
             fleet: "FLEET"

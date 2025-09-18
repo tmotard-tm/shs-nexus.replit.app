@@ -137,13 +137,13 @@ export default function NTAOQueuePage() {
       <div className="container mx-auto p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">NTAO Queue</h1>
+            <h1 className="text-3xl font-bold tracking-tight">NTAO — National Truck Assortment Queue</h1>
             <p className="text-muted-foreground">
-              Manage NTAO department tasks and assignments
+              Manage NTAO — National Truck Assortment department tasks and assignments
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900 dark:text-blue-100">
+            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900 dark:text-blue-100" title="NTAO — National Truck Assortment">
               NTAO Department
             </Badge>
           </div>
@@ -387,7 +387,7 @@ export default function NTAOQueuePage() {
         <Dialog open={!!viewQueueItem} onOpenChange={() => setViewQueueItem(null)}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>NTAO Queue Item Details</DialogTitle>
+              <DialogTitle>NTAO — National Truck Assortment Queue Item Details</DialogTitle>
               <DialogDescription>
                 View complete form submission and manage queue item
               </DialogDescription>

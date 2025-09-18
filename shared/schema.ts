@@ -12,8 +12,8 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
   role: text("role").notNull().default("field"), // superadmin, agent, field
-  department: text("department"), // NTAO, Assets Management, Inventory Control, Fleet Management
-  departmentAccess: text("department_access").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET']
+  department: text("department"), // NTAO — National Truck Assortment, Assets Management, Inventory Control, Fleet Management
+  departmentAccess: text("department_access").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'] where NTAO = National Truck Assortment
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -386,7 +386,7 @@ export const workTemplateStepSchema = z.object({
 export const workTemplateSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  department: z.enum(["FLEET", "INVENTORY", "ASSETS", "NTAO"]),
+  department: z.enum(["FLEET", "INVENTORY", "ASSETS", "NTAO"]), // NTAO = National Truck Assortment
   workflowType: z.string().min(1), // Maps to queueItem workflowType
   version: z.string().min(1),
   description: z.string().optional(),
@@ -451,7 +451,7 @@ export const enhancedCompleteQueueItemSchema = completeQueueItemSchema.extend({
 
 // Template Management Schemas
 export const templateFilterSchema = z.object({
-  department: z.enum(["FLEET", "INVENTORY", "ASSETS", "NTAO"]).optional(),
+  department: z.enum(["FLEET", "INVENTORY", "ASSETS", "NTAO"]).optional(), // NTAO = National Truck Assortment
   workflowType: z.string().optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
   requiredRole: z.enum(["field", "agent", "superadmin"]).optional(),

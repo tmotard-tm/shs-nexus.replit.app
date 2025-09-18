@@ -218,10 +218,10 @@ export default function OffboardVehicleLocation() {
 
       // PHASE 1 (Day 0) - Create immediate tasks for all 4 teams
       
-      // Day 0 Task 1: NTAO - Stop truck stock replenishment (immediate)
+      // Day 0 Task 1: NTAO — National Truck Assortment - Stop truck stock replenishment (immediate)
       await apiRequest("POST", "/api/ntao-queue", {
         workflowType: "offboarding",
-        title: `Day 0: Stop Truck Stock Replenishment - ${vehicleOffboard.techName}`,
+        title: `Day 0: NTAO — National Truck Assortment - Stop Truck Stock Replenishment - ${vehicleOffboard.techName}`,
         description: `IMMEDIATE TASK: Stop truck stock replenishment for ${vehicleOffboard.techName} (${vehicleOffboard.techRacfId}). Vehicle: ${vehicleOffboard.vehicleNumber}. Last day: ${vehicleOffboard.lastDayWorked}. Reason: ${vehicleOffboard.reason}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
         priority: "high",
         data: JSON.stringify({
@@ -245,7 +245,7 @@ export default function OffboardVehicleLocation() {
             "Cancel any pending orders for this technician",
             "Cancel all backorders associated with the vehicle",
             "Remove technician from automatic replenishment system",
-            "Update truck status in NTAO system",
+            "Update truck status in NTAO — National Truck Assortment system",
             "Complete Day 0 task - no follow-up tasks until all teams complete Day 0"
           ]
         })
@@ -386,7 +386,7 @@ export default function OffboardVehicleLocation() {
 
     toast({
       title: "Two-Phase Offboarding Started",
-      description: `Phase 1 (Day 0) tasks created for ${vehicleOffboard.techName}: NTAO, Equipment, Fleet, and Inventory teams. Phase 2 tasks will auto-trigger after all Day 0 tasks complete.`,
+      description: `Phase 1 (Day 0) tasks created for ${vehicleOffboard.techName}: NTAO — National Truck Assortment, Equipment, Fleet, and Inventory teams. Phase 2 tasks will auto-trigger after all Day 0 tasks complete.`,
     });
     
     // Show secondary notification about workflow sequence
@@ -534,7 +534,7 @@ export default function OffboardVehicleLocation() {
                                 <p className="font-medium text-yellow-800 dark:text-yellow-200">Workflow Sequence</p>
                                 <p className="text-yellow-700 dark:text-yellow-300"><strong>Phase 1 (Day 0)</strong> - Immediate tasks for all departments:</p>
                                 <ul className="mt-1 text-yellow-600 dark:text-yellow-400 list-disc list-inside text-xs">
-                                  <li>NTAO (Stop truck replenishment immediately)</li>
+                                  <li>NTAO — National Truck Assortment (Stop truck replenishment immediately)</li>
                                   <li>Equipment/Assets (Recover company devices immediately)</li>
                                   <li>Fleet (Initial vehicle coordination)</li>
                                   <li>Inventory (Remove from TPMS, stop orders immediately)</li>

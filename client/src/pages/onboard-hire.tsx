@@ -249,10 +249,10 @@ export default function OnboardHire() {
           requestsCreated.push(`${dept} ${taskType.toLowerCase()}`);
           orderMessages.push(`${dept} task created for ${taskType.toLowerCase()}`);
         } else if (dept === "NTAO") {
-          // NTAO queue task
+          // NTAO — National Truck Assortment queue task
           await apiRequest("POST", "/api/ntao-queue", {
             workflowType: "onboarding",
-            title: `NTAO - Employee Onboarding Task`,
+            title: `NTAO — National Truck Assortment - Employee Onboarding Task`,
             description: `${taskType} task for new employee: ${employeeForm.firstName} ${employeeForm.lastName} (${employeeForm.enterpriseId})`,
             priority: priority,
             data: JSON.stringify({

@@ -89,7 +89,7 @@ export async function createTestUsers() {
   console.log("- assets_user / test123 (Assets role)");
   console.log("- fleet_user / test123 (Fleet role)");
   console.log("- inventory_user / test123 (Inventory role)");
-  console.log("- ntao_user / test123 (NTAO role)"); 
+  console.log("- ntao_user / test123 (NTAO — National Truck Assortment role)"); 
   console.log("- field_user / test123 (Field role)");
   console.log("- superadmin / test123 (Super Admin role)");
 }

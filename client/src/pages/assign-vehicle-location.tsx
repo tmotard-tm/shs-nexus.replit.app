@@ -238,7 +238,7 @@ export default function AssignVehicleLocation() {
       orderMessages.push("Assets & Supplies order triggered for Day 1 supplies");
     }
     if (supplyOrders.ntaoPartsStock) {
-      orderMessages.push("NTAO order triggered for parts stock");
+      orderMessages.push("NTAO — National Truck Assortment order triggered for parts stock");
     }
     
     const description = orderMessages.length > 0 
@@ -973,7 +973,7 @@ export default function AssignVehicleLocation() {
                       />
                       <Label htmlFor="dialog-ntao-parts" className="flex items-center gap-2 text-sm">
                         <Wrench className="h-4 w-4" />
-                        Trigger NTAO Order for Parts Stock
+                        Trigger NTAO — National Truck Assortment Order for Parts Stock
                       </Label>
                     </div>
                   </div>

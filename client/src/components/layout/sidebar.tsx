@@ -22,7 +22,7 @@ export function Sidebar() {
       analytics: { name: "Analytics Board", href: "/analytics", icon: Activity },
       productivity: { name: "Productivity Dashboard", href: "/productivity", icon: TrendingUp },
       queueManagement: { name: "Queue Management", href: "/queue-management", icon: Clock },
-      ntaoQueue: { name: "NTAO Queue", href: "/ntao-queue", icon: Clock },
+      ntaoQueue: { name: "NTAO — National Truck Assortment Queue", href: "/ntao-queue", icon: Clock },
       assetsQueue: { name: "Assets Queue", href: "/assets-queue", icon: Clock },
       inventoryQueue: { name: "Inventory Queue", href: "/inventory-queue", icon: Clock },
       fleetQueue: { name: "Fleet Queue", href: "/fleet-queue", icon: Clock },

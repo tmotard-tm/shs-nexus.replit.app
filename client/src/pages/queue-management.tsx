@@ -41,7 +41,7 @@ import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from
 
 // Module labels for display
 const moduleLabels = {
-  ntao: "NTAO",
+  ntao: "NTAO — National Truck Assortment",
   assets: "Assets Management", 
   inventory: "Inventory Control",
   fleet: "Fleet Management"
