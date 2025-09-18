@@ -3686,6 +3686,278 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Template Diagnostic Endpoint for debugging production issues
+  app.get("/api/templates/diagnose", requireAuth, async (req, res) => {
+    try {
+      console.log('Template diagnostics requested');
+      const diagnostics: {
+        timestamp: string;
+        environment: string;
+        templateSystem: {
+          loaderInstance: boolean;
+          templateDirectory: string;
+          directoryExists: boolean;
+          directoryContents: string[];
+        };
+        registry: {
+          loaded: boolean;
+          path: string;
+          exists: boolean;
+          contents: any;
+          error: string | null;
+        };
+        departments: string[];
+        workflowTypes: string[];
+        templateLoadingStatus: Record<string, Record<string, any>>;
+        ntaoSpecificTests: {
+          onboardingTemplate: any;
+          onboardingDay0Template: any;
+          registryEntries: any;
+        };
+        fileSystemChecks: Record<string, any>;
+        issues: string[];
+        summary?: {
+          overallStatus: string;
+          criticalIssues: string[];
+          totalIssues: number;
+          templatesDirectory: string;
+          registryLoaded: boolean;
+          ntaoOnboardingAvailable: boolean;
+        };
+      } = {
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'development',
+        templateSystem: {
+          loaderInstance: !!templateLoader,
+          templateDirectory: '',
+          directoryExists: false,
+          directoryContents: [] as string[]
+        },
+        registry: {
+          loaded: false,
+          path: '',
+          exists: false,
+          contents: null,
+          error: null
+        },
+        departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
+        workflowTypes: [
+          'onboarding', 'onboarding_day0', 'offboarding', 
+          'vehicle_assignment', 'decommission', 'byov_assignment',
+          'byov_onboarding', 'setup_shipment', 'stop_shipment'
+        ],
+        templateLoadingStatus: {} as Record<string, Record<string, any>>,
+        ntaoSpecificTests: {
+          onboardingTemplate: null,
+          onboardingDay0Template: null,
+          registryEntries: null
+        },
+        fileSystemChecks: {} as Record<string, any>,
+        issues: [] as string[]
+      };
+
+      // Get template directory information
+      const path = await import('path');
+      const fs = await import('fs');
+      const { fileURLToPath } = await import('url');
+      
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      const templatesDir = path.join(__dirname, '..', 'shared', 'templates');
+      
+      diagnostics.templateSystem.templateDirectory = templatesDir;
+      diagnostics.templateSystem.directoryExists = fs.existsSync(templatesDir);
+      
+      if (diagnostics.templateSystem.directoryExists) {
+        try {
+          diagnostics.templateSystem.directoryContents = fs.readdirSync(templatesDir);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          diagnostics.issues.push(`Failed to read template directory: ${errorMessage}`);
+        }
+      } else {
+        diagnostics.issues.push(`Template directory does not exist: ${templatesDir}`);
+      }
+
+      // Test template registry loading
+      const registryPath = path.join(templatesDir, 'template-registry.json');
+      diagnostics.registry.path = registryPath;
+      diagnostics.registry.exists = fs.existsSync(registryPath);
+      
+      if (diagnostics.registry.exists) {
+        try {
+          const registryData = fs.readFileSync(registryPath, 'utf-8');
+          const parsedRegistry = JSON.parse(registryData);
+          diagnostics.registry.contents = parsedRegistry.registry ?? parsedRegistry;
+          diagnostics.registry.loaded = true;
+          
+          // Extract workflow types from registry
+          if (diagnostics.registry.contents) {
+            diagnostics.workflowTypes = Object.keys(diagnostics.registry.contents);
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          diagnostics.registry.error = errorMessage;
+          diagnostics.issues.push(`Failed to load template registry: ${errorMessage}`);
+        }
+      } else {
+        diagnostics.issues.push(`Template registry file does not exist: ${registryPath}`);
+      }
+
+      // Test template loading for each department/workflow combination
+      for (const department of diagnostics.departments) {
+        diagnostics.templateLoadingStatus[department] = {};
+        
+        for (const workflowType of diagnostics.workflowTypes) {
+          try {
+            const result = await templateLoader.getTemplateForWorkflow(workflowType, department.toLowerCase() as QueueModule);
+            diagnostics.templateLoadingStatus[department][workflowType] = {
+              success: !!result.template,
+              templateId: result.template?.id || null,
+              error: result.error || null,
+              suggestions: result.suggestions || []
+            };
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            diagnostics.templateLoadingStatus[department][workflowType] = {
+              success: false,
+              templateId: null,
+              error: errorMessage,
+              suggestions: []
+            };
+          }
+        }
+      }
+
+      // NTAO-specific diagnostic tests
+      try {
+        // Test NTAO onboarding template
+        const ntaoOnboardingResult = await templateLoader.getTemplateForWorkflow('onboarding', 'ntao');
+        diagnostics.ntaoSpecificTests.onboardingTemplate = {
+          success: !!ntaoOnboardingResult.template,
+          templateId: ntaoOnboardingResult.template?.id || null,
+          templateName: ntaoOnboardingResult.template?.name || null,
+          stepsCount: ntaoOnboardingResult.template?.steps?.length || 0,
+          error: ntaoOnboardingResult.error || null
+        };
+
+        // Test NTAO onboarding_day0 template (this might be missing)
+        const ntaoDay0Result = await templateLoader.getTemplateForWorkflow('onboarding_day0', 'ntao');
+        diagnostics.ntaoSpecificTests.onboardingDay0Template = {
+          success: !!ntaoDay0Result.template,
+          templateId: ntaoDay0Result.template?.id || null,
+          templateName: ntaoDay0Result.template?.name || null,
+          stepsCount: ntaoDay0Result.template?.steps?.length || 0,
+          error: ntaoDay0Result.error || null
+        };
+
+        // Check registry entries for NTAO
+        if (diagnostics.registry.contents) {
+          diagnostics.ntaoSpecificTests.registryEntries = {
+            onboarding: diagnostics.registry.contents.onboarding?.NTAO || [],
+            onboarding_day0: diagnostics.registry.contents.onboarding_day0?.NTAO || [],
+            allWorkflowsForNTAO: {}
+          };
+          
+          // Get all workflows for NTAO
+          for (const workflowType of Object.keys(diagnostics.registry.contents)) {
+            const ntaoTemplates = diagnostics.registry.contents[workflowType]?.NTAO || [];
+            if (ntaoTemplates.length > 0) {
+              diagnostics.ntaoSpecificTests.registryEntries.allWorkflowsForNTAO[workflowType] = ntaoTemplates;
+            }
+          }
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        diagnostics.issues.push(`NTAO template testing failed: ${errorMessage}`);
+      }
+
+      // File system checks for NTAO templates
+      const ntaoDir = path.join(templatesDir, 'ntao');
+      diagnostics.fileSystemChecks.ntaoDirectory = {
+        path: ntaoDir,
+        exists: fs.existsSync(ntaoDir),
+        contents: []
+      };
+
+      if (diagnostics.fileSystemChecks.ntaoDirectory.exists) {
+        try {
+          const ntaoFiles = fs.readdirSync(ntaoDir);
+          diagnostics.fileSystemChecks.ntaoDirectory.contents = ntaoFiles;
+          
+          // Check specific NTAO template files
+          const expectedNtaoTemplates = [
+            'ntao_onboard_technician_v1.json',
+            'ntao_assign_vehicle_v1.json',
+            'ntao_offboard_technician_v1.json',
+            'ntao_setup_shipment_v1.json',
+            'ntao_stop_shipment_v1.json',
+            'ntao_byov_inspection_v1.json'
+          ];
+          
+          diagnostics.fileSystemChecks.expectedNtaoTemplates = {};
+          for (const templateFile of expectedNtaoTemplates) {
+            const templatePath = path.join(ntaoDir, templateFile);
+            diagnostics.fileSystemChecks.expectedNtaoTemplates[templateFile] = {
+              exists: fs.existsSync(templatePath),
+              path: templatePath
+            };
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          diagnostics.issues.push(`Failed to read NTAO directory: ${errorMessage}`);
+        }
+      } else {
+        diagnostics.issues.push(`NTAO template directory does not exist: ${ntaoDir}`);
+      }
+
+      // Identify critical issues
+      const criticalIssues = [];
+      
+      if (!diagnostics.templateSystem.directoryExists) {
+        criticalIssues.push('CRITICAL: Template directory does not exist');
+      }
+      
+      if (!diagnostics.registry.loaded) {
+        criticalIssues.push('CRITICAL: Template registry could not be loaded');
+      }
+      
+      if (!diagnostics.ntaoSpecificTests.onboardingTemplate?.success) {
+        criticalIssues.push('CRITICAL: NTAO onboarding template not available');
+      }
+      
+      if (diagnostics.registry.contents?.onboarding_day0?.NTAO?.length === 0) {
+        criticalIssues.push('WARNING: NTAO onboarding_day0 template not defined in registry');
+      }
+
+      diagnostics.summary = {
+        overallStatus: criticalIssues.length === 0 ? 'HEALTHY' : 'ISSUES_DETECTED',
+        criticalIssues,
+        totalIssues: diagnostics.issues.length,
+        templatesDirectory: diagnostics.templateSystem.templateDirectory,
+        registryLoaded: diagnostics.registry.loaded,
+        ntaoOnboardingAvailable: diagnostics.ntaoSpecificTests.onboardingTemplate?.success || false
+      };
+
+      console.log('Template diagnostics completed:', {
+        status: diagnostics.summary.overallStatus,
+        criticalIssues: diagnostics.summary.criticalIssues.length,
+        totalIssues: diagnostics.summary.totalIssues
+      });
+
+      res.json(diagnostics);
+
+    } catch (error) {
+      console.error("Error running template diagnostics:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ 
+        message: "Failed to run template diagnostics",
+        error: errorMessage,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
   // Work Progress Routes for Template State
   app.get("/api/work-progress/:queueItemId", requireAuth, async (req, res) => {
     try {
