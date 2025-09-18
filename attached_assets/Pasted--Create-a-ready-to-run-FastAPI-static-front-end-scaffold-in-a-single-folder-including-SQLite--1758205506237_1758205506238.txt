@@ -1,0 +1,542 @@
+# Create a ready-to-run FastAPI + static front-end scaffold in a single folder,
+# including SQLite schema, seed data, metrics endpoints, export endpoints, and a simple dashboard UI.
+import os, json, textwrap, zipfile, io, pandas as pd, numpy as np, datetime as dt, random
+
+base = "/mnt/data/ops_dashboard_scaffold"
+os.makedirs(base, exist_ok=True)
+
+# -------------------- Backend: requirements --------------------
+requirements = """\
+fastapi==0.115.5
+uvicorn==0.30.6
+pydantic==2.9.2
+python-multipart==0.0.9
+pandas==2.2.2
+xlsxwriter==3.2.0
+"""
+open(os.path.join(base, "requirements.txt"), "w").write(requirements)
+
+# -------------------- Backend: schema & seed --------------------
+schema_sql = """\
+-- SQLite schema for Requests table
+DROP TABLE IF EXISTS requests;
+CREATE TABLE requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  department TEXT,
+  team TEXT,
+  type TEXT,
+  status TEXT,
+  assignee TEXT,
+  created_at TEXT,        -- ISO8601 timestamp
+  started_at TEXT,        -- ISO8601 timestamp
+  first_response_at TEXT, -- ISO8601 timestamp
+  completed_at TEXT,      -- ISO8601 timestamp
+  updated_at TEXT         -- ISO8601 timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests (created_at);
+CREATE INDEX IF NOT EXISTS idx_requests_department ON requests (department);
+CREATE INDEX IF NOT EXISTS idx_requests_status ON requests (status);
+CREATE INDEX IF NOT EXISTS idx_requests_assignee ON requests (assignee);
+CREATE INDEX IF NOT EXISTS idx_requests_completed_at ON requests (completed_at);
+"""
+open(os.path.join(base, "schema.sql"), "w").write(schema_sql)
+
+# generate seed data (synthetic) to verify UI quickly
+departments = ["NTAO", "Assets Management", "Inventory Control", "Fleet Management"]
+teams = ["North", "South", "East", "West", None]
+types = ["New Part", "Return", "Asset", "Fleet Ticket", "Inventory Adj."]
+statuses = ["Pending", "Open", "New", "In Progress", "Assigned", "Completed", "Canceled"]
+assignees = ["A. Jones", "B. Lee", "C. Patel", "D. Gomez", "E. Chen", None]
+
+rng = np.random.default_rng(42)
+now = dt.datetime.now()
+rows = []
+for i in range(300):
+    created = now - dt.timedelta(days=int(rng.integers(0, 60)), hours=int(rng.integers(0, 23)))
+    status = random.choices(["Completed", "In Progress", "Pending", "Open", "Canceled"], weights=[0.5,0.25,0.15,0.05,0.05])[0]
+    started = created + dt.timedelta(hours=int(rng.integers(0, 12))) if status in ["Completed","In Progress"] else None
+    completed = None
+    if status == "Completed":
+        completed = created + dt.timedelta(hours=int(rng.integers(2, 72)))
+    first_response = created + dt.timedelta(hours=int(rng.integers(1, 24))) if rng.random()<0.8 else None
+    updated = completed or started or created
+    rows.append({
+        "department": random.choice(departments),
+        "team": random.choice(teams),
+        "type": random.choice(types),
+        "status": status,
+        "assignee": random.choice(assignees),
+        "created_at": created.isoformat(timespec="seconds"),
+        "started_at": started.isoformat(timespec="seconds") if started else None,
+        "first_response_at": first_response.isoformat(timespec="seconds") if first_response else None,
+        "completed_at": completed.isoformat(timespec="seconds") if completed else None,
+        "updated_at": updated.isoformat(timespec="seconds"),
+    })
+df = pd.DataFrame(rows)
+seed_csv_path = os.path.join(base, "seed.csv")
+df.to_csv(seed_csv_path, index=False)
+
+seed_loader = """\
+#!/usr/bin/env python3
+import sqlite3, csv, sys, os
+DB = os.environ.get("DB_PATH", "ops.db")
+conn = sqlite3.connect(DB)
+cur = conn.cursor()
+cur.executescript(open("schema.sql").read())
+with open("seed.csv", newline="") as f:
+    rdr = csv.DictReader(f)
+    rows = [tuple(r.get(k) for k in rdr.fieldnames) for r in rdr]
+    placeholders = ",".join(["?"]*len(rdr.fieldnames))
+    cur.executemany(f"INSERT INTO requests ({','.join(rdr.fieldnames)}) VALUES ({placeholders})", rows)
+conn.commit()
+print(f"Seeded {len(rows)} rows into {DB}")
+"""
+open(os.path.join(base, "seed.py"), "w").write(seed_loader)
+
+# -------------------- Backend: metrics SQL (SQLite flavor inside Python) --------------------
+# We'll implement the metrics using Python-side SQL strings tailored for SQLite.
+routes_metrics = """\
+# routes_metrics.py
+from fastapi import APIRouter, Query
+from typing import List, Optional, Dict, Any
+import sqlite3, os, itertools, datetime as dt
+
+router = APIRouter()
+DB = os.environ.get("DB_PATH", "ops.db")
+
+def _connect():
+    conn = sqlite3.connect(DB, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _in_clause(values: Optional[List[str]], field: str) -> str:
+    if not values: 
+        return ""
+    placeholders = ",".join(["?"]*len(values))
+    return f" AND {field} IN ({placeholders}) "
+
+def _binds(from_ts:str, to_ts:str, departments, statuses, assignees):
+    binds = [from_ts, to_ts]
+    for group in (departments or []), (statuses or []), (assignees or []):
+        binds.extend(group)
+    return binds
+
+@router.get("/metrics")
+def metrics(
+    from_ts: str = Query(..., description="ISO8601 inclusive start"),
+    to_ts: str   = Query(..., description="ISO8601 exclusive end"),
+    departments: Optional[List[str]] = Query(None),
+    statuses: Optional[List[str]]    = Query(None),
+    assignees: Optional[List[str]]   = Query(None),
+):
+    conn = _connect()
+    cur = conn.cursor()
+
+    # Build WHERE
+    where = " WHERE created_at >= ? AND created_at < ? "
+    where += _in_clause(departments, "department")
+    where += _in_clause(statuses, "status")
+    where += _in_clause(assignees, "assignee")
+
+    # Summary with aging buckets (hours via strftime)
+    summary_sql = f\"\"\"
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN status IN ('Pending','Open','New') THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN status IN ('In Progress','Assigned') THEN 1 ELSE 0 END) AS in_progress,
+      SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN status IN ('Canceled','Cancelled') THEN 1 ELSE 0 END) AS canceled,
+      ROUND(AVG(
+        CASE WHEN completed_at IS NOT NULL 
+          THEN (strftime('%s', completed_at) - strftime('%s', created_at))/3600.0
+        END
+      ), 2) AS avg_created_to_done,
+      ROUND(AVG(
+        CASE WHEN started_at IS NOT NULL AND completed_at IS NOT NULL
+          THEN (strftime('%s', completed_at) - strftime('%s', started_at))/3600.0
+        END
+      ), 2) AS avg_start_to_done,
+      ROUND(AVG(
+        CASE WHEN first_response_at IS NOT NULL
+          THEN (strftime('%s', first_response_at) - strftime('%s', created_at))/3600.0
+        END
+      ), 2) AS avg_first_response,
+      SUM(CASE WHEN status <> 'Completed' AND (strftime('%s','now') - strftime('%s', created_at))/3600.0 BETWEEN 0 AND 48 THEN 1 ELSE 0 END) AS age_0_2d,
+      SUM(CASE WHEN status <> 'Completed' AND (strftime('%s','now') - strftime('%s', created_at))/3600.0 BETWEEN 72 AND 168 THEN 1 ELSE 0 END) AS age_3_7d,
+      SUM(CASE WHEN status <> 'Completed' AND (strftime('%s','now') - strftime('%s', created_at))/3600.0 BETWEEN 192 AND 336 THEN 1 ELSE 0 END) AS age_8_14d,
+      SUM(CASE WHEN status <> 'Completed' AND (strftime('%s','now') - strftime('%s', created_at))/3600.0 BETWEEN 360 AND 720 THEN 1 ELSE 0 END) AS age_15_30d,
+      SUM(CASE WHEN status <> 'Completed' AND (strftime('%s','now') - strftime('%s', created_at))/3600.0 BETWEEN 744 AND 1440 THEN 1 ELSE 0 END) AS age_31_60d,
+      SUM(CASE WHEN status <> 'Completed' AND (strftime('%s','now') - strftime('%s', created_at))/3600.0 > 1440 THEN 1 ELSE 0 END) AS age_gt_60d
+    FROM requests
+    {where};
+    \"\"\"
+
+    # By type
+    by_type_sql = f\"\"\"
+    SELECT type, COUNT(*) AS total
+    FROM requests
+    {where}
+    GROUP BY type ORDER BY total DESC;
+    \"\"\"
+
+    # By team
+    by_team_sql = f\"\"\"
+    SELECT COALESCE(team,'(Unassigned Team)') AS team,
+      COUNT(*) AS total,
+      SUM(CASE WHEN status IN ('In Progress','Assigned') THEN 1 ELSE 0 END) AS in_progress,
+      SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END) AS completed,
+      ROUND(AVG(CASE WHEN completed_at IS NOT NULL THEN (strftime('%s', completed_at) - strftime('%s', created_at))/3600.0 END), 2) AS avg_created_to_done,
+      ROUND(AVG(CASE WHEN started_at   IS NOT NULL AND completed_at IS NOT NULL THEN (strftime('%s', completed_at) - strftime('%s', started_at))/3600.0 END), 2) AS avg_start_to_done
+    FROM requests
+    {where}
+    GROUP BY COALESCE(team,'(Unassigned Team)')
+    ORDER BY total DESC;
+    \"\"\"
+
+    # By user
+    by_user_sql = f\"\"\"
+    SELECT COALESCE(assignee,'(Unassigned)') AS assignee,
+      COUNT(*) AS total,
+      SUM(CASE WHEN status IN ('In Progress','Assigned') THEN 1 ELSE 0 END) AS in_progress,
+      SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END) AS completed,
+      ROUND(AVG(CASE WHEN completed_at IS NOT NULL THEN (strftime('%s', completed_at) - strftime('%s', created_at))/3600.0 END), 2) AS avg_created_to_done,
+      ROUND(AVG(CASE WHEN started_at   IS NOT NULL AND completed_at IS NOT NULL THEN (strftime('%s', completed_at) - strftime('%s', started_at))/3600.0 END), 2) AS avg_start_to_done
+    FROM requests
+    {where}
+    GROUP BY COALESCE(assignee,'(Unassigned)')
+    ORDER BY total DESC;
+    \"\"\"
+
+    # Completed per day by agent
+    completed_ts_sql = f\"\"\"
+    SELECT date(completed_at) AS day,
+           COALESCE(assignee,'(Unassigned)') AS assignee,
+           COUNT(*) AS completed_count,
+           ROUND(AVG((strftime('%s', completed_at) - strftime('%s', created_at))/3600.0), 2) AS avg_hrs_created_to_done
+    FROM requests
+    {where} AND completed_at IS NOT NULL
+    GROUP BY date(completed_at), COALESCE(assignee,'(Unassigned)')
+    ORDER BY day, assignee;
+    \"\"\"
+
+    binds = _binds(from_ts, to_ts, departments, statuses, assignees)
+
+    cur.execute(summary_sql, binds)
+    summary = dict(cur.fetchone() or {})
+
+    cur.execute(by_type_sql, binds)
+    by_type = [dict(r) for r in cur.fetchall()]
+
+    cur.execute(by_team_sql, binds)
+    by_team = [dict(r) for r in cur.fetchall()]
+
+    cur.execute(by_user_sql, binds)
+    by_user = [dict(r) for r in cur.fetchall()]
+
+    cur.execute(completed_ts_sql, binds)
+    completed_time_series = [dict(r) for r in cur.fetchall()]
+
+    return {
+        "summary": summary,
+        "by_type": by_type,
+        "by_team": by_team,
+        "by_user": by_user,
+        "completed_time_series": completed_time_series
+    }
+"""
+open(os.path.join(base, "routes_metrics.py"), "w").write(routes_metrics)
+
+# -------------------- Backend: export endpoints --------------------
+routes_export = """\
+# routes_export.py
+from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
+from typing import List, Optional
+import sqlite3, os, io, csv, pandas as pd
+
+router = APIRouter()
+DB = os.environ.get("DB_PATH", "ops.db")
+
+def _connect():
+    conn = sqlite3.connect(DB, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _in_clause(values, field):
+    if not values: 
+        return ""
+    placeholders = ",".join(["?"]*len(values))
+    return f" AND {field} IN ({placeholders}) "
+
+def _binds(from_ts,to_ts,departments,statuses,assignees):
+    binds=[from_ts,to_ts]
+    for group in (departments or []), (statuses or []), (assignees or []):
+        binds.extend(group)
+    return binds
+
+BASE = " FROM requests WHERE created_at >= ? AND created_at < ? "
+
+@router.get("/export/requests.csv")
+def export_csv(from_ts:str, to_ts:str, departments: Optional[List[str]] = Query(None),
+               statuses: Optional[List[str]] = Query(None), assignees: Optional[List[str]] = Query(None)):
+    conn=_connect(); cur=conn.cursor()
+    where = BASE + _in_clause(departments,"department") + _in_clause(statuses,"status") + _in_clause(assignees,"assignee")
+    sql = "SELECT id, department, team, type, status, assignee, created_at, started_at, first_response_at, completed_at, updated_at " + where + " ORDER BY created_at DESC"
+    cur.execute(sql, _binds(from_ts,to_ts,departments,statuses,assignees))
+    rows = [dict(r) for r in cur.fetchall()]
+    output = io.StringIO()
+    if rows:
+        writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    else:
+        output.write("")
+    output.seek(0)
+    return StreamingResponse(output, media_type="text/csv",
+        headers={"Content-Disposition":"attachment; filename=requests.csv"})
+
+@router.get("/export/requests.xlsx")
+def export_xlsx(from_ts:str, to_ts:str, departments: Optional[List[str]] = Query(None),
+               statuses: Optional[List[str]] = Query(None), assignees: Optional[List[str]] = Query(None)):
+    conn=_connect(); cur=conn.cursor()
+    where = BASE + _in_clause(departments,"department") + _in_clause(statuses,"status") + _in_clause(assignees,"assignee")
+    sql = "SELECT id, department, team, type, status, assignee, created_at, started_at, first_response_at, completed_at, updated_at " + where + " ORDER BY created_at DESC"
+    cur.execute(sql, _binds(from_ts,to_ts,departments,statuses,assignees))
+    rows = [dict(r) for r in cur.fetchall()]
+    df = pd.DataFrame(rows)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        (df if not df.empty else pd.DataFrame()).to_excel(writer, index=False, sheet_name="Requests")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":"attachment; filename=requests.xlsx"})
+"""
+open(os.path.join(base, "routes_export.py"), "w").write(routes_export)
+
+# -------------------- Backend: main app (serves static UI too) --------------------
+main_py = """\
+# main.py
+import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from routes_metrics import router as metrics_router
+from routes_export import router as export_router
+
+app = FastAPI(title="Operations Dashboard API")
+
+# CORS (allow local dev)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(metrics_router)
+app.include_router(export_router)
+
+# Serve static dashboard (no build step)
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(static_dir, exist_ok=True)
+app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+"""
+open(os.path.join(base, "main.py"), "w").write(main_py)
+
+# -------------------- Front-end: static files --------------------
+static_dir = os.path.join(base, "static")
+os.makedirs(static_dir, exist_ok=True)
+
+index_html = """\
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Operations Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/mvp.css@1.12/mvp.css">
+  <style>
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 12px; }
+    .tile { padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; }
+    table td, table th { white-space: nowrap; }
+    .scroll-x { overflow-x:auto }
+    .row { display:flex; flex-wrap:wrap; gap:8px; align-items:end; }
+    .row > * { min-width: 200px; }
+    code.badge { padding:4px 8px; border-radius:8px; background:#eef2ff; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Operations Dashboard</h1>
+    <p>Includes Department, Team, and Agent productivity + export. NTAO label is corrected to <code class="badge">NTAO — National Truck Assortment</code>.</p>
+  </header>
+
+  <section>
+    <h2>Filters</h2>
+    <div class="row">
+      <div>
+        <label>From</label>
+        <input type="datetime-local" id="from_ts">
+      </div>
+      <div>
+        <label>To</label>
+        <input type="datetime-local" id="to_ts">
+      </div>
+      <div>
+        <label>Department</label>
+        <select id="department" multiple size="4">
+          <option value="NTAO">NTAO — National Truck Assortment</option>
+          <option>Assets Management</option>
+          <option>Inventory Control</option>
+          <option>Fleet Management</option>
+        </select>
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="status" multiple size="6">
+          <option>Pending</option>
+          <option>Open</option>
+          <option>New</option>
+          <option>In Progress</option>
+          <option>Assigned</option>
+          <option>Completed</option>
+          <option>Canceled</option>
+        </select>
+      </div>
+      <div>
+        <label>Assignee (type to filter)</label>
+        <input id="assignee_filter" placeholder="e.g., Jones">
+      </div>
+      <div>
+        <button id="run">Run</button>
+        <a id="csv" class="button">Export CSV</a>
+        <a id="xlsx" class="button">Export XLSX</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="summary"></section>
+
+  <section>
+    <h2>Requests by Type</h2>
+    <div class="scroll-x"><table id="by_type"></table></div>
+  </section>
+
+  <section>
+    <h2>Team Performance</h2>
+    <div class="scroll-x"><table id="by_team"></table></div>
+  </section>
+
+  <section>
+    <h2>Agent Productivity</h2>
+    <div class="scroll-x"><table id="by_user"></table></div>
+    <details>
+      <summary>Completed per Day by Agent (raw)</summary>
+      <div class="scroll-x"><table id="ts"></table></div>
+    </details>
+  </section>
+
+<script>
+const fmt = (n)=> (n===null||n===undefined||Number.isNaN(n)) ? "—" : n;
+
+function qs(params){
+  const u = new URLSearchParams();
+  if(params.from_ts) u.set("from_ts", params.from_ts);
+  if(params.to_ts) u.set("to_ts", params.to_ts);
+  (params.departments||[]).forEach(v=>u.append("departments", v));
+  (params.statuses||[]).forEach(v=>u.append("statuses", v));
+  (params.assignees||[]).forEach(v=>u.append("assignees", v));
+  return u.toString();
+}
+
+function getFilters(){
+  const from_ts = document.getElementById('from_ts').value ? new Date(document.getElementById('from_ts').value).toISOString() : null;
+  const to_ts   = document.getElementById('to_ts').value   ? new Date(document.getElementById('to_ts').value).toISOString() : null;
+  const sel = (id)=> Array.from(document.getElementById(id).selectedOptions).map(o=>o.value);
+  const departments = sel('department');
+  const statuses = sel('status');
+  // demo assignee filter is text search; backend supports explicit list if needed
+  const assignee_filter = document.getElementById('assignee_filter').value.toLowerCase().trim();
+  return { from_ts, to_ts, departments, statuses, assignees: null, assignee_filter };
+}
+
+function setDefaults(){
+  const now = new Date();
+  const start = new Date(now.getTime() - 30*24*3600*1000);
+  document.getElementById('from_ts').value = start.toISOString().slice(0,16);
+  document.getElementById('to_ts').value = now.toISOString().slice(0,16);
+}
+
+function renderTable(elId, rows){
+  const el = document.getElementById(elId);
+  if(!rows || rows.length===0){ el.innerHTML = "<tbody><tr><td>No data</td></tr></tbody>"; return; }
+  const cols = Object.keys(rows[0]);
+  let thead = "<thead><tr>"+cols.map(c=>`<th>${c}</th>`).join("")+"</tr></thead>";
+  let tbody = "<tbody>"+rows.map(r=>"<tr>"+cols.map(c=>`<td>${fmt(r[c])}</td>`).join("")+"</tr>").join("")+"</tbody>";
+  el.innerHTML = thead + tbody;
+}
+
+function renderSummary(s){
+  const host = document.getElementById('summary');
+  host.innerHTML = `
+    <h2>Summary</h2>
+    <div class="grid">
+      ${tile("Total Requests", s.total)}
+      ${tile("Pending", s.pending)}
+      ${tile("In Progress", s.in_progress)}
+      ${tile("Completed", s.completed)}
+      ${tile("Canceled", s.canceled)}
+      ${tile("Avg Hrs (Created→Done)", s.avg_created_to_done)}
+      ${tile("Avg Hrs (Start→Done)", s.avg_start_to_done)}
+      ${tile("Avg First Response (hrs)", s.avg_first_response)}
+      ${tile("Aging 0–2d", s.age_0_2d)}
+      ${tile("Aging 3–7d", s.age_3_7d)}
+      ${tile("Aging 8–14d", s.age_8_14d)}
+      ${tile("Aging 15–30d", s.age_15_30d)}
+      ${tile("Aging 31–60d", s.age_31_60d)}
+      ${tile(">60d", s.age_gt_60d)}
+    </div>`;
+}
+function tile(label, value){ return `<div class="tile"><h3>${label}</h3><p><strong>${fmt(value)}</strong></p></div>`; }
+
+async function run(){
+  const f = getFilters();
+  const url = "/metrics?" + qs(f);
+  document.getElementById("csv").href = "/export/requests.csv?" + qs(f);
+  document.getElementById("xlsx").href = "/export/requests.xlsx?" + qs(f);
+  const res = await fetch(url);
+  const data = await res.json();
+
+  // Optional client-side assignee search filter on table
+  let by_user = data.by_user || [];
+  const term = f.assignee_filter;
+  if(term){
+    by_user = by_user.filter(r => (r.assignee||"").toLowerCase().includes(term));
+  }
+
+  renderSummary(data.summary || {});
+  renderTable("by_type", data.by_type || []);
+  renderTable("by_team", data.by_team || []);
+  renderTable("by_user", by_user);
+  renderTable("ts", data.completed_time_series || []);
+}
+
+document.getElementById('run').addEventListener('click', run);
+setDefaults();
+run();
+</script>
+</body>
+</html>
+"""
+open(os.path.join(static_dir, "index.html"), "w").write(index_html)
+
+# -------------------- README --------------------
+readme = """\
+# Operations Dashboard (Replit-ready)
+
+Single project with FastAPI API + static front-end and SQLite DB.
+
+## Run locally / Replit
+1) **Install deps**
