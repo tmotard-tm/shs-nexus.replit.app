@@ -1,0 +1,111 @@
+{
+  "id": "assets_decommission_v1",
+  "name": "Assets Vehicle Decommission Process",
+  "department": "ASSETS",
+  "workflowType": "decommission",
+  "version": "1.0",
+  "description": "Assets management process for vehicle decommissioning and equipment recovery",
+  "estimatedDuration": 40,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "equipment_inventory_removal",
+      "title": "Equipment Inventory and Removal",
+      "description": "Inventory and remove all company equipment from vehicle",
+      "required": true,
+      "estimatedTime": 25,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "inventory_vehicle_equipment",
+          "title": "Inventory all vehicle equipment",
+          "description": "Complete inventory of all company equipment installed in vehicle",
+          "required": true
+        },
+        {
+          "id": "remove_company_equipment",
+          "title": "Remove all company equipment",
+          "description": "Safely remove all company-owned equipment from vehicle",
+          "required": true
+        },
+        {
+          "id": "document_equipment_condition",
+          "title": "Document equipment condition",
+          "description": "Document condition of all removed equipment",
+          "required": true
+        },
+        {
+          "id": "secure_sensitive_equipment",
+          "title": "Secure sensitive equipment",
+          "description": "Properly secure and account for any sensitive or high-value equipment",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "asset_processing",
+      "title": "Asset Processing and Documentation",
+      "description": "Process recovered assets and update tracking systems",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "update_asset_tracking_system",
+          "title": "Update asset tracking system",
+          "description": "Update asset tracking with recovered equipment status",
+          "required": true
+        },
+        {
+          "id": "determine_equipment_disposition",
+          "title": "Determine equipment disposition",
+          "description": "Determine whether equipment will be redeployed, repaired, or disposed",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "final_asset_reconciliation",
+      "title": "Final Asset Reconciliation",
+      "description": "Complete final reconciliation of all assets",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "generate_asset_recovery_report",
+          "title": "Generate asset recovery report",
+          "description": "Create comprehensive report of all recovered assets",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "assets_recovered_complete",
+        "label": "All Assets Recovered - Complete",
+        "requiresApproval": false
+      },
+      {
+        "value": "partial_recovery",
+        "label": "Partial Asset Recovery",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_investigation",
+        "label": "Requires Investigation",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-18T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["decommission", "assets", "equipment", "recovery"],
+    "isActive": true
+  }
+}

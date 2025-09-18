@@ -1,0 +1,105 @@
+{
+  "id": "ntao_decommission_v1",
+  "name": "NTAO Vehicle Decommission Process",
+  "department": "NTAO",
+  "workflowType": "decommission",
+  "version": "1.0",
+  "description": "NTAO operational process for vehicle decommissioning",
+  "estimatedDuration": 30,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "operational_impact_assessment",
+      "title": "Operational Impact Assessment",
+      "description": "Assess operational impact of vehicle decommission",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "review_service_territory_impact",
+          "title": "Review service territory impact",
+          "description": "Analyze impact on service territory coverage and capacity",
+          "required": true
+        },
+        {
+          "id": "identify_replacement_coverage",
+          "title": "Identify replacement coverage options",
+          "description": "Determine alternative coverage solutions for affected territory",
+          "required": true
+        },
+        {
+          "id": "assess_technician_reassignment",
+          "title": "Assess technician reassignment needs",
+          "description": "Evaluate need for technician reassignment to maintain coverage",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "service_transition_coordination",
+      "title": "Service Transition Coordination",
+      "description": "Coordinate service transition and coverage adjustments",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "coordination",
+      "substeps": [
+        {
+          "id": "update_dispatch_routing",
+          "title": "Update dispatch routing systems",
+          "description": "Adjust routing and dispatch systems for decommissioned vehicle",
+          "required": true
+        },
+        {
+          "id": "communicate_service_changes",
+          "title": "Communicate service changes to stakeholders",
+          "description": "Notify relevant stakeholders of service coverage changes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "operational_documentation",
+      "title": "Operational Documentation",
+      "description": "Document operational changes and updates",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "update_operational_records",
+          "title": "Update operational records",
+          "description": "Update all operational records to reflect vehicle decommission",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "operational_decommission_complete",
+        "label": "Operational Decommission Complete",
+        "requiresApproval": false
+      },
+      {
+        "value": "coverage_adjustment_pending",
+        "label": "Coverage Adjustment Pending",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_management_approval",
+        "label": "Requires Management Approval",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-18T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["decommission", "ntao", "operational", "coverage"],
+    "isActive": true
+  }
+}

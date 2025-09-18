@@ -3676,13 +3676,218 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/work-templates/validate/all", requireAuth, async (req, res) => {
+  app.get("/api/templates/validate-all", requireAuth, async (req, res) => {
     try {
-      const result = await templateLoader.validateAllTemplates();
-      res.json(result);
+      console.log('=== STARTING COMPREHENSIVE TEMPLATE VALIDATION ===');
+      
+      const departments: QueueModule[] = ['ntao', 'assets', 'inventory', 'fleet'];
+      const workflowTypes = [
+        'vehicle_assignment', 'onboarding', 'offboarding', 'decommission', 
+        'byov_assignment', 'byov_onboarding', 'onboarding_day0', 'onboarding_day1_5',
+        'onboarding_general', 'van_assignment', 'van_unassignment', 'system_updates',
+        'stop_shipment', 'setup_shipment', 'equipment_recovery', 'storage_request',
+        'create_vehicle', 'offboarding_sequence'
+      ];
+
+      const validationResults = {
+        timestamp: new Date().toISOString(),
+        summary: {
+          totalCombinations: departments.length * workflowTypes.length,
+          workingCombinations: 0,
+          missingTemplates: 0,
+          missingRegistryEntries: 0,
+          bothMissing: 0,
+          errors: 0
+        },
+        departments: {} as Record<string, any>,
+        missingTemplates: [] as Array<{
+          department: string;
+          workflowType: string;
+          issue: 'missing_template' | 'missing_registry' | 'both_missing' | 'load_error';
+          expectedTemplateId: string;
+          registryEntry: string[];
+          error?: string;
+        }>,
+        workingTemplates: [] as Array<{
+          department: string;
+          workflowType: string;
+          templateId: string;
+          templateExists: boolean;
+          registryExists: boolean;
+        }>,
+        registryAnalysis: {
+          loadedSuccessfully: false,
+          totalWorkflowTypes: 0,
+          emptyMappings: 0,
+          workflowTypesWithEmptyDepartments: [] as string[]
+        }
+      };
+
+      // Load registry to understand current mappings
+      const path = await import('path');
+      const fs = await import('fs');
+      const { fileURLToPath } = await import('url');
+      
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      
+      let registry: any = {};
+      try {
+        const registryPath = path.join(__dirname, '../shared/templates/template-registry.json');
+        const registryData = await fs.promises.readFile(registryPath, 'utf-8');
+        const parsedRegistry = JSON.parse(registryData);
+        registry = parsedRegistry.registry ?? parsedRegistry;
+        validationResults.registryAnalysis.loadedSuccessfully = true;
+        validationResults.registryAnalysis.totalWorkflowTypes = Object.keys(registry).length;
+        
+        // Analyze empty mappings
+        for (const [workflowType, deptMappings] of Object.entries(registry)) {
+          let hasEmptyDepartments = false;
+          for (const [dept, templates] of Object.entries(deptMappings as any)) {
+            if (!templates || (Array.isArray(templates) && templates.length === 0)) {
+              hasEmptyDepartments = true;
+              validationResults.registryAnalysis.emptyMappings++;
+            }
+          }
+          if (hasEmptyDepartments) {
+            validationResults.registryAnalysis.workflowTypesWithEmptyDepartments.push(workflowType);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load registry for validation:', error);
+        validationResults.registryAnalysis.loadedSuccessfully = false;
+      }
+
+      // Test each department/workflow combination
+      for (const department of departments) {
+        console.log(`Testing department: ${department.toUpperCase()}`);
+        validationResults.departments[department.toUpperCase()] = {
+          totalWorkflows: workflowTypes.length,
+          working: 0,
+          missing: 0,
+          details: {} as Record<string, any>
+        };
+
+        for (const workflowType of workflowTypes) {
+          const testResult = {
+            workflowType,
+            registryExists: false,
+            templateExists: false,
+            templateLoads: false,
+            expectedTemplateId: '',
+            registryTemplates: [] as string[],
+            error: null as string | null
+          };
+
+          try {
+            // Check registry entry
+            const registryEntry = registry[workflowType]?.[department.toUpperCase()];
+            testResult.registryExists = !!(registryEntry && registryEntry.length > 0);
+            testResult.registryTemplates = registryEntry || [];
+
+            if (testResult.registryExists && testResult.registryTemplates.length > 0) {
+              // Check if template file exists
+              testResult.expectedTemplateId = testResult.registryTemplates[0];
+              const templatePath = path.join(__dirname, `../shared/templates/${department}/${testResult.expectedTemplateId}.json`);
+              testResult.templateExists = fs.existsSync(templatePath);
+
+              if (testResult.templateExists) {
+                // Try to load template
+                try {
+                  const templateResult = await templateLoader.getTemplateForWorkflow(workflowType, department);
+                  testResult.templateLoads = !!templateResult.template;
+                  if (!testResult.templateLoads && templateResult.error) {
+                    testResult.error = templateResult.error;
+                  }
+                } catch (loadError) {
+                  testResult.templateLoads = false;
+                  testResult.error = `Load error: ${loadError instanceof Error ? loadError.message : 'Unknown error'}`;
+                }
+              }
+            } else {
+              // Generate expected template ID for missing registry entries
+              testResult.expectedTemplateId = `${department}_${workflowType.replace(/_/g, '_')}_v1`;
+            }
+
+            // Categorize the result
+            if (testResult.registryExists && testResult.templateExists && testResult.templateLoads) {
+              validationResults.summary.workingCombinations++;
+              validationResults.departments[department.toUpperCase()].working++;
+              validationResults.workingTemplates.push({
+                department: department.toUpperCase(),
+                workflowType,
+                templateId: testResult.expectedTemplateId,
+                templateExists: true,
+                registryExists: true
+              });
+            } else {
+              validationResults.departments[department.toUpperCase()].missing++;
+              
+              let issue: 'missing_template' | 'missing_registry' | 'both_missing' | 'load_error' = 'both_missing';
+              
+              if (!testResult.registryExists && !testResult.templateExists) {
+                issue = 'both_missing';
+                validationResults.summary.bothMissing++;
+              } else if (!testResult.registryExists) {
+                issue = 'missing_registry';
+                validationResults.summary.missingRegistryEntries++;
+              } else if (!testResult.templateExists || !testResult.templateLoads) {
+                if (testResult.error) {
+                  issue = 'load_error';
+                  validationResults.summary.errors++;
+                } else {
+                  issue = 'missing_template';
+                  validationResults.summary.missingTemplates++;
+                }
+              }
+
+              validationResults.missingTemplates.push({
+                department: department.toUpperCase(),
+                workflowType,
+                issue,
+                expectedTemplateId: testResult.expectedTemplateId,
+                registryEntry: testResult.registryTemplates,
+                error: testResult.error || undefined
+              });
+            }
+
+            validationResults.departments[department.toUpperCase()].details[workflowType] = testResult;
+
+          } catch (error) {
+            console.error(`Error testing ${department}/${workflowType}:`, error);
+            testResult.error = error instanceof Error ? error.message : 'Unknown error';
+            validationResults.summary.errors++;
+            validationResults.departments[department.toUpperCase()].missing++;
+            
+            validationResults.missingTemplates.push({
+              department: department.toUpperCase(),
+              workflowType,
+              issue: 'load_error',
+              expectedTemplateId: testResult.expectedTemplateId,
+              registryEntry: testResult.registryTemplates,
+              error: testResult.error
+            });
+
+            validationResults.departments[department.toUpperCase()].details[workflowType] = testResult;
+          }
+        }
+      }
+
+      console.log('=== VALIDATION COMPLETE ===');
+      console.log(`Total combinations: ${validationResults.summary.totalCombinations}`);
+      console.log(`Working: ${validationResults.summary.workingCombinations}`);
+      console.log(`Missing templates: ${validationResults.summary.missingTemplates}`);
+      console.log(`Missing registry entries: ${validationResults.summary.missingRegistryEntries}`);
+      console.log(`Both missing: ${validationResults.summary.bothMissing}`);
+      console.log(`Errors: ${validationResults.summary.errors}`);
+
+      res.json(validationResults);
     } catch (error) {
-      console.error("Error validating all templates:", error);
-      res.status(500).json({ message: "Failed to validate templates" });
+      console.error("Error in comprehensive template validation:", error);
+      res.status(500).json({ 
+        message: "Failed to perform comprehensive template validation",
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 

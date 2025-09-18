@@ -1,0 +1,89 @@
+{
+  "id": "inventory_byov_onboarding_v1",
+  "name": "Inventory BYOV Technician Onboarding",
+  "department": "INVENTORY",
+  "workflowType": "byov_onboarding",
+  "version": "1.0",
+  "description": "Inventory management onboarding process for Bring Your Own Vehicle technicians",
+  "estimatedDuration": 25,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "byov_parts_allocation",
+      "title": "BYOV Parts Allocation",
+      "description": "Allocate parts inventory suitable for BYOV operations",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "determine_starter_parts_kit",
+          "title": "Determine starter parts kit",
+          "description": "Select appropriate starter parts inventory for BYOV technician",
+          "required": true
+        },
+        {
+          "id": "configure_mobile_parts_storage",
+          "title": "Configure mobile parts storage solution",
+          "description": "Set up mobile storage solution for parts inventory in personal vehicle",
+          "required": true
+        },
+        {
+          "id": "establish_parts_replenishment_schedule",
+          "title": "Establish parts replenishment schedule",
+          "description": "Define schedule and method for parts inventory replenishment",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "byov_inventory_tracking",
+      "title": "BYOV Inventory Tracking Setup",
+      "description": "Set up inventory tracking for BYOV operations",
+      "required": true,
+      "estimatedTime": 10,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "configure_mobile_inventory_system",
+          "title": "Configure mobile inventory tracking",
+          "description": "Set up mobile inventory tracking system for BYOV technician",
+          "required": true
+        },
+        {
+          "id": "establish_inventory_accountability",
+          "title": "Establish inventory accountability protocols",
+          "description": "Define protocols for regular inventory counts and accountability",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "byov_inventory_assigned",
+        "label": "BYOV Inventory Assigned Complete",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_parts_delivery",
+        "label": "Pending Parts Delivery",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_inventory_manager_approval",
+        "label": "Requires Inventory Manager Approval",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-18T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["byov", "onboarding", "inventory", "mobile_storage"],
+    "isActive": true
+  }
+}

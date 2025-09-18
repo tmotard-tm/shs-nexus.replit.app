@@ -1,0 +1,117 @@
+{
+  "id": "fleet_offboarding_sequence_v1",
+  "name": "Fleet Technician Offboarding Sequence",
+  "department": "FLEET",
+  "workflowType": "offboarding_sequence",
+  "version": "1.0",
+  "description": "Complete fleet management offboarding sequence for departing technicians",
+  "estimatedDuration": 50,
+  "difficulty": "high",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "vehicle_return_coordination",
+      "title": "Vehicle Return Coordination",
+      "description": "Coordinate return of assigned fleet vehicles",
+      "required": true,
+      "estimatedTime": 25,
+      "category": "coordination",
+      "substeps": [
+        {
+          "id": "schedule_vehicle_return",
+          "title": "Schedule vehicle return",
+          "description": "Arrange for return of all assigned fleet vehicles",
+          "required": true
+        },
+        {
+          "id": "conduct_vehicle_inspection",
+          "title": "Conduct final vehicle inspection",
+          "description": "Perform comprehensive inspection of returned vehicles",
+          "required": true
+        },
+        {
+          "id": "document_vehicle_condition",
+          "title": "Document vehicle condition",
+          "description": "Document current condition and any damage or maintenance needs",
+          "required": true
+        },
+        {
+          "id": "transfer_vehicle_keys_documents",
+          "title": "Transfer vehicle keys and documents",
+          "description": "Collect all vehicle keys, registration, and related documents",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "fleet_system_updates",
+      "title": "Fleet System Updates",
+      "description": "Update fleet management systems",
+      "required": true,
+      "estimatedTime": 20,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "update_vehicle_assignment_system",
+          "title": "Update vehicle assignment system",
+          "description": "Remove technician assignments from fleet management system",
+          "required": true
+        },
+        {
+          "id": "deactivate_vehicle_access_systems",
+          "title": "Deactivate vehicle access systems",
+          "description": "Deactivate any electronic access systems or tracking devices",
+          "required": true
+        },
+        {
+          "id": "update_insurance_records",
+          "title": "Update insurance and liability records",
+          "description": "Update insurance records to reflect change in vehicle assignment",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "final_fleet_reconciliation",
+      "title": "Final Fleet Reconciliation",
+      "description": "Complete final fleet asset reconciliation",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "documentation",
+      "substeps": [
+        {
+          "id": "generate_vehicle_return_report",
+          "title": "Generate vehicle return report",
+          "description": "Create comprehensive report of all returned fleet assets",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "fleet_assets_returned_complete",
+        "label": "All Fleet Assets Returned - Complete",
+        "requiresApproval": false
+      },
+      {
+        "value": "damage_assessment_pending",
+        "label": "Damage Assessment Pending",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_legal_collection",
+        "label": "Requires Legal Collection Action",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-18T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["offboarding", "sequence", "fleet", "vehicles", "return"],
+    "isActive": true
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "id": "ntao_onboarding_day0_v1",
+  "name": "NTAO Day 0 Technician Onboarding",
+  "department": "NTAO",
+  "workflowType": "onboarding_day0",
+  "version": "1.0",
+  "description": "Critical Day 0 NTAO operational tasks for new technician onboarding",
+  "estimatedDuration": 35,
+  "difficulty": "high",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "territory_assignment",
+      "title": "Territory Assignment and Setup",
+      "description": "Assign service territory and configure operational parameters",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "assign_service_territory",
+          "title": "Assign service territory to new technician",
+          "description": "Assign appropriate service territory based on location and capacity",
+          "required": true
+        },
+        {
+          "id": "configure_routing_profile",
+          "title": "Configure routing profile in dispatch system",
+          "description": "Set up technician routing profile for optimal service delivery",
+          "required": true
+        },
+        {
+          "id": "validate_service_area_coverage",
+          "title": "Validate service area coverage",
+          "description": "Ensure assigned territory provides appropriate service coverage",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "operational_setup",
+      "title": "Operational Systems Setup",
+      "description": "Configure operational systems and communication channels",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "setup_dispatch_communication",
+          "title": "Set up dispatch communication channel",
+          "description": "Configure communication systems for dispatch coordination",
+          "required": true
+        },
+        {
+          "id": "configure_service_scheduling",
+          "title": "Configure service scheduling parameters",
+          "description": "Set up scheduling parameters for optimal service delivery",
+          "required": true
+        },
+        {
+          "id": "enable_real_time_tracking",
+          "title": "Enable real-time tracking and monitoring",
+          "description": "Activate tracking systems for operational visibility",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "notification_coordination",
+      "title": "Stakeholder Notifications",
+      "description": "Notify relevant operational stakeholders",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "communication",
+      "substeps": [
+        {
+          "id": "notify_dispatch_team",
+          "title": "Notify dispatch team of new technician",
+          "description": "Inform dispatch team of new technician availability and territory coverage",
+          "required": true
+        },
+        {
+          "id": "update_capacity_planning",
+          "title": "Update operational capacity planning",
+          "description": "Adjust capacity planning models with new technician availability",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "day0_operational_ready",
+        "label": "Day 0 Operational Setup Complete",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_territory_assignment",
+        "label": "Pending Territory Assignment",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_coordination",
+        "label": "Requires Additional Operational Coordination",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-18T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["onboarding", "day0", "ntao", "critical", "operational"],
+    "isActive": true
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "id": "ntao_offboarding_sequence_v1",
+  "name": "NTAO Technician Offboarding Sequence",
+  "department": "NTAO",
+  "workflowType": "offboarding_sequence",
+  "version": "1.0",
+  "description": "Complete NTAO operational offboarding sequence for departing technicians",
+  "estimatedDuration": 40,
+  "difficulty": "medium",
+  "requiredRole": "field",
+  "steps": [
+    {
+      "id": "territory_handover",
+      "title": "Territory Handover Coordination",
+      "description": "Coordinate territory handover to maintain service continuity",
+      "required": true,
+      "estimatedTime": 20,
+      "category": "coordination",
+      "substeps": [
+        {
+          "id": "identify_coverage_replacement",
+          "title": "Identify coverage replacement",
+          "description": "Determine temporary or permanent replacement for service territory",
+          "required": true
+        },
+        {
+          "id": "redistribute_active_appointments",
+          "title": "Redistribute active appointments",
+          "description": "Reassign all active and scheduled appointments to other technicians",
+          "required": true
+        },
+        {
+          "id": "update_territory_boundaries",
+          "title": "Update territory boundaries",
+          "description": "Adjust territory boundaries to maintain optimal coverage",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "operational_deactivation",
+      "title": "Operational Systems Deactivation",
+      "description": "Deactivate operational systems and access",
+      "required": true,
+      "estimatedTime": 15,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "deactivate_dispatch_access",
+          "title": "Deactivate dispatch system access",
+          "description": "Remove technician access from dispatch and routing systems",
+          "required": true
+        },
+        {
+          "id": "update_capacity_models",
+          "title": "Update operational capacity models",
+          "description": "Adjust capacity planning to reflect reduced technician availability",
+          "required": true
+        },
+        {
+          "id": "archive_service_history",
+          "title": "Archive service history and performance data",
+          "description": "Properly archive technician service history for record keeping",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "stakeholder_communication",
+      "title": "Stakeholder Communication",
+      "description": "Communicate departure to operational stakeholders",
+      "required": true,
+      "estimatedTime": 5,
+      "category": "communication",
+      "substeps": [
+        {
+          "id": "notify_operations_team",
+          "title": "Notify operations management team",
+          "description": "Inform operations team of technician departure and coverage adjustments",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "finalDisposition": {
+    "required": true,
+    "options": [
+      {
+        "value": "offboarding_complete",
+        "label": "NTAO Offboarding Complete",
+        "requiresApproval": false
+      },
+      {
+        "value": "pending_coverage",
+        "label": "Pending Coverage Arrangement",
+        "requiresApproval": false
+      },
+      {
+        "value": "requires_escalation",
+        "label": "Requires Management Escalation",
+        "requiresApproval": true
+      }
+    ]
+  },
+  "metadata": {
+    "createdAt": "2025-09-18T00:00:00Z",
+    "createdBy": "system",
+    "tags": ["offboarding", "sequence", "ntao", "operational", "territory"],
+    "isActive": true
+  }
+}
