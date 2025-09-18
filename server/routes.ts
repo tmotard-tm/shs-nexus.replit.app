@@ -728,7 +728,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updates = req.body;
       
       // Strict field validation - only allow safe fields to be updated
-      const allowedFields = ['email', 'fullName', 'department', 'role', 'departmentAccess', 'isActive'];
+      const allowedFields = ['email', 'fullName', 'department', 'role', 'departmentAccess', 'isActive', 'username'];
       const sanitizedUpdates: any = {};
       
       for (const [key, value] of Object.entries(updates)) {
@@ -740,8 +740,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Never allow these critical fields to be updated through this route
       delete sanitizedUpdates.password;
       delete sanitizedUpdates.id;
-      delete sanitizedUpdates.username; // Critical: prevent username corruption
       delete sanitizedUpdates.createdAt;
+      
+      // Validate username if being updated
+      if (sanitizedUpdates.username) {
+        const usernameStr = String(sanitizedUpdates.username).trim();
+        if (usernameStr.length < 3 || usernameStr.length > 50) {
+          return res.status(400).json({ message: "Username must be between 3 and 50 characters" });
+        }
+        if (!/^[a-zA-Z0-9_.-]+$/.test(usernameStr)) {
+          return res.status(400).json({ message: "Username can only contain letters, numbers, dots, dashes, and underscores" });
+        }
+        
+        // Check if username is already taken (but allow keeping the same username)
+        const existingUser = await storage.getUserByUsername(usernameStr);
+        if (existingUser && existingUser.id !== id) {
+          return res.status(400).json({ message: "Username is already taken" });
+        }
+        
+        sanitizedUpdates.username = usernameStr;
+      }
       
       // Validate role if being updated
       if (sanitizedUpdates.role) {
