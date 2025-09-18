@@ -1,4 +1,0 @@
-Force rebuild - timestamp: 2025-09-18T18:52:00Z
-Templates: 41 files ready for deployment
-Registry: v1.4.0 with comprehensive mappings
-Purpose: Ensure template files sync to production correctly
