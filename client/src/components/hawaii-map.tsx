@@ -112,6 +112,13 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
       
       markersLayerRef.current!.addLayer(marker);
     });
+    
+    // Force map to refresh and ensure markers are visible
+    setTimeout(() => {
+      if (mapInstance.current) {
+        mapInstance.current.invalidateSize();
+      }
+    }, 100);
   }, [hawaiiVehicles]);
 
   return (
