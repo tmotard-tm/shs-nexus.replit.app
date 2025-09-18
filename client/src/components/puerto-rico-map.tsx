@@ -87,16 +87,18 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
       const customIcon = L.divIcon({
         className: 'custom-marker',
         html: `<div style="
-          width: 20px;
-          height: 20px;
+          width: 24px;
+          height: 24px;
           background-color: ${color};
-          border: 3px solid #ffffff;
+          border: 4px solid #ffffff;
           border-radius: 50%;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-          z-index: 1000;
+          box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+          z-index: 1000 !important;
+          position: relative !important;
+          display: block !important;
         "></div>`,
-        iconSize: [20, 20],
-        iconAnchor: [10, 10]
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
       });
       
       const marker = L.marker([lat, lng], { icon: customIcon });
