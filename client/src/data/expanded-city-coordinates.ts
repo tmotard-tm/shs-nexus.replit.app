@@ -73,6 +73,8 @@ export const expandedCityCoordinates: Record<string, [number, number]> = {
   'PEARL CITY': [21.3972, -157.9731], 'WAIPAHU': [21.3867, -158.0094], 'KANEOHE': [21.4180, -157.8025],
   'KAILUA-KONA': [19.6390, -155.9969], 'WAHIAWA': [21.5025, -158.0242], 'KAPAA': [22.0752, -159.3190],
   'LIHUE': [21.9811, -159.3711], 'LAHAINA': [20.8783, -156.6825], 'KAHULUI': [20.8947, -156.4700],
+  'MILILANI': [21.4511, -158.0111], 'MAKAWAO': [20.8581, -156.3136], 'KEAAU': [19.6222, -155.0383],
+  'KULA': [20.7928, -156.3281], 'EWA BEACH': [21.3156, -158.0072], 'PAHOA': [19.4958, -154.9447],
   
   // Puerto Rico
   'SAN JUAN': [18.4655, -66.1057], 'BAYAMON': [18.3833, -66.1500], 'CAROLINA': [18.3833, -65.9500],
@@ -98,6 +100,7 @@ export const expandedCityCoordinates: Record<string, [number, number]> = {
   'NARANJITO': [18.3015, -66.2445], 'COROZAL': [18.3431, -66.3209], 'MOROVIS': [18.3273, -66.4059],
   'CIALES': [18.3360, -66.4686], 'JAYUYA': [18.2135, -66.5886], 'UTUADO': [18.2655, -66.7007],
   'ADJUNTAS': [18.1638, -66.7223], 'LARES': [18.2941, -66.8802], 'FLORIDA': [18.3647, -66.5653],
+  'AGUADA': [18.3811, -67.1897], 'FAJARDO': [18.3258, -65.6525], 'LUQUILLO': [18.3731, -65.7175],
   
   // Alaska Major Cities (if needed)
   'ANCHORAGE': [61.2181, -149.9003], 'FAIRBANKS': [64.8378, -147.7164], 'JUNEAU': [58.3019, -134.4197],

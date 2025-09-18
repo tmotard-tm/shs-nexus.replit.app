@@ -3,22 +3,24 @@
 /* Map containment to prevent overlapping */
 .map-wrapper {
   position: relative;
-  height: 300px;
+  height: 400px;
   width: 100%;
   overflow: hidden;
   isolation: isolate;
   contain: layout paint;
   border: 1px solid hsl(var(--border));
   border-radius: 0.375rem;
+  z-index: 1;
 }
 
 .map-wrapper .leaflet-container {
   height: 100% !important;
   width: 100% !important;
   isolation: isolate;
+  z-index: 2;
 }
 
-/* Extra safety - make all Leaflet panes contained */
+/* Extra safety - make all Leaflet panes contained and visible */
 .map-wrapper .leaflet-pane,
 .map-wrapper .leaflet-map-pane,
 .map-wrapper .leaflet-tile-pane,
@@ -27,6 +29,7 @@
 .map-wrapper .leaflet-tooltip-pane,
 .map-wrapper .leaflet-popup-pane {
   contain: paint;
+  z-index: 3;
 }
 
 /* Ensure other Leaflet containers have proper sizing */
