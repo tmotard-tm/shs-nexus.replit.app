@@ -15,7 +15,16 @@ import {
   type InsertStorageSpot,
   type Vehicle,
   type InsertVehicle,
+  users,
+  requests,
+  apiConfigurations,
+  activityLogs,
+  queueItems,
+  storageSpots,
+  vehicles,
 } from "@shared/schema";
+import { db } from "./db";
+import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { readFileSync, writeFileSync, existsSync } from "fs";
@@ -504,6 +513,7 @@ export class MemStorage implements IStorage {
         assignedTo: null,
         requesterId: enterpriseUsers[0].id, // ENT1234
         department: "NTAO",
+        team: null,
         data: JSON.stringify({
           submitter: {
             name: "FIELD001",
@@ -538,6 +548,8 @@ export class MemStorage implements IStorage {
         attempts: 0,
         lastError: null,
         completedAt: null,
+        startedAt: null,
+        firstResponseAt: null,
         workflowId: null,
         workflowStep: null,
         dependsOn: null,
@@ -556,6 +568,7 @@ export class MemStorage implements IStorage {
         assignedTo: enterpriseUsers[1].id, // ENT1235
         requesterId: enterpriseUsers[0].id,
         department: "Fleet Management",
+        team: null,
         data: JSON.stringify({
           submitter: {
             name: "AGENT001",
@@ -586,6 +599,8 @@ export class MemStorage implements IStorage {
         attempts: 0,
         lastError: null,
         completedAt: null,
+        startedAt: null,
+        firstResponseAt: null,
         workflowId: null,
         workflowStep: null,
         dependsOn: null,
@@ -604,6 +619,7 @@ export class MemStorage implements IStorage {
         assignedTo: null,
         requesterId: enterpriseUsers[2].id, // ADMIN123
         department: "Assets Management",
+        team: null,
         data: JSON.stringify({
           submitter: {
             name: "SUPER001",
@@ -631,6 +647,8 @@ export class MemStorage implements IStorage {
         attempts: 0,
         lastError: null,
         completedAt: null,
+        startedAt: null,
+        firstResponseAt: null,
         workflowId: null,
         workflowStep: null,
         dependsOn: null,
@@ -987,6 +1005,7 @@ export class MemStorage implements IStorage {
       priority: insertItem.priority || "medium",
       assignedTo: insertItem.assignedTo || null,
       department: "NTAO",
+      team: insertItem.team || null,
       data: insertItem.data || null,
       metadata: insertItem.metadata || null,
       notes: insertItem.notes || null,
@@ -994,6 +1013,8 @@ export class MemStorage implements IStorage {
       attempts: insertItem.attempts || 0,
       lastError: insertItem.lastError || null,
       completedAt: insertItem.completedAt || null,
+      startedAt: insertItem.startedAt || null,
+      firstResponseAt: insertItem.firstResponseAt || null,
       workflowId: insertItem.workflowId || null,
       workflowStep: insertItem.workflowStep || null,
       dependsOn: insertItem.dependsOn || null,
@@ -1093,6 +1114,7 @@ export class MemStorage implements IStorage {
       priority: insertItem.priority || "medium",
       assignedTo: insertItem.assignedTo || null,
       department: "Assets Management",
+      team: insertItem.team || null,
       data: insertItem.data || null,
       metadata: insertItem.metadata || null,
       notes: insertItem.notes || null,
@@ -1100,6 +1122,8 @@ export class MemStorage implements IStorage {
       attempts: insertItem.attempts || 0,
       lastError: insertItem.lastError || null,
       completedAt: insertItem.completedAt || null,
+      startedAt: insertItem.startedAt || null,
+      firstResponseAt: insertItem.firstResponseAt || null,
       workflowId: insertItem.workflowId || null,
       workflowStep: insertItem.workflowStep || null,
       dependsOn: insertItem.dependsOn || null,
@@ -1199,6 +1223,7 @@ export class MemStorage implements IStorage {
       priority: insertItem.priority || "medium",
       assignedTo: insertItem.assignedTo || null,
       department: "Inventory Control",
+      team: insertItem.team || null,
       data: insertItem.data || null,
       metadata: insertItem.metadata || null,
       notes: insertItem.notes || null,
@@ -1206,6 +1231,8 @@ export class MemStorage implements IStorage {
       attempts: insertItem.attempts || 0,
       lastError: insertItem.lastError || null,
       completedAt: insertItem.completedAt || null,
+      startedAt: insertItem.startedAt || null,
+      firstResponseAt: insertItem.firstResponseAt || null,
       workflowId: insertItem.workflowId || null,
       workflowStep: insertItem.workflowStep || null,
       dependsOn: insertItem.dependsOn || null,
@@ -1305,6 +1332,7 @@ export class MemStorage implements IStorage {
       priority: insertItem.priority || "medium",
       assignedTo: insertItem.assignedTo || null,
       department: "Fleet Management",
+      team: insertItem.team || null,
       data: insertItem.data || null,
       metadata: insertItem.metadata || null,
       notes: insertItem.notes || null,
@@ -1312,6 +1340,8 @@ export class MemStorage implements IStorage {
       attempts: insertItem.attempts || 0,
       lastError: insertItem.lastError || null,
       completedAt: insertItem.completedAt || null,
+      startedAt: insertItem.startedAt || null,
+      firstResponseAt: insertItem.firstResponseAt || null,
       workflowId: insertItem.workflowId || null,
       workflowStep: insertItem.workflowStep || null,
       dependsOn: insertItem.dependsOn || null,
@@ -2356,4 +2386,1009 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export class DatabaseStorage implements IStorage {
+  
+  // Users
+  async getUser(id: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    return result[0];
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    return result[0];
+  }
+
+  async getUsers(): Promise<User[]> {
+    return await db.select().from(users).orderBy(desc(users.createdAt));
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const result = await db.insert(users).values(user).returning();
+    return result[0];
+  }
+
+  async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
+    const result = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, id));
+    return result.rowCount! > 0;
+  }
+
+  // Requests
+  async getRequest(id: string): Promise<Request | undefined> {
+    const result = await db.select().from(requests).where(eq(requests.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getRequests(): Promise<Request[]> {
+    return await db.select().from(requests).orderBy(desc(requests.createdAt));
+  }
+
+  async getRequestsByStatus(status: string): Promise<Request[]> {
+    return await db.select().from(requests).where(eq(requests.status, status)).orderBy(desc(requests.createdAt));
+  }
+
+  async getRequestsByRequester(requesterId: string): Promise<Request[]> {
+    return await db.select().from(requests).where(eq(requests.requesterId, requesterId)).orderBy(desc(requests.createdAt));
+  }
+
+  async createRequest(request: InsertRequest): Promise<Request> {
+    const result = await db.insert(requests).values(request).returning();
+    return result[0];
+  }
+
+  async updateRequest(id: string, updates: Partial<Request>): Promise<Request | undefined> {
+    const result = await db.update(requests).set({...updates, updatedAt: new Date()}).where(eq(requests.id, id)).returning();
+    return result[0];
+  }
+
+  // API Configurations
+  async getApiConfiguration(id: string): Promise<ApiConfiguration | undefined> {
+    const result = await db.select().from(apiConfigurations).where(eq(apiConfigurations.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getApiConfigurations(): Promise<ApiConfiguration[]> {
+    return await db.select().from(apiConfigurations).orderBy(desc(apiConfigurations.createdAt));
+  }
+
+  async createApiConfiguration(config: InsertApiConfiguration): Promise<ApiConfiguration> {
+    const result = await db.insert(apiConfigurations).values(config).returning();
+    return result[0];
+  }
+
+  async updateApiConfiguration(id: string, updates: Partial<ApiConfiguration>): Promise<ApiConfiguration | undefined> {
+    const result = await db.update(apiConfigurations).set(updates).where(eq(apiConfigurations.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteApiConfiguration(id: string): Promise<boolean> {
+    const result = await db.delete(apiConfigurations).where(eq(apiConfigurations.id, id));
+    return result.rowCount! > 0;
+  }
+
+  // Activity Logs
+  async getActivityLogs(): Promise<ActivityLog[]> {
+    return await db.select().from(activityLogs).orderBy(desc(activityLogs.createdAt));
+  }
+
+  async getActivityLogsByUser(userId: string): Promise<ActivityLog[]> {
+    return await db.select().from(activityLogs).where(eq(activityLogs.userId, userId)).orderBy(desc(activityLogs.createdAt));
+  }
+
+  async createActivityLog(log: InsertActivityLog): Promise<ActivityLog> {
+    const result = await db.insert(activityLogs).values(log).returning();
+    return result[0];
+  }
+
+  // Dashboard Stats
+  async getDashboardStats(): Promise<{
+    onboarding: { pending: number; inProgress: number; completed: number };
+    vehicleAssignment: { pending: number; inProgress: number; completed: number };
+    offboarding: { pending: number; inProgress: number; completed: number };
+    activeUsers: number;
+  }> {
+    const [onboardingStats, vehicleAssignmentStats, offboardingStats, userCount] = await Promise.all([
+      db.select({
+        status: queueItems.status,
+        count: sql<number>`cast(count(*) as int)`
+      }).from(queueItems).where(eq(queueItems.workflowType, 'onboarding')).groupBy(queueItems.status),
+      
+      db.select({
+        status: queueItems.status,
+        count: sql<number>`cast(count(*) as int)`
+      }).from(queueItems).where(eq(queueItems.workflowType, 'vehicle_assignment')).groupBy(queueItems.status),
+      
+      db.select({
+        status: queueItems.status,
+        count: sql<number>`cast(count(*) as int)`
+      }).from(queueItems).where(eq(queueItems.workflowType, 'offboarding')).groupBy(queueItems.status),
+      
+      db.select({ count: sql<number>`cast(count(*) as int)` }).from(users)
+    ]);
+
+    const getStatsByStatus = (stats: Array<{status: string; count: number}>) => {
+      const result = { pending: 0, inProgress: 0, completed: 0 };
+      stats.forEach(stat => {
+        if (stat.status === 'pending') result.pending = stat.count;
+        else if (stat.status === 'in_progress') result.inProgress = stat.count;
+        else if (stat.status === 'completed') result.completed = stat.count;
+      });
+      return result;
+    };
+
+    return {
+      onboarding: getStatsByStatus(onboardingStats),
+      vehicleAssignment: getStatsByStatus(vehicleAssignmentStats),
+      offboarding: getStatsByStatus(offboardingStats),
+      activeUsers: userCount[0]?.count || 0
+    };
+  }
+
+  // Queue Item Operations - using shared queue_items table with department filtering
+  
+  // NTAO Queue Module
+  async getNTAOQueueItem(id: string): Promise<QueueItem | undefined> {
+    const result = await db.select().from(queueItems)
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'NTAO')))
+      .limit(1);
+    return result[0];
+  }
+
+  async getNTAOQueueItems(): Promise<QueueItem[]> {
+    return await db.select().from(queueItems)
+      .where(eq(queueItems.department, 'NTAO'))
+      .orderBy(desc(queueItems.createdAt));
+  }
+
+  async createNTAOQueueItem(item: InsertQueueItem): Promise<QueueItem> {
+    const result = await db.insert(queueItems).values({
+      ...item,
+      department: 'NTAO'
+    }).returning();
+    return result[0];
+  }
+
+  async updateNTAOQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({...updates, updatedAt: new Date()})
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'NTAO')))
+      .returning();
+    return result[0];
+  }
+
+  async assignNTAOQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    return await this.updateNTAOQueueItem(id, { 
+      assignedTo: assigneeId, 
+      status: 'pending'
+    });
+  }
+
+  async startWorkNTAOQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    return await db.transaction(async (tx) => {
+      const item = await tx.select().from(queueItems)
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'NTAO')))
+        .limit(1);
+      
+      if (!item[0] || item[0].assignedTo !== workerId || 
+          (item[0].status !== 'pending' && item[0].status !== 'in_progress')) {
+        return undefined;
+      }
+
+      if (item[0].status === 'in_progress') {
+        return item[0];
+      }
+
+      const result = await tx.update(queueItems)
+        .set({ 
+          status: 'in_progress', 
+          startedAt: new Date(),
+          updatedAt: new Date() 
+        })
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'NTAO')))
+        .returning();
+      
+      return result[0];
+    });
+  }
+
+  async completeNTAOQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({ 
+        status: 'completed', 
+        completedAt: new Date(),
+        updatedAt: new Date() 
+      })
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'NTAO')))
+      .returning();
+    return result[0];
+  }
+
+  // Assets Queue Module (similar pattern for all queue modules)
+  async getAssetsQueueItem(id: string): Promise<QueueItem | undefined> {
+    const result = await db.select().from(queueItems)
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Assets Management')))
+      .limit(1);
+    return result[0];
+  }
+
+  async getAssetsQueueItems(): Promise<QueueItem[]> {
+    return await db.select().from(queueItems)
+      .where(eq(queueItems.department, 'Assets Management'))
+      .orderBy(desc(queueItems.createdAt));
+  }
+
+  async createAssetsQueueItem(item: InsertQueueItem): Promise<QueueItem> {
+    const result = await db.insert(queueItems).values({
+      ...item,
+      department: 'Assets Management'
+    }).returning();
+    return result[0];
+  }
+
+  async updateAssetsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({...updates, updatedAt: new Date()})
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Assets Management')))
+      .returning();
+    return result[0];
+  }
+
+  async assignAssetsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    return await this.updateAssetsQueueItem(id, { 
+      assignedTo: assigneeId, 
+      status: 'pending'
+    });
+  }
+
+  async startWorkAssetsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    return await db.transaction(async (tx) => {
+      const item = await tx.select().from(queueItems)
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Assets Management')))
+        .limit(1);
+      
+      if (!item[0] || item[0].assignedTo !== workerId || 
+          (item[0].status !== 'pending' && item[0].status !== 'in_progress')) {
+        return undefined;
+      }
+
+      if (item[0].status === 'in_progress') {
+        return item[0];
+      }
+
+      const result = await tx.update(queueItems)
+        .set({ 
+          status: 'in_progress', 
+          startedAt: new Date(),
+          updatedAt: new Date() 
+        })
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Assets Management')))
+        .returning();
+      
+      return result[0];
+    });
+  }
+
+  async completeAssetsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({ 
+        status: 'completed', 
+        completedAt: new Date(),
+        updatedAt: new Date() 
+      })
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Assets Management')))
+      .returning();
+    return result[0];
+  }
+
+  // Inventory Queue Module  
+  async getInventoryQueueItem(id: string): Promise<QueueItem | undefined> {
+    const result = await db.select().from(queueItems)
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Inventory Control')))
+      .limit(1);
+    return result[0];
+  }
+
+  async getInventoryQueueItems(): Promise<QueueItem[]> {
+    return await db.select().from(queueItems)
+      .where(eq(queueItems.department, 'Inventory Control'))
+      .orderBy(desc(queueItems.createdAt));
+  }
+
+  async createInventoryQueueItem(item: InsertQueueItem): Promise<QueueItem> {
+    const result = await db.insert(queueItems).values({
+      ...item,
+      department: 'Inventory Control'
+    }).returning();
+    return result[0];
+  }
+
+  async updateInventoryQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({...updates, updatedAt: new Date()})
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Inventory Control')))
+      .returning();
+    return result[0];
+  }
+
+  async assignInventoryQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    return await this.updateInventoryQueueItem(id, { 
+      assignedTo: assigneeId, 
+      status: 'pending'
+    });
+  }
+
+  async startWorkInventoryQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    return await db.transaction(async (tx) => {
+      const item = await tx.select().from(queueItems)
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Inventory Control')))
+        .limit(1);
+      
+      if (!item[0] || item[0].assignedTo !== workerId || 
+          (item[0].status !== 'pending' && item[0].status !== 'in_progress')) {
+        return undefined;
+      }
+
+      if (item[0].status === 'in_progress') {
+        return item[0];
+      }
+
+      const result = await tx.update(queueItems)
+        .set({ 
+          status: 'in_progress', 
+          startedAt: new Date(),
+          updatedAt: new Date() 
+        })
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Inventory Control')))
+        .returning();
+      
+      return result[0];
+    });
+  }
+
+  async completeInventoryQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({ 
+        status: 'completed', 
+        completedAt: new Date(),
+        updatedAt: new Date() 
+      })
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Inventory Control')))
+      .returning();
+    return result[0];
+  }
+
+  // Fleet Queue Module
+  async getFleetQueueItem(id: string): Promise<QueueItem | undefined> {
+    const result = await db.select().from(queueItems)
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Fleet Management')))
+      .limit(1);
+    return result[0];
+  }
+
+  async getFleetQueueItems(): Promise<QueueItem[]> {
+    return await db.select().from(queueItems)
+      .where(eq(queueItems.department, 'Fleet Management'))
+      .orderBy(desc(queueItems.createdAt));
+  }
+
+  async createFleetQueueItem(item: InsertQueueItem): Promise<QueueItem> {
+    const result = await db.insert(queueItems).values({
+      ...item,
+      department: 'Fleet Management'
+    }).returning();
+    return result[0];
+  }
+
+  async updateFleetQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({...updates, updatedAt: new Date()})
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Fleet Management')))
+      .returning();
+    return result[0];
+  }
+
+  async assignFleetQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    return await this.updateFleetQueueItem(id, { 
+      assignedTo: assigneeId, 
+      status: 'pending'
+    });
+  }
+
+  async startWorkFleetQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    return await db.transaction(async (tx) => {
+      const item = await tx.select().from(queueItems)
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Fleet Management')))
+        .limit(1);
+      
+      if (!item[0] || item[0].assignedTo !== workerId || 
+          (item[0].status !== 'pending' && item[0].status !== 'in_progress')) {
+        return undefined;
+      }
+
+      if (item[0].status === 'in_progress') {
+        return item[0];
+      }
+
+      const result = await tx.update(queueItems)
+        .set({ 
+          status: 'in_progress', 
+          startedAt: new Date(),
+          updatedAt: new Date() 
+        })
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Fleet Management')))
+        .returning();
+      
+      return result[0];
+    });
+  }
+
+  async completeFleetQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({ 
+        status: 'completed', 
+        completedAt: new Date(),
+        updatedAt: new Date() 
+      })
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Fleet Management')))
+      .returning();
+    return result[0];
+  }
+
+  // Queue operations
+  async cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({ 
+        status: 'cancelled', 
+        lastError: reason,
+        updatedAt: new Date() 
+      })
+      .where(eq(queueItems.id, id))
+      .returning();
+    return result[0];
+  }
+
+  // Generic queue item operations (searches across all modules)
+  async getQueueItem(id: string): Promise<QueueItem | undefined> {
+    const result = await db.select().from(queueItems).where(eq(queueItems.id, id)).limit(1);
+    return result[0];
+  }
+
+  async updateQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({...updates, updatedAt: new Date()})
+      .where(eq(queueItems.id, id))
+      .returning();
+    return result[0];
+  }
+
+  // Storage Spots Module
+  async getStorageSpot(id: string): Promise<StorageSpot | undefined> {
+    const result = await db.select().from(storageSpots).where(eq(storageSpots.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getStorageSpots(): Promise<StorageSpot[]> {
+    return await db.select().from(storageSpots).orderBy(desc(storageSpots.createdAt));
+  }
+
+  async getStorageSpotsByStatus(status: string): Promise<StorageSpot[]> {
+    return await db.select().from(storageSpots).where(eq(storageSpots.status, status)).orderBy(desc(storageSpots.createdAt));
+  }
+
+  async getStorageSpotsByState(state: string): Promise<StorageSpot[]> {
+    return await db.select().from(storageSpots).where(eq(storageSpots.state, state)).orderBy(desc(storageSpots.createdAt));
+  }
+
+  async createStorageSpot(spot: InsertStorageSpot): Promise<StorageSpot> {
+    const result = await db.insert(storageSpots).values(spot).returning();
+    return result[0];
+  }
+
+  async updateStorageSpot(id: string, updates: Partial<StorageSpot>): Promise<StorageSpot | undefined> {
+    const result = await db.update(storageSpots)
+      .set({...updates, updatedAt: new Date()})
+      .where(eq(storageSpots.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteStorageSpot(id: string): Promise<boolean> {
+    const result = await db.delete(storageSpots).where(eq(storageSpots.id, id));
+    return result.rowCount! > 0;
+  }
+
+  // Vehicles Module
+  async getVehicle(id: string): Promise<Vehicle | undefined> {
+    const result = await db.select().from(vehicles).where(eq(vehicles.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getVehicleByVin(vin: string): Promise<Vehicle | undefined> {
+    const result = await db.select().from(vehicles).where(eq(vehicles.vin, vin)).limit(1);
+    return result[0];
+  }
+
+  async getVehicles(): Promise<Vehicle[]> {
+    return await db.select().from(vehicles).orderBy(desc(vehicles.createdAt));
+  }
+
+  async getVehiclesByStatus(status: string): Promise<Vehicle[]> {
+    return await db.select().from(vehicles).where(eq(vehicles.status, status)).orderBy(desc(vehicles.createdAt));
+  }
+
+  async getVehiclesByState(state: string): Promise<Vehicle[]> {
+    return await db.select().from(vehicles).where(eq(vehicles.state, state)).orderBy(desc(vehicles.createdAt));
+  }
+
+  async getVehiclesByBranding(branding: string): Promise<Vehicle[]> {
+    return await db.select().from(vehicles).where(eq(vehicles.branding, branding)).orderBy(desc(vehicles.createdAt));
+  }
+
+  async createVehicle(vehicle: InsertVehicle): Promise<Vehicle> {
+    const result = await db.insert(vehicles).values(vehicle).returning();
+    return result[0];
+  }
+
+  async createVehicles(vehicleList: InsertVehicle[]): Promise<Vehicle[]> {
+    return await db.transaction(async (tx) => {
+      const results: Vehicle[] = [];
+      for (const vehicle of vehicleList) {
+        const result = await tx.insert(vehicles).values(vehicle).returning();
+        results.push(result[0]);
+      }
+      return results;
+    });
+  }
+
+  async updateVehicle(id: string, updates: Partial<Vehicle>): Promise<Vehicle | undefined> {
+    const result = await db.update(vehicles)
+      .set({...updates, updatedAt: new Date()})
+      .where(eq(vehicles.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteVehicle(id: string): Promise<boolean> {
+    const result = await db.delete(vehicles).where(eq(vehicles.id, id));
+    return result.rowCount! > 0;
+  }
+
+  // Unified Queue Aggregator
+  async getUnifiedQueueItems(modules: QueueModule[], status?: string): Promise<CombinedQueueItem[]> {
+    const departmentMap: Record<QueueModule, string> = {
+      'ntao': 'NTAO',
+      'assets': 'Assets Management', 
+      'inventory': 'Inventory Control',
+      'fleet': 'Fleet Management'
+    };
+
+    const departments = modules.map(m => departmentMap[m]);
+    
+    let query = db.select().from(queueItems).where(inArray(queueItems.department, departments));
+    
+    if (status) {
+      query = query.where(and(inArray(queueItems.department, departments), eq(queueItems.status, status)));
+    }
+    
+    const items = await query.orderBy(desc(queueItems.createdAt));
+    
+    return items.map(item => ({
+      ...item,
+      module: Object.keys(departmentMap).find(key => 
+        departmentMap[key as QueueModule] === item.department
+      ) as QueueModule
+    }));
+  }
+
+  async getUnifiedQueueStats(modules: QueueModule[]): Promise<{
+    pending: number;
+    in_progress: number; 
+    completed: number;
+    total: number;
+  }> {
+    const departmentMap: Record<QueueModule, string> = {
+      'ntao': 'NTAO',
+      'assets': 'Assets Management', 
+      'inventory': 'Inventory Control',
+      'fleet': 'Fleet Management'
+    };
+
+    const departments = modules.map(m => departmentMap[m]);
+    
+    const stats = await db.select({
+      status: queueItems.status,
+      count: sql<number>`cast(count(*) as int)`
+    }).from(queueItems)
+      .where(inArray(queueItems.department, departments))
+      .groupBy(queueItems.status);
+
+    const result = { pending: 0, in_progress: 0, completed: 0, total: 0 };
+    
+    stats.forEach(stat => {
+      if (stat.status === 'pending') result.pending = stat.count;
+      else if (stat.status === 'in_progress') result.in_progress = stat.count;
+      else if (stat.status === 'completed') result.completed = stat.count;
+      result.total += stat.count;
+    });
+
+    return result;
+  }
+
+  async getUnifiedQueueItem(module: QueueModule, id: string): Promise<QueueItem | undefined> {
+    const departmentMap: Record<QueueModule, string> = {
+      'ntao': 'NTAO',
+      'assets': 'Assets Management', 
+      'inventory': 'Inventory Control',
+      'fleet': 'Fleet Management'
+    };
+
+    const result = await db.select().from(queueItems)
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, departmentMap[module])))
+      .limit(1);
+    return result[0];
+  }
+
+  async updateUnifiedQueueItem(module: QueueModule, id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const departmentMap: Record<QueueModule, string> = {
+      'ntao': 'NTAO',
+      'assets': 'Assets Management', 
+      'inventory': 'Inventory Control',
+      'fleet': 'Fleet Management'
+    };
+
+    const result = await db.update(queueItems)
+      .set({...updates, updatedAt: new Date()})
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, departmentMap[module])))
+      .returning();
+    return result[0];
+  }
+
+  async assignUnifiedQueueItem(module: QueueModule, id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    return await this.updateUnifiedQueueItem(module, id, { 
+      assignedTo: assigneeId, 
+      status: 'pending'
+    });
+  }
+
+  async startWorkUnifiedQueueItem(module: QueueModule, id: string, workerId: string): Promise<QueueItem | undefined> {
+    const departmentMap: Record<QueueModule, string> = {
+      'ntao': 'NTAO',
+      'assets': 'Assets Management', 
+      'inventory': 'Inventory Control',
+      'fleet': 'Fleet Management'
+    };
+
+    return await db.transaction(async (tx) => {
+      const item = await tx.select().from(queueItems)
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, departmentMap[module])))
+        .limit(1);
+      
+      if (!item[0] || item[0].assignedTo !== workerId || 
+          (item[0].status !== 'pending' && item[0].status !== 'in_progress')) {
+        return undefined;
+      }
+
+      if (item[0].status === 'in_progress') {
+        return item[0];
+      }
+
+      const result = await tx.update(queueItems)
+        .set({ 
+          status: 'in_progress', 
+          startedAt: new Date(),
+          updatedAt: new Date() 
+        })
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, departmentMap[module])))
+        .returning();
+      
+      return result[0];
+    });
+  }
+
+  async completeUnifiedQueueItem(module: QueueModule, id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const departmentMap: Record<QueueModule, string> = {
+      'ntao': 'NTAO',
+      'assets': 'Assets Management', 
+      'inventory': 'Inventory Control',
+      'fleet': 'Fleet Management'
+    };
+
+    const result = await db.update(queueItems)
+      .set({ 
+        status: 'completed', 
+        completedAt: new Date(),
+        updatedAt: new Date() 
+      })
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, departmentMap[module])))
+      .returning();
+    return result[0];
+  }
+
+  // Duplicate Detection Functions
+  async checkOffboardingTaskDuplicates(employeeId: string, techRacfId: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }> {
+    const cutoffTime = timeWindowMs ? new Date(Date.now() - timeWindowMs) : null;
+    
+    let query = db.select().from(queueItems)
+      .where(eq(queueItems.workflowType, 'offboarding'));
+    
+    if (cutoffTime) {
+      query = query.where(and(eq(queueItems.workflowType, 'offboarding'), sql`${queueItems.createdAt} >= ${cutoffTime}`));
+    }
+    
+    const items = await query;
+    
+    for (const item of items) {
+      try {
+        let itemData = item.data;
+        if (typeof itemData === 'string') {
+          itemData = JSON.parse(itemData);
+        }
+        
+        if (itemData && itemData.employee && 
+           (itemData.employee.employeeId === employeeId || itemData.employee.techRacfId === techRacfId)) {
+          return {
+            isDuplicate: true,
+            message: `Duplicate offboarding task found for employee ${employeeId}/${techRacfId}`,
+            existingTask: item
+          };
+        }
+      } catch (parseError) {
+        console.error('Error parsing queue item data for duplicate check:', parseError);
+        continue;
+      }
+    }
+    
+    return { isDuplicate: false };
+  }
+
+  async checkByovEnrollmentDuplicates(ldap: string, email: string, currentTruckNumber: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }> {
+    const cutoffTime = timeWindowMs ? new Date(Date.now() - timeWindowMs) : null;
+    
+    let query = db.select().from(queueItems)
+      .where(eq(queueItems.workflowId, 'byov_enrollment'));
+    
+    if (cutoffTime) {
+      query = query.where(sql`${queueItems.createdAt} >= ${cutoffTime}`);
+    }
+    
+    const items = await query;
+    
+    for (const item of items) {
+      try {
+        let itemData = item.data;
+        if (typeof itemData === 'string') {
+          itemData = JSON.parse(itemData);
+        }
+        
+        if (itemData && itemData.techInfo && 
+           (itemData.techInfo.ldap === ldap || 
+            itemData.techInfo.email === email || 
+            itemData.techInfo.currentTruckNumber === currentTruckNumber)) {
+          return {
+            isDuplicate: true,
+            message: `Duplicate BYOV enrollment found for ${ldap}/${email}/${currentTruckNumber}`,
+            existingTask: item
+          };
+        }
+      } catch (parseError) {
+        console.error('Error parsing queue item data for duplicate check:', parseError);
+        continue;
+      }
+    }
+    
+    return { isDuplicate: false };
+  }
+
+  async getRecentQueueItemsByTimeWindow(modules: QueueModule[], timeWindowMs: number): Promise<{ module: QueueModule; items: QueueItem[] }[]> {
+    const cutoffTime = new Date(Date.now() - timeWindowMs);
+    const result: { module: QueueModule; items: QueueItem[] }[] = [];
+    
+    const departmentMap: Record<QueueModule, string> = {
+      'ntao': 'NTAO',
+      'assets': 'Assets Management', 
+      'inventory': 'Inventory Control',
+      'fleet': 'Fleet Management'
+    };
+
+    for (const module of modules) {
+      const items = await db.select().from(queueItems)
+        .where(and(
+          eq(queueItems.department, departmentMap[module]),
+          sql`${queueItems.createdAt} >= ${cutoffTime}`
+        ))
+        .orderBy(desc(queueItems.createdAt));
+      
+      result.push({ module, items });
+    }
+    
+    return result;
+  }
+  
+  async findQueueItemsByDataMatch(modules: QueueModule[], searchFunction: (data: any) => boolean): Promise<{ module: QueueModule; items: QueueItem[] }[]> {
+    const result: { module: QueueModule; items: QueueItem[] }[] = [];
+    
+    const departmentMap: Record<QueueModule, string> = {
+      'ntao': 'NTAO',
+      'assets': 'Assets Management', 
+      'inventory': 'Inventory Control',
+      'fleet': 'Fleet Management'
+    };
+
+    for (const module of modules) {
+      const items = await db.select().from(queueItems)
+        .where(eq(queueItems.department, departmentMap[module]))
+        .orderBy(desc(queueItems.createdAt));
+      
+      const matchingItems: QueueItem[] = [];
+      
+      for (const item of items) {
+        try {
+          let itemData = item.data;
+          if (typeof itemData === 'string') {
+            itemData = JSON.parse(itemData);
+          }
+          
+          if (searchFunction(itemData)) {
+            matchingItems.push(item);
+          }
+        } catch (parseError) {
+          console.error('Error parsing queue item data for search:', parseError);
+          continue;
+        }
+      }
+      
+      result.push({ module, items: matchingItems });
+    }
+    
+    return result;
+  }
+
+  // Migration method to bulk-insert data from MemStorage
+  async migrateFrom(mem: MemStorage): Promise<void> {
+    console.log('Starting migration from MemStorage to DatabaseStorage...');
+    
+    return await db.transaction(async (tx) => {
+      try {
+        // Migrate users
+        const usersList = await mem.getUsers();
+        if (usersList.length > 0) {
+          console.log(`Migrating ${usersList.length} users...`);
+          for (const user of usersList) {
+            const { id, createdAt, ...userData } = user;
+            await tx.insert(users).values({
+              ...userData,
+              id: id || randomUUID(),
+              createdAt: createdAt || new Date()
+            }).onConflictDoNothing();
+          }
+        }
+
+        // Migrate requests
+        const requestsList = await mem.getRequests();
+        if (requestsList.length > 0) {
+          console.log(`Migrating ${requestsList.length} requests...`);
+          for (const request of requestsList) {
+            const { id, createdAt, updatedAt, ...requestData } = request;
+            await tx.insert(requests).values({
+              ...requestData,
+              id: id || randomUUID(),
+              createdAt: createdAt || new Date(),
+              updatedAt: updatedAt || new Date()
+            }).onConflictDoNothing();
+          }
+        }
+
+        // Migrate API configurations
+        const apiConfigs = await mem.getApiConfigurations();
+        if (apiConfigs.length > 0) {
+          console.log(`Migrating ${apiConfigs.length} API configurations...`);
+          for (const config of apiConfigs) {
+            const { id, createdAt, lastChecked, ...configData } = config;
+            await tx.insert(apiConfigurations).values({
+              ...configData,
+              id: id || randomUUID(),
+              createdAt: createdAt || new Date(),
+              lastChecked: lastChecked || new Date()
+            }).onConflictDoNothing();
+          }
+        }
+
+        // Migrate activity logs
+        const activityLogsList = await mem.getActivityLogs();
+        if (activityLogsList.length > 0) {
+          console.log(`Migrating ${activityLogsList.length} activity logs...`);
+          for (const log of activityLogsList) {
+            const { id, createdAt, ...logData } = log;
+            await tx.insert(activityLogs).values({
+              ...logData,
+              id: id || randomUUID(),
+              createdAt: createdAt || new Date()
+            }).onConflictDoNothing();
+          }
+        }
+
+        // Migrate queue items from all modules
+        const queueModules: QueueModule[] = ['ntao', 'assets', 'inventory', 'fleet'];
+        for (const module of queueModules) {
+          let items: QueueItem[] = [];
+          switch (module) {
+            case 'ntao':
+              items = await mem.getNTAOQueueItems();
+              break;
+            case 'assets':
+              items = await mem.getAssetsQueueItems();
+              break;
+            case 'inventory':
+              items = await mem.getInventoryQueueItems();
+              break;
+            case 'fleet':
+              items = await mem.getFleetQueueItems();
+              break;
+          }
+          
+          if (items.length > 0) {
+            console.log(`Migrating ${items.length} queue items from ${module} module...`);
+            for (const item of items) {
+              const { id, createdAt, updatedAt, ...itemData } = item;
+              await tx.insert(queueItems).values({
+                ...itemData,
+                id: id || randomUUID(),
+                createdAt: createdAt || new Date(),
+                updatedAt: updatedAt || new Date()
+              }).onConflictDoNothing();
+            }
+          }
+        }
+
+        // Migrate storage spots
+        const storageSpotsList = await mem.getStorageSpots();
+        if (storageSpotsList.length > 0) {
+          console.log(`Migrating ${storageSpotsList.length} storage spots...`);
+          for (const spot of storageSpotsList) {
+            const { id, createdAt, updatedAt, ...spotData } = spot;
+            await tx.insert(storageSpots).values({
+              ...spotData,
+              id: id || randomUUID(),
+              createdAt: createdAt || new Date(),
+              updatedAt: updatedAt || new Date()
+            }).onConflictDoNothing();
+          }
+        }
+
+        // Migrate vehicles
+        const vehiclesList = await mem.getVehicles();
+        if (vehiclesList.length > 0) {
+          console.log(`Migrating ${vehiclesList.length} vehicles...`);
+          for (const vehicle of vehiclesList) {
+            const { id, createdAt, updatedAt, ...vehicleData } = vehicle;
+            await tx.insert(vehicles).values({
+              ...vehicleData,
+              id: id || randomUUID(),
+              createdAt: createdAt || new Date(),
+              updatedAt: updatedAt || new Date()
+            }).onConflictDoNothing();
+          }
+        }
+
+        console.log('Migration completed successfully!');
+      } catch (error) {
+        console.error('Migration failed:', error);
+        throw error;
+      }
+    });
+  }
+}
+
+// Choose storage implementation based on environment variable
+const useDatabase = process.env.USE_DB === 'true';
+export const storage: IStorage = useDatabase ? new DatabaseStorage() : new MemStorage();
