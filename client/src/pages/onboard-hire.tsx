@@ -659,22 +659,12 @@ export default function OnboardHire() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="manager">Manager *</Label>
-                        <Select 
-                          value={employeeForm.manager} 
-                          onValueChange={(value) => setEmployeeForm(prev => ({ ...prev, manager: value }))}
-                          data-testid="select-manager"
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select manager" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {managers.map(manager => (
-                              <SelectItem key={manager.id} value={manager.id} data-testid={`option-manager-${manager.id}`}>
-                                {manager.name} ({manager.department})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Input
+                          value={employeeForm.manager}
+                          onChange={(e) => setEmployeeForm(prev => ({ ...prev, manager: e.target.value }))}
+                          placeholder="Enter manager name"
+                          data-testid="input-manager"
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="employeeId">Employee ID</Label>

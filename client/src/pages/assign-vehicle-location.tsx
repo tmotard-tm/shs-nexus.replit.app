@@ -686,22 +686,12 @@ export default function AssignVehicleLocation() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="dialog-manager">Manager *</Label>
-                      <Select 
-                        value={employeeData.manager} 
-                        onValueChange={(value) => setEmployeeData(prev => ({ ...prev, manager: value }))}
-                        data-testid="dialog-select-manager"
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select manager" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {managers.map(manager => (
-                            <SelectItem key={manager.id} value={manager.id} data-testid={`dialog-option-manager-${manager.id}`}>
-                              {manager.name} ({manager.department})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Input
+                        value={employeeData.manager}
+                        onChange={(e) => setEmployeeData(prev => ({ ...prev, manager: e.target.value }))}
+                        placeholder="Enter manager name"
+                        data-testid="dialog-input-manager"
+                      />
                     </div>
                   </div>
 
