@@ -21,6 +21,7 @@ export function Sidebar() {
       dashboard: { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
       analytics: { name: "Analytics Board", href: "/analytics", icon: Activity },
       productivity: { name: "Productivity Dashboard", href: "/productivity", icon: TrendingUp },
+      operations: { name: "Operations Dashboard", href: "/operations", icon: BarChart3 },
       queueManagement: { name: "Queue Management", href: "/queue-management", icon: Clock },
       ntaoQueue: { name: "NTAO — National Truck Assortment Queue", href: "/ntao-queue", icon: Clock },
       assetsQueue: { name: "Assets Queue", href: "/assets-queue", icon: Clock },
@@ -58,6 +59,7 @@ export function Sidebar() {
           baseItems.dashboard,
           baseItems.analytics,
           baseItems.productivity, // Standalone productivity dashboard
+          baseItems.operations, // Operations dashboard with comprehensive metrics
           baseItems.queueManagement,
           baseItems.storageSpots,
           baseItems.requests,

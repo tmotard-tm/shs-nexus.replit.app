@@ -221,7 +221,13 @@ export default function UserManagement() {
 
   const onRoleManagementSubmit = (data: { role: string; department: string | null; departmentAccess: string[] }) => {
     if (roleManagementUser) {
-      roleUpdateMutation.mutate({ userId: roleManagementUser.id, updates: data });
+      roleUpdateMutation.mutate({ 
+        userId: roleManagementUser.id, 
+        updates: {
+          ...data,
+          department: data.department || undefined
+        }
+      });
     }
   };
 

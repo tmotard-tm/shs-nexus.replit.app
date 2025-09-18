@@ -109,6 +109,36 @@ function sanitizeInput(obj: any): any {
   return obj;
 }
 
+// CSV/Excel Formula Injection Prevention
+function sanitizeForCSVExcel(value: any): any {
+  if (typeof value !== 'string' || !value) {
+    return value;
+  }
+  
+  // Check if the string starts with dangerous characters that could execute as formulas
+  if (/^[=+\-@]/.test(value)) {
+    // Prefix with single quote to prevent formula execution
+    return `'${value}`;
+  }
+  
+  return value;
+}
+
+// Sanitize an entire row for CSV/Excel export
+function sanitizeRowForExport(row: any): any {
+  const sanitizedRow: any = {};
+  for (const [key, value] of Object.entries(row)) {
+    // Apply CSV/Excel sanitization to text fields that could contain user input
+    const textFields = ['title', 'description', 'notes', 'last_error', 'assignee', 'requester_id'];
+    if (textFields.includes(key)) {
+      sanitizedRow[key] = sanitizeForCSVExcel(value);
+    } else {
+      sanitizedRow[key] = value;
+    }
+  }
+  return sanitizedRow;
+}
+
 // Duplicate task detection for BYOV enrollment workflows
 async function checkByovEnrollmentDuplicates(formData: any): Promise<{ isDuplicate: boolean, message?: string }> {
   try {
@@ -3736,11 +3766,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Metrics and Export Routes
   
-  // Helper function to build queue item query filters
+  // Helper function to build queue item query filters with robust array parsing
   const buildQueueFilters = (query: any) => {
     const filters: string[] = [];
     const params: any[] = [];
     let paramIndex = 1;
+
+    // Helper function to parse array parameters correctly
+    const parseArrayParam = (param: any): string[] => {
+      if (!param) return [];
+      
+      // If it's already an array, use it directly
+      if (Array.isArray(param)) {
+        return param.filter(item => item && typeof item === 'string');
+      }
+      
+      // If it's a string, handle comma-separated values or single values
+      if (typeof param === 'string') {
+        // Split by comma and filter out empty strings
+        return param.split(',').map(item => item.trim()).filter(item => item.length > 0);
+      }
+      
+      return [];
+    };
 
     // Date range filters
     if (query.from_ts) {
@@ -3752,9 +3800,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       params.push(new Date(query.to_ts));
     }
 
-    // Department filter (array support)
+    // Department filter (robust array support)
     if (query.departments) {
-      const departments = Array.isArray(query.departments) ? query.departments : [query.departments];
+      const departments = parseArrayParam(query.departments);
       if (departments.length > 0) {
         const placeholders = departments.map(() => `$${paramIndex++}`).join(',');
         filters.push(`department = ANY(ARRAY[${placeholders}])`);
@@ -3762,9 +3810,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
 
-    // Status filter (array support)
+    // Status filter (robust array support)
     if (query.statuses) {
-      const statuses = Array.isArray(query.statuses) ? query.statuses : [query.statuses];
+      const statuses = parseArrayParam(query.statuses);
       if (statuses.length > 0) {
         const placeholders = statuses.map(() => `$${paramIndex++}`).join(',');
         filters.push(`status = ANY(ARRAY[${placeholders}])`);
@@ -3772,9 +3820,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
 
-    // Assignee filter (array support)
+    // Assignee filter (robust array support)
     if (query.assignees) {
-      const assignees = Array.isArray(query.assignees) ? query.assignees : [query.assignees];
+      const assignees = parseArrayParam(query.assignees);
       if (assignees.length > 0) {
         const placeholders = assignees.map(() => `$${paramIndex++}`).join(',');
         filters.push(`assigned_to = ANY(ARRAY[${placeholders}])`);
@@ -3854,12 +3902,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // CSV Export Route
+  // CSV Export Route (with role-based authorization and formula injection prevention)
   app.get("/api/exports/requests.csv", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
       if (!currentUser) {
         return res.status(401).json({ message: "Invalid user" });
+      }
+
+      // Server-side authorization: require superadmin or admin role for exports
+      if (!currentUser || !['superadmin', 'admin'].includes(currentUser.role)) {
+        return res.status(403).json({ 
+          message: "Access denied. Export functionality requires superadmin or admin role." 
+        });
       }
 
       const { filters, params } = buildQueueFilters(req.query);
@@ -3896,6 +3951,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await db.execute(sql.raw(query));
       const rows = result.rows;
 
+      // Sanitize all rows to prevent formula injection
+      const sanitizedRows = (rows as any[]).map(row => sanitizeRowForExport(row));
+
       // Create CSV content
       const columns = [
         'id', 'title', 'description', 'status', 'priority', 'assignee', 'requester_id',
@@ -3905,7 +3963,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ];
 
       const csvData = await new Promise<string>((resolve, reject) => {
-        csvStringify(rows as any[], {
+        csvStringify(sanitizedRows, {
           header: true,
           columns: columns
         }, (err, output) => {
@@ -3924,12 +3982,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Excel Export Route
+  // Excel Export Route (with role-based authorization and formula injection prevention)
   app.get("/api/exports/requests.xlsx", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
       if (!currentUser) {
         return res.status(401).json({ message: "Invalid user" });
+      }
+
+      // Server-side authorization: require superadmin or admin role for exports
+      if (!currentUser || !['superadmin', 'admin'].includes(currentUser.role)) {
+        return res.status(403).json({ 
+          message: "Access denied. Export functionality requires superadmin or admin role." 
+        });
       }
 
       const { filters, params } = buildQueueFilters(req.query);
@@ -3976,6 +4041,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await db.execute(sql.raw(query));
       const rows = result.rows;
 
+      // Sanitize all rows to prevent formula injection
+      const sanitizedRows = (rows as any[]).map(row => sanitizeRowForExport(row));
+
       // Create Excel workbook
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet('Requests');
@@ -4007,8 +4075,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { header: 'Updated At', key: 'updated_at', width: 20 }
       ];
 
-      // Add data rows
-      (rows as any[]).forEach((row: any) => {
+      // Add sanitized data rows
+      sanitizedRows.forEach((row: any) => {
         worksheet.addRow(row);
       });
 
