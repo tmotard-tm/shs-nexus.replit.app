@@ -270,14 +270,30 @@ export const anonymousVehicleAssignmentSchema = z.object({
 export const anonymousOnboardingSchema = z.object({
   firstName: z.string().min(1).max(100, "First name must be 100 characters or less"),
   lastName: z.string().min(1).max(100, "Last name must be 100 characters or less"),
-  techId: z.string().min(1).max(50, "Tech ID must be 50 characters or less").optional(),
+  techId: z.string().max(50, "Tech ID must be 50 characters or less").optional(),
   email: z.string().email("Invalid email format").max(200).optional(),
   phone: z.string().max(20, "Phone must be 20 characters or less").optional(),
-  startDate: z.string().datetime().optional(),
+  startDate: z.string().optional(),
   position: z.string().max(100, "Position must be 100 characters or less").optional(),
   department: z.string().max(100, "Department must be 100 characters or less").optional(),
   supervisor: z.string().max(100, "Supervisor must be 100 characters or less").optional(),
-  // Additional onboarding-specific fields
+  manager: z.string().max(100, "Manager must be 100 characters or less").optional(),
+  // Address fields
+  street: z.string().max(200, "Street must be 200 characters or less").optional(),
+  city: z.string().max(100, "City must be 100 characters or less").optional(),
+  state: z.string().max(50, "State must be 50 characters or less").optional(),
+  zipCode: z.string().max(10, "Zip code must be 10 characters or less").optional(),
+  // Additional employee fields
+  employeeId: z.string().max(50, "Employee ID must be 50 characters or less").optional(),
+  region: z.string().max(100, "Region must be 100 characters or less").optional(),
+  district: z.string().max(100, "District must be 100 characters or less").optional(),
+  requisitionId: z.string().max(100, "Requisition ID must be 100 characters or less").optional(),
+  enterpriseId: z.string().max(100, "Enterprise ID must be 100 characters or less").optional(),
+  proposedRouteStartDate: z.string().optional(),
+  // Specialty fields
+  specialties: z.array(z.string()).optional(),
+  isGeneralist: z.boolean().optional(),
+  isFSSLTech: z.boolean().optional(),
 }).strict();
 
 export const anonymousOffboardingSchema = z.object({
