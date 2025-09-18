@@ -3605,13 +3605,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Use enhanced template selection that considers task data
-      const result = await templateLoader.getTemplateForTask(workflowType, department.toLowerCase() as QueueModule, parsedTaskData);
+      // Use enhanced template selection that considers task data (keep original case for registry lookup)
+      console.log(`Template API: Loading template for workflow="${workflowType}", department="${department}"`);
+      const result = await templateLoader.getTemplateForTask(workflowType, department as QueueModule, parsedTaskData);
       const template = result.template;
       
       if (template) {
+        console.log(`Template API: Successfully loaded template for ${workflowType}/${department}`);
         res.json({ template });
       } else {
+        console.warn(`Template API: Template not found for ${workflowType}/${department}. Error: ${result.error}`);
         res.status(404).json({ 
           message: "Template not found",
           error: result.error || `No template available for workflow ${workflowType} in department ${department}`,
@@ -3846,7 +3849,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get all queue items from in-memory storage (all modules)
-      const allModules = ['ntao', 'assets', 'inventory', 'fleet'];
+      const allModules: QueueModule[] = ['ntao', 'assets', 'inventory', 'fleet'];
       const allItems = await storage.getUnifiedQueueItems(allModules, req.query.status);
 
       // Apply client-side filtering based on query parameters
