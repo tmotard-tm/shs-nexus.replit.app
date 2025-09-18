@@ -235,7 +235,9 @@ export default function AnalyticsBoard() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <HawaiiMap key="hawaii-map" filteredVehicles={mapVehicleData} />
+                  <div className="h-[400px]">
+                    <HawaiiMap key="hawaii-map" filteredVehicles={mapVehicleData} />
+                  </div>
                 </CardContent>
               </Card>
               
@@ -247,7 +249,9 @@ export default function AnalyticsBoard() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <PuertoRicoMap key="pr-map" filteredVehicles={mapVehicleData} />
+                  <div className="h-[400px]">
+                    <PuertoRicoMap key="pr-map" filteredVehicles={mapVehicleData} />
+                  </div>
                 </CardContent>
               </Card>
             </div>
