@@ -745,7 +745,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Validate role if being updated
       if (sanitizedUpdates.role) {
-        const validRoles = ['superadmin', 'agent', 'field', 'approver', 'requester'];
+        const validRoles = ['superadmin', 'admin', 'agent', 'field', 'approver', 'requester'];
         if (!validRoles.includes(sanitizedUpdates.role)) {
           return res.status(400).json({ message: "Invalid role specified" });
         }
