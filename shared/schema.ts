@@ -501,5 +501,6 @@ export type TemplateRegistry = {
 export type TemplateLoadResult = {
   template: WorkTemplate | null;
   error?: string;
+  warning?: string; // Warning message for fallback templates
   suggestions?: string[]; // Alternative template IDs if exact match not found
 };

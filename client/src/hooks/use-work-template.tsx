@@ -14,6 +14,7 @@ interface WorkTemplateState {
   checklistState: Record<string, boolean>;
   isLoading: boolean;
   error: string | null;
+  warning: string | null;
 }
 
 export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): WorkTemplateState & {
@@ -31,7 +32,7 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
   const [substepNotes, setSubstepNotes] = useState<Record<string, Record<string, string>>>({});
 
   // Load template based on workflow type and department, with task data for enhanced selection
-  const { data: templateData, isLoading, error } = useQuery<{ template: WorkTemplate | null; error?: string }>({
+  const { data: templateData, isLoading, error } = useQuery<{ template: WorkTemplate | null; error?: string; warning?: string }>({
     queryKey: [`/api/work-templates/${queueItem?.workflowType}/${(module || queueItem?.department)?.toUpperCase()}`, queueItem?.data],
     queryFn: async () => {
       try {
@@ -209,6 +210,7 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     checklistState,
     isLoading,
     error: error?.message || templateData?.error || null,
+    warning: templateData?.warning || null,
     updateStepProgress,
     updateSubstepProgress,
     calculateOverallProgress,

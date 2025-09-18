@@ -4,36 +4,82 @@
   "department": "NTAO",
   "workflowType": "onboarding",
   "version": "1.0",
-  "description": "Onboarding process for NTAO technician",
-  "requiredRole": "agent",
+  "description": "NTAO operations onboarding process for new technicians",
+  "estimatedDuration": 35,
+  "difficulty": "medium",
+  "requiredRole": "field",
   "steps": [
     {
-      "id": "stop_original_shipment",
-      "title": "Stop shipment to original van",
-      "description": "Stop shipment to original van",
+      "id": "operational_setup",
+      "title": "Operational Setup",
+      "description": "Set up technician in operational systems",
       "required": true,
-      "category": "system_action"
+      "estimatedTime": 15,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "create_tech_record",
+          "title": "Create technician record",
+          "description": "Create new technician record in NTAO operational systems",
+          "required": true
+        },
+        {
+          "id": "assign_territory",
+          "title": "Assign service territory",
+          "description": "Assign appropriate service territory based on location and capacity",
+          "required": true
+        },
+        {
+          "id": "setup_routing",
+          "title": "Set up routing access",
+          "description": "Configure routing system access for technician",
+          "required": true
+        }
+      ]
     },
     {
-      "id": "cancel_back_orders",
-      "title": "Cancel all back order parts",
-      "description": "Cancel all back order parts",
+      "id": "credentials_access",
+      "title": "Credentials & System Access",
+      "description": "Provide necessary credentials and system access",
       "required": true,
-      "category": "system_action"
+      "estimatedTime": 10,
+      "category": "system_action",
+      "substeps": [
+        {
+          "id": "create_login_credentials",
+          "title": "Create login credentials",
+          "description": "Set up technician login credentials for operational systems",
+          "required": true
+        },
+        {
+          "id": "assign_mobile_access",
+          "title": "Assign mobile access",
+          "description": "Configure mobile app access for field operations",
+          "required": true
+        }
+      ]
     },
     {
-      "id": "verify_vehicle_details",
-      "title": "Verify vehicle details to identify the ideal truck stock",
-      "description": "Verify vehicle details to identify the ideal truck stock",
+      "id": "operational_verification",
+      "title": "Operational Verification",
+      "description": "Verify technician operational readiness",
       "required": true,
-      "category": "verification"
-    },
-    {
-      "id": "start_new_shipment",
-      "title": "Start shipment of new truck stock to new byov",
-      "description": "Start shipment of new truck stock to new byov",
-      "required": true,
-      "category": "system_action"
+      "estimatedTime": 10,
+      "category": "verification",
+      "substeps": [
+        {
+          "id": "verify_service_specialties",
+          "title": "Verify service specialties",
+          "description": "Confirm technician specialties align with territorial needs",
+          "required": true
+        },
+        {
+          "id": "verify_schedule_availability",
+          "title": "Verify schedule availability",
+          "description": "Confirm technician availability matches service demand",
+          "required": true
+        }
+      ]
     }
   ],
   "finalDisposition": {

@@ -98,6 +98,7 @@ export function WorkModuleDialog({
     checklistState,
     isLoading: templateLoading,
     error: templateError,
+    warning: templateWarning,
     updateStepProgress,
     updateSubstepProgress,
     calculateOverallProgress,
@@ -490,6 +491,20 @@ export function WorkModuleDialog({
                       <div className="text-center space-y-2">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
                         <p className="text-sm text-muted-foreground">Loading work template...</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {templateWarning && (
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center gap-2 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-blue-800 dark:text-blue-200">Using Default Template</p>
+                        <p className="text-xs text-blue-700 dark:text-blue-300">{templateWarning}</p>
                       </div>
                     </div>
                   </CardContent>

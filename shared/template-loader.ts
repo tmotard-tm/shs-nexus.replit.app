@@ -206,6 +206,12 @@ export class TemplateLoader {
       const departmentTemplates = registry[workflowType]?.[department.toUpperCase()];
       
       if (!departmentTemplates || departmentTemplates.length === 0) {
+        // Attempt fallback strategies
+        const fallbackResult = await this.tryFallbackTemplate(workflowType, department, registry);
+        if (fallbackResult) {
+          return fallbackResult;
+        }
+        
         return {
           template: null,
           error: `No template found for workflow ${workflowType} in department ${department}`,
@@ -222,6 +228,68 @@ export class TemplateLoader {
         error: `Failed to get template for workflow: ${error instanceof Error ? error.message : 'Unknown error'}`
       };
     }
+  }
+
+  /**
+   * Try fallback strategies for missing templates
+   */
+  private async tryFallbackTemplate(workflowType: string, department: QueueModule, registry: any): Promise<TemplateLoadResult | null> {
+    if (this.isDebugEnabled()) {
+      console.log(`Template fallback: Attempting fallbacks for ${workflowType}/${department}`);
+    }
+
+    // 1. Try workflow-specific aliases
+    const fallbackWorkflows = this.getFallbackWorkflows(workflowType);
+    for (const fallbackWorkflow of fallbackWorkflows) {
+      const fallbackTemplates = registry[fallbackWorkflow]?.[department.toUpperCase()];
+      if (fallbackTemplates && fallbackTemplates.length > 0) {
+        if (this.isDebugEnabled()) {
+          console.log(`Template fallback: Using ${fallbackWorkflow} template for ${workflowType}/${department}`);
+        }
+        const result = await this.loadTemplate(fallbackTemplates[0]);
+        if (result.template) {
+          return {
+            template: result.template,
+            warning: `Using ${fallbackWorkflow} template as fallback for ${workflowType}`,
+            suggestions: await this.getSuggestedWorkflowTemplates(workflowType)
+          };
+        }
+      }
+    }
+
+    // 2. Try same workflow in other departments (priority order: ASSETS, INVENTORY, FLEET)
+    const fallbackDepartments = (['ASSETS', 'INVENTORY', 'FLEET'] as unknown as QueueModule[]).filter(d => d !== department.toUpperCase());
+    for (const fallbackDept of fallbackDepartments) {
+      const fallbackTemplates = registry[workflowType]?.[fallbackDept];
+      if (fallbackTemplates && fallbackTemplates.length > 0) {
+        if (this.isDebugEnabled()) {
+          console.log(`Template fallback: Using ${fallbackDept} template for ${workflowType}/${department}`);
+        }
+        const result = await this.loadTemplate(fallbackTemplates[0]);
+        if (result.template) {
+          return {
+            template: result.template,
+            warning: `Using ${fallbackDept} template as fallback for ${department} department`,
+            suggestions: await this.getSuggestedWorkflowTemplates(workflowType)
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get fallback workflow types for a given workflow
+   */
+  private getFallbackWorkflows(workflowType: string): string[] {
+    const fallbackMap: Record<string, string[]> = {
+      'onboarding': ['onboarding_day0', 'onboarding_general'],
+      'offboarding': ['offboarding_sequence'],
+      'vehicle_assignment': ['van_assignment'],
+      'decommission': []
+    };
+    return fallbackMap[workflowType] || [];
   }
 
   /**
