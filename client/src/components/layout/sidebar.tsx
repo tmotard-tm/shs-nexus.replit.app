@@ -60,7 +60,6 @@ export function Sidebar() {
           baseItems.operations, // Operations dashboard with comprehensive metrics
           baseItems.queueManagement,
           baseItems.storageSpots,
-          baseItems.requests,
           baseItems.approvals,
           baseItems.apiManagement,
           baseItems.snowflake,
@@ -77,7 +76,6 @@ export function Sidebar() {
           baseItems.analytics,
           baseItems.queueManagement,
           baseItems.storageSpots,
-          baseItems.requests,
           baseItems.approvals,
         ];
     }
