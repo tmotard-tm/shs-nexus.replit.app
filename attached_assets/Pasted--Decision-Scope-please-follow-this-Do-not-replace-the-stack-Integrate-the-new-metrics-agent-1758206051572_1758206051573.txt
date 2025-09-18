@@ -1,0 +1,307 @@
+✅ Decision & Scope (please follow this)
+
+Do not replace the stack.
+Integrate the new metrics + agent productivity + filters + CSV/XLSX exports into the existing SearsDrive (Express.js + PostgreSQL) app.
+Also update the NTAO label everywhere to: “NTAO — National Truck Assortment.”
+(If a short label is needed in tight UI, use “NTAO” but the long form should appear in tooltips/descriptions/filters.)
+
+We’ll also consolidate the redundant dashboards into a single Operations Dashboard with tabs/filters (Overview, Departments, Teams, Users, Requests).
+
+Deliverables checklist
+
+ New /api/metrics endpoint (POST or GET with querystring) returning:
+
+summary (totals, pending, in_progress, completed, canceled, averages, aging buckets)
+
+by_type
+
+by_team
+
+by_user
+
+completed_time_series (per-agent completions per day + avg hours)
+
+ Filters supported by all endpoints & exports:
+
+from_ts, to_ts, departments[], statuses[], assignees[]
+
+ Exports:
+
+/api/exports/requests.csv
+
+/api/exports/requests.xlsx (use exceljs)
+
+ Operations Dashboard UI:
+
+Filters bar (date range, department, status, user)
+
+Tiles for summary + aging
+
+Tables: by type, by team, by user
+
+Agent productivity chart (completed/day by agent) + table
+
+Export buttons (honor current filters)
+
+ Label fix: replace “Network Technical Assistance Office” with “National Truck Assortment” across SearsDrive.
+
+DB assumptions (PostgreSQL)
+
+Ensure the requests table (or view backing the dashboard) has at least:
+
+id, department, team, type, status, assignee,
+created_at, started_at, first_response_at, completed_at, updated_at
+
+
+Indexes (if missing):
+
+CREATE INDEX IF NOT EXISTS idx_requests_created_at   ON requests (created_at);
+CREATE INDEX IF NOT EXISTS idx_requests_completed_at ON requests (completed_at);
+CREATE INDEX IF NOT EXISTS idx_requests_department   ON requests (department);
+CREATE INDEX IF NOT EXISTS idx_requests_status       ON requests (status);
+CREATE INDEX IF NOT EXISTS idx_requests_assignee     ON requests (assignee);
+
+Metrics SQL (Postgres, parameterized)
+
+Put this in a .sql file or as a template string; bind arrays properly (see route code below).
+
+WITH params AS (
+  SELECT
+    $1::timestamptz  AS from_ts,
+    $2::timestamptz  AS to_ts,
+    $3::text[]       AS departments,
+    $4::text[]       AS statuses,
+    $5::text[]       AS assignees
+),
+base AS (
+  SELECT r.*
+  FROM requests r, params p
+  WHERE r.created_at >= p.from_ts
+    AND r.created_at <  p.to_ts
+    AND (p.departments IS NULL OR r.department = ANY(p.departments))
+    AND (p.statuses   IS NULL OR r.status    = ANY(p.statuses))
+    AND (p.assignees  IS NULL OR r.assignee  = ANY(p.assignees))
+),
+durations AS (
+  SELECT
+    id, department, team, type, status, assignee, created_at, started_at, first_response_at, completed_at,
+    (EXTRACT(EPOCH FROM (completed_at - created_at))/3600.0) AS hrs_created_to_done,
+    CASE WHEN started_at IS NOT NULL AND completed_at IS NOT NULL
+         THEN (EXTRACT(EPOCH FROM (completed_at - started_at))/3600.0) END AS hrs_start_to_done,
+    CASE WHEN first_response_at IS NOT NULL
+         THEN (EXTRACT(EPOCH FROM (first_response_at - created_at))/3600.0) END AS hrs_first_response,
+    CASE WHEN status <> 'Completed'
+         THEN (EXTRACT(EPOCH FROM (NOW() - created_at))/3600.0) END AS age_open_hrs
+  FROM base
+),
+summary AS (
+  SELECT
+    COUNT(*) AS total,
+    COUNT(*) FILTER (WHERE status IN ('Pending','Open','New')) AS pending,
+    COUNT(*) FILTER (WHERE status IN ('In Progress','Assigned')) AS in_progress,
+    COUNT(*) FILTER (WHERE status='Completed') AS completed,
+    COUNT(*) FILTER (WHERE status IN ('Canceled','Cancelled')) AS canceled,
+    ROUND(AVG(hrs_created_to_done)::numeric,2) AS avg_created_to_done,
+    ROUND(AVG(hrs_start_to_done)::numeric,2)   AS avg_start_to_done,
+    ROUND(AVG(hrs_first_response)::numeric,2)  AS avg_first_response,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 0 AND 48)    AS age_0_2d,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 72 AND 168)  AS age_3_7d,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 192 AND 336) AS age_8_14d,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 360 AND 720) AS age_15_30d,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 744 AND 1440) AS age_31_60d,
+    COUNT(*) FILTER (WHERE age_open_hrs > 1440)              AS age_gt_60d
+  FROM durations
+),
+by_type AS (
+  SELECT type, COUNT(*) AS total
+  FROM durations GROUP BY 1 ORDER BY total DESC
+),
+by_team AS (
+  SELECT COALESCE(team,'(Unassigned Team)') AS team,
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE status IN ('In Progress','Assigned')) AS in_progress,
+         COUNT(*) FILTER (WHERE status='Completed') AS completed,
+         ROUND(AVG(hrs_created_to_done)::numeric,2) AS avg_created_to_done,
+         ROUND(AVG(hrs_start_to_done)::numeric,2)   AS avg_start_to_done
+  FROM durations GROUP BY 1 ORDER BY total DESC
+),
+by_user AS (
+  SELECT COALESCE(assignee,'(Unassigned)') AS assignee,
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE status IN ('In Progress','Assigned')) AS in_progress,
+         COUNT(*) FILTER (WHERE status='Completed') AS completed,
+         ROUND(AVG(hrs_created_to_done)::numeric,2) AS avg_created_to_done,
+         ROUND(AVG(hrs_start_to_done)::numeric,2)   AS avg_start_to_done
+  FROM durations GROUP BY 1 ORDER BY total DESC
+),
+completed_ts AS (
+  SELECT date_trunc('day', completed_at) AS day,
+         COALESCE(assignee,'(Unassigned)') AS assignee,
+         COUNT(*) AS completed_count,
+         ROUND(AVG(hrs_created_to_done)::numeric,2) AS avg_hrs_created_to_done
+  FROM durations
+  WHERE completed_at IS NOT NULL
+  GROUP BY 1,2 ORDER BY 1,2
+)
+SELECT
+  to_jsonb(s.*) AS summary,
+  (SELECT jsonb_agg(bt) FROM by_type bt) AS by_type,
+  (SELECT jsonb_agg(bt) FROM by_team bt) AS by_team,
+  (SELECT jsonb_agg(bu) FROM by_user bu) AS by_user,
+  (SELECT jsonb_agg(ct) FROM completed_ts ct) AS completed_time_series;
+
+Express.js routes (using pg and exceljs)
+// routes/metrics.js
+const express = require('express');
+const router = express.Router();
+const { Pool } = require('pg');
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+function toArray(val) {
+  if (!val) return null;
+  return Array.isArray(val) ? val : [val];
+}
+
+router.get('/metrics', async (req, res, next) => {
+  try {
+    const { from_ts, to_ts } = req.query;
+    const departments = toArray(req.query.departments);
+    const statuses    = toArray(req.query.statuses);
+    const assignees   = toArray(req.query.assignees);
+
+    if (!from_ts || !to_ts) {
+      return res.status(400).json({ error: 'from_ts and to_ts are required ISO timestamps' });
+    }
+
+    const sql = /* paste the SQL from above */ `
+      -- see SQL block in the spec; keep as single text
+    `;
+
+    const result = await pool.query(sql, [
+      from_ts, to_ts, departments, statuses, assignees
+    ]);
+    const row = result.rows[0] || {};
+    res.json({
+      summary: row.summary || {},
+      by_type: row.by_type || [],
+      by_team: row.by_team || [],
+      by_user: row.by_user || [],
+      completed_time_series: row.completed_time_series || []
+    });
+  } catch (e) { next(e); }
+});
+
+module.exports = router;
+
+// routes/exports.js
+const express = require('express');
+const router = express.Router();
+const { Pool } = require('pg');
+const { stringify } = require('csv-stringify/sync');
+const ExcelJS = require('exceljs');
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+function toArray(v){ if(!v) return null; return Array.isArray(v)?v:[v]; }
+
+function buildWhere(q) {
+  const clauses = ['created_at >= $1', 'created_at < $2'];
+  const binds = [q.from_ts, q.to_ts];
+  let idx = 3;
+
+  if (q.departments) { clauses.push(`department = ANY($${idx})`); binds.push(q.departments); idx++; }
+  if (q.statuses)    { clauses.push(`status = ANY($${idx})`);     binds.push(q.statuses);    idx++; }
+  if (q.assignees)   { clauses.push(`assignee = ANY($${idx})`);   binds.push(q.assignees);   idx++; }
+
+  return { where: 'WHERE ' + clauses.join(' AND '), binds };
+}
+
+const BASE_SELECT = `
+  SELECT id, department, team, type, status, assignee,
+         created_at, started_at, first_response_at, completed_at, updated_at
+  FROM requests
+`;
+
+router.get('/exports/requests.csv', async (req, res, next) => {
+  try {
+    const q = {
+      from_ts: req.query.from_ts, to_ts: req.query.to_ts,
+      departments: toArray(req.query.departments),
+      statuses: toArray(req.query.statuses),
+      assignees: toArray(req.query.assignees),
+    };
+    const { where, binds } = buildWhere(q);
+    const { rows } = await pool.query(`${BASE_SELECT} ${where} ORDER BY created_at DESC`, binds);
+    const csv = rows.length ? stringify(rows, { header: true }) : '';
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=requests.csv');
+    res.send(csv);
+  } catch (e) { next(e); }
+});
+
+router.get('/exports/requests.xlsx', async (req, res, next) => {
+  try {
+    const q = {
+      from_ts: req.query.from_ts, to_ts: req.query.to_ts,
+      departments: toArray(req.query.departments),
+      statuses: toArray(req.query.statuses),
+      assignees: toArray(req.query.assignees),
+    };
+    const { where, binds } = buildWhere(q);
+    const { rows } = await pool.query(`${BASE_SELECT} ${where} ORDER BY created_at DESC`, binds);
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Requests');
+    if (rows.length) {
+      ws.columns = Object.keys(rows[0]).map(k => ({ header: k, key: k }));
+      rows.forEach(r => ws.addRow(r));
+    }
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=requests.xlsx');
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) { next(e); }
+});
+
+module.exports = router;
+
+
+Wire routes into SearsDrive app:
+
+// app.js or server.js
+const metricsRoutes = require('./routes/metrics');
+const exportRoutes  = require('./routes/exports');
+app.use('/api', metricsRoutes);
+app.use('/api', exportRoutes);
+
+UI (high level)
+
+Add an Operations Dashboard page:
+
+Filter bar: date range, department (multi, includes “NTAO — National Truck Assortment”), status (multi), assignee (multi or search).
+
+Tiles: summary fields (incl. aging).
+
+Tables: by_type, by_team, by_user (sortable).
+
+Agent chart: stacked bar of completed_time_series (X: day, Y: completed_count, series: assignee).
+
+Export buttons link to:
+
+/api/exports/requests.csv?from_ts=…&to_ts=…&departments=…&statuses=…&assignees=…
+
+/api/exports/requests.xlsx?... (same params)
+
+NTAO label update
+
+Replace any “Network Technical Assistance Office” → “National Truck Assortment”.
+
+In code: centralize a mapping:
+
+const DEPT_LABELS = {
+  'NTAO': 'NTAO — National Truck Assortment',
+  'Assets Management': 'Assets Management',
+  'Inventory Control': 'Inventory Control',
+  'Fleet Management': 'Fleet Management',
+};

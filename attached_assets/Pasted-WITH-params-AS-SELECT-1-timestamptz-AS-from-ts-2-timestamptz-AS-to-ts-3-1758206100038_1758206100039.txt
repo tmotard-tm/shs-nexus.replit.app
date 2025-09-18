@@ -1,0 +1,84 @@
+WITH params AS (
+  SELECT
+    $1::timestamptz  AS from_ts,
+    $2::timestamptz  AS to_ts,
+    $3::text[]       AS departments,
+    $4::text[]       AS statuses,
+    $5::text[]       AS assignees
+),
+base AS (
+  SELECT r.*
+  FROM requests r, params p
+  WHERE r.created_at >= p.from_ts
+    AND r.created_at <  p.to_ts
+    AND (p.departments IS NULL OR r.department = ANY(p.departments))
+    AND (p.statuses   IS NULL OR r.status    = ANY(p.statuses))
+    AND (p.assignees  IS NULL OR r.assignee  = ANY(p.assignees))
+),
+durations AS (
+  SELECT
+    id, department, team, type, status, assignee, created_at, started_at, first_response_at, completed_at,
+    (EXTRACT(EPOCH FROM (completed_at - created_at))/3600.0) AS hrs_created_to_done,
+    CASE WHEN started_at IS NOT NULL AND completed_at IS NOT NULL
+         THEN (EXTRACT(EPOCH FROM (completed_at - started_at))/3600.0) END AS hrs_start_to_done,
+    CASE WHEN first_response_at IS NOT NULL
+         THEN (EXTRACT(EPOCH FROM (first_response_at - created_at))/3600.0) END AS hrs_first_response,
+    CASE WHEN status <> 'Completed'
+         THEN (EXTRACT(EPOCH FROM (NOW() - created_at))/3600.0) END AS age_open_hrs
+  FROM base
+),
+summary AS (
+  SELECT
+    COUNT(*) AS total,
+    COUNT(*) FILTER (WHERE status IN ('Pending','Open','New')) AS pending,
+    COUNT(*) FILTER (WHERE status IN ('In Progress','Assigned')) AS in_progress,
+    COUNT(*) FILTER (WHERE status='Completed') AS completed,
+    COUNT(*) FILTER (WHERE status IN ('Canceled','Cancelled')) AS canceled,
+    ROUND(AVG(hrs_created_to_done)::numeric,2) AS avg_created_to_done,
+    ROUND(AVG(hrs_start_to_done)::numeric,2)   AS avg_start_to_done,
+    ROUND(AVG(hrs_first_response)::numeric,2)  AS avg_first_response,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 0 AND 48)    AS age_0_2d,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 72 AND 168)  AS age_3_7d,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 192 AND 336) AS age_8_14d,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 360 AND 720) AS age_15_30d,
+    COUNT(*) FILTER (WHERE age_open_hrs BETWEEN 744 AND 1440) AS age_31_60d,
+    COUNT(*) FILTER (WHERE age_open_hrs > 1440)              AS age_gt_60d
+  FROM durations
+),
+by_type AS (
+  SELECT type, COUNT(*) AS total
+  FROM durations GROUP BY 1 ORDER BY total DESC
+),
+by_team AS (
+  SELECT COALESCE(team,'(Unassigned Team)') AS team,
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE status IN ('In Progress','Assigned')) AS in_progress,
+         COUNT(*) FILTER (WHERE status='Completed') AS completed,
+         ROUND(AVG(hrs_created_to_done)::numeric,2) AS avg_created_to_done,
+         ROUND(AVG(hrs_start_to_done)::numeric,2)   AS avg_start_to_done
+  FROM durations GROUP BY 1 ORDER BY total DESC
+),
+by_user AS (
+  SELECT COALESCE(assignee,'(Unassigned)') AS assignee,
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE status IN ('In Progress','Assigned')) AS in_progress,
+         COUNT(*) FILTER (WHERE status='Completed') AS completed,
+         ROUND(AVG(hrs_created_to_done)::numeric,2) AS avg_created_to_done,
+         ROUND(AVG(hrs_start_to_done)::numeric,2)   AS avg_start_to_done
+  FROM durations GROUP BY 1 ORDER BY total DESC
+),
+completed_ts AS (
+  SELECT date_trunc('day', completed_at) AS day,
+         COALESCE(assignee,'(Unassigned)') AS assignee,
+         COUNT(*) AS completed_count,
+         ROUND(AVG(hrs_created_to_done)::numeric,2) AS avg_hrs_created_to_done
+  FROM durations
+  WHERE completed_at IS NOT NULL
+  GROUP BY 1,2 ORDER BY 1,2
+)
+SELECT
+  to_jsonb(s.*) AS summary,
+  (SELECT jsonb_agg(bt) FROM by_type bt) AS by_type,
+  (SELECT jsonb_agg(bt) FROM by_team bt) AS by_team,
+  (SELECT jsonb_agg(bu) FROM by_user bu) AS by_user,
+  (SELECT jsonb_agg(ct) FROM completed_ts ct) AS completed_time_series;
