@@ -27,7 +27,7 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
 
   // Filter vehicles in Hawaii
   const hawaiiVehicles = filteredVehicles.filter(vehicle => 
-    vehicle.state === 'HI'
+    vehicle.state === 'HI' || vehicle.state === 'Hawaii'
   );
 
   // Initialize map once

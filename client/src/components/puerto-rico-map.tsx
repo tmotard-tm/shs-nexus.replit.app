@@ -27,7 +27,7 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
 
   // Filter vehicles in Puerto Rico
   const puertoRicoVehicles = filteredVehicles.filter(vehicle => 
-    vehicle.state === 'PR'
+    vehicle.state === 'PR' || vehicle.state === 'Puerto Rico'
   );
 
   // Initialize map once
