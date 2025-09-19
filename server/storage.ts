@@ -33,8 +33,6 @@ import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import { join } from "path";
 
 export interface IStorage {
   // Users
@@ -175,7 +173,6 @@ export interface IStorage {
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
   private requests: Map<string, Request>;
   private apiConfigurations: Map<string, ApiConfiguration>;
   private activityLogs: Map<string, ActivityLog>;
@@ -191,7 +188,6 @@ export class MemStorage implements IStorage {
   private fleetQueueItems: Map<string, QueueItem>;
 
   constructor() {
-    this.users = new Map();
     this.requests = new Map();
     this.apiConfigurations = new Map();
     this.activityLogs = new Map();
@@ -206,47 +202,9 @@ export class MemStorage implements IStorage {
     this.inventoryQueueItems = new Map();
     this.fleetQueueItems = new Map();
     
-    // Load users from file first, then fallback to defaults
-    this.loadUsersFromFile();
     this.initializeDefaultData();
   }
 
-  // File I/O helper methods for user persistence
-  private readonly usersFilePath = join(process.cwd(), 'users.json');
-
-  private loadUsersFromFile(): void {
-    try {
-      if (existsSync(this.usersFilePath)) {
-        const fileContent = readFileSync(this.usersFilePath, 'utf-8');
-        const userData = JSON.parse(fileContent);
-        
-        // Convert array back to Map with proper date objects
-        if (Array.isArray(userData)) {
-          userData.forEach((user: any) => {
-            // Restore Date objects
-            if (user.createdAt) user.createdAt = new Date(user.createdAt);
-            this.users.set(user.id, user);
-          });
-          console.log(`Loaded ${userData.length} users from ${this.usersFilePath}`);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load users from file, will use defaults:', error);
-      // Clear corrupted data and let defaults be loaded
-      this.users.clear();
-    }
-  }
-
-  private saveUsersToFile(): void {
-    try {
-      // Convert Map to array for JSON serialization
-      const usersArray = Array.from(this.users.values());
-      writeFileSync(this.usersFilePath, JSON.stringify(usersArray, null, 2), 'utf-8');
-      console.log(`Saved ${usersArray.length} users to ${this.usersFilePath}`);
-    } catch (error) {
-      console.error('Failed to save users to file:', error);
-    }
-  }
 
   private async initializeDefaultData() {
     // Create Enterprise ID users with new role system
@@ -473,21 +431,24 @@ export class MemStorage implements IStorage {
     };
     enterpriseUsers.push(anonymousUser);
     
-    // Only add default users if they don't already exist (preserves users loaded from file)
-    enterpriseUsers.forEach(user => {
-      if (!this.users.has(user.id) && !this.users.has(user.username)) {
-        this.users.set(user.id, user);
+    // Only add default users if they don't already exist in the database
+    for (const user of enterpriseUsers) {
+      try {
+        const existingUser = await this.getUserByUsername(user.username);
+        if (!existingUser) {
+          await this.createUser({
+            username: user.username,
+            email: user.email,
+            password: user.password,
+            role: user.role,
+            department: user.department,
+            departmentAccess: user.departmentAccess,
+          });
+        }
+      } catch (error) {
+        // Ignore duplicate errors during initialization
+        console.log(`User ${user.username} may already exist, skipping creation`);
       }
-    });
-    
-    // Also add anonymous user by username for lookups if not already present
-    if (!this.users.has("anonymous")) {
-      this.users.set("anonymous", anonymousUser);
-    }
-
-    // Save initial users to file if this is a fresh start (no existing file)
-    if (!existsSync(this.usersFilePath)) {
-      this.saveUsersToFile();
     }
 
     // Create sample API configurations
@@ -810,56 +771,84 @@ export class MemStorage implements IStorage {
 
   // Users
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    try {
+      const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+      return result[0] || undefined;
+    } catch (error) {
+      console.error('Error getting user by id:', error);
+      throw error;
+    }
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const normalizedInput = username.toLowerCase();
-    return Array.from(this.users.values()).find(user => 
-      user.username.toLowerCase() === normalizedInput || 
-      user.email.toLowerCase() === normalizedInput
-    );
+    try {
+      const normalizedInput = username.toLowerCase();
+      const result = await db.select().from(users).where(
+        sql`LOWER(${users.username}) = ${normalizedInput} OR LOWER(${users.email}) = ${normalizedInput}`
+      ).limit(1);
+      return result[0] || undefined;
+    } catch (error) {
+      console.error('Error getting user by username:', error);
+      throw error;
+    }
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.email === email);
+    try {
+      const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+      return result[0] || undefined;
+    } catch (error) {
+      console.error('Error getting user by email:', error);
+      throw error;
+    }
   }
 
   async getUsers(): Promise<User[]> {
-    return Array.from(this.users.values());
+    try {
+      return await db.select().from(users);
+    } catch (error) {
+      console.error('Error getting all users:', error);
+      throw error;
+    }
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { 
-      ...insertUser,
-      role: insertUser.role || "field",
-      department: insertUser.department || null,
-      departmentAccess: insertUser.departmentAccess || null,
-      id, 
-      createdAt: new Date(),
-    };
-    this.users.set(id, user);
-    this.saveUsersToFile();
-    return user;
+    try {
+      const userToInsert = {
+        ...insertUser,
+        role: insertUser.role || "field",
+        department: insertUser.department || null,
+        departmentAccess: insertUser.departmentAccess || null,
+      };
+      const result = await db.insert(users).values(userToInsert).returning();
+      return result[0];
+    } catch (error) {
+      console.error('Error creating user:', error);
+      throw error;
+    }
   }
 
   async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
-    const user = this.users.get(id);
-    if (!user) return undefined;
-    
-    const updatedUser = { ...user, ...updates };
-    this.users.set(id, updatedUser);
-    this.saveUsersToFile();
-    return updatedUser;
+    try {
+      const result = await db.update(users)
+        .set(updates)
+        .where(eq(users.id, id))
+        .returning();
+      return result[0] || undefined;
+    } catch (error) {
+      console.error('Error updating user:', error);
+      throw error;
+    }
   }
 
   async deleteUser(id: string): Promise<boolean> {
-    const result = this.users.delete(id);
-    if (result) {
-      this.saveUsersToFile();
+    try {
+      const result = await db.delete(users).where(eq(users.id, id));
+      return result.rowCount > 0;
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      throw error;
     }
-    return result;
   }
 
   // Requests
@@ -1044,7 +1033,8 @@ export class MemStorage implements IStorage {
       };
     };
     
-    const activeUsers = this.users.size;
+    const allUsers = await this.getUsers();
+    const activeUsers = allUsers.length;
 
     return {
       onboarding: getWorkflowStats("onboarding"),
