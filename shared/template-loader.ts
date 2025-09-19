@@ -378,7 +378,7 @@ export class TemplateLoader {
    * Check if debug logging is enabled
    */
   private isDebugEnabled(): boolean {
-    return process.env.DEBUG_TEMPLATES === 'true' || process.env.NODE_ENV === 'development';
+    return process.env.DEBUG_TEMPLATES === 'true' || process.env.NODE_ENV === 'development' || true; // Enable temporarily to debug user issue
   }
 
   /**
