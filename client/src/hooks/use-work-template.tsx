@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { WorkTemplate, QueueItem, CombinedQueueItem, QueueModule, WorkTemplateProgress } from "@shared/schema";
 
 interface UseWorkTemplateProps {
@@ -26,10 +27,17 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
   isSubstepCompleted: (stepId: string, substepId: string) => boolean;
   getStepNotes: (stepId: string) => string;
   getSubstepNotes: (stepId: string, substepId: string) => string;
+  isSaving: boolean;
 } {
+  const { toast } = useToast();
   const [checklistState, setChecklistState] = useState<Record<string, boolean>>({});
   const [stepNotes, setStepNotes] = useState<Record<string, string>>({});
   const [substepNotes, setSubstepNotes] = useState<Record<string, Record<string, string>>>({});
+  
+  // Debouncing refs
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSaveRef = useRef<boolean>(false);
+  const dirtyRef = useRef<boolean>(false);
 
   // Load template based on workflow type and department, with task data for enhanced selection
   const { data: templateData, isLoading, error } = useQuery<{ template: WorkTemplate | null; error?: string; warning?: string }>({
@@ -129,14 +137,213 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     }
   }, [progressData]);
 
+  // Save progress mutation - Enhanced with debouncing and error handling
+  const saveProgressMutation = useMutation({
+    mutationFn: async (data: {
+      checklistState: Record<string, boolean>;
+      stepNotes: Record<string, string>;
+      substepNotes: Record<string, Record<string, string>>;
+      templateId?: string;
+    }) => {
+      console.log('Saving progress for task:', queueItem?.id, 'Current status:', queueItem?.status);
+      
+      if (!module && !queueItem?.department) {
+        throw new Error('Module or department is required for saving progress');
+      }
+      
+      if (!queueItem?.id) {
+        throw new Error('Queue item ID is required for saving progress');
+      }
+      
+      const moduleToUse = module || queueItem.department;
+      const endpoint = `/api/work-progress/${queueItem.id}`;
+      
+      console.log('Calling save progress endpoint:', endpoint);
+      return apiRequest("PATCH", endpoint, {
+        checklistState: data.checklistState,
+        stepNotes: Object.keys(data.stepNotes).length > 0 ? data.stepNotes : undefined,
+        substepNotes: Object.keys(data.substepNotes).length > 0 ? data.substepNotes : undefined,
+        templateId: data.templateId,
+        templateProgress: calculateOverallProgress()
+      });
+    },
+    onSuccess: (data) => {
+      console.log('Progress saved successfully for task:', queueItem?.id, 'Response:', data);
+      
+      // Invalidate work progress query
+      queryClient.invalidateQueries({ queryKey: [`/api/work-progress/${queueItem?.id}`] });
+      
+      // Invalidate queue queries for immediate UI update
+      const moduleToUse = module || queueItem?.department;
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false
+      });
+      if (moduleToUse) {
+        queryClient.invalidateQueries({ 
+          queryKey: [`/api/${moduleToUse}-queue`],
+          exact: false
+        });
+      }
+    },
+    onError: (error: any) => {
+      console.error('Failed to save progress for task:', queueItem?.id, 'Error:', error);
+      
+      toast({
+        title: "Error Saving Progress",
+        description: error.message || "Failed to save progress. Changes will be lost if you leave this page.",
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      pendingSaveRef.current = false;
+      
+      // If there are dirty changes that occurred during the save, trigger another save
+      if (dirtyRef.current && templateData?.template) {
+        dirtyRef.current = false;
+        console.log('Dirty changes detected after save, triggering immediate retry');
+        
+        // Trigger another save immediately for reliability
+        setTimeout(() => {
+          if (templateData?.template) {
+            pendingSaveRef.current = true;
+            saveProgressMutation.mutate({
+              checklistState,
+              stepNotes,
+              substepNotes,
+              templateId: templateData.template.id
+            });
+          }
+        }, 300); // Short delay to avoid overwhelming the server
+      }
+    },
+  });
+
+  // Start work mutation - Auto-triggered when first checkbox is completed
+  const startWorkMutation = useMutation({
+    mutationFn: async () => {
+      console.log('Starting work on task:', queueItem?.id, 'Current status:', queueItem?.status);
+      
+      if (!queueItem?.id) {
+        console.error('Cannot start work: No task ID available');
+        throw new Error('No task ID available');
+      }
+      
+      if (queueItem?.status !== 'pending') {
+        console.warn('Task already started or completed:', queueItem?.id, 'Status:', queueItem?.status);
+        return; // Don't make API call if already started
+      }
+      
+      const moduleToUse = module || queueItem.department;
+      if (!moduleToUse) {
+        throw new Error('Module or department is required for starting work');
+      }
+      
+      const endpoint = `/api/queues/${moduleToUse}/${queueItem.id}/start-work`;
+      
+      console.log('Calling start work endpoint:', endpoint);
+      return apiRequest("PATCH", endpoint);
+    },
+    onSuccess: (data) => {
+      console.log('Work started successfully for task:', queueItem?.id, 'Response:', data);
+      
+      // Invalidate queue queries for immediate UI update
+      const moduleToUse = module || queueItem?.department;
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false
+      });
+      if (moduleToUse) {
+        queryClient.invalidateQueries({ 
+          queryKey: [`/api/${moduleToUse}-queue`],
+          exact: false
+        });
+      }
+      
+      toast({
+        title: "Work Started",
+        description: "Task status has been changed to in-progress.",
+      });
+    },
+    onError: (error: any) => {
+      console.error('Failed to start work on task:', queueItem?.id, 'Error:', error);
+      
+      toast({
+        title: "Error Starting Work",
+        description: error.message || "Failed to start work on this task. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Debounced save function to batch progress saves
+  const debouncedSaveProgress = useCallback(() => {
+    // Mark that there are unsaved changes
+    dirtyRef.current = true;
+    
+    // Clear any pending timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set a new timeout to save after 1 second of inactivity
+    saveTimeoutRef.current = setTimeout(() => {
+      if (templateData?.template) {
+        if (!pendingSaveRef.current) {
+          // No save in progress, start a new save
+          dirtyRef.current = false; // Clear dirty flag as we're about to save
+          pendingSaveRef.current = true;
+          
+          saveProgressMutation.mutate({
+            checklistState,
+            stepNotes,
+            substepNotes,
+            templateId: templateData.template.id
+          });
+        } else {
+          // Save already in progress, dirtyRef stays true and onSettled will handle retry
+          console.log('Save already in progress, will retry after completion');
+        }
+      }
+    }, 1000);
+  }, [checklistState, stepNotes, substepNotes, templateData?.template, saveProgressMutation]);
+
+  // Check if this is the first checkbox being completed and task is pending
+  const checkAndStartWork = useCallback((isFirstCompletion: boolean) => {
+    if (isFirstCompletion && 
+        queueItem?.status === 'pending' && 
+        !startWorkMutation.isPending &&
+        templateData?.template) {
+      
+      console.log('First checkbox completed on pending task - starting work');
+      startWorkMutation.mutate();
+    }
+  }, [queueItem?.status, startWorkMutation, templateData?.template]);
+
   const updateStepProgress = (stepId: string, completed: boolean, notes?: string) => {
+    // Check if this is the first completion on a pending task
+    const wasAnyCompleted = Object.values(checklistState).some(Boolean);
+    const isFirstCompletion = completed && !wasAnyCompleted;
+    
+    // Update local state first (preserve existing behavior)
     setChecklistState(prev => ({ ...prev, [stepId]: completed }));
     if (notes !== undefined) {
       setStepNotes(prev => ({ ...prev, [stepId]: notes }));
     }
+
+    // Start work if this is the first checkbox completion on a pending task
+    checkAndStartWork(isFirstCompletion);
+
+    // Debounce the progress save to avoid excessive API calls
+    debouncedSaveProgress();
   };
 
   const updateSubstepProgress = (stepId: string, substepId: string, completed: boolean, notes?: string) => {
+    // Check if this is the first completion on a pending task
+    const wasAnyCompleted = Object.values(checklistState).some(Boolean);
+    const isFirstCompletion = completed && !wasAnyCompleted;
+    
+    // Update local state first (preserve existing behavior)
     const key = `${stepId}.${substepId}`;
     setChecklistState(prev => ({ ...prev, [key]: completed }));
     if (notes !== undefined) {
@@ -145,6 +352,12 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
         [stepId]: { ...(prev[stepId] || {}), [substepId]: notes }
       }));
     }
+
+    // Start work if this is the first checkbox completion on a pending task
+    checkAndStartWork(isFirstCompletion);
+
+    // Debounce the progress save to avoid excessive API calls
+    debouncedSaveProgress();
   };
 
   const calculateOverallProgress = (): number => {
@@ -204,6 +417,54 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     return substepNotes[stepId]?.[substepId] || "";
   };
 
+  // Flush function to save any pending changes immediately
+  const flushPendingChanges = useCallback(() => {
+    if (dirtyRef.current && templateData?.template && !pendingSaveRef.current) {
+      console.log('Flushing pending changes before unmount/unload');
+      dirtyRef.current = false;
+      
+      // Use synchronous save for beforeunload - no async/await here as it may not complete
+      saveProgressMutation.mutate({
+        checklistState,
+        stepNotes,
+        substepNotes,
+        templateId: templateData.template.id
+      });
+    }
+  }, [dirtyRef, templateData, pendingSaveRef, saveProgressMutation, checklistState, stepNotes, substepNotes]);
+
+  // Handle beforeunload and unmount to persist any pending changes
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (dirtyRef.current) {
+        // Flush changes synchronously
+        flushPendingChanges();
+        
+        // Show browser confirmation dialog
+        event.preventDefault();
+        event.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        return event.returnValue;
+      }
+    };
+
+    // Add beforeunload listener
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // Cleanup function for unmount
+    return () => {
+      // Remove beforeunload listener
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      
+      // Clear timeout
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      
+      // Flush any pending changes on unmount
+      flushPendingChanges();
+    };
+  }, [flushPendingChanges]);
+
   return {
     template: templateData?.template || null,
     progress: progressData?.progress || null,
@@ -219,5 +480,6 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     isSubstepCompleted,
     getStepNotes,
     getSubstepNotes,
+    isSaving: saveProgressMutation.isPending || pendingSaveRef.current,
   };
 }
