@@ -38,6 +38,11 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef<boolean>(false);
   const dirtyRef = useRef<boolean>(false);
+  
+  // Refs to store current state for debounced save (prevents stale closures)
+  const checklistStateRef = useRef<Record<string, boolean>>({});
+  const stepNotesRef = useRef<Record<string, string>>({});
+  const substepNotesRef = useRef<Record<string, Record<string, string>>>({});
 
   // Load template based on workflow type and department, with task data for enhanced selection
   const { data: templateData, isLoading, error } = useQuery<{ template: WorkTemplate | null; error?: string; warning?: string }>({
@@ -137,6 +142,19 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     }
   }, [progressData]);
 
+  // Keep refs synchronized with current state to prevent stale closures
+  useEffect(() => {
+    checklistStateRef.current = checklistState;
+  }, [checklistState]);
+  
+  useEffect(() => {
+    stepNotesRef.current = stepNotes;
+  }, [stepNotes]);
+  
+  useEffect(() => {
+    substepNotesRef.current = substepNotes;
+  }, [substepNotes]);
+
   // Save progress mutation - Enhanced with debouncing and error handling
   const saveProgressMutation = useMutation({
     mutationFn: async (data: {
@@ -208,9 +226,9 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
           if (templateData?.template) {
             pendingSaveRef.current = true;
             saveProgressMutation.mutate({
-              checklistState,
-              stepNotes,
-              substepNotes,
+              checklistState: checklistStateRef.current,
+              stepNotes: stepNotesRef.current,
+              substepNotes: substepNotesRef.current,
               templateId: templateData.template.id
             });
           }
@@ -295,9 +313,9 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
           pendingSaveRef.current = true;
           
           saveProgressMutation.mutate({
-            checklistState,
-            stepNotes,
-            substepNotes,
+            checklistState: checklistStateRef.current,
+            stepNotes: stepNotesRef.current,
+            substepNotes: substepNotesRef.current,
             templateId: templateData.template.id
           });
         } else {
@@ -306,7 +324,7 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
         }
       }
     }, 1000);
-  }, [checklistState, stepNotes, substepNotes, templateData?.template, saveProgressMutation]);
+  }, [templateData?.template, saveProgressMutation]);
 
   // Check if this is the first checkbox being completed and task is pending
   const checkAndStartWork = useCallback((isFirstCompletion: boolean) => {
@@ -425,13 +443,13 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
       
       // Use synchronous save for beforeunload - no async/await here as it may not complete
       saveProgressMutation.mutate({
-        checklistState,
-        stepNotes,
-        substepNotes,
+        checklistState: checklistStateRef.current,
+        stepNotes: stepNotesRef.current,
+        substepNotes: substepNotesRef.current,
         templateId: templateData.template.id
       });
     }
-  }, [dirtyRef, templateData, pendingSaveRef, saveProgressMutation, checklistState, stepNotes, substepNotes]);
+  }, [dirtyRef, templateData, pendingSaveRef, saveProgressMutation]);
 
   // Handle beforeunload and unmount to persist any pending changes
   useEffect(() => {
