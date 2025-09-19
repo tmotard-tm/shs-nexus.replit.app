@@ -52,7 +52,9 @@ export default function Login() {
         // Read the next parameter from URL and redirect to intended destination
         const urlParams = new URLSearchParams(window.location.search);
         const nextUrl = urlParams.get('next');
-        setLocation(validateNextUrl(nextUrl));
+        const redirectUrl = validateNextUrl(nextUrl);
+        console.log('Login successful, redirecting to:', redirectUrl);
+        setLocation(redirectUrl);
       } else {
         toast({
           title: "Login Failed",
