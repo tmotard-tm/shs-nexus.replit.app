@@ -13,6 +13,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { QueueItem, User } from "@shared/schema";
 import { Clock, User as UserIcon, Save } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
+import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
 
 export default function DecommissionsQueuePage() {
   const [viewQueueItem, setViewQueueItem] = useState<QueueItem | null>(null);
@@ -451,10 +452,8 @@ export default function DecommissionsQueuePage() {
                 {viewQueueItem.data && (
                   <div>
                     <Label className="font-medium">Details</Label>
-                    <div className="bg-muted p-3 rounded-md mt-1">
-                      <pre className="text-xs whitespace-pre-wrap">
-                        {JSON.stringify(JSON.parse(viewQueueItem.data), null, 2)}
-                      </pre>
+                    <div className="mt-1">
+                      <QueueItemDataTemplate data={viewQueueItem.data} />
                     </div>
                   </div>
                 )}

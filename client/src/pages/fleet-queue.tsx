@@ -15,6 +15,7 @@ import { Clock, User as UserIcon, Save } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
+import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
 
 export default function FleetQueuePage() {
   const [viewQueueItem, setViewQueueItem] = useState<QueueItem | null>(null);
@@ -428,6 +429,15 @@ export default function FleetQueuePage() {
                   <Label className="font-semibold">Description</Label>
                   <p className="text-sm mt-1 p-3 bg-muted rounded">{viewQueueItem.description}</p>
                 </div>
+
+                {viewQueueItem.data && (
+                  <div>
+                    <Label className="font-medium">Additional Data</Label>
+                    <div className="mt-1">
+                      <QueueItemDataTemplate data={viewQueueItem.data} />
+                    </div>
+                  </div>
+                )}
 
                 {/* Notes Section */}
                 <NotesSection item={viewQueueItem} />

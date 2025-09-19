@@ -37,6 +37,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
+import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
 
 // Module labels for display
@@ -962,9 +963,9 @@ export default function UnifiedQueueManagement() {
                 {viewQueueItem.data && (
                   <div>
                     <Label>Additional Data</Label>
-                    <pre className="text-xs mt-1 p-3 bg-muted rounded-md overflow-x-auto">
-                      {JSON.stringify(JSON.parse(viewQueueItem.data), null, 2)}
-                    </pre>
+                    <div className="mt-1">
+                      <QueueItemDataTemplate data={viewQueueItem.data} />
+                    </div>
                   </div>
                 )}
 
