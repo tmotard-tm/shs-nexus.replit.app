@@ -38,6 +38,10 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef<boolean>(false);
   const dirtyRef = useRef<boolean>(false);
+  const queuedSaveRef = useRef<boolean>(false);
+  
+  // Track if initial progress data has been loaded to prevent race conditions
+  const initializedRef = useRef<boolean>(false);
   
   // Refs to store current state for debounced save (prevents stale closures)
   const checklistStateRef = useRef<Record<string, boolean>>({});
@@ -130,15 +134,27 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     },
   });
 
+  // Only initialize state from server data when safe to do so
+  // This prevents race conditions where server data overwrites local changes after saves
   useEffect(() => {
-    if (progressData?.checklistState) {
-      setChecklistState(progressData.checklistState);
-    }
-    if (progressData?.stepNotes) {
-      setStepNotes(progressData.stepNotes);
-    }
-    if (progressData?.substepNotes) {
-      setSubstepNotes(progressData.substepNotes);
+    // Only update local state if:
+    // 1. This is the first load (not initialized yet), OR
+    // 2. There are no saves in flight AND no pending changes AND no queued saves
+    if (progressData && (!initializedRef.current || (!pendingSaveRef.current && !dirtyRef.current && !queuedSaveRef.current))) {
+      if (progressData.checklistState) {
+        setChecklistState(progressData.checklistState);
+      }
+      if (progressData.stepNotes) {
+        setStepNotes(progressData.stepNotes);
+      }
+      if (progressData.substepNotes) {
+        setSubstepNotes(progressData.substepNotes);
+      }
+      
+      // Mark as initialized after first load
+      if (!initializedRef.current) {
+        initializedRef.current = true;
+      }
     }
   }, [progressData]);
 
@@ -154,6 +170,26 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
   useEffect(() => {
     substepNotesRef.current = substepNotes;
   }, [substepNotes]);
+
+  // Reset flags and state when task switches to prevent race conditions
+  useEffect(() => {
+    // Clear all flags and cancel timers on task switch
+    initializedRef.current = false;
+    dirtyRef.current = false;
+    pendingSaveRef.current = false;
+    queuedSaveRef.current = false;
+    
+    // Cancel any pending debounce timers
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    
+    // Reset local state to empty until progressData arrives
+    setChecklistState({});
+    setStepNotes({});
+    setSubstepNotes({});
+  }, [queueItem?.id]); // Reset when task ID changes
 
   // Save progress mutation - Enhanced with debouncing and error handling
   const saveProgressMutation = useMutation({
@@ -188,21 +224,30 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     onSuccess: (data) => {
       console.log('Progress saved successfully for task:', queueItem?.id, 'Response:', data);
       
-      // Invalidate work progress query
-      queryClient.invalidateQueries({ queryKey: [`/api/work-progress/${queueItem?.id}`] });
-      
-      // Invalidate queue queries for immediate UI update
-      const moduleToUse = module || queueItem?.department;
-      queryClient.invalidateQueries({ 
-        queryKey: ["/api/queues"],
-        exact: false
+      // Use cache update instead of invalidation to prevent refetch clobbering
+      const workProgressQueryKey = [`/api/work-progress/${queueItem?.id}`];
+      queryClient.setQueryData(workProgressQueryKey, {
+        progress: progressData?.progress,
+        checklistState: checklistStateRef.current,
+        stepNotes: stepNotesRef.current,
+        substepNotes: substepNotesRef.current
       });
-      if (moduleToUse) {
+      
+      // Still invalidate queue queries for immediate UI update, but delay it slightly
+      // to avoid race condition with the above cache update
+      setTimeout(() => {
+        const moduleToUse = module || queueItem?.department;
         queryClient.invalidateQueries({ 
-          queryKey: [`/api/${moduleToUse}-queue`],
+          queryKey: ["/api/queues"],
           exact: false
         });
-      }
+        if (moduleToUse) {
+          queryClient.invalidateQueries({ 
+            queryKey: [`/api/${moduleToUse}-queue`],
+            exact: false
+          });
+        }
+      }, 100);
     },
     onError: (error: any) => {
       console.error('Failed to save progress for task:', queueItem?.id, 'Error:', error);
@@ -216,15 +261,19 @@ export function useWorkTemplate({ queueItem, module }: UseWorkTemplateProps): Wo
     onSettled: () => {
       pendingSaveRef.current = false;
       
-      // If there are dirty changes that occurred during the save, trigger another save
+      // If there are dirty changes that occurred during the save, queue another save
       if (dirtyRef.current && templateData?.template) {
-        dirtyRef.current = false;
-        console.log('Dirty changes detected after save, triggering immediate retry');
+        console.log('Dirty changes detected after save, queueing immediate retry');
+        queuedSaveRef.current = true; // Mark that a save is queued
         
         // Trigger another save immediately for reliability
         setTimeout(() => {
-          if (templateData?.template) {
+          if (templateData?.template && queuedSaveRef.current) {
+            // Now starting the queued save - clear flags
+            dirtyRef.current = false;
+            queuedSaveRef.current = false;
             pendingSaveRef.current = true;
+            
             saveProgressMutation.mutate({
               checklistState: checklistStateRef.current,
               stepNotes: stepNotesRef.current,
