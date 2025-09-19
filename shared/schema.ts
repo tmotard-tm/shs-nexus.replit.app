@@ -148,6 +148,24 @@ export const storageSpots = pgTable("storage_spots", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const templates = pgTable("templates", {
+  id: text("id").primaryKey(), // template ID like "assets_onboard_technician_v1"
+  department: text("department").notNull(), // ASSETS, FLEET, INVENTORY, NTAO
+  workflowType: text("workflow_type").notNull(), // onboarding, offboarding, vehicle_assignment, etc.
+  version: text("version").notNull(), // version like "1.0"
+  name: text("name").notNull(), // human readable name
+  content: text("content").notNull(), // full JSON template content as string
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    // Index for faster lookups by workflow type and department
+    workflowTypeDeptIdx: index("templates_workflow_type_dept_idx").on(table.workflowType, table.department),
+    departmentIdx: index("templates_department_idx").on(table.department),
+    isActiveIdx: index("templates_is_active_idx").on(table.isActive),
+  };
+});
+
 
 // Password validation schema
 export const passwordValidationSchema = z.string()
@@ -196,6 +214,10 @@ export const insertStorageSpotSchema = createInsertSchema(storageSpots).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+});
+
+export const insertTemplateSchema = createInsertSchema(templates).omit({
+  createdAt: true,
 });
 
 // API endpoint validation schemas
@@ -345,6 +367,8 @@ export type QueueItem = typeof queueItems.$inferSelect;
 export type InsertQueueItem = z.infer<typeof insertQueueItemSchema>;
 export type StorageSpot = typeof storageSpots.$inferSelect;
 export type InsertStorageSpot = z.infer<typeof insertStorageSpotSchema>;
+export type Template = typeof templates.$inferSelect;
+export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
 
 // Combined queue item with module information for unified queue access
 export type CombinedQueueItem = QueueItem & {

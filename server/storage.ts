@@ -15,6 +15,8 @@ import {
   type InsertStorageSpot,
   type Vehicle,
   type InsertVehicle,
+  type Template,
+  type InsertTemplate,
   users,
   requests,
   apiConfigurations,
@@ -22,6 +24,7 @@ import {
   queueItems,
   storageSpots,
   vehicles,
+  templates,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -132,6 +135,14 @@ export interface IStorage {
   updateVehicle(id: string, updates: Partial<Vehicle>): Promise<Vehicle | undefined>;
   deleteVehicle(id: string): Promise<boolean>;
 
+  // Templates Module
+  getTemplateById(id: string): Promise<Template | undefined>;
+  getTemplatesByWorkflow(workflowType: string, department: string): Promise<Template[]>;
+  getTemplatesByDepartment(department: string): Promise<Template[]>;
+  resolveLatestTemplate(workflowType: string, department: string): Promise<Template | undefined>;
+  upsertTemplate(template: InsertTemplate): Promise<Template>;
+  deleteTemplate(id: string): Promise<boolean>;
+
   // Unified Queue Aggregator
   getUnifiedQueueItems(modules: QueueModule[], status?: string): Promise<CombinedQueueItem[]>;
   getUnifiedQueueStats(modules: QueueModule[]): Promise<{
@@ -160,6 +171,7 @@ export class MemStorage implements IStorage {
   private activityLogs: Map<string, ActivityLog>;
   private storageSpots: Map<string, StorageSpot>;
   private vehicles: Map<string, Vehicle>;
+  private templates: Map<string, Template>;
   
   // Separate storage for each queue module
   private ntaoQueueItems: Map<string, QueueItem>;
@@ -174,6 +186,7 @@ export class MemStorage implements IStorage {
     this.activityLogs = new Map();
     this.storageSpots = new Map();
     this.vehicles = new Map();
+    this.templates = new Map();
     
     // Initialize separate queue modules
     this.ntaoQueueItems = new Map();
@@ -2194,6 +2207,72 @@ export class MemStorage implements IStorage {
     return this.vehicles.delete(id);
   }
 
+  // Templates Module
+  async getTemplateById(id: string): Promise<Template | undefined> {
+    return this.templates.get(id);
+  }
+
+  async getTemplatesByWorkflow(workflowType: string, department: string): Promise<Template[]> {
+    const templates: Template[] = [];
+    for (const [, template] of this.templates) {
+      if (template.workflowType === workflowType && template.department === department && template.isActive) {
+        templates.push(template);
+      }
+    }
+    // Sort by semantic version (highest first)
+    return templates.sort((a, b) => this.compareVersions(b.version, a.version));
+  }
+
+  async resolveLatestTemplate(workflowType: string, department: string): Promise<Template | undefined> {
+    const templates = await this.getTemplatesByWorkflow(workflowType, department);
+    return templates.length > 0 ? templates[0] : undefined; // First is highest version
+  }
+
+  private compareVersions(a: string, b: string): number {
+    // Parse semantic versions (e.g., "1.0", "1.2.3", "2.0.1")
+    const parseVersion = (version: string): number[] => {
+      return version.split('.').map(part => parseInt(part, 10) || 0);
+    };
+    
+    const versionA = parseVersion(a);
+    const versionB = parseVersion(b);
+    
+    // Compare each version component
+    const maxLength = Math.max(versionA.length, versionB.length);
+    for (let i = 0; i < maxLength; i++) {
+      const partA = versionA[i] || 0;
+      const partB = versionB[i] || 0;
+      
+      if (partA > partB) return 1;
+      if (partA < partB) return -1;
+    }
+    
+    return 0; // Equal versions
+  }
+
+  async getTemplatesByDepartment(department: string): Promise<Template[]> {
+    const templates: Template[] = [];
+    for (const [, template] of this.templates) {
+      if (template.department === department && template.isActive) {
+        templates.push(template);
+      }
+    }
+    return templates;
+  }
+
+  async upsertTemplate(insertTemplate: InsertTemplate): Promise<Template> {
+    const template: Template = {
+      ...insertTemplate,
+      createdAt: this.templates.get(insertTemplate.id)?.createdAt || new Date(),
+    };
+    this.templates.set(insertTemplate.id, template);
+    return template;
+  }
+
+  async deleteTemplate(id: string): Promise<boolean> {
+    return this.templates.delete(id);
+  }
+
   // Duplicate Detection Functions Implementation
   async checkOffboardingTaskDuplicates(
     employeeId: string, 
@@ -2960,6 +3039,80 @@ export class DatabaseStorage implements IStorage {
 
   async deleteVehicle(id: string): Promise<boolean> {
     const result = await db.delete(vehicles).where(eq(vehicles.id, id));
+    return result.rowCount! > 0;
+  }
+
+  // Templates Module
+  async getTemplateById(id: string): Promise<Template | undefined> {
+    const result = await db.select().from(templates).where(eq(templates.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getTemplatesByWorkflow(workflowType: string, department: string): Promise<Template[]> {
+    const results = await db.select().from(templates)
+      .where(and(
+        eq(templates.workflowType, workflowType),
+        eq(templates.department, department),
+        eq(templates.isActive, true)
+      ));
+    
+    // Sort by semantic version (highest first)
+    return results.sort((a, b) => this.compareVersions(b.version, a.version));
+  }
+
+  async resolveLatestTemplate(workflowType: string, department: string): Promise<Template | undefined> {
+    const templateResults = await this.getTemplatesByWorkflow(workflowType, department);
+    return templateResults.length > 0 ? templateResults[0] : undefined; // First is highest version
+  }
+
+  private compareVersions(a: string, b: string): number {
+    // Parse semantic versions (e.g., "1.0", "1.2.3", "2.0.1")
+    const parseVersion = (version: string): number[] => {
+      return version.split('.').map(part => parseInt(part, 10) || 0);
+    };
+    
+    const versionA = parseVersion(a);
+    const versionB = parseVersion(b);
+    
+    // Compare each version component
+    const maxLength = Math.max(versionA.length, versionB.length);
+    for (let i = 0; i < maxLength; i++) {
+      const partA = versionA[i] || 0;
+      const partB = versionB[i] || 0;
+      
+      if (partA > partB) return 1;
+      if (partA < partB) return -1;
+    }
+    
+    return 0; // Equal versions
+  }
+
+  async getTemplatesByDepartment(department: string): Promise<Template[]> {
+    return await db.select().from(templates)
+      .where(and(eq(templates.department, department), eq(templates.isActive, true)))
+      .orderBy(desc(templates.createdAt));
+  }
+
+  async upsertTemplate(insertTemplate: InsertTemplate): Promise<Template> {
+    const result = await db.insert(templates)
+      .values(insertTemplate)
+      .onConflictDoUpdate({
+        target: templates.id,
+        set: {
+          department: insertTemplate.department,
+          workflowType: insertTemplate.workflowType,
+          version: insertTemplate.version,
+          name: insertTemplate.name,
+          content: insertTemplate.content,
+          isActive: insertTemplate.isActive
+        }
+      })
+      .returning();
+    return result[0];
+  }
+
+  async deleteTemplate(id: string): Promise<boolean> {
+    const result = await db.delete(templates).where(eq(templates.id, id));
     return result.rowCount! > 0;
   }
 
