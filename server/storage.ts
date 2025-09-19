@@ -850,7 +850,7 @@ export class MemStorage implements IStorage {
   async deleteUser(id: string): Promise<boolean> {
     try {
       const result = await db.delete(users).where(eq(users.id, id));
-      return result.rowCount > 0;
+      return (result.rowCount ?? 0) > 0;
     } catch (error) {
       console.error('Error deleting user:', error);
       throw error;
@@ -2265,7 +2265,7 @@ export class MemStorage implements IStorage {
 
   async getTemplatesByWorkflow(workflowType: string, department: string): Promise<Template[]> {
     const templates: Template[] = [];
-    for (const [, template] of this.templates) {
+    for (const template of Array.from(this.templates.values())) {
       if (template.workflowType === workflowType && template.department === department && template.isActive) {
         templates.push(template);
       }
@@ -2303,7 +2303,7 @@ export class MemStorage implements IStorage {
 
   async getTemplatesByDepartment(department: string): Promise<Template[]> {
     const templates: Template[] = [];
-    for (const [, template] of this.templates) {
+    for (const template of Array.from(this.templates.values())) {
       if (template.department === department && template.isActive) {
         templates.push(template);
       }
@@ -2314,6 +2314,7 @@ export class MemStorage implements IStorage {
   async upsertTemplate(insertTemplate: InsertTemplate): Promise<Template> {
     const template: Template = {
       ...insertTemplate,
+      isActive: insertTemplate.isActive ?? true,
       createdAt: this.templates.get(insertTemplate.id)?.createdAt || new Date(),
     };
     this.templates.set(insertTemplate.id, template);
@@ -2345,9 +2346,9 @@ export class MemStorage implements IStorage {
                 itemData = JSON.parse(itemData);
               }
               
-              if (itemData?.workflowType === 'offboarding_sequence') {
-                const itemEmployeeId = itemData?.employee?.employeeId || itemData?.employeeId;
-                const itemTechRacfId = itemData?.employee?.racfId || itemData?.techRacfId || itemData?.employee?.enterpriseId;
+              if (itemData && typeof itemData === 'object' && (itemData as any).workflowType === 'offboarding_sequence') {
+                const itemEmployeeId = (itemData as any)?.employee?.employeeId || (itemData as any)?.employeeId;
+                const itemTechRacfId = (itemData as any)?.employee?.racfId || (itemData as any)?.techRacfId || (itemData as any)?.employee?.enterpriseId;
                 
                 const employeeIdMatch = employeeId && itemEmployeeId && employeeId === itemEmployeeId;
                 const techRacfIdMatch = techRacfId && itemTechRacfId && techRacfId === itemTechRacfId;
@@ -2407,15 +2408,15 @@ export class MemStorage implements IStorage {
                 }
               }
               
-              if (!isByovWorkflow) {
-                isByovWorkflow = itemData?.workflowId?.startsWith('byov-') ||
+              if (!isByovWorkflow && itemData && typeof itemData === 'object') {
+                isByovWorkflow = (itemData as any)?.workflowId?.startsWith('byov-') ||
                   ['van_assignment', 'van_unassignment', 'system_updates', 'stop_shipment', 'setup_shipment'].includes(item.workflowType);
               }
               
-              if (isByovWorkflow && itemData?.techInfo) {
-                const itemLdap = itemData.techInfo.ldap;
-                const itemEmail = itemData.techInfo.email;
-                const itemTruckNumber = itemData.techInfo.currentTruckNumber;
+              if (isByovWorkflow && itemData && typeof itemData === 'object' && (itemData as any)?.techInfo) {
+                const itemLdap = (itemData as any).techInfo.ldap;
+                const itemEmail = (itemData as any).techInfo.email;
+                const itemTruckNumber = (itemData as any).techInfo.currentTruckNumber;
                 
                 const ldapMatch = ldap && itemLdap && ldap.toLowerCase() === itemLdap.toLowerCase();
                 const emailMatch = email && itemEmail && email.toLowerCase() === itemEmail.toLowerCase();
@@ -3213,13 +3214,15 @@ export class DatabaseStorage implements IStorage {
 
     const departments = modules.map(m => departmentMap[m]);
     
-    let query = db.select().from(queueItems).where(inArray(queueItems.department, departments));
+    let whereCondition = inArray(queueItems.department, departments);
     
     if (status) {
-      query = query.where(and(inArray(queueItems.department, departments), eq(queueItems.status, status)));
+      whereCondition = and(inArray(queueItems.department, departments), eq(queueItems.status, status)) ?? whereCondition;
     }
     
-    const items = await query.orderBy(desc(queueItems.createdAt));
+    const items = await db.select().from(queueItems)
+      .where(whereCondition)
+      .orderBy(desc(queueItems.createdAt));
     
     return items.map(item => ({
       ...item,
@@ -3357,14 +3360,13 @@ export class DatabaseStorage implements IStorage {
   async checkOffboardingTaskDuplicates(employeeId: string, techRacfId: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }> {
     const cutoffTime = timeWindowMs ? new Date(Date.now() - timeWindowMs) : null;
     
-    let query = db.select().from(queueItems)
-      .where(eq(queueItems.workflowType, 'offboarding'));
+    let whereCondition = eq(queueItems.workflowType, 'offboarding');
     
     if (cutoffTime) {
-      query = query.where(and(eq(queueItems.workflowType, 'offboarding'), sql`${queueItems.createdAt} >= ${cutoffTime}`));
+      whereCondition = and(eq(queueItems.workflowType, 'offboarding'), sql`${queueItems.createdAt} >= ${cutoffTime}`) ?? whereCondition;
     }
     
-    const items = await query;
+    const items = await db.select().from(queueItems).where(whereCondition);
     
     for (const item of items) {
       try {
@@ -3373,8 +3375,8 @@ export class DatabaseStorage implements IStorage {
           itemData = JSON.parse(itemData);
         }
         
-        if (itemData && itemData.employee && 
-           (itemData.employee.employeeId === employeeId || itemData.employee.techRacfId === techRacfId)) {
+        if (itemData && typeof itemData === 'object' && (itemData as any).employee && 
+           ((itemData as any).employee.employeeId === employeeId || (itemData as any).employee.techRacfId === techRacfId)) {
           return {
             isDuplicate: true,
             message: `Duplicate offboarding task found for employee ${employeeId}/${techRacfId}`,
@@ -3393,14 +3395,13 @@ export class DatabaseStorage implements IStorage {
   async checkByovEnrollmentDuplicates(ldap: string, email: string, currentTruckNumber: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }> {
     const cutoffTime = timeWindowMs ? new Date(Date.now() - timeWindowMs) : null;
     
-    let query = db.select().from(queueItems)
-      .where(eq(queueItems.workflowId, 'byov_enrollment'));
+    let whereCondition = eq(queueItems.workflowId, 'byov_enrollment');
     
     if (cutoffTime) {
-      query = query.where(sql`${queueItems.createdAt} >= ${cutoffTime}`);
+      whereCondition = and(eq(queueItems.workflowId, 'byov_enrollment'), sql`${queueItems.createdAt} >= ${cutoffTime}`) ?? whereCondition;
     }
     
-    const items = await query;
+    const items = await db.select().from(queueItems).where(whereCondition);
     
     for (const item of items) {
       try {
@@ -3409,10 +3410,10 @@ export class DatabaseStorage implements IStorage {
           itemData = JSON.parse(itemData);
         }
         
-        if (itemData && itemData.techInfo && 
-           (itemData.techInfo.ldap === ldap || 
-            itemData.techInfo.email === email || 
-            itemData.techInfo.currentTruckNumber === currentTruckNumber)) {
+        if (itemData && typeof itemData === 'object' && (itemData as any).techInfo && 
+           ((itemData as any).techInfo.ldap === ldap || 
+            (itemData as any).techInfo.email === email || 
+            (itemData as any).techInfo.currentTruckNumber === currentTruckNumber)) {
           return {
             isDuplicate: true,
             message: `Duplicate BYOV enrollment found for ${ldap}/${email}/${currentTruckNumber}`,
