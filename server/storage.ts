@@ -207,6 +207,12 @@ export class MemStorage implements IStorage {
 
 
   private async initializeDefaultData() {
+    // Only create demo users in development environment for security
+    if (process.env.NODE_ENV === 'production') {
+      console.log('Production environment detected - skipping demo user creation for security');
+      return;
+    }
+    
     // Create Enterprise ID users with new role system
     const enterpriseUsers: User[] = [
       // EMERGENCY LOGIN - Use this account if other users can't login due to password requirements
@@ -2519,12 +2525,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    // Case-insensitive lookup to handle usernames like 'SWONG05' vs 'swong05'
+    const normalizedInput = username.toLowerCase();
+    const result = await db.select().from(users).where(
+      sql`LOWER(${users.username}) = ${normalizedInput} OR LOWER(${users.email}) = ${normalizedInput}`
+    ).limit(1);
     return result[0];
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    // Case-insensitive lookup for email addresses
+    const normalizedEmail = email.toLowerCase();
+    const result = await db.select().from(users).where(
+      sql`LOWER(${users.email}) = ${normalizedEmail}`
+    ).limit(1);
     return result[0];
   }
 

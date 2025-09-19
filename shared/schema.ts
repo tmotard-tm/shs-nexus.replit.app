@@ -15,6 +15,12 @@ export const users = pgTable("users", {
   department: text("department"), // NTAO — National Truck Assortment, Assets Management, Inventory Control, Fleet Management
   departmentAccess: text("department_access").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'] where NTAO = National Truck Assortment
   createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    // Case-insensitive unique constraints to prevent duplicates that differ only by case
+    usernameIdx: index("users_username_lower_idx").on(sql`LOWER(${table.username})`),
+    emailIdx: index("users_email_lower_idx").on(sql`LOWER(${table.email})`),
+  };
 });
 
 export const requests = pgTable("requests", {
