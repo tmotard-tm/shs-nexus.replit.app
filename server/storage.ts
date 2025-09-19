@@ -138,10 +138,13 @@ export interface IStorage {
 
   // Templates Module
   getTemplateById(id: string): Promise<Template | undefined>;
+  getAllTemplates(): Promise<Template[]>;
   getTemplatesByWorkflow(workflowType: string, department: string): Promise<Template[]>;
   getTemplatesByDepartment(department: string): Promise<Template[]>;
   resolveLatestTemplate(workflowType: string, department: string): Promise<Template | undefined>;
   upsertTemplate(template: InsertTemplate): Promise<Template>;
+  updateTemplate(id: string, updates: Partial<Template>): Promise<Template | undefined>;
+  toggleTemplateStatus(id: string): Promise<Template | undefined>;
   deleteTemplate(id: string): Promise<boolean>;
 
   // Unified Queue Aggregator
@@ -2263,6 +2266,10 @@ export class MemStorage implements IStorage {
     return this.templates.get(id);
   }
 
+  async getAllTemplates(): Promise<Template[]> {
+    return Array.from(this.templates.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
   async getTemplatesByWorkflow(workflowType: string, department: string): Promise<Template[]> {
     const templates: Template[] = [];
     for (const template of Array.from(this.templates.values())) {
@@ -2319,6 +2326,34 @@ export class MemStorage implements IStorage {
     };
     this.templates.set(insertTemplate.id, template);
     return template;
+  }
+
+  async updateTemplate(id: string, updates: Partial<Template>): Promise<Template | undefined> {
+    const existing = this.templates.get(id);
+    if (!existing) return undefined;
+    
+    // Whitelist only updateable fields to prevent mutation of immutable fields (id, createdAt)
+    const allowedFields = ['name', 'department', 'workflowType', 'version', 'content', 'isActive'] as const;
+    const safeUpdates: Partial<Template> = {};
+    
+    for (const field of allowedFields) {
+      if (field in updates) {
+        (safeUpdates as any)[field] = updates[field];
+      }
+    }
+    
+    const updated: Template = { ...existing, ...safeUpdates };
+    this.templates.set(id, updated);
+    return updated;
+  }
+
+  async toggleTemplateStatus(id: string): Promise<Template | undefined> {
+    const existing = this.templates.get(id);
+    if (!existing) return undefined;
+    
+    const updated: Template = { ...existing, isActive: !existing.isActive };
+    this.templates.set(id, updated);
+    return updated;
   }
 
   async deleteTemplate(id: string): Promise<boolean> {
@@ -3174,6 +3209,10 @@ export class DatabaseStorage implements IStorage {
     return 0; // Equal versions
   }
 
+  async getAllTemplates(): Promise<Template[]> {
+    return await db.select().from(templates).orderBy(desc(templates.createdAt));
+  }
+
   async getTemplatesByDepartment(department: string): Promise<Template[]> {
     return await db.select().from(templates)
       .where(and(eq(templates.department, department), eq(templates.isActive, true)))
@@ -3194,6 +3233,40 @@ export class DatabaseStorage implements IStorage {
           isActive: insertTemplate.isActive
         }
       })
+      .returning();
+    return result[0];
+  }
+
+  async updateTemplate(id: string, updates: Partial<Template>): Promise<Template | undefined> {
+    // Whitelist only updateable fields to prevent mutation of immutable fields (id, createdAt)
+    const allowedFields = ['name', 'department', 'workflowType', 'version', 'content', 'isActive'] as const;
+    const safeUpdates: Partial<Template> = {};
+    
+    for (const field of allowedFields) {
+      if (field in updates) {
+        (safeUpdates as any)[field] = updates[field];
+      }
+    }
+    
+    // Only proceed if there are valid fields to update
+    if (Object.keys(safeUpdates).length === 0) {
+      return undefined;
+    }
+    
+    const result = await db.update(templates)
+      .set(safeUpdates)
+      .where(eq(templates.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async toggleTemplateStatus(id: string): Promise<Template | undefined> {
+    const template = await this.getTemplateById(id);
+    if (!template) return undefined;
+    
+    const result = await db.update(templates)
+      .set({ isActive: !template.isActive })
+      .where(eq(templates.id, id))
       .returning();
     return result[0];
   }

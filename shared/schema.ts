@@ -237,6 +237,7 @@ export const insertStorageSpotSchema = createInsertSchema(storageSpots).omit({
 });
 
 export const insertTemplateSchema = createInsertSchema(templates).omit({
+  id: true,
   createdAt: true,
 });
 

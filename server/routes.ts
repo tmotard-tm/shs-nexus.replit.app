@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import crypto from 'crypto';
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema } from "@shared/schema";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
@@ -4603,6 +4603,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error generating Excel export:', error);
       res.status(500).json({ message: "Failed to generate Excel export" });
+    }
+  });
+
+  // Template management API routes
+  console.log("Registering template management routes...");
+  
+  // GET /api/templates - fetch all templates
+  app.get("/api/templates", requireAuth, async (req: any, res) => {
+    try {
+      // Check if user is superadmin
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      }
+
+      const templates = await storage.getAllTemplates();
+      res.json(templates);
+    } catch (error) {
+      console.error("Error fetching templates:", error);
+      res.status(500).json({ message: "Failed to fetch templates" });
+    }
+  });
+
+  // POST /api/templates - create new template
+  app.post("/api/templates", requireAuth, async (req: any, res) => {
+    try {
+      // Check if user is superadmin
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      }
+
+      const templateData = insertTemplateSchema.parse(req.body);
+      
+      // Generate server-side ID using consistent pattern: department_workflowType_version
+      const generatedId = `${templateData.department.toLowerCase()}_${templateData.workflowType}_v${templateData.version.replace(/[^a-zA-Z0-9]/g, '')}`;
+      
+      // Check if generated template ID already exists
+      const existingTemplate = await storage.getTemplateById(generatedId);
+      if (existingTemplate) {
+        return res.status(400).json({ message: `Template ID '${generatedId}' already exists. Try a different version or workflow type.` });
+      }
+
+      const template = await storage.upsertTemplate({
+        ...templateData,
+        id: generatedId
+      });
+      
+      // Log activity
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "template_created",
+        entityType: "template",
+        entityId: template.id,
+        details: `Template ${template.name} created`,
+      });
+
+      res.status(201).json(template);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid template data", errors: error.errors });
+      }
+      console.error("Error creating template:", error);
+      res.status(500).json({ message: "Failed to create template" });
+    }
+  });
+
+  // PATCH /api/templates/:id - update template
+  app.patch("/api/templates/:id", requireAuth, async (req: any, res) => {
+    try {
+      // Check if user is superadmin
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      }
+
+      const { id } = req.params;
+      
+      // Create strict partial schema that only allows whitelisted updateable fields
+      // Omit immutable fields (id, createdAt) and reject unknown keys
+      const updateTemplateSchema = insertTemplateSchema
+        .omit({ id: true })  // id is already omitted in insertTemplateSchema creation
+        .partial()
+        .strict(); // Reject unknown keys
+      
+      const updates = updateTemplateSchema.parse(req.body);
+      
+      const template = await storage.updateTemplate(id, updates);
+      if (!template) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "template_updated",
+        entityType: "template", 
+        entityId: template.id,
+        details: `Template ${template.name} updated`,
+      });
+
+      res.json(template);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid template data", errors: error.errors });
+      }
+      console.error("Error updating template:", error);
+      res.status(500).json({ message: "Failed to update template" });
+    }
+  });
+
+  // DELETE /api/templates/:id - delete template
+  app.delete("/api/templates/:id", requireAuth, async (req: any, res) => {
+    try {
+      // Check if user is superadmin
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      }
+
+      const { id } = req.params;
+      
+      // Get template info for logging before deletion
+      const template = await storage.getTemplateById(id);
+      if (!template) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+
+      const deleted = await storage.deleteTemplate(id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "template_deleted",
+        entityType: "template",
+        entityId: id,
+        details: `Template ${template.name} deleted`,
+      });
+
+      res.json({ message: "Template deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting template:", error);
+      res.status(500).json({ message: "Failed to delete template" });
+    }
+  });
+
+  // PATCH /api/templates/:id/toggle-status - toggle template active status
+  app.patch("/api/templates/:id/toggle-status", requireAuth, async (req: any, res) => {
+    try {
+      // Check if user is superadmin
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      }
+
+      const { id } = req.params;
+      
+      const template = await storage.toggleTemplateStatus(id);
+      if (!template) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "template_status_toggled",
+        entityType: "template",
+        entityId: template.id,
+        details: `Template ${template.name} status changed to ${template.isActive ? 'active' : 'inactive'}`,
+      });
+
+      res.json(template);
+    } catch (error) {
+      console.error("Error toggling template status:", error);
+      res.status(500).json({ message: "Failed to toggle template status" });
     }
   });
 

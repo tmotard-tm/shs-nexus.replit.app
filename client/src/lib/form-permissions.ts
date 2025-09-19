@@ -8,6 +8,7 @@ export const FORM_ACCESS_MAP = {
   'offboarding': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao'], // Employee offboarding requires admin or department privileges
   'byov-enrollment': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao', 'field'], // BYOV enrollment can be done by department staff and field workers
   'user-management': ['superadmin'], // User management restricted to superadmin only
+  'template-management': ['superadmin'], // Template management restricted to superadmin only
 } as const;
 
 export type FormKey = keyof typeof FORM_ACCESS_MAP;
@@ -44,6 +45,7 @@ export const FORM_DISPLAY_NAMES: Record<FormKey, string> = {
   'offboarding': 'Employee Offboarding',
   'byov-enrollment': 'BYOV Enrollment',
   'user-management': 'User Management',
+  'template-management': 'Template Management',
 };
 
 // Get forms accessible by a user's role

@@ -29,6 +29,7 @@ import InventoryQueuePage from "@/pages/inventory-queue";
 import FleetQueuePage from "@/pages/fleet-queue";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
+import TemplateManagement from "@/pages/template-management";
 import ChangePassword from "@/pages/change-password";
 import AnalyticsBoard from "@/pages/analytics-board";
 import OperationsDashboard from "@/pages/operations-dashboard";
@@ -290,6 +291,14 @@ function Router() {
         <PermissionProtectedRoute formKey="user-management" redirectOnDenied={true}>
           <MainContent>
             <UserManagement />
+          </MainContent>
+        </PermissionProtectedRoute>
+      </Route>
+      
+      <Route path="/templates">
+        <PermissionProtectedRoute formKey="template-management" redirectOnDenied={true}>
+          <MainContent>
+            <TemplateManagement />
           </MainContent>
         </PermissionProtectedRoute>
       </Route>

@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp, Key } from "lucide-react";
+import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp, Key, FileCode } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
@@ -32,6 +32,7 @@ export function Sidebar() {
       apiManagement: { name: "API Management", href: "/api-management", icon: Settings },
       snowflake: { name: "Snowflake Config", href: "/snowflake", icon: Database },
       userManagement: { name: "User Management", href: "/users", icon: Users },
+      templateManagement: { name: "Template Management", href: "/templates", icon: FileCode },
       activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity },
       changePassword: { name: "Change Password", href: "/change-password", icon: Key },
     };
@@ -64,6 +65,7 @@ export function Sidebar() {
           baseItems.apiManagement,
           baseItems.snowflake,
           baseItems.userManagement,
+          baseItems.templateManagement,
           baseItems.activityLogs,
           baseItems.changePassword,
         ];
