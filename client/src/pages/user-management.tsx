@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Edit, Trash2, Shield, Users, UserCheck, Key, Settings } from "lucide-react";
+import { Plus, Edit, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createInsertSchema } from "drizzle-zod";
@@ -36,6 +36,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useLocation } from "wouter";
 
 // Form validation schema
 const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
@@ -58,6 +59,11 @@ export default function UserManagement() {
   const [departmentFilter, setDepartmentFilter] = useState<string>("all");
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
+
+  const handleBackClick = () => {
+    setLocation("/");
+  };
 
   // Fetch users
   const { data: allUsers = [], isLoading } = useQuery<User[]>({
@@ -308,9 +314,19 @@ export default function UserManagement() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">User Management</h1>
-          <p className="text-muted-foreground">Manage system users and their permissions</p>
+        <div className="flex items-center space-x-4">
+          <Button
+            variant="ghost"
+            onClick={handleBackClick}
+            data-testid="button-back"
+            className="p-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">User Management</h1>
+            <p className="text-muted-foreground">Manage system users and their permissions</p>
+          </div>
         </div>
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
           <DialogTrigger asChild>
