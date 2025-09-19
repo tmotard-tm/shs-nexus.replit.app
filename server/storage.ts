@@ -17,6 +17,8 @@ import {
   type InsertVehicle,
   type Template,
   type InsertTemplate,
+  type Session,
+  type InsertSession,
   users,
   requests,
   apiConfigurations,
@@ -25,6 +27,7 @@ import {
   storageSpots,
   vehicles,
   templates,
+  sessions,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -162,6 +165,13 @@ export interface IStorage {
   checkByovEnrollmentDuplicates(ldap: string, email: string, currentTruckNumber: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }>;
   getRecentQueueItemsByTimeWindow(modules: QueueModule[], timeWindowMs: number): Promise<{ module: QueueModule; items: QueueItem[] }[]>;
   findQueueItemsByDataMatch(modules: QueueModule[], searchFunction: (data: any) => boolean): Promise<{ module: QueueModule; items: QueueItem[] }[]>;
+
+  // Sessions Module
+  createSession(session: InsertSession): Promise<Session>;
+  getSession(sessionId: string): Promise<Session | undefined>;
+  deleteSession(sessionId: string): Promise<boolean>;
+  updateSession(sessionId: string, updates: Partial<Session>): Promise<Session | undefined>;
+  cleanExpiredSessions(): Promise<number>; // Returns number of sessions cleaned
 }
 
 export class MemStorage implements IStorage {
@@ -172,6 +182,7 @@ export class MemStorage implements IStorage {
   private storageSpots: Map<string, StorageSpot>;
   private vehicles: Map<string, Vehicle>;
   private templates: Map<string, Template>;
+  private sessions: Map<string, Session>;
   
   // Separate storage for each queue module
   private ntaoQueueItems: Map<string, QueueItem>;
@@ -187,6 +198,7 @@ export class MemStorage implements IStorage {
     this.storageSpots = new Map();
     this.vehicles = new Map();
     this.templates = new Map();
+    this.sessions = new Map();
     
     // Initialize separate queue modules
     this.ntaoQueueItems = new Map();
@@ -937,6 +949,49 @@ export class MemStorage implements IStorage {
 
   async deleteApiConfiguration(id: string): Promise<boolean> {
     return this.apiConfigurations.delete(id);
+  }
+
+  // Sessions Module
+  async createSession(insertSession: InsertSession): Promise<Session> {
+    const session: Session = {
+      ...insertSession,
+      createdAt: new Date(),
+    };
+    this.sessions.set(session.id, session);
+    return session;
+  }
+
+  async getSession(sessionId: string): Promise<Session | undefined> {
+    return this.sessions.get(sessionId);
+  }
+
+  async deleteSession(sessionId: string): Promise<boolean> {
+    return this.sessions.delete(sessionId);
+  }
+
+  async updateSession(sessionId: string, updates: Partial<Session>): Promise<Session | undefined> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+    
+    const updatedSession = { ...session, ...updates };
+    this.sessions.set(sessionId, updatedSession);
+    return updatedSession;
+  }
+
+  async cleanExpiredSessions(): Promise<number> {
+    const now = new Date();
+    let cleanedCount = 0;
+    
+    // Convert to array to avoid iteration issues
+    const sessionEntries = Array.from(this.sessions.entries());
+    for (const [sessionId, session] of sessionEntries) {
+      if (session.expiresAt <= now) {
+        this.sessions.delete(sessionId);
+        cleanedCount++;
+      }
+    }
+    
+    return cleanedCount;
   }
 
   // Activity Logs
@@ -2500,6 +2555,33 @@ export class DatabaseStorage implements IStorage {
   async deleteUser(id: string): Promise<boolean> {
     const result = await db.delete(users).where(eq(users.id, id));
     return result.rowCount! > 0;
+  }
+
+  // Sessions Module
+  async createSession(session: InsertSession): Promise<Session> {
+    const result = await db.insert(sessions).values(session).returning();
+    return result[0];
+  }
+
+  async getSession(sessionId: string): Promise<Session | undefined> {
+    const result = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    return result[0];
+  }
+
+  async deleteSession(sessionId: string): Promise<boolean> {
+    const result = await db.delete(sessions).where(eq(sessions.id, sessionId));
+    return result.rowCount! > 0;
+  }
+
+  async updateSession(sessionId: string, updates: Partial<Session>): Promise<Session | undefined> {
+    const result = await db.update(sessions).set(updates).where(eq(sessions.id, sessionId)).returning();
+    return result[0];
+  }
+
+  async cleanExpiredSessions(): Promise<number> {
+    const now = new Date();
+    const result = await db.delete(sessions).where(sql`${sessions.expiresAt} <= ${now}`);
+    return result.rowCount!;
   }
 
   // Requests
