@@ -414,7 +414,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Auth routes
   console.log("Registering auth routes...");
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
+    console.log('ROUTE HIT: /api/auth/login');
     try {
       console.log('=== LOGIN ATTEMPT ===');
       console.log('Request body:', req.body);
