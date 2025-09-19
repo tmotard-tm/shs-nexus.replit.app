@@ -1,6 +1,5 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { existsSync, readFileSync, writeFileSync } from 'fs';
 import crypto from 'crypto';
 import { storage } from "./storage";
 import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema } from "@shared/schema";
@@ -19,45 +18,16 @@ import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 
-// Persistent session store (survives server restarts)
-const SESSIONS_FILE = './sessions.json';
-const sessions = new Map<string, { userId: string; username: string; expiresAt: Date }>();
-
-// Load sessions from file on startup
-
+// Initialize session cleanup on startup
 try {
-  if (existsSync(SESSIONS_FILE)) {
-    const savedSessions = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
-    const now = new Date();
-    for (const [sessionId, sessionData] of Object.entries(savedSessions)) {
-      const session = sessionData as any;
-      // Only restore sessions that haven't expired
-      if (new Date(session.expiresAt) > now) {
-        sessions.set(sessionId, {
-          userId: session.userId,
-          username: session.username,
-          expiresAt: new Date(session.expiresAt)
-        });
-      }
-    }
-    console.log(`Restored ${sessions.size} valid sessions from storage`);
-  }
+  storage.cleanExpiredSessions().then(cleanedCount => {
+    console.log(`Cleaned up ${cleanedCount} expired sessions from database`);
+  }).catch(error => {
+    console.warn('Failed to clean expired sessions on startup:', error);
+  });
 } catch (error) {
-  console.warn('Failed to load sessions from storage:', error);
+  console.warn('Failed to initialize session cleanup:', error);
 }
-
-// Save sessions to file
-function saveSessions() {
-  try {
-    const sessionsObj = Object.fromEntries(sessions);
-    writeFileSync(SESSIONS_FILE, JSON.stringify(sessionsObj, null, 2));
-  } catch (error) {
-    console.warn('Failed to save sessions:', error);
-  }
-}
-
-// Auto-save sessions every 30 seconds
-setInterval(saveSessions, 30000);
 
 // Human verification session store
 const humanVerificationSessions = new Map<string, { verified: boolean; expiresAt: Date; originalUrl: string }>();
@@ -403,7 +373,7 @@ function getAccessibleQueueModules(user: any): QueueModule[] {
 }
 
 // Authentication middleware
-function requireAuth(req: any, res: any, next: any): any {
+async function requireAuth(req: any, res: any, next: any): Promise<any> {
   const cookieHeader = req.headers.cookie;
   const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
   
@@ -411,16 +381,23 @@ function requireAuth(req: any, res: any, next: any): any {
     return res.status(401).json({ message: "Authentication required" });
   }
   
-  const session = sessions.get(sessionId);
-  
-  if (!session || session.expiresAt < new Date()) {
-    sessions.delete(sessionId);
-    return res.status(401).json({ message: "Session expired" });
+  try {
+    const session = await storage.getSession(sessionId);
+    
+    if (!session || session.expiresAt < new Date()) {
+      if (session) {
+        await storage.deleteSession(sessionId);
+      }
+      return res.status(401).json({ message: "Session expired" });
+    }
+    
+    req.user = { id: session.userId, username: session.username };
+    
+    return next();
+  } catch (error) {
+    console.error('Session validation error:', error);
+    return res.status(401).json({ message: "Authentication failed" });
   }
-  
-  req.user = { id: session.userId, username: session.username };
-  
-  return next();
 }
 
 // Configure multer for file uploads
@@ -456,14 +433,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sessionId = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
       
-      sessions.set(sessionId, {
+      await storage.createSession({
+        id: sessionId,
         userId: user.id,
         username: user.username,
         expiresAt
       });
-      
-      // Save sessions immediately after creating new one
-      saveSessions();
 
       // Set httpOnly cookie with secure settings
       res.cookie('sessionId', sessionId, {
