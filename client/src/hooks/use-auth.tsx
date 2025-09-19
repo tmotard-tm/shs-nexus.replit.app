@@ -56,10 +56,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (enterpriseId: string, password: string): Promise<boolean> => {
     try {
-      console.log('=== CLIENT LOGIN ATTEMPT ===');
-      console.log('Enterprise ID:', enterpriseId);
-      console.log('Password length:', password.length);
-      
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -67,18 +63,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         credentials: "include", // Include cookies in the request
       });
 
-      console.log('Response status:', response.status);
-      console.log('Response ok:', response.ok);
-
       if (response.ok) {
         const data = await response.json();
-        console.log('Login successful, user:', data.user);
         setUser(data.user);
         localStorage.setItem("user", JSON.stringify(data.user));
+        
+        // Brief delay to ensure session consistency
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         return true;
       } else {
-        const errorText = await response.text();
-        console.log('Login failed with response:', errorText);
         return false;
       }
     } catch (error) {

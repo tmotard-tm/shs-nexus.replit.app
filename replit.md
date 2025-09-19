@@ -2,6 +2,8 @@
 
 This is a full-stack admin platform built with React, TypeScript, and Express.js that manages access requests and API configurations. The application provides role-based interfaces for different user types (admin, requester, approver) to handle various types of requests including API access, Snowflake queries, system configurations, and user permissions. The platform features a modern UI built with shadcn/ui components and Tailwind CSS, with comprehensive request tracking and activity logging capabilities.
 
+**Migration Status**: Successfully migrated from JSON file-based authentication to PostgreSQL database authentication (September 2025). All user credentials, session management, and authentication flows now use the database backend.
+
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
