@@ -174,6 +174,21 @@ export function TemplateEditor({
   const [parseError, setParseError] = useState<string | null>(null);
   const [originalContent, setOriginalContent] = useState<any>(null); // Store original content for data preservation
 
+  // Set originalContent when initialData changes
+  useEffect(() => {
+    if (initialData?.content) {
+      let content = initialData.content;
+      if (typeof content === "string") {
+        try {
+          content = JSON.parse(content);
+        } catch (error) {
+          console.error("Failed to parse initial content:", error);
+        }
+      }
+      setOriginalContent(content);
+    }
+  }, [initialData]);
+
   // Parse initial data into form format with data preservation
   const parseTemplateData = (data: any): TemplateEditorFormData => {
     try {
@@ -182,9 +197,6 @@ export function TemplateEditor({
       if (typeof content === "string") {
         content = JSON.parse(content);
       }
-      
-      // Store original content for data preservation
-      setOriginalContent(content);
 
       return {
         // Basic template fields
