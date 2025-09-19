@@ -166,6 +166,20 @@ export const templates = pgTable("templates", {
   };
 });
 
+export const sessions = pgTable("sessions", {
+  id: varchar("id").primaryKey(), // session ID (random hex string)
+  userId: varchar("user_id").notNull(),
+  username: text("username").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    // Index for cleanup of expired sessions
+    expiresAtIdx: index("sessions_expires_at_idx").on(table.expiresAt),
+    userIdIdx: index("sessions_user_id_idx").on(table.userId),
+  };
+});
+
 
 // Password validation schema
 export const passwordValidationSchema = z.string()
@@ -217,6 +231,10 @@ export const insertStorageSpotSchema = createInsertSchema(storageSpots).omit({
 });
 
 export const insertTemplateSchema = createInsertSchema(templates).omit({
+  createdAt: true,
+});
+
+export const insertSessionSchema = createInsertSchema(sessions).omit({
   createdAt: true,
 });
 
@@ -369,6 +387,8 @@ export type StorageSpot = typeof storageSpots.$inferSelect;
 export type InsertStorageSpot = z.infer<typeof insertStorageSpotSchema>;
 export type Template = typeof templates.$inferSelect;
 export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
+export type Session = typeof sessions.$inferSelect;
+export type InsertSession = z.infer<typeof insertSessionSchema>;
 
 // Combined queue item with module information for unified queue access
 export type CombinedQueueItem = QueueItem & {
