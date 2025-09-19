@@ -252,7 +252,24 @@ export function checkQueueModuleAccess(user: User | null, module: string): boole
 }
 
 // Get user-friendly role display name
-export function getRoleDisplayName(role: string): string {
+export function getRoleDisplayName(role: string, user?: User): string {
+  // For agent users, show their department instead of generic "Agent"
+  if (role === 'agent' && user?.departmentAccess?.length) {
+    const primaryDept = user.departmentAccess[0];
+    switch (primaryDept.toLowerCase()) {
+      case 'assets':
+        return 'Assets Management';
+      case 'fleet':
+        return 'Fleet Management';
+      case 'inventory':
+        return 'Inventory Control';
+      case 'ntao':
+        return 'NTAO';
+      default:
+        return `${primaryDept} Agent`;
+    }
+  }
+  
   switch (role) {
     case 'assets':
       return 'Assets Management';
@@ -274,6 +291,57 @@ export function getRoleDisplayName(role: string): string {
       return 'Requester';
     default:
       return role.charAt(0).toUpperCase() + role.slice(1);
+  }
+}
+
+// Get appropriate landing page for user based on role and department access
+export function getUserLandingPage(user: User | null): string {
+  if (!user) {
+    return '/login';
+  }
+
+  const userRole = user.role as UserRole;
+
+  // Superadmin gets the assistance selection (admin interface)
+  if (userRole === 'superadmin') {
+    return '/';
+  }
+
+  // For agent users, redirect to their primary department queue
+  if (userRole === 'agent' && user.departmentAccess?.length) {
+    const primaryDept = user.departmentAccess[0].toLowerCase();
+    switch (primaryDept) {
+      case 'assets':
+        return '/assets-queue';
+      case 'fleet':
+        return '/fleet-queue';
+      case 'inventory':
+        return '/inventory-queue';
+      case 'ntao':
+        return '/ntao-queue';
+      default:
+        return '/'; // Fallback to assistance selection
+    }
+  }
+
+  // For direct role assignments
+  switch (userRole) {
+    case 'assets':
+      return '/assets-queue';
+    case 'fleet':
+      return '/fleet-queue';
+    case 'inventory':
+      return '/inventory-queue';
+    case 'ntao':
+      return '/ntao-queue';
+    case 'approver':
+      return '/approver';
+    case 'requester':
+      return '/requester';
+    case 'field':
+      return '/'; // Field workers get assistance selection for form access
+    default:
+      return '/'; // Fallback to assistance selection
   }
 }
 

@@ -15,7 +15,7 @@ export function Sidebar() {
   if (!user) return null;
 
   // Role-based navigation system
-  const getNavigationForRole = (userRole: string) => {
+  const getNavigationForRole = (userRole: string, userDepartmentAccess?: string[]) => {
     const baseItems = {
       home: { name: "Home", href: "/", icon: Home },
       dashboard: { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
@@ -36,6 +36,23 @@ export function Sidebar() {
       activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity },
       changePassword: { name: "Change Password", href: "/change-password", icon: Key },
     };
+
+    // Handle agent users based on their department access
+    if (userRole === 'agent' && userDepartmentAccess?.length) {
+      const primaryDept = userDepartmentAccess[0].toLowerCase();
+      switch (primaryDept) {
+        case 'assets':
+          return [baseItems.home, baseItems.assetsQueue, baseItems.changePassword];
+        case 'fleet':
+          return [baseItems.home, baseItems.fleetQueue, baseItems.changePassword];
+        case 'inventory':
+          return [baseItems.home, baseItems.inventoryQueue, baseItems.changePassword];
+        case 'ntao':
+          return [baseItems.home, baseItems.ntaoQueue, baseItems.changePassword];
+        default:
+          return [baseItems.home, baseItems.changePassword];
+      }
+    }
 
     switch (userRole) {
       case 'assets':
@@ -83,7 +100,7 @@ export function Sidebar() {
     }
   };
 
-  const navigation = getNavigationForRole(user.role);
+  const navigation = getNavigationForRole(user.role, user.departmentAccess);
 
   return (
     <div className={cn(

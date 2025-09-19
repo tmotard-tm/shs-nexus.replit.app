@@ -41,6 +41,7 @@ import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
 import { PublicFormRoute } from "@/components/public-form-route";
 import { RoleProtectedRoute } from "@/components/role-protected-route";
+import { RoleBasedHome } from "@/components/role-based-home";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -66,7 +67,7 @@ function Router() {
       <Route path="/">
         <ProtectedRoute>
           <MainContent>
-            <AssistanceSelection />
+            <RoleBasedHome />
           </MainContent>
         </ProtectedRoute>
       </Route>

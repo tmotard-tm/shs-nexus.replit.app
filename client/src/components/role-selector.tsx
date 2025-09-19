@@ -1,6 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
+import { getRoleDisplayName } from "@/lib/role-permissions";
 
 interface RoleSelectorProps {
   onRoleChange?: (role: string) => void;
@@ -20,14 +21,14 @@ export function RoleSelector({ onRoleChange }: RoleSelectorProps) {
       <Label className="text-sm font-medium text-muted-foreground mb-2 block">
         Current Role
       </Label>
-      <Select defaultValue={user.role} onValueChange={handleRoleChange} data-testid="select-role">
+      <Select defaultValue={user.role} onValueChange={handleRoleChange} data-testid="select-role" disabled>
         <SelectTrigger className="w-full" data-testid="trigger-role-selector">
-          <SelectValue />
+          <SelectValue placeholder={getRoleDisplayName(user.role, user)} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="admin" data-testid="option-admin">Administrator</SelectItem>
-          <SelectItem value="requester" data-testid="option-requester">Requester</SelectItem>
-          <SelectItem value="approver" data-testid="option-approver">Approver</SelectItem>
+          <SelectItem value={user.role} data-testid={`option-${user.role}`}>
+            {getRoleDisplayName(user.role, user)}
+          </SelectItem>
         </SelectContent>
       </Select>
     </div>
