@@ -61,6 +61,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { TemplateEditor } from "@/components/template-editor";
 
 // Import shared schema for consistency between frontend and backend
 import { insertTemplateSchema } from "@shared/schema";
@@ -100,14 +101,16 @@ export default function TemplateManagement() {
   // Fetch templates
   const { data: allTemplates = [], isLoading, isError, error } = useQuery<Template[]>({
     queryKey: ["/api/templates"],
-    onError: (error: Error) => {
-      toast({
-        title: "Error",
-        description: `Failed to fetch templates: ${error.message}`,
-        variant: "destructive",
-      });
-    },
   });
+
+  // Handle error state
+  if (isError && error) {
+    toast({
+      title: "Error",
+      description: `Failed to fetch templates: ${error.message}`,
+      variant: "destructive",
+    });
+  }
 
   // Create template mutation
   const createTemplateMutation = useMutation({
@@ -192,7 +195,7 @@ export default function TemplateManagement() {
     },
   });
 
-  // Form setup
+  // Form setup (keeping for backward compatibility)
   const form = useForm<CreateTemplateFormData>({
     resolver: zodResolver(createTemplateSchema),
     defaultValues: {
@@ -216,6 +219,36 @@ export default function TemplateManagement() {
   const onEditSubmit = (data: Partial<Template>) => {
     if (editingTemplate) {
       updateTemplateMutation.mutate({ id: editingTemplate.id, ...data });
+    }
+  };
+
+  // Convert template editor data to API format
+  const convertTemplateEditorToApiFormat = (editorData: any) => {
+    const { id, name, department, workflowType, version, isActive, ...content } = editorData;
+    
+    return {
+      id,
+      name,
+      department,
+      workflowType,
+      version,
+      isActive,
+      // Template editor now returns content as object, stringify it for API
+      content: JSON.stringify(content),
+    };
+  };
+
+  // Handle create template from editor
+  const handleCreateTemplateSave = (editorData: any) => {
+    const apiData = convertTemplateEditorToApiFormat(editorData);
+    createTemplateMutation.mutate(apiData);
+  };
+
+  // Handle edit template from editor
+  const handleEditTemplateSave = (editorData: any) => {
+    if (editingTemplate) {
+      const { id, ...apiDataWithoutId } = convertTemplateEditorToApiFormat(editorData);
+      updateTemplateMutation.mutate({ id: editingTemplate.id, ...apiDataWithoutId });
     }
   };
 
@@ -300,7 +333,7 @@ export default function TemplateManagement() {
   };
 
   // Filter templates by search, department and status
-  const filteredTemplates = allTemplates.filter((template: Template) => {
+  const filteredTemplates = Array.isArray(allTemplates) ? allTemplates.filter((template: Template) => {
     const matchesSearch = searchQuery === "" || 
       template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       template.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -312,21 +345,21 @@ export default function TemplateManagement() {
       (statusFilter === "inactive" && !template.isActive);
     
     return matchesSearch && matchesDepartment && matchesStatus;
-  });
+  }) : [];
 
   // Statistics
   const templateStats = {
-    total: allTemplates.length,
-    active: allTemplates.filter((t: Template) => t.isActive).length,
-    inactive: allTemplates.filter((t: Template) => !t.isActive).length,
+    total: Array.isArray(allTemplates) ? allTemplates.length : 0,
+    active: Array.isArray(allTemplates) ? allTemplates.filter((t: Template) => t.isActive).length : 0,
+    inactive: Array.isArray(allTemplates) ? allTemplates.filter((t: Template) => !t.isActive).length : 0,
   };
 
   // Department statistics
   const departmentStats = {
-    ntao: allTemplates.filter((t: Template) => t.department === 'NTAO').length,
-    assets: allTemplates.filter((t: Template) => t.department === 'ASSETS').length,
-    inventory: allTemplates.filter((t: Template) => t.department === 'INVENTORY').length,
-    fleet: allTemplates.filter((t: Template) => t.department === 'FLEET').length,
+    ntao: Array.isArray(allTemplates) ? allTemplates.filter((t: Template) => t.department === 'NTAO').length : 0,
+    assets: Array.isArray(allTemplates) ? allTemplates.filter((t: Template) => t.department === 'ASSETS').length : 0,
+    inventory: Array.isArray(allTemplates) ? allTemplates.filter((t: Template) => t.department === 'INVENTORY').length : 0,
+    fleet: Array.isArray(allTemplates) ? allTemplates.filter((t: Template) => t.department === 'FLEET').length : 0,
   };
 
   if (isLoading) {
@@ -374,150 +407,13 @@ export default function TemplateManagement() {
               Add Template
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px]">
-            <DialogHeader>
-              <DialogTitle>Create New Template</DialogTitle>
-            </DialogHeader>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <FormControl>
-                        <Input
-                          data-testid="input-template-name"
-                          placeholder="e.g., Assets Onboarding Template"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="department"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Department</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                          <FormControl>
-                            <SelectTrigger data-testid="select-department">
-                              <SelectValue placeholder="Select department" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="ASSETS">Assets</SelectItem>
-                            <SelectItem value="FLEET">Fleet</SelectItem>
-                            <SelectItem value="INVENTORY">Inventory</SelectItem>
-                            <SelectItem value="NTAO">NTAO</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="workflowType"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Workflow Type</FormLabel>
-                        <FormControl>
-                          <Input
-                            data-testid="input-workflow-type"
-                            placeholder="e.g., onboarding"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
-                <FormField
-                  control={form.control}
-                  name="version"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Version</FormLabel>
-                      <FormControl>
-                        <Input
-                          data-testid="input-version"
-                          placeholder="e.g., 1.0"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="content"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Template Content (JSON)</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          data-testid="textarea-content"
-                          placeholder='{"steps": [], "metadata": {}}'
-                          className="min-h-[200px] font-mono text-sm"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="isActive"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-start space-x-3 space-y-0">
-                      <FormControl>
-                        <Checkbox
-                          data-testid="checkbox-is-active"
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                      <div className="space-y-1 leading-none">
-                        <FormLabel>
-                          Active Template
-                        </FormLabel>
-                      </div>
-                    </FormItem>
-                  )}
-                />
-
-                <div className="flex justify-end space-x-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsCreateOpen(false)}
-                    data-testid="button-cancel-create"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={createTemplateMutation.isPending}
-                    data-testid="button-submit-create"
-                  >
-                    {createTemplateMutation.isPending ? "Creating..." : "Create Template"}
-                  </Button>
-                </div>
-              </form>
-            </Form>
+          <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+            <TemplateEditor
+              mode="create"
+              onSave={handleCreateTemplateSave}
+              onCancel={() => setIsCreateOpen(false)}
+              isSubmitting={createTemplateMutation.isPending}
+            />
           </DialogContent>
         </Dialog>
       </div>
@@ -707,166 +603,15 @@ export default function TemplateManagement() {
 
       {/* Edit Template Dialog */}
       <Dialog open={!!editingTemplate} onOpenChange={(open) => !open && setEditingTemplate(null)}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>Edit Template</DialogTitle>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
           {editingTemplate && (
-            <Form {...editForm}>
-              <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={editForm.control}
-                    name="id"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Template ID</FormLabel>
-                        <FormControl>
-                          <Input
-                            data-testid="input-edit-template-id"
-                            disabled
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={editForm.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Name</FormLabel>
-                        <FormControl>
-                          <Input
-                            data-testid="input-edit-template-name"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={editForm.control}
-                    name="department"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Department</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger data-testid="select-edit-department">
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="ASSETS">Assets</SelectItem>
-                            <SelectItem value="FLEET">Fleet</SelectItem>
-                            <SelectItem value="INVENTORY">Inventory</SelectItem>
-                            <SelectItem value="NTAO">NTAO</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={editForm.control}
-                    name="workflowType"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Workflow Type</FormLabel>
-                        <FormControl>
-                          <Input
-                            data-testid="input-edit-workflow-type"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
-                <FormField
-                  control={editForm.control}
-                  name="version"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Version</FormLabel>
-                      <FormControl>
-                        <Input
-                          data-testid="input-edit-version"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={editForm.control}
-                  name="content"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Template Content (JSON)</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          data-testid="textarea-edit-content"
-                          className="min-h-[200px] font-mono text-sm"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={editForm.control}
-                  name="isActive"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-start space-x-3 space-y-0">
-                      <FormControl>
-                        <Checkbox
-                          data-testid="checkbox-edit-is-active"
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                      <div className="space-y-1 leading-none">
-                        <FormLabel>
-                          Active Template
-                        </FormLabel>
-                      </div>
-                    </FormItem>
-                  )}
-                />
-
-                <div className="flex justify-end space-x-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setEditingTemplate(null)}
-                    data-testid="button-cancel-edit"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={updateTemplateMutation.isPending}
-                    data-testid="button-submit-edit"
-                  >
-                    {updateTemplateMutation.isPending ? "Updating..." : "Update Template"}
-                  </Button>
-                </div>
-              </form>
-            </Form>
+            <TemplateEditor
+              mode="edit"
+              initialData={editingTemplate}
+              onSave={handleEditTemplateSave}
+              onCancel={() => setEditingTemplate(null)}
+              isSubmitting={updateTemplateMutation.isPending}
+            />
           )}
         </DialogContent>
       </Dialog>
