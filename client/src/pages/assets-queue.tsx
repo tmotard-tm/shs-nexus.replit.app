@@ -27,6 +27,7 @@ export default function AssetsQueuePage() {
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
     queryKey: ["/api/assets-queue"],
     queryFn: () => apiRequest("GET", "/api/assets-queue").then(res => res.json()),
+    refetchInterval: 30000,
   });
 
   // Fetch users for assignee names

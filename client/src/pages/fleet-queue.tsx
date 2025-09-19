@@ -27,6 +27,7 @@ export default function FleetQueuePage() {
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
     queryKey: ["/api/fleet-queue"],
     queryFn: () => apiRequest("GET", "/api/fleet-queue").then(res => res.json()),
+    refetchInterval: 30000,
   });
 
   // Fetch users for assignee names

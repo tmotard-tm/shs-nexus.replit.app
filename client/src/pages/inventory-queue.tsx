@@ -29,6 +29,7 @@ export default function InventoryQueuePage() {
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
     queryKey: ["/api/inventory-queue"],
     queryFn: () => apiRequest("GET", "/api/inventory-queue").then(res => res.json()),
+    refetchInterval: 30000,
   });
 
   // Fetch users for assignee names

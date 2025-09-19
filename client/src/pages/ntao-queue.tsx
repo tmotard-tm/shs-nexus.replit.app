@@ -27,6 +27,7 @@ export default function NTAOQueuePage() {
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
     queryKey: ["/api/ntao-queue"],
     queryFn: () => apiRequest("GET", "/api/ntao-queue").then(res => res.json()),
+    refetchInterval: 30000,
   });
 
   // Fetch users for assignee names

@@ -148,6 +148,7 @@ export default function UnifiedQueueManagement() {
       return items;
     },
     enabled: selectedModules.length > 0,
+    refetchInterval: 30000,
   });
 
   // Fetch queue stats
@@ -163,6 +164,7 @@ export default function UnifiedQueueManagement() {
       return response.json();
     },
     enabled: selectedModules.length > 0,
+    refetchInterval: 30000,
   });
 
   // Fetch users for assignment
