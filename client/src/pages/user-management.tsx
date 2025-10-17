@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Edit, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft } from "lucide-react";
+import { Plus, Edit, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createInsertSchema } from "drizzle-zod";
@@ -57,9 +57,32 @@ export default function UserManagement() {
   const [passwordResetUser, setPasswordResetUser] = useState<User | null>(null);
   const [roleManagementUser, setRoleManagementUser] = useState<User | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("all");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+
+  const handleCreateDialogChange = (open: boolean) => {
+    setIsCreateOpen(open);
+    if (!open) {
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+    }
+  };
+
+  const handlePasswordResetDialogChange = (open: boolean) => {
+    if (!open) {
+      setPasswordResetUser(null);
+      setShowResetPassword(false);
+      setShowResetConfirmPassword(false);
+    } else if (passwordResetUser) {
+      setShowResetPassword(false);
+      setShowResetConfirmPassword(false);
+    }
+  };
 
   const handleBackClick = () => {
     setLocation("/");
@@ -76,7 +99,7 @@ export default function UserManagement() {
       apiRequest("POST", "/api/users", userData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
-      setIsCreateOpen(false);
+      handleCreateDialogChange(false);
       toast({
         title: "Success",
         description: "User created successfully.",
@@ -137,7 +160,7 @@ export default function UserManagement() {
     mutationFn: ({ userId, temporaryPassword }: { userId: string; temporaryPassword: string }) =>
       apiRequest("POST", `/api/users/${userId}/reset-password`, { temporaryPassword }),
     onSuccess: (data: any) => {
-      setPasswordResetUser(null);
+      handlePasswordResetDialogChange(false);
       toast({
         title: "Success",
         description: `Password reset successfully for ${data.username}. User can now log in with the new temporary password.`,
@@ -328,7 +351,7 @@ export default function UserManagement() {
             <p className="text-muted-foreground">Manage system users and their permissions</p>
           </div>
         </div>
-        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <Dialog open={isCreateOpen} onOpenChange={handleCreateDialogChange}>
           <DialogTrigger asChild>
             <Button data-testid="button-create-user">
               <Plus className="mr-2 h-4 w-4" />
@@ -437,32 +460,66 @@ export default function UserManagement() {
               </div>
               <div>
                 <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  data-testid="input-password"
-                  className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
-                  {...form.register("password")}
-                />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    data-testid="input-password"
+                    className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300 pr-10"
+                    {...form.register("password")}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => setShowPassword(!showPassword)}
+                    data-testid="button-toggle-password"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4 text-gray-500" />
+                    ) : (
+                      <Eye className="h-4 w-4 text-gray-500" />
+                    )}
+                  </Button>
+                </div>
                 {form.formState.errors.password && (
                   <p className="text-sm text-red-500">{form.formState.errors.password.message}</p>
                 )}
               </div>
               <div>
                 <Label htmlFor="confirmPassword">Confirm Password</Label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  data-testid="input-confirm-password"
-                  className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
-                  {...form.register("confirmPassword")}
-                />
+                <div className="relative">
+                  <Input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    data-testid="input-confirm-password"
+                    className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300 pr-10"
+                    {...form.register("confirmPassword")}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    data-testid="button-toggle-confirm-password"
+                    aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="h-4 w-4 text-gray-500" />
+                    ) : (
+                      <Eye className="h-4 w-4 text-gray-500" />
+                    )}
+                  </Button>
+                </div>
                 {form.formState.errors.confirmPassword && (
                   <p className="text-sm text-red-500">{form.formState.errors.confirmPassword.message}</p>
                 )}
               </div>
               <div className="flex justify-end space-x-2">
-                <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
+                <Button type="button" variant="outline" onClick={() => handleCreateDialogChange(false)}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createUserMutation.isPending} data-testid="button-submit-user">
@@ -810,7 +867,7 @@ export default function UserManagement() {
       </Dialog>
 
       {/* Admin Password Reset Dialog */}
-      <Dialog open={!!passwordResetUser} onOpenChange={() => setPasswordResetUser(null)}>
+      <Dialog open={!!passwordResetUser} onOpenChange={handlePasswordResetDialogChange}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Reset User Password</DialogTitle>
@@ -821,28 +878,62 @@ export default function UserManagement() {
           <form onSubmit={passwordResetForm.handleSubmit(onPasswordResetSubmit)} className="space-y-4">
             <div>
               <Label htmlFor="temporaryPassword">New Temporary Password</Label>
-              <Input
-                id="temporaryPassword"
-                type="password"
-                data-testid="input-temporary-password"
-                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
-                placeholder="Enter secure temporary password (min 8 characters)"
-                {...passwordResetForm.register("temporaryPassword")}
-              />
+              <div className="relative">
+                <Input
+                  id="temporaryPassword"
+                  type={showResetPassword ? "text" : "password"}
+                  data-testid="input-temporary-password"
+                  className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300 pr-10"
+                  placeholder="Enter secure temporary password (min 8 characters)"
+                  {...passwordResetForm.register("temporaryPassword")}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowResetPassword(!showResetPassword)}
+                  data-testid="button-toggle-reset-password"
+                  aria-label={showResetPassword ? "Hide temporary password" : "Show temporary password"}
+                >
+                  {showResetPassword ? (
+                    <EyeOff className="h-4 w-4 text-gray-500" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-gray-500" />
+                  )}
+                </Button>
+              </div>
               {passwordResetForm.formState.errors.temporaryPassword && (
                 <p className="text-sm text-red-500">{passwordResetForm.formState.errors.temporaryPassword.message}</p>
               )}
             </div>
             <div>
               <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                data-testid="input-confirm-password"
-                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
-                placeholder="Confirm the temporary password"
-                {...passwordResetForm.register("confirmPassword")}
-              />
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  type={showResetConfirmPassword ? "text" : "password"}
+                  data-testid="input-confirm-password"
+                  className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300 pr-10"
+                  placeholder="Confirm the temporary password"
+                  {...passwordResetForm.register("confirmPassword")}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
+                  data-testid="button-toggle-reset-confirm-password"
+                  aria-label={showResetConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                >
+                  {showResetConfirmPassword ? (
+                    <EyeOff className="h-4 w-4 text-gray-500" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-gray-500" />
+                  )}
+                </Button>
+              </div>
               {passwordResetForm.formState.errors.confirmPassword && (
                 <p className="text-sm text-red-500">{passwordResetForm.formState.errors.confirmPassword.message}</p>
               )}
@@ -851,7 +942,7 @@ export default function UserManagement() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setPasswordResetUser(null)}
+                onClick={() => handlePasswordResetDialogChange(false)}
                 data-testid="button-cancel-password-reset"
               >
                 Cancel
