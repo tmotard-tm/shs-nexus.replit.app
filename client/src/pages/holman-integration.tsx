@@ -211,7 +211,7 @@ export default function HolmanIntegration() {
             </span>
           </div>
         </div>
-        <div className="border rounded-lg max-h-[500px] max-w-full overflow-auto">
+        <div className="border rounded-lg max-h-[500px] w-full overflow-auto">
           <table className="w-max text-sm border-collapse">
             <thead>
               <tr>
