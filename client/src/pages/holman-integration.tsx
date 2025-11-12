@@ -51,25 +51,25 @@ export default function HolmanIntegration() {
   const vehiclesUrl = `/api/holman/vehicles?${new URLSearchParams({ 
     lesseeCode: lesseeCode || '', 
     pageNumber: pageNumber.toString(),
-    pageSize: '100'
+    pageSize: '1000'
   }).toString()}`;
 
   const contactsUrl = `/api/holman/contacts?${new URLSearchParams({ 
     lesseeCode: lesseeCode || '', 
     pageNumber: pageNumber.toString(),
-    pageSize: '100'
+    pageSize: '1000'
   }).toString()}`;
 
   const maintenanceUrl = `/api/holman/maintenance?${new URLSearchParams({ 
     lesseeCode: lesseeCode || '', 
     pageNumber: pageNumber.toString(),
-    pageSize: '100'
+    pageSize: '1000'
   }).toString()}`;
 
   const odometerUrl = `/api/holman/odometer?${new URLSearchParams({ 
     lesseeCode: lesseeCode || '', 
     pageNumber: pageNumber.toString(),
-    pageSize: '100'
+    pageSize: '1000'
   }).toString()}`;
 
   const { data: vehiclesData, isLoading: vehiclesLoading, error: vehiclesError, refetch: refetchVehicles } = useQuery({
