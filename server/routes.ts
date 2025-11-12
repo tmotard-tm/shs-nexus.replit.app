@@ -4810,9 +4810,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pageSize ? parseInt(pageSize) : 100
       );
       res.json(result);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching Holman vehicles:", error);
-      res.status(500).json({ message: "Failed to fetch vehicles from Holman API" });
+      // Try to extract the actual API error message if available
+      const errorMessage = error.message || "Failed to fetch vehicles from Holman API";
+      res.status(500).json({ message: errorMessage });
     }
   });
 

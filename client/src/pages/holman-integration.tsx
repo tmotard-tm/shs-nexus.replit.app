@@ -88,7 +88,11 @@ export default function HolmanIntegration() {
       pageSize: vehiclesParams.pageSize.toString()
     };
     if (vehiclesParams.lesseeCodes) params.lesseeCode = vehiclesParams.lesseeCodes;
-    if (vehiclesParams.statusCodes) params.statusCodes = vehiclesParams.statusCodes;
+    if (vehiclesParams.statusCodes) {
+      // Trim and remove trailing commas
+      const cleaned = vehiclesParams.statusCodes.trim().replace(/,+$/, '');
+      if (cleaned) params.statusCodes = cleaned;
+    }
     return `/api/holman/vehicles?${new URLSearchParams(params).toString()}`;
   };
   const vehiclesUrl = buildVehiclesUrl();
@@ -563,9 +567,12 @@ export default function HolmanIntegration() {
                       id="vehicles-status-codes"
                       value={vehiclesParams.statusCodes}
                       onChange={(e) => setVehiclesParams({...vehiclesParams, statusCodes: e.target.value})}
-                      placeholder="Optional"
+                      placeholder="e.g., 1,2"
                       data-testid="input-vehicles-status-codes"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Valid codes: 1 (Active), 2 (Inactive). Note: Code 3 (Sold) requires additional parameters.
+                    </p>
                   </div>
                   <div>
                     <Label htmlFor="vehicles-page-number">Page Number</Label>
