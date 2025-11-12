@@ -189,7 +189,14 @@ export default function HolmanIntegration() {
     }
 
     const items = data.items.slice(0, 10);
-    const columns = items.length > 0 ? Object.keys(items[0]) : [];
+    let columns = items.length > 0 ? Object.keys(items[0]) : [];
+    
+    // For vehicles, show holmanVehicleNumber and vin first
+    if (type === 'vehicles' && columns.length > 0) {
+      const priorityColumns = ['holmanVehicleNumber', 'vin'];
+      const otherColumns = columns.filter(col => !priorityColumns.includes(col));
+      columns = [...priorityColumns, ...otherColumns];
+    }
 
     return (
       <div className="space-y-4">
@@ -204,12 +211,12 @@ export default function HolmanIntegration() {
             </span>
           </div>
         </div>
-        <div className="border rounded-lg overflow-auto max-h-[500px]">
+        <div className="border rounded-lg overflow-x-auto overflow-y-auto max-h-[500px]">
           <Table>
             <TableHeader>
               <TableRow>
-                {columns.slice(0, 8).map((col) => (
-                  <TableHead key={col} className="capitalize">
+                {columns.map((col) => (
+                  <TableHead key={col} className="capitalize whitespace-nowrap">
                     {col.replace(/([A-Z])/g, ' $1').trim()}
                   </TableHead>
                 ))}
@@ -218,8 +225,8 @@ export default function HolmanIntegration() {
             <TableBody>
               {items.map((item: any, idx: number) => (
                 <TableRow key={idx} data-testid={`row-${type}-${idx}`}>
-                  {columns.slice(0, 8).map((col) => (
-                    <TableCell key={col} className="max-w-[200px] truncate">
+                  {columns.map((col) => (
+                    <TableCell key={col} className="whitespace-nowrap">
                       {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
                     </TableCell>
                   ))}
