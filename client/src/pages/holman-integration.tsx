@@ -37,6 +37,7 @@ export default function HolmanIntegration() {
   const [vehiclesParams, setVehiclesParams] = useState({
     lesseeCodes: "2B56",
     statusCodes: "",
+    soldDateCode: "5",
     pageNumber: 1,
     pageSize: 1000
   });
@@ -91,7 +92,14 @@ export default function HolmanIntegration() {
     if (vehiclesParams.statusCodes) {
       // Trim and remove trailing commas
       const cleaned = vehiclesParams.statusCodes.trim().replace(/,+$/, '');
-      if (cleaned) params.statusCodes = cleaned;
+      if (cleaned) {
+        params.statusCodes = cleaned;
+        // Check if status code 3 is present as a discrete code
+        const codes = cleaned.split(',').map(c => c.trim());
+        if (codes.includes('3') && vehiclesParams.soldDateCode) {
+          params.soldDateCode = vehiclesParams.soldDateCode;
+        }
+      }
     }
     return `/api/holman/vehicles?${new URLSearchParams(params).toString()}`;
   };
@@ -571,9 +579,24 @@ export default function HolmanIntegration() {
                       data-testid="input-vehicles-status-codes"
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Valid codes: 1 (Active), 2 (Inactive). Note: Code 3 (Sold) requires additional parameters.
+                      Valid codes: 1 (Active), 2 (Inactive), 3 (Sold)
                     </p>
                   </div>
+                  {vehiclesParams.statusCodes.split(',').map(c => c.trim()).includes('3') && (
+                    <div>
+                      <Label htmlFor="vehicles-sold-date-code">Sold Date Code</Label>
+                      <Input
+                        id="vehicles-sold-date-code"
+                        value={vehiclesParams.soldDateCode}
+                        onChange={(e) => setVehiclesParams({...vehiclesParams, soldDateCode: e.target.value})}
+                        placeholder="e.g., 5"
+                        data-testid="input-vehicles-sold-date-code"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Required when status code 3 is used (default: 5)
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <Label htmlFor="vehicles-page-number">Page Number</Label>
                     <Input

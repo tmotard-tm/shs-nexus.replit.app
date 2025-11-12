@@ -186,6 +186,7 @@ export class HolmanApiService {
   async getVehicles(
     lesseeCode?: string,
     statusCodes?: string,
+    soldDateCode?: string,
     pageNumber: number = 1,
     pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanVehicle>> {
@@ -197,6 +198,11 @@ export class HolmanApiService {
     
     if (statusCodes) {
       params.set('statusCodes', statusCodes);
+      // Check if status code 3 is present as a discrete code
+      const codes = statusCodes.split(',').map(c => c.trim());
+      if (codes.includes('3') && soldDateCode) {
+        params.set('soldDateCode', soldDateCode);
+      }
     }
     
     params.set('pageSize', pageSize.toString());

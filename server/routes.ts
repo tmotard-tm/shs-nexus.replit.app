@@ -4802,10 +4802,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Vehicles endpoints
   app.get("/api/holman/vehicles", requireAuth, async (req: any, res) => {
     try {
-      const { lesseeCode, statusCodes, pageNumber, pageSize } = req.query;
+      const { lesseeCode, statusCodes, soldDateCode, pageNumber, pageSize } = req.query;
       const result = await holmanApiService.getVehicles(
         lesseeCode,
         statusCodes,
+        soldDateCode,
         pageNumber ? parseInt(pageNumber) : 1,
         pageSize ? parseInt(pageSize) : 100
       );
