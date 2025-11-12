@@ -188,18 +188,14 @@ export class HolmanApiService {
     pageNumber: number = 1,
     pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanVehicle>> {
-    const params = new URLSearchParams({
-      pageNumber: pageNumber.toString(),
-      pageSize: pageSize.toString()
-    });
+    const params = new URLSearchParams();
     
     if (lesseeCode) {
       params.set('lesseeCodes', lesseeCode);
-    } else {
-      params.set('lesseeCodes', '');
     }
     
-    params.set('statusCodes', '');
+    params.set('pageSize', pageSize.toString());
+    params.set('pageNumber', pageNumber.toString());
     
     return this.makeRequest<HolmanBaseResponse<HolmanVehicle>>(`/vehicles/basic-query?${params}`);
   }
@@ -234,16 +230,14 @@ export class HolmanApiService {
     pageNumber: number = 1,
     pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanContact>> {
-    const params = new URLSearchParams({
-      pageNumber: pageNumber.toString(),
-      pageSize: pageSize.toString()
-    });
+    const params = new URLSearchParams();
     
     if (lesseeCode) {
       params.set('lesseeCodes', lesseeCode);
-    } else {
-      params.set('lesseeCodes', '');
     }
+    
+    params.set('pageSize', pageSize.toString());
+    params.set('pageNumber', pageNumber.toString());
     
     return this.makeRequest<HolmanBaseResponse<HolmanContact>>(`/contacts/basic-query?${params}`);
   }
@@ -278,17 +272,15 @@ export class HolmanApiService {
     pageNumber: number = 1,
     pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanMaintenance>> {
-    const params = new URLSearchParams({
-      pageNumber: pageNumber.toString(),
-      pageSize: pageSize.toString(),
-      poDateCode: '1'
-    });
+    const params = new URLSearchParams();
     
     if (lesseeCode) {
       params.set('lesseeCodes', lesseeCode);
-    } else {
-      params.set('lesseeCodes', '');
     }
+    
+    params.set('poDateCode', '1');
+    params.set('pageSize', pageSize.toString());
+    params.set('pageNumber', pageNumber.toString());
     
     return this.makeRequest<HolmanBaseResponse<HolmanMaintenance>>(`/maintenance/purchase-orders/basic-query?${params}`);
   }
@@ -323,17 +315,15 @@ export class HolmanApiService {
     pageNumber: number = 1,
     pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanOdometer>> {
-    const params = new URLSearchParams({
-      pageNumber: pageNumber.toString(),
-      pageSize: pageSize.toString(),
-      odometerHistoryDateCode: '1'
-    });
+    const params = new URLSearchParams();
     
     if (lesseeCode) {
       params.set('lesseeCodes', lesseeCode);
-    } else {
-      params.set('lesseeCodes', '');
     }
+    
+    params.set('odometerHistoryDateCode', '1');
+    params.set('pageSize', pageSize.toString());
+    params.set('pageNumber', pageNumber.toString());
     
     return this.makeRequest<HolmanBaseResponse<HolmanOdometer>>(`/odometer/basic-query?${params}`);
   }
