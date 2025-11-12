@@ -156,11 +156,28 @@ export class HolmanApiService {
     }
 
     const url = `${this.apiEndpoint}${endpoint}`;
+    console.log('[Holman] Making request to:', url);
+    
     const response = await fetch(url, options);
+    
+    console.log('[Holman] Response status:', response.status, response.statusText);
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Holman API request failed: ${response.status} ${errorText}`);
+      console.error('[Holman] API request failed:', {
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        errorPreview: errorText.substring(0, 500)
+      });
+      throw new Error(`Holman API request failed: ${response.status} ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error('[Holman] Expected JSON but got:', contentType, 'Preview:', text.substring(0, 500));
+      throw new Error(`Holman API returned non-JSON response: ${contentType}`);
     }
 
     return response.json();
