@@ -82,29 +82,46 @@ export default function HolmanIntegration() {
     },
   });
 
-  const vehiclesUrl = `/api/holman/vehicles?${new URLSearchParams({ 
-    lesseeCode: vehiclesParams.lesseeCodes || '', 
-    pageNumber: vehiclesParams.pageNumber.toString(),
-    pageSize: vehiclesParams.pageSize.toString()
-  }).toString()}`;
+  const buildVehiclesUrl = () => {
+    const params: Record<string, string> = {
+      pageNumber: vehiclesParams.pageNumber.toString(),
+      pageSize: vehiclesParams.pageSize.toString()
+    };
+    if (vehiclesParams.lesseeCodes) params.lesseeCode = vehiclesParams.lesseeCodes;
+    if (vehiclesParams.statusCodes) params.statusCodes = vehiclesParams.statusCodes;
+    return `/api/holman/vehicles?${new URLSearchParams(params).toString()}`;
+  };
+  const vehiclesUrl = buildVehiclesUrl();
 
-  const contactsUrl = `/api/holman/contacts?${new URLSearchParams({ 
-    lesseeCode: contactsParams.lesseeCodes || '', 
-    pageNumber: contactsParams.pageNumber.toString(),
-    pageSize: contactsParams.pageSize.toString()
-  }).toString()}`;
+  const buildContactsUrl = () => {
+    const params: Record<string, string> = {
+      pageNumber: contactsParams.pageNumber.toString(),
+      pageSize: contactsParams.pageSize.toString()
+    };
+    if (contactsParams.lesseeCodes) params.lesseeCode = contactsParams.lesseeCodes;
+    return `/api/holman/contacts?${new URLSearchParams(params).toString()}`;
+  };
+  const contactsUrl = buildContactsUrl();
 
-  const maintenanceUrl = `/api/holman/maintenance?${new URLSearchParams({ 
-    lesseeCode: maintenanceParams.lesseeCodes || '', 
-    pageNumber: maintenanceParams.pageNumber.toString(),
-    pageSize: maintenanceParams.pageSize.toString()
-  }).toString()}`;
+  const buildMaintenanceUrl = () => {
+    const params: Record<string, string> = {
+      pageNumber: maintenanceParams.pageNumber.toString(),
+      pageSize: maintenanceParams.pageSize.toString()
+    };
+    if (maintenanceParams.lesseeCodes) params.lesseeCode = maintenanceParams.lesseeCodes;
+    return `/api/holman/maintenance?${new URLSearchParams(params).toString()}`;
+  };
+  const maintenanceUrl = buildMaintenanceUrl();
 
-  const odometerUrl = `/api/holman/odometer?${new URLSearchParams({ 
-    lesseeCode: odometerParams.lesseeCodes || '', 
-    pageNumber: odometerParams.pageNumber.toString(),
-    pageSize: odometerParams.pageSize.toString()
-  }).toString()}`;
+  const buildOdometerUrl = () => {
+    const params: Record<string, string> = {
+      pageNumber: odometerParams.pageNumber.toString(),
+      pageSize: odometerParams.pageSize.toString()
+    };
+    if (odometerParams.lesseeCodes) params.lesseeCode = odometerParams.lesseeCodes;
+    return `/api/holman/odometer?${new URLSearchParams(params).toString()}`;
+  };
+  const odometerUrl = buildOdometerUrl();
 
   const { data: vehiclesData, isLoading: vehiclesLoading, error: vehiclesError, refetch: refetchVehicles } = useQuery({
     queryKey: [vehiclesUrl],

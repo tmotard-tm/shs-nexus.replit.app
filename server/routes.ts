@@ -4802,9 +4802,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Vehicles endpoints
   app.get("/api/holman/vehicles", requireAuth, async (req: any, res) => {
     try {
-      const { lesseeCode, pageNumber, pageSize } = req.query;
+      const { lesseeCode, statusCodes, pageNumber, pageSize } = req.query;
       const result = await holmanApiService.getVehicles(
         lesseeCode,
+        statusCodes,
         pageNumber ? parseInt(pageNumber) : 1,
         pageSize ? parseInt(pageSize) : 100
       );
@@ -4817,6 +4818,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/holman/vehicles/query", requireAuth, async (req: any, res) => {
     try {
+      console.log('[Holman] Custom query request body:', JSON.stringify(req.body, null, 2));
       const result = await holmanApiService.queryVehiclesCustom(req.body);
       res.json(result);
     } catch (error) {

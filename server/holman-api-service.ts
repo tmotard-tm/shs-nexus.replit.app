@@ -185,6 +185,7 @@ export class HolmanApiService {
 
   async getVehicles(
     lesseeCode?: string,
+    statusCodes?: string,
     pageNumber: number = 1,
     pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanVehicle>> {
@@ -192,6 +193,10 @@ export class HolmanApiService {
     
     if (lesseeCode) {
       params.set('lesseeCodes', lesseeCode);
+    }
+    
+    if (statusCodes) {
+      params.set('statusCodes', statusCodes);
     }
     
     params.set('pageSize', pageSize.toString());
