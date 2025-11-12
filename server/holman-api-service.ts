@@ -79,6 +79,8 @@ export class HolmanApiService {
     }
   }
 
+  private tokenCache: { token: string; expiresAt: number } | null = null;
+
   private async authenticate(): Promise<string> {
     const params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
@@ -99,19 +101,22 @@ export class HolmanApiService {
     }
 
     const data: HolmanAuthResponse = await response.json();
+    
+    const expiresInMs = (data.expires_in - 60) * 1000;
+    this.tokenCache = {
+      token: data.access_token,
+      expiresAt: Date.now() + expiresInMs
+    };
+    
     return data.access_token;
   }
 
-  private getMemoizedAuthenticate = memoize(
-    () => this.authenticate(),
-    {
-      promise: true,
-      maxAge: 3300000,
-    }
-  );
-
   private async getAccessToken(): Promise<string> {
-    return this.getMemoizedAuthenticate();
+    if (this.tokenCache && Date.now() < this.tokenCache.expiresAt) {
+      return this.tokenCache.token;
+    }
+    
+    return this.authenticate();
   }
 
   private async makeRequest<T>(

@@ -39,33 +39,50 @@ export default function HolmanIntegration() {
         variant: data.success ? "default" : "destructive",
       });
     },
+    onError: (error: Error) => {
+      toast({
+        title: "Connection Test Failed",
+        description: error.message || "Failed to test Holman API connection",
+        variant: "destructive",
+      });
+    },
   });
 
-  const { data: vehiclesData, isLoading: vehiclesLoading, refetch: refetchVehicles } = useQuery({
+  const { data: vehiclesData, isLoading: vehiclesLoading, error: vehiclesError, refetch: refetchVehicles } = useQuery({
     queryKey: ["/api/holman/vehicles", lesseeCode, pageNumber],
     enabled: activeTab === "vehicles",
   });
 
-  const { data: contactsData, isLoading: contactsLoading, refetch: refetchContacts } = useQuery({
+  const { data: contactsData, isLoading: contactsLoading, error: contactsError, refetch: refetchContacts } = useQuery({
     queryKey: ["/api/holman/contacts", lesseeCode, pageNumber],
     enabled: activeTab === "contacts",
   });
 
-  const { data: maintenanceData, isLoading: maintenanceLoading, refetch: refetchMaintenance } = useQuery({
+  const { data: maintenanceData, isLoading: maintenanceLoading, error: maintenanceError, refetch: refetchMaintenance } = useQuery({
     queryKey: ["/api/holman/maintenance", lesseeCode, pageNumber],
     enabled: activeTab === "maintenance",
   });
 
-  const { data: odometerData, isLoading: odometerLoading, refetch: refetchOdometer } = useQuery({
+  const { data: odometerData, isLoading: odometerLoading, error: odometerError, refetch: refetchOdometer } = useQuery({
     queryKey: ["/api/holman/odometer", lesseeCode, pageNumber],
     enabled: activeTab === "odometer",
   });
 
-  const renderDataTable = (data: any, isLoading: boolean, type: string) => {
+  const renderDataTable = (data: any, isLoading: boolean, error: Error | null, type: string) => {
     if (isLoading) {
       return (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="flex flex-col items-center justify-center py-8 text-destructive">
+          <XCircle className="h-8 w-8 mb-2" />
+          <p className="font-medium">Error loading {type} data</p>
+          <p className="text-sm text-muted-foreground">{error.message}</p>
         </div>
       );
     }
@@ -310,7 +327,7 @@ export default function HolmanIntegration() {
                     Refresh
                   </Button>
                 </div>
-                {renderDataTable(vehiclesData, vehiclesLoading, "vehicles")}
+                {renderDataTable(vehiclesData, vehiclesLoading, vehiclesError, "vehicles")}
               </TabsContent>
 
               <TabsContent value="contacts" className="space-y-4">
@@ -327,7 +344,7 @@ export default function HolmanIntegration() {
                     Refresh
                   </Button>
                 </div>
-                {renderDataTable(contactsData, contactsLoading, "contacts")}
+                {renderDataTable(contactsData, contactsLoading, contactsError, "contacts")}
               </TabsContent>
 
               <TabsContent value="maintenance" className="space-y-4">
@@ -344,7 +361,7 @@ export default function HolmanIntegration() {
                     Refresh
                   </Button>
                 </div>
-                {renderDataTable(maintenanceData, maintenanceLoading, "maintenance")}
+                {renderDataTable(maintenanceData, maintenanceLoading, maintenanceError, "maintenance")}
               </TabsContent>
 
               <TabsContent value="odometer" className="space-y-4">
@@ -361,7 +378,7 @@ export default function HolmanIntegration() {
                     Refresh
                   </Button>
                 </div>
-                {renderDataTable(odometerData, odometerLoading, "odometer")}
+                {renderDataTable(odometerData, odometerLoading, odometerError, "odometer")}
               </TabsContent>
             </Tabs>
           </CardContent>
