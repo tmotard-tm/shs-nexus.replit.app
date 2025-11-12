@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,22 +51,66 @@ export default function HolmanIntegration() {
   const { data: vehiclesData, isLoading: vehiclesLoading, error: vehiclesError, refetch: refetchVehicles } = useQuery({
     queryKey: ["/api/holman/vehicles", lesseeCode, pageNumber],
     enabled: activeTab === "vehicles",
+    retry: false,
   });
 
   const { data: contactsData, isLoading: contactsLoading, error: contactsError, refetch: refetchContacts } = useQuery({
     queryKey: ["/api/holman/contacts", lesseeCode, pageNumber],
     enabled: activeTab === "contacts",
+    retry: false,
   });
 
   const { data: maintenanceData, isLoading: maintenanceLoading, error: maintenanceError, refetch: refetchMaintenance } = useQuery({
     queryKey: ["/api/holman/maintenance", lesseeCode, pageNumber],
     enabled: activeTab === "maintenance",
+    retry: false,
   });
 
   const { data: odometerData, isLoading: odometerLoading, error: odometerError, refetch: refetchOdometer } = useQuery({
     queryKey: ["/api/holman/odometer", lesseeCode, pageNumber],
     enabled: activeTab === "odometer",
+    retry: false,
   });
+
+  useEffect(() => {
+    if (vehiclesError && activeTab === "vehicles") {
+      toast({
+        title: "Failed to Load Vehicles",
+        description: vehiclesError.message || "Unable to fetch vehicles data from Holman API",
+        variant: "destructive",
+      });
+    }
+  }, [vehiclesError, activeTab, toast]);
+
+  useEffect(() => {
+    if (contactsError && activeTab === "contacts") {
+      toast({
+        title: "Failed to Load Contacts",
+        description: contactsError.message || "Unable to fetch contacts data from Holman API",
+        variant: "destructive",
+      });
+    }
+  }, [contactsError, activeTab, toast]);
+
+  useEffect(() => {
+    if (maintenanceError && activeTab === "maintenance") {
+      toast({
+        title: "Failed to Load Maintenance Data",
+        description: maintenanceError.message || "Unable to fetch maintenance data from Holman API",
+        variant: "destructive",
+      });
+    }
+  }, [maintenanceError, activeTab, toast]);
+
+  useEffect(() => {
+    if (odometerError && activeTab === "odometer") {
+      toast({
+        title: "Failed to Load Odometer Data",
+        description: odometerError.message || "Unable to fetch odometer data from Holman API",
+        variant: "destructive",
+      });
+    }
+  }, [odometerError, activeTab, toast]);
 
   const renderDataTable = (data: any, isLoading: boolean, error: Error | null, type: string) => {
     if (isLoading) {
