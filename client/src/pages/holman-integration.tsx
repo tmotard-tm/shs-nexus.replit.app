@@ -24,8 +24,33 @@ import {
 export default function HolmanIntegration() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("overview");
-  const [lesseeCode, setLesseeCode] = useState("");
-  const [pageNumber, setPageNumber] = useState(1);
+  
+  const [vehiclesParams, setVehiclesParams] = useState({
+    lesseeCodes: "",
+    statusCodes: "",
+    pageNumber: 1,
+    pageSize: 1000
+  });
+  
+  const [contactsParams, setContactsParams] = useState({
+    lesseeCodes: "",
+    pageNumber: 1,
+    pageSize: 1000
+  });
+  
+  const [maintenanceParams, setMaintenanceParams] = useState({
+    lesseeCodes: "",
+    poDateCode: "1",
+    pageNumber: 1,
+    pageSize: 1000
+  });
+  
+  const [odometerParams, setOdometerParams] = useState({
+    lesseeCodes: "",
+    odometerHistoryDateCode: "1",
+    pageNumber: 1,
+    pageSize: 1000
+  });
 
   const testConnectionMutation = useMutation({
     mutationFn: async () => {
@@ -49,27 +74,27 @@ export default function HolmanIntegration() {
   });
 
   const vehiclesUrl = `/api/holman/vehicles?${new URLSearchParams({ 
-    lesseeCode: lesseeCode || '', 
-    pageNumber: pageNumber.toString(),
-    pageSize: '1000'
+    lesseeCode: vehiclesParams.lesseeCodes || '', 
+    pageNumber: vehiclesParams.pageNumber.toString(),
+    pageSize: vehiclesParams.pageSize.toString()
   }).toString()}`;
 
   const contactsUrl = `/api/holman/contacts?${new URLSearchParams({ 
-    lesseeCode: lesseeCode || '', 
-    pageNumber: pageNumber.toString(),
-    pageSize: '1000'
+    lesseeCode: contactsParams.lesseeCodes || '', 
+    pageNumber: contactsParams.pageNumber.toString(),
+    pageSize: contactsParams.pageSize.toString()
   }).toString()}`;
 
   const maintenanceUrl = `/api/holman/maintenance?${new URLSearchParams({ 
-    lesseeCode: lesseeCode || '', 
-    pageNumber: pageNumber.toString(),
-    pageSize: '1000'
+    lesseeCode: maintenanceParams.lesseeCodes || '', 
+    pageNumber: maintenanceParams.pageNumber.toString(),
+    pageSize: maintenanceParams.pageSize.toString()
   }).toString()}`;
 
   const odometerUrl = `/api/holman/odometer?${new URLSearchParams({ 
-    lesseeCode: lesseeCode || '', 
-    pageNumber: pageNumber.toString(),
-    pageSize: '1000'
+    lesseeCode: odometerParams.lesseeCodes || '', 
+    pageNumber: odometerParams.pageNumber.toString(),
+    pageSize: odometerParams.pageSize.toString()
   }).toString()}`;
 
   const { data: vehiclesData, isLoading: vehiclesLoading, error: vehiclesError, refetch: refetchVehicles } = useQuery({
@@ -174,24 +199,9 @@ export default function HolmanIntegration() {
             {data.pageInfo && ` (Page ${data.pageInfo.pageNumber} of ${data.pageInfo.totalPages})`}
           </div>
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setPageNumber(Math.max(1, pageNumber - 1))}
-              disabled={pageNumber === 1}
-              data-testid={`button-prev-page-${type}`}
-            >
-              Previous
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setPageNumber(pageNumber + 1)}
-              disabled={!data.pageInfo || pageNumber >= data.pageInfo.totalPages}
-              data-testid={`button-next-page-${type}`}
-            >
-              Next
-            </Button>
+            <span className="text-sm text-muted-foreground">
+              Page {type === 'vehicles' ? vehiclesParams.pageNumber : type === 'contacts' ? contactsParams.pageNumber : type === 'maintenance' ? maintenanceParams.pageNumber : odometerParams.pageNumber}
+            </span>
           </div>
         </div>
         <div className="border rounded-lg overflow-auto max-h-[500px]">
@@ -319,22 +329,6 @@ export default function HolmanIntegration() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="mb-4 flex gap-4">
-              <div className="flex-1">
-                <Label htmlFor="lesseeCode">Lessee Code (optional)</Label>
-                <Input
-                  id="lesseeCode"
-                  value={lesseeCode}
-                  onChange={(e) => setLesseeCode(e.target.value)}
-                  placeholder="Enter lessee code to filter"
-                  data-testid="input-lessee-code"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Leave empty to query all accessible data
-                </p>
-              </div>
-            </div>
-
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="grid w-full grid-cols-4">
                 <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
@@ -382,6 +376,52 @@ export default function HolmanIntegration() {
               </TabsContent>
 
               <TabsContent value="vehicles" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 p-4 bg-muted/50 rounded-lg">
+                  <div>
+                    <Label htmlFor="vehicles-lessee-codes">Lessee Codes</Label>
+                    <Input
+                      id="vehicles-lessee-codes"
+                      value={vehiclesParams.lesseeCodes}
+                      onChange={(e) => setVehiclesParams({...vehiclesParams, lesseeCodes: e.target.value})}
+                      placeholder="e.g., 2B56"
+                      data-testid="input-vehicles-lessee-codes"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="vehicles-status-codes">Status Codes</Label>
+                    <Input
+                      id="vehicles-status-codes"
+                      value={vehiclesParams.statusCodes}
+                      onChange={(e) => setVehiclesParams({...vehiclesParams, statusCodes: e.target.value})}
+                      placeholder="Optional"
+                      data-testid="input-vehicles-status-codes"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="vehicles-page-number">Page Number</Label>
+                    <Input
+                      id="vehicles-page-number"
+                      type="number"
+                      value={vehiclesParams.pageNumber}
+                      onChange={(e) => setVehiclesParams({...vehiclesParams, pageNumber: parseInt(e.target.value) || 1})}
+                      min="1"
+                      data-testid="input-vehicles-page-number"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="vehicles-page-size">Page Size</Label>
+                    <Input
+                      id="vehicles-page-size"
+                      type="number"
+                      value={vehiclesParams.pageSize}
+                      onChange={(e) => setVehiclesParams({...vehiclesParams, pageSize: parseInt(e.target.value) || 1000})}
+                      min="1"
+                      max="1000"
+                      data-testid="input-vehicles-page-size"
+                    />
+                  </div>
+                </div>
+                
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-semibold">Vehicles Data</h3>
                   <Button
@@ -399,6 +439,42 @@ export default function HolmanIntegration() {
               </TabsContent>
 
               <TabsContent value="contacts" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-4 bg-muted/50 rounded-lg">
+                  <div>
+                    <Label htmlFor="contacts-lessee-codes">Lessee Codes</Label>
+                    <Input
+                      id="contacts-lessee-codes"
+                      value={contactsParams.lesseeCodes}
+                      onChange={(e) => setContactsParams({...contactsParams, lesseeCodes: e.target.value})}
+                      placeholder="e.g., 2B56"
+                      data-testid="input-contacts-lessee-codes"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="contacts-page-number">Page Number</Label>
+                    <Input
+                      id="contacts-page-number"
+                      type="number"
+                      value={contactsParams.pageNumber}
+                      onChange={(e) => setContactsParams({...contactsParams, pageNumber: parseInt(e.target.value) || 1})}
+                      min="1"
+                      data-testid="input-contacts-page-number"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="contacts-page-size">Page Size</Label>
+                    <Input
+                      id="contacts-page-size"
+                      type="number"
+                      value={contactsParams.pageSize}
+                      onChange={(e) => setContactsParams({...contactsParams, pageSize: parseInt(e.target.value) || 1000})}
+                      min="1"
+                      max="1000"
+                      data-testid="input-contacts-page-size"
+                    />
+                  </div>
+                </div>
+                
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-semibold">Contacts Data</h3>
                   <Button
@@ -416,6 +492,52 @@ export default function HolmanIntegration() {
               </TabsContent>
 
               <TabsContent value="maintenance" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 p-4 bg-muted/50 rounded-lg">
+                  <div>
+                    <Label htmlFor="maintenance-lessee-codes">Lessee Codes</Label>
+                    <Input
+                      id="maintenance-lessee-codes"
+                      value={maintenanceParams.lesseeCodes}
+                      onChange={(e) => setMaintenanceParams({...maintenanceParams, lesseeCodes: e.target.value})}
+                      placeholder="e.g., 2B56"
+                      data-testid="input-maintenance-lessee-codes"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="maintenance-po-date-code">PO Date Code</Label>
+                    <Input
+                      id="maintenance-po-date-code"
+                      value={maintenanceParams.poDateCode}
+                      onChange={(e) => setMaintenanceParams({...maintenanceParams, poDateCode: e.target.value})}
+                      placeholder="1"
+                      data-testid="input-maintenance-po-date-code"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="maintenance-page-number">Page Number</Label>
+                    <Input
+                      id="maintenance-page-number"
+                      type="number"
+                      value={maintenanceParams.pageNumber}
+                      onChange={(e) => setMaintenanceParams({...maintenanceParams, pageNumber: parseInt(e.target.value) || 1})}
+                      min="1"
+                      data-testid="input-maintenance-page-number"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="maintenance-page-size">Page Size</Label>
+                    <Input
+                      id="maintenance-page-size"
+                      type="number"
+                      value={maintenanceParams.pageSize}
+                      onChange={(e) => setMaintenanceParams({...maintenanceParams, pageSize: parseInt(e.target.value) || 1000})}
+                      min="1"
+                      max="1000"
+                      data-testid="input-maintenance-page-size"
+                    />
+                  </div>
+                </div>
+                
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-semibold">Maintenance Data</h3>
                   <Button
@@ -433,6 +555,52 @@ export default function HolmanIntegration() {
               </TabsContent>
 
               <TabsContent value="odometer" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 p-4 bg-muted/50 rounded-lg">
+                  <div>
+                    <Label htmlFor="odometer-lessee-codes">Lessee Codes</Label>
+                    <Input
+                      id="odometer-lessee-codes"
+                      value={odometerParams.lesseeCodes}
+                      onChange={(e) => setOdometerParams({...odometerParams, lesseeCodes: e.target.value})}
+                      placeholder="e.g., 2B56"
+                      data-testid="input-odometer-lessee-codes"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="odometer-history-date-code">History Date Code</Label>
+                    <Input
+                      id="odometer-history-date-code"
+                      value={odometerParams.odometerHistoryDateCode}
+                      onChange={(e) => setOdometerParams({...odometerParams, odometerHistoryDateCode: e.target.value})}
+                      placeholder="1"
+                      data-testid="input-odometer-history-date-code"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="odometer-page-number">Page Number</Label>
+                    <Input
+                      id="odometer-page-number"
+                      type="number"
+                      value={odometerParams.pageNumber}
+                      onChange={(e) => setOdometerParams({...odometerParams, pageNumber: parseInt(e.target.value) || 1})}
+                      min="1"
+                      data-testid="input-odometer-page-number"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="odometer-page-size">Page Size</Label>
+                    <Input
+                      id="odometer-page-size"
+                      type="number"
+                      value={odometerParams.pageSize}
+                      onChange={(e) => setOdometerParams({...odometerParams, pageSize: parseInt(e.target.value) || 1000})}
+                      min="1"
+                      max="1000"
+                      data-testid="input-odometer-page-size"
+                    />
+                  </div>
+                </div>
+                
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-semibold">Odometer Data</h3>
                   <Button
