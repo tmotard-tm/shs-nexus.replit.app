@@ -26,27 +26,27 @@ export default function HolmanIntegration() {
   const [activeTab, setActiveTab] = useState("overview");
   
   const [vehiclesParams, setVehiclesParams] = useState({
-    lesseeCodes: "",
+    lesseeCodes: "2B56",
     statusCodes: "",
     pageNumber: 1,
     pageSize: 1000
   });
   
   const [contactsParams, setContactsParams] = useState({
-    lesseeCodes: "",
+    lesseeCodes: "2B56",
     pageNumber: 1,
     pageSize: 1000
   });
   
   const [maintenanceParams, setMaintenanceParams] = useState({
-    lesseeCodes: "",
+    lesseeCodes: "2B56",
     poDateCode: "1",
     pageNumber: 1,
     pageSize: 1000
   });
   
   const [odometerParams, setOdometerParams] = useState({
-    lesseeCodes: "",
+    lesseeCodes: "2B56",
     odometerHistoryDateCode: "1",
     pageNumber: 1,
     pageSize: 1000
