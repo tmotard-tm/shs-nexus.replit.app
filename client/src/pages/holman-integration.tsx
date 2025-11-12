@@ -212,9 +212,9 @@ export default function HolmanIntegration() {
           </div>
         </div>
         <div className="border rounded-lg max-w-full overflow-x-auto">
-          <div className="min-w-full">
+          <div className="max-h-[450px] overflow-y-auto overflow-x-hidden">
             <table className="w-full text-sm border-collapse">
-              <thead className="bg-muted">
+              <thead className="bg-muted sticky top-0 z-10">
                 <tr>
                   {columns.map((col) => (
                     <th 
@@ -226,26 +226,22 @@ export default function HolmanIntegration() {
                   ))}
                 </tr>
               </thead>
+              <tbody>
+                {items.map((item: any, idx: number) => (
+                  <tr 
+                    key={idx} 
+                    data-testid={`row-${type}-${idx}`}
+                    className="border-b hover:bg-muted/50"
+                  >
+                    {columns.map((col) => (
+                      <td key={col} className="px-4 py-3 whitespace-nowrap">
+                        {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
             </table>
-            <div className="max-h-[450px] overflow-y-auto">
-              <table className="w-full text-sm border-collapse">
-                <tbody>
-                  {items.map((item: any, idx: number) => (
-                    <tr 
-                      key={idx} 
-                      data-testid={`row-${type}-${idx}`}
-                      className="border-b hover:bg-muted/50"
-                    >
-                      {columns.map((col) => (
-                        <td key={col} className="px-4 py-3 whitespace-nowrap">
-                          {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
         </div>
       </div>
