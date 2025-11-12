@@ -211,9 +211,9 @@ export default function HolmanIntegration() {
             </span>
           </div>
         </div>
-        <div className="border rounded-lg max-h-[500px] overflow-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-muted">
+        <div className="border rounded-lg max-h-[500px] max-w-full overflow-auto">
+          <table className="w-max text-sm border-collapse">
+            <thead>
               <tr>
                 {columns.map((col) => (
                   <th 
@@ -221,9 +221,7 @@ export default function HolmanIntegration() {
                     className="px-4 py-3 text-left font-medium whitespace-nowrap bg-muted border-b"
                     style={{ position: 'sticky', top: 0, zIndex: 10 }}
                   >
-                    <span className="capitalize">
-                      {col.replace(/([A-Z])/g, ' $1').trim()}
-                    </span>
+                    {col.replace(/([A-Z])/g, ' $1').trim()}
                   </th>
                 ))}
               </tr>
