@@ -100,7 +100,7 @@ export function Sidebar() {
     }
   };
 
-  const navigation = getNavigationForRole(user.role, user.departmentAccess);
+  const navigation = getNavigationForRole(user.role, user.departmentAccess ?? undefined);
 
   return (
     <div className={cn(
@@ -135,11 +135,15 @@ export function Sidebar() {
           )}
         </div>
 
-        {!isCollapsed && <RoleSelector />}
+        {!isCollapsed && (
+          <div className="mb-6">
+            <RoleSelector />
+          </div>
+        )}
 
-        <nav className="space-y-2">
+        <nav className="space-y-1">
           {!isCollapsed && (
-            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
               Navigation
             </div>
           )}
