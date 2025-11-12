@@ -211,35 +211,29 @@ export default function HolmanIntegration() {
             </span>
           </div>
         </div>
-        <div className="border rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted">
+        <div className="border rounded-lg overflow-auto max-h-[500px]">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted sticky top-0 z-10">
+                {columns.map((col) => (
+                  <TableHead key={col} className="capitalize whitespace-nowrap bg-muted">
+                    {col.replace(/([A-Z])/g, ' $1').trim()}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((item: any, idx: number) => (
+                <TableRow key={idx} data-testid={`row-${type}-${idx}`}>
                   {columns.map((col) => (
-                    <TableHead key={col} className="capitalize whitespace-nowrap">
-                      {col.replace(/([A-Z])/g, ' $1').trim()}
-                    </TableHead>
+                    <TableCell key={col} className="whitespace-nowrap">
+                      {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
+                    </TableCell>
                   ))}
                 </TableRow>
-              </TableHeader>
-            </Table>
-          </div>
-          <div className="overflow-x-auto overflow-y-auto max-h-[450px]">
-            <Table>
-              <TableBody>
-                {items.map((item: any, idx: number) => (
-                  <TableRow key={idx} data-testid={`row-${type}-${idx}`}>
-                    {columns.map((col) => (
-                      <TableCell key={col} className="whitespace-nowrap">
-                        {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       </div>
     );
