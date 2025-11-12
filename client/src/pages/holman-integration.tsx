@@ -180,7 +180,10 @@ export default function HolmanIntegration() {
       );
     }
 
+    console.log(`[${type}] Data received:`, data);
+
     if (!data || !data.data || data.data.length === 0) {
+      console.log(`[${type}] No data - data:`, !!data, 'data.data:', !!data?.data, 'data.data.length:', data?.data?.length);
       return (
         <div className="text-center py-8 text-muted-foreground">
           No {type} data available
