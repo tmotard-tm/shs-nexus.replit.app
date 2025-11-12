@@ -189,14 +189,24 @@ export default function HolmanIntegration() {
     }
 
     const items = data.items.slice(0, 10);
-    let columns = items.length > 0 ? Object.keys(items[0]) : [];
+    let allColumns = items.length > 0 ? Object.keys(items[0]) : [];
     
-    // For vehicles, show holmanVehicleNumber and vin first
-    if (type === 'vehicles' && columns.length > 0) {
-      const priorityColumns = ['holmanVehicleNumber', 'vin'];
-      const otherColumns = columns.filter(col => !priorityColumns.includes(col));
-      columns = [...priorityColumns, ...otherColumns];
+    // Show only the most important columns to fit in the container
+    let columns: string[] = [];
+    if (type === 'vehicles') {
+      columns = ['holmanVehicleNumber', 'vin', 'modelYear', 'make', 'model', 'lesseeCode', 'assignedStatus', 'zipPostalCode'];
+    } else if (type === 'contacts') {
+      columns = ['holmanContactId', 'firstName', 'lastName', 'emailAddress', 'phoneNumber', 'lesseeCode', 'contactType'];
+    } else if (type === 'maintenance') {
+      columns = ['holmanVehicleNumber', 'poNumber', 'poDate', 'vendorName', 'totalAmount', 'status'];
+    } else if (type === 'odometer') {
+      columns = ['holmanVehicleNumber', 'readingDate', 'odometerReading', 'lesseeCode'];
+    } else {
+      columns = allColumns.slice(0, 8);
     }
+    
+    // Filter to only include columns that exist in the data
+    columns = columns.filter(col => allColumns.includes(col));
 
     return (
       <div className="space-y-4">
