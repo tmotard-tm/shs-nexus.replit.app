@@ -213,31 +213,38 @@ export default function HolmanIntegration() {
         </div>
         <div className="relative border rounded-lg">
           <div className="max-h-[500px] overflow-auto">
-            <Table className="min-w-max border-collapse">
-              <TableHeader>
-                <TableRow>
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-muted">
+                <tr>
                   {columns.map((col) => (
-                    <TableHead 
+                    <th 
                       key={col} 
-                      className="capitalize whitespace-nowrap sticky top-0 z-10 bg-background shadow-sm border-b"
+                      className="px-4 py-3 text-left font-medium whitespace-nowrap sticky top-0 bg-muted z-10 border-b"
+                      style={{ position: 'sticky', top: 0 }}
                     >
-                      {col.replace(/([A-Z])/g, ' $1').trim()}
-                    </TableHead>
+                      <span className="capitalize">
+                        {col.replace(/([A-Z])/g, ' $1').trim()}
+                      </span>
+                    </th>
                   ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+                </tr>
+              </thead>
+              <tbody>
                 {items.map((item: any, idx: number) => (
-                  <TableRow key={idx} data-testid={`row-${type}-${idx}`}>
+                  <tr 
+                    key={idx} 
+                    data-testid={`row-${type}-${idx}`}
+                    className="border-b hover:bg-muted/50"
+                  >
                     {columns.map((col) => (
-                      <TableCell key={col} className="whitespace-nowrap">
+                      <td key={col} className="px-4 py-3 whitespace-nowrap">
                         {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
-                      </TableCell>
+                      </td>
                     ))}
-                  </TableRow>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
