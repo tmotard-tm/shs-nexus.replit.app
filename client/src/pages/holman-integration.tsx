@@ -191,8 +191,12 @@ export default function HolmanIntegration() {
     const items = data.items;
     let allColumns = items.length > 0 ? Object.keys(items[0]) : [];
     
-    // Show all columns so horizontal scrolling is needed
+    // Show all columns with holmanVehicleNumber and vin first
     let columns = allColumns;
+    if (type === 'vehicles' && allColumns.includes('holmanVehicleNumber') && allColumns.includes('vin')) {
+      const otherColumns = allColumns.filter(col => col !== 'holmanVehicleNumber' && col !== 'vin');
+      columns = ['holmanVehicleNumber', 'vin', ...otherColumns];
+    }
 
     return (
       <div className="space-y-4">
