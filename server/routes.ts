@@ -17,6 +17,7 @@ import * as ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+import { holmanApiService } from "./holman-api-service";
 
 // Initialize session cleanup on startup
 try {
@@ -4781,6 +4782,164 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error toggling template status:", error);
       res.status(500).json({ message: "Failed to toggle template status" });
+    }
+  });
+
+  // Holman API Integration Routes
+  console.log("Registering Holman API routes...");
+
+  // Test connection endpoint
+  app.get("/api/holman/test", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanApiService.testConnection();
+      res.json(result);
+    } catch (error) {
+      console.error("Error testing Holman connection:", error);
+      res.status(500).json({ success: false, message: "Failed to test connection" });
+    }
+  });
+
+  // Vehicles endpoints
+  app.get("/api/holman/vehicles", requireAuth, async (req: any, res) => {
+    try {
+      const { lesseeCode, pageNumber, pageSize } = req.query;
+      const result = await holmanApiService.getVehicles(
+        lesseeCode,
+        pageNumber ? parseInt(pageNumber) : 1,
+        pageSize ? parseInt(pageSize) : 100
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching Holman vehicles:", error);
+      res.status(500).json({ message: "Failed to fetch vehicles from Holman API" });
+    }
+  });
+
+  app.post("/api/holman/vehicles/query", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanApiService.queryVehiclesCustom(req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error querying Holman vehicles:", error);
+      res.status(500).json({ message: "Failed to query vehicles from Holman API" });
+    }
+  });
+
+  app.post("/api/holman/vehicles/submit", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanApiService.submitVehicle(req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error submitting Holman vehicle:", error);
+      res.status(500).json({ message: "Failed to submit vehicle to Holman API" });
+    }
+  });
+
+  // Contacts endpoints
+  app.get("/api/holman/contacts", requireAuth, async (req: any, res) => {
+    try {
+      const { lesseeCode, pageNumber, pageSize } = req.query;
+      const result = await holmanApiService.getContacts(
+        lesseeCode,
+        pageNumber ? parseInt(pageNumber) : 1,
+        pageSize ? parseInt(pageSize) : 100
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching Holman contacts:", error);
+      res.status(500).json({ message: "Failed to fetch contacts from Holman API" });
+    }
+  });
+
+  app.post("/api/holman/contacts/query", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanApiService.queryContactsCustom(req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error querying Holman contacts:", error);
+      res.status(500).json({ message: "Failed to query contacts from Holman API" });
+    }
+  });
+
+  app.post("/api/holman/contacts/submit", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanApiService.submitContact(req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error submitting Holman contact:", error);
+      res.status(500).json({ message: "Failed to submit contact to Holman API" });
+    }
+  });
+
+  // Maintenance endpoints
+  app.get("/api/holman/maintenance", requireAuth, async (req: any, res) => {
+    try {
+      const { lesseeCode, pageNumber, pageSize } = req.query;
+      const result = await holmanApiService.getMaintenance(
+        lesseeCode,
+        pageNumber ? parseInt(pageNumber) : 1,
+        pageSize ? parseInt(pageSize) : 100
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching Holman maintenance:", error);
+      res.status(500).json({ message: "Failed to fetch maintenance from Holman API" });
+    }
+  });
+
+  app.post("/api/holman/maintenance/query", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanApiService.queryMaintenanceCustom(req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error querying Holman maintenance:", error);
+      res.status(500).json({ message: "Failed to query maintenance from Holman API" });
+    }
+  });
+
+  app.post("/api/holman/maintenance/submit", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanApiService.submitMaintenance(req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error submitting Holman maintenance:", error);
+      res.status(500).json({ message: "Failed to submit maintenance to Holman API" });
+    }
+  });
+
+  // Odometer endpoints
+  app.get("/api/holman/odometer", requireAuth, async (req: any, res) => {
+    try {
+      const { lesseeCode, pageNumber, pageSize } = req.query;
+      const result = await holmanApiService.getOdometer(
+        lesseeCode,
+        pageNumber ? parseInt(pageNumber) : 1,
+        pageSize ? parseInt(pageSize) : 100
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching Holman odometer:", error);
+      res.status(500).json({ message: "Failed to fetch odometer from Holman API" });
+    }
+  });
+
+  app.post("/api/holman/odometer/query", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanApiService.queryOdometerCustom(req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error querying Holman odometer:", error);
+      res.status(500).json({ message: "Failed to query odometer from Holman API" });
+    }
+  });
+
+  app.post("/api/holman/odometer/submit", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanApiService.submitOdometer(req.body);
+      res.json(result);
+    } catch (error) {
+      console.error("Error submitting Holman odometer:", error);
+      res.status(500).json({ message: "Failed to submit odometer to Holman API" });
     }
   });
 
