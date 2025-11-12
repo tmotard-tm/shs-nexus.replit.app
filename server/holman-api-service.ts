@@ -82,6 +82,8 @@ export class HolmanApiService {
   private tokenCache: { token: string; expiresAt: number } | null = null;
 
   private async authenticate(): Promise<string> {
+    console.log('[Holman] Attempting authentication to:', this.authEndpoint);
+    
     const params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
     params.append('client_id', this.clientId);
@@ -97,10 +99,16 @@ export class HolmanApiService {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Holman authentication failed: ${response.status} ${errorText}`);
+      console.error('[Holman] Authentication failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorPreview: errorText.substring(0, 500)
+      });
+      throw new Error(`Holman authentication failed: ${response.status} - ${response.statusText}`);
     }
 
     const data: HolmanAuthResponse = await response.json();
+    console.log('[Holman] Authentication successful, token expires in:', data.expires_in, 'seconds');
     
     const expiresInMs = (data.expires_in - 60) * 1000;
     this.tokenCache = {
