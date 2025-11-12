@@ -190,8 +190,7 @@ export class HolmanApiService {
   ): Promise<HolmanBaseResponse<HolmanVehicle>> {
     const params = new URLSearchParams({
       pageNumber: pageNumber.toString(),
-      pageSize: pageSize.toString(),
-      statusCodes: ''
+      pageSize: pageSize.toString()
     });
     
     if (lesseeCode) {
@@ -199,6 +198,8 @@ export class HolmanApiService {
     } else {
       params.set('lesseeCodes', '');
     }
+    
+    params.set('statusCodes', '');
     
     return this.makeRequest<HolmanBaseResponse<HolmanVehicle>>(`/vehicles/basic-query?${params}`);
   }
