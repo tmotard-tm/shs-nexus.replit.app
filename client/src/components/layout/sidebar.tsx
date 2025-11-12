@@ -142,9 +142,16 @@ export function Sidebar() {
         )}
 
         <nav className="space-y-1">
-          {!isCollapsed && (
-            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-              Navigation
+          {!isCollapsed ? (
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Navigation
+              </div>
+              <ThemeToggle />
+            </div>
+          ) : (
+            <div className="flex justify-center mb-4">
+              <ThemeToggle />
             </div>
           )}
           {navigation.map((item) => {
@@ -174,14 +181,9 @@ export function Sidebar() {
       </div>
 
       <div className={cn(
-        "absolute bottom-0 left-0 right-0 p-6 border-t border-border space-y-3",
+        "absolute bottom-0 left-0 right-0 p-6 border-t border-border",
         isCollapsed && "p-3"
       )}>
-        {/* Theme Toggle */}
-        <div className={cn("flex", isCollapsed ? "justify-center" : "justify-end")}>
-          <ThemeToggle />
-        </div>
-        
         {/* User Section */}
         <div className={cn("flex items-center gap-3", isCollapsed && "justify-center")}>
           <div className="w-8 h-8 bg-secondary rounded-full flex items-center justify-center">
