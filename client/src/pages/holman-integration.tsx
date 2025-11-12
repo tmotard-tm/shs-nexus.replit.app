@@ -211,8 +211,8 @@ export default function HolmanIntegration() {
             </span>
           </div>
         </div>
-        <div className="border rounded-lg max-h-[500px] w-full overflow-auto">
-          <table className="w-max text-sm border-collapse">
+        <div className="border rounded-lg max-h-[500px] overflow-auto w-full">
+          <table className="min-w-full text-sm border-collapse">
             <thead>
               <tr>
                 {columns.map((col) => (
@@ -248,13 +248,13 @@ export default function HolmanIntegration() {
   };
 
   return (
-    <MainContent>
+    <MainContent className="overflow-hidden">
       <TopBar 
         title="Holman API Integration" 
         breadcrumbs={["Home", "API Management", "Holman"]}
       />
       
-      <main className="p-6">
+      <main className="p-6 overflow-hidden">
         <BackButton href="/api-management" />
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
