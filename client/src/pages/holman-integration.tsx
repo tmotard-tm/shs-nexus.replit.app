@@ -211,37 +211,42 @@ export default function HolmanIntegration() {
             </span>
           </div>
         </div>
-        <div className="border rounded-lg max-h-[500px] max-w-full overflow-auto">
-          <table className="text-sm border-collapse" style={{ minWidth: '100%', width: 'max-content' }}>
-            <thead>
-              <tr>
-                {columns.map((col) => (
-                  <th 
-                    key={col} 
-                    className="px-4 py-3 text-left font-medium whitespace-nowrap bg-muted border-b shadow-sm"
-                    style={{ position: 'sticky', top: 0, zIndex: 10 }}
-                  >
-                    {col.replace(/([A-Z])/g, ' $1').trim()}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item: any, idx: number) => (
-                <tr 
-                  key={idx} 
-                  data-testid={`row-${type}-${idx}`}
-                  className="border-b hover:bg-muted/50"
-                >
+        <div className="border rounded-lg max-w-full overflow-x-auto">
+          <div className="min-w-full">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-muted">
+                <tr>
                   {columns.map((col) => (
-                    <td key={col} className="px-4 py-3 whitespace-nowrap">
-                      {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
-                    </td>
+                    <th 
+                      key={col} 
+                      className="px-4 py-3 text-left font-medium whitespace-nowrap bg-muted border-b"
+                    >
+                      {col.replace(/([A-Z])/g, ' $1').trim()}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+            </table>
+            <div className="max-h-[450px] overflow-y-auto">
+              <table className="w-full text-sm border-collapse">
+                <tbody>
+                  {items.map((item: any, idx: number) => (
+                    <tr 
+                      key={idx} 
+                      data-testid={`row-${type}-${idx}`}
+                      className="border-b hover:bg-muted/50"
+                    >
+                      {columns.map((col) => (
+                        <td key={col} className="px-4 py-3 whitespace-nowrap">
+                          {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     );
