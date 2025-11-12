@@ -48,26 +48,50 @@ export default function HolmanIntegration() {
     },
   });
 
+  const vehiclesUrl = `/api/holman/vehicles?${new URLSearchParams({ 
+    lesseeCode: lesseeCode || '', 
+    pageNumber: pageNumber.toString(),
+    pageSize: '100'
+  }).toString()}`;
+
+  const contactsUrl = `/api/holman/contacts?${new URLSearchParams({ 
+    lesseeCode: lesseeCode || '', 
+    pageNumber: pageNumber.toString(),
+    pageSize: '100'
+  }).toString()}`;
+
+  const maintenanceUrl = `/api/holman/maintenance?${new URLSearchParams({ 
+    lesseeCode: lesseeCode || '', 
+    pageNumber: pageNumber.toString(),
+    pageSize: '100'
+  }).toString()}`;
+
+  const odometerUrl = `/api/holman/odometer?${new URLSearchParams({ 
+    lesseeCode: lesseeCode || '', 
+    pageNumber: pageNumber.toString(),
+    pageSize: '100'
+  }).toString()}`;
+
   const { data: vehiclesData, isLoading: vehiclesLoading, error: vehiclesError, refetch: refetchVehicles } = useQuery({
-    queryKey: ["/api/holman/vehicles", lesseeCode, pageNumber],
+    queryKey: [vehiclesUrl],
     enabled: activeTab === "vehicles",
     retry: false,
   });
 
   const { data: contactsData, isLoading: contactsLoading, error: contactsError, refetch: refetchContacts } = useQuery({
-    queryKey: ["/api/holman/contacts", lesseeCode, pageNumber],
+    queryKey: [contactsUrl],
     enabled: activeTab === "contacts",
     retry: false,
   });
 
   const { data: maintenanceData, isLoading: maintenanceLoading, error: maintenanceError, refetch: refetchMaintenance } = useQuery({
-    queryKey: ["/api/holman/maintenance", lesseeCode, pageNumber],
+    queryKey: [maintenanceUrl],
     enabled: activeTab === "maintenance",
     retry: false,
   });
 
   const { data: odometerData, isLoading: odometerLoading, error: odometerError, refetch: refetchOdometer } = useQuery({
-    queryKey: ["/api/holman/odometer", lesseeCode, pageNumber],
+    queryKey: [odometerUrl],
     enabled: activeTab === "odometer",
     retry: false,
   });
