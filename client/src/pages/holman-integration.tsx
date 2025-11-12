@@ -26,6 +26,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function HolmanIntegration() {
   const { toast } = useToast();
@@ -585,15 +592,23 @@ export default function HolmanIntegration() {
                   {vehiclesParams.statusCodes.split(',').map(c => c.trim()).includes('3') && (
                     <div>
                       <Label htmlFor="vehicles-sold-date-code">Sold Date Code</Label>
-                      <Input
-                        id="vehicles-sold-date-code"
+                      <Select
                         value={vehiclesParams.soldDateCode}
-                        onChange={(e) => setVehiclesParams({...vehiclesParams, soldDateCode: e.target.value})}
-                        placeholder="e.g., 5"
-                        data-testid="input-vehicles-sold-date-code"
-                      />
+                        onValueChange={(value) => setVehiclesParams({...vehiclesParams, soldDateCode: value})}
+                      >
+                        <SelectTrigger id="vehicles-sold-date-code" data-testid="select-vehicles-sold-date-code">
+                          <SelectValue placeholder="Select sold date range" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 – Previous Month</SelectItem>
+                          <SelectItem value="2">2 – Previous Three months</SelectItem>
+                          <SelectItem value="3">3 – Previous Six months</SelectItem>
+                          <SelectItem value="4">4 – Previous 12 months</SelectItem>
+                          <SelectItem value="5">5 – All sold assets</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Required when status code 3 is used (default: 5)
+                        Required when status code 3 (Sold) is selected
                       </p>
                     </div>
                   )}
