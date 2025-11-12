@@ -190,11 +190,14 @@ export class HolmanApiService {
   ): Promise<HolmanBaseResponse<HolmanVehicle>> {
     const params = new URLSearchParams({
       pageNumber: pageNumber.toString(),
-      pageSize: pageSize.toString()
+      pageSize: pageSize.toString(),
+      statusCodes: ''
     });
     
     if (lesseeCode) {
       params.set('lesseeCodes', lesseeCode);
+    } else {
+      params.set('lesseeCodes', '');
     }
     
     return this.makeRequest<HolmanBaseResponse<HolmanVehicle>>(`/vehicles/basic-query?${params}`);
@@ -237,6 +240,8 @@ export class HolmanApiService {
     
     if (lesseeCode) {
       params.set('lesseeCodes', lesseeCode);
+    } else {
+      params.set('lesseeCodes', '');
     }
     
     return this.makeRequest<HolmanBaseResponse<HolmanContact>>(`/contacts/basic-query?${params}`);
@@ -274,11 +279,14 @@ export class HolmanApiService {
   ): Promise<HolmanBaseResponse<HolmanMaintenance>> {
     const params = new URLSearchParams({
       pageNumber: pageNumber.toString(),
-      pageSize: pageSize.toString()
+      pageSize: pageSize.toString(),
+      poDateCode: '1'
     });
     
     if (lesseeCode) {
       params.set('lesseeCodes', lesseeCode);
+    } else {
+      params.set('lesseeCodes', '');
     }
     
     return this.makeRequest<HolmanBaseResponse<HolmanMaintenance>>(`/maintenance/purchase-orders/basic-query?${params}`);
@@ -322,6 +330,8 @@ export class HolmanApiService {
     
     if (lesseeCode) {
       params.set('lesseeCodes', lesseeCode);
+    } else {
+      params.set('lesseeCodes', '');
     }
     
     return this.makeRequest<HolmanBaseResponse<HolmanOdometer>>(`/odometer/basic-query?${params}`);
