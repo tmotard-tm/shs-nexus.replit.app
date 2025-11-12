@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
-import { RefreshCw, Database, Users, Wrench, Gauge, CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { RefreshCw, Database, Users, Wrench, Gauge, CheckCircle, XCircle, Loader2, ArrowUpDown, ArrowUp, ArrowDown, Filter } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -20,10 +20,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export default function HolmanIntegration() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("overview");
+  
+  const [sortConfig, setSortConfig] = useState<{column: string, direction: 'asc' | 'desc'} | null>(null);
+  const [filters, setFilters] = useState<Record<string, string[]>>({});
   
   const [vehiclesParams, setVehiclesParams] = useState({
     lesseeCodes: "2B56",
@@ -188,7 +197,7 @@ export default function HolmanIntegration() {
       );
     }
 
-    const items = data.items;
+    let items = data.items;
     let allColumns = items.length > 0 ? Object.keys(items[0]) : [];
     
     // Show all columns with holmanVehicleNumber and vin first
@@ -197,6 +206,62 @@ export default function HolmanIntegration() {
       const otherColumns = allColumns.filter(col => col !== 'holmanVehicleNumber' && col !== 'vin');
       columns = ['holmanVehicleNumber', 'vin', ...otherColumns];
     }
+
+    // Apply filters
+    if (Object.keys(filters).length > 0) {
+      items = items.filter((item: any) => {
+        return Object.entries(filters).every(([col, selectedValues]) => {
+          if (selectedValues.length === 0) return true;
+          const itemValue = String(item[col] || '');
+          return selectedValues.includes(itemValue);
+        });
+      });
+    }
+
+    // Apply sorting
+    if (sortConfig) {
+      items = [...items].sort((a: any, b: any) => {
+        const aValue = String(a[sortConfig.column] || '');
+        const bValue = String(b[sortConfig.column] || '');
+        
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    const handleSort = (column: string) => {
+      setSortConfig(current => {
+        if (!current || current.column !== column) {
+          return { column, direction: 'asc' };
+        }
+        if (current.direction === 'asc') {
+          return { column, direction: 'desc' };
+        }
+        return null;
+      });
+    };
+
+    const getUniqueValues = (column: string) => {
+      const values = new Set(data.items.map((item: any) => String(item[column] || '')));
+      return Array.from(values).sort();
+    };
+
+    const toggleFilter = (column: string, value: string) => {
+      setFilters(current => {
+        const currentFilters = current[column] || [];
+        const newFilters = currentFilters.includes(value)
+          ? currentFilters.filter(v => v !== value)
+          : [...currentFilters, value];
+        
+        if (newFilters.length === 0) {
+          const { [column]: _, ...rest } = current;
+          return rest;
+        }
+        
+        return { ...current, [column]: newFilters };
+      });
+    };
 
     return (
       <div className="space-y-4">
@@ -219,9 +284,50 @@ export default function HolmanIntegration() {
                   {columns.map((col) => (
                     <th 
                       key={col} 
-                      className="px-4 py-3 text-left font-medium whitespace-nowrap bg-muted border-b"
+                      className="px-2 py-2 text-left font-medium whitespace-nowrap bg-muted border-b"
                     >
-                      {col.replace(/([A-Z])/g, ' $1').trim()}
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-auto p-1 hover:bg-muted-foreground/10"
+                          onClick={() => handleSort(col)}
+                        >
+                          <span className="text-xs">{col.replace(/([A-Z])/g, ' $1').trim()}</span>
+                          {sortConfig?.column === col ? (
+                            sortConfig.direction === 'asc' ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />
+                          ) : (
+                            <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />
+                          )}
+                        </Button>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-auto p-1 hover:bg-muted-foreground/10">
+                              <Filter className={`h-3 w-3 ${filters[col]?.length > 0 ? 'text-primary' : 'opacity-50'}`} />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-56 max-h-64 overflow-y-auto" align="start">
+                            <div className="space-y-2">
+                              <div className="font-medium text-sm">Filter by {col}</div>
+                              {getUniqueValues(col).map((value) => (
+                                <div key={value} className="flex items-center space-x-2">
+                                  <Checkbox
+                                    id={`${col}-${value}`}
+                                    checked={filters[col]?.includes(value) || false}
+                                    onCheckedChange={() => toggleFilter(col, value)}
+                                  />
+                                  <label
+                                    htmlFor={`${col}-${value}`}
+                                    className="text-sm cursor-pointer flex-1"
+                                  >
+                                    {value || '(empty)'}
+                                  </label>
+                                </div>
+                              ))}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
                     </th>
                   ))}
                 </tr>
