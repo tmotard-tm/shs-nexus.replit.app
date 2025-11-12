@@ -483,7 +483,7 @@ export default function HolmanIntegration() {
           </CardHeader>
           <CardContent>
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
                 <TabsTrigger value="vehicles" data-testid="tab-vehicles">
                   <Database className="h-4 w-4 mr-2" />
