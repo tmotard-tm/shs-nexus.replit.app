@@ -211,29 +211,34 @@ export default function HolmanIntegration() {
             </span>
           </div>
         </div>
-        <div className="border rounded-lg overflow-auto max-h-[500px]">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted sticky top-0 z-10">
-                {columns.map((col) => (
-                  <TableHead key={col} className="capitalize whitespace-nowrap bg-muted">
-                    {col.replace(/([A-Z])/g, ' $1').trim()}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((item: any, idx: number) => (
-                <TableRow key={idx} data-testid={`row-${type}-${idx}`}>
+        <div className="relative border rounded-lg">
+          <div className="max-h-[500px] overflow-auto">
+            <Table className="min-w-max border-collapse">
+              <TableHeader>
+                <TableRow>
                   {columns.map((col) => (
-                    <TableCell key={col} className="whitespace-nowrap">
-                      {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
-                    </TableCell>
+                    <TableHead 
+                      key={col} 
+                      className="capitalize whitespace-nowrap sticky top-0 z-10 bg-background shadow-sm border-b"
+                    >
+                      {col.replace(/([A-Z])/g, ' $1').trim()}
+                    </TableHead>
                   ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {items.map((item: any, idx: number) => (
+                  <TableRow key={idx} data-testid={`row-${type}-${idx}`}>
+                    {columns.map((col) => (
+                      <TableCell key={col} className="whitespace-nowrap">
+                        {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col] || '-')}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       </div>
     );
