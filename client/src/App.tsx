@@ -22,6 +22,7 @@ import RequesterInterface from "@/pages/requester";
 import ApproverInterface from "@/pages/approver";
 import RequestsPage from "@/pages/requests";
 import ApiManagement from "@/pages/api-management";
+import HolmanIntegration from "@/pages/holman-integration";
 import QueueManagement from "@/pages/queue-management";
 import NTAOQueuePage from "@/pages/ntao-queue";
 import AssetsQueuePage from "@/pages/assets-queue";
@@ -274,6 +275,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <ApiManagement />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/holman-integration">
+        <ProtectedRoute>
+          <MainContent>
+            <HolmanIntegration />
           </MainContent>
         </ProtectedRoute>
       </Route>
