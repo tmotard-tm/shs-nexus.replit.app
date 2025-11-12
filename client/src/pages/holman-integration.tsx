@@ -211,14 +211,14 @@ export default function HolmanIntegration() {
             </span>
           </div>
         </div>
-        <div className="border rounded-lg max-h-[500px] overflow-auto" style={{ width: '100%' }}>
+        <div className="border rounded-lg max-h-[500px] max-w-full overflow-auto">
           <table className="text-sm border-collapse" style={{ minWidth: '100%', width: 'max-content' }}>
             <thead>
               <tr>
                 {columns.map((col) => (
                   <th 
                     key={col} 
-                    className="px-4 py-3 text-left font-medium whitespace-nowrap bg-muted border-b"
+                    className="px-4 py-3 text-left font-medium whitespace-nowrap bg-muted border-b shadow-sm"
                     style={{ position: 'sticky', top: 0, zIndex: 10 }}
                   >
                     {col.replace(/([A-Z])/g, ' $1').trim()}
@@ -254,7 +254,7 @@ export default function HolmanIntegration() {
         breadcrumbs={["Home", "API Management", "Holman"]}
       />
       
-      <main className="p-6 max-w-full overflow-x-hidden">
+      <main className="p-6">
         <BackButton href="/api-management" />
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">

@@ -13,8 +13,8 @@ export function MainContent({ children, className }: MainContentProps) {
   return (
     <div 
       className={cn(
-        "flex-1 transition-all duration-300",
-        isCollapsed ? "ml-16" : "ml-64",
+        "flex-1 w-full min-w-0 overflow-x-hidden flex flex-col transition-all duration-300",
+        isCollapsed ? "pl-16" : "pl-64",
         className
       )}
     >

@@ -51,7 +51,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         <div className="dev-banner">
           🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
         </div>
-        <div className="min-h-screen bg-background flex">
+        <div className="min-h-screen bg-background flex overflow-x-hidden">
           <Sidebar />
           {children}
         </div>
