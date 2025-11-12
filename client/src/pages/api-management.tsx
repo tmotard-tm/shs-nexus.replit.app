@@ -13,7 +13,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { ApiConfiguration } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
-import { Plus, Settings, Trash2, TestTube } from "lucide-react";
+import { Plus, Settings, Trash2, TestTube, Database, ArrowRight } from "lucide-react";
+import { Link } from "wouter";
 
 export default function ApiManagement() {
   const { toast } = useToast();
@@ -207,6 +208,38 @@ export default function ApiManagement() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Fleet Integrations */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle data-testid="text-fleet-integrations-title">Fleet Management Integrations</CardTitle>
+            <CardDescription>
+              Access fleet management systems and third-party integrations
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/holman-integration">
+              <a className="block group" data-testid="link-holman-integration">
+                <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary hover:bg-accent transition-all cursor-pointer">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                      <Database className="h-6 w-6 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
+                        Holman Fleet Integration
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        Manage vehicles, contacts, maintenance records, and odometer data
+                      </p>
+                    </div>
+                  </div>
+                  <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                </div>
+              </a>
+            </Link>
+          </CardContent>
+        </Card>
 
         {/* API Configurations */}
         <Card>
