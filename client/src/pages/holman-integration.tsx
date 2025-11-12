@@ -180,10 +180,7 @@ export default function HolmanIntegration() {
       );
     }
 
-    console.log(`[${type}] Data received:`, data);
-
-    if (!data || !data.data || data.data.length === 0) {
-      console.log(`[${type}] No data - data:`, !!data, 'data.data:', !!data?.data, 'data.data.length:', data?.data?.length);
+    if (!data || !data.items || data.items.length === 0) {
       return (
         <div className="text-center py-8 text-muted-foreground">
           No {type} data available
@@ -191,7 +188,7 @@ export default function HolmanIntegration() {
       );
     }
 
-    const items = data.data.slice(0, 10);
+    const items = data.items.slice(0, 10);
     const columns = items.length > 0 ? Object.keys(items[0]) : [];
 
     return (
