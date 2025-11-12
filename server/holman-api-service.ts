@@ -186,13 +186,15 @@ export class HolmanApiService {
   async getVehicles(
     lesseeCode?: string,
     pageNumber: number = 1,
-    pageSize: number = 100
+    pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanVehicle>> {
-    const endpoint = lesseeCode 
-      ? `/vehicle/basic?lesseeCode=${lesseeCode}&pageNumber=${pageNumber}&pageSize=${pageSize}`
-      : `/vehicle/basic?pageNumber=${pageNumber}&pageSize=${pageSize}`;
+    const params = new URLSearchParams({
+      lesseeCodes: lesseeCode || '',
+      pageNumber: pageNumber.toString(),
+      pageSize: pageSize.toString()
+    });
     
-    return this.makeRequest<HolmanBaseResponse<HolmanVehicle>>(endpoint);
+    return this.makeRequest<HolmanBaseResponse<HolmanVehicle>>(`/vehicles/basic-query?${params}`);
   }
 
   async queryVehiclesCustom(
@@ -206,7 +208,7 @@ export class HolmanApiService {
     }
   ): Promise<HolmanBaseResponse<HolmanVehicle>> {
     return this.makeRequest<HolmanBaseResponse<HolmanVehicle>>(
-      '/vehicle/custom',
+      '/vehicles/custom-query',
       'POST',
       query
     );
@@ -214,7 +216,7 @@ export class HolmanApiService {
 
   async submitVehicle(vehicleData: Partial<HolmanVehicle>): Promise<any> {
     return this.makeRequest(
-      '/vehicle/submit',
+      '/vehicles/submit',
       'POST',
       vehicleData
     );
@@ -223,13 +225,15 @@ export class HolmanApiService {
   async getContacts(
     lesseeCode?: string,
     pageNumber: number = 1,
-    pageSize: number = 100
+    pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanContact>> {
-    const endpoint = lesseeCode
-      ? `/contact/basic?lesseeCode=${lesseeCode}&pageNumber=${pageNumber}&pageSize=${pageSize}`
-      : `/contact/basic?pageNumber=${pageNumber}&pageSize=${pageSize}`;
+    const params = new URLSearchParams({
+      lesseeCodes: lesseeCode || '',
+      pageNumber: pageNumber.toString(),
+      pageSize: pageSize.toString()
+    });
     
-    return this.makeRequest<HolmanBaseResponse<HolmanContact>>(endpoint);
+    return this.makeRequest<HolmanBaseResponse<HolmanContact>>(`/contacts/basic-query?${params}`);
   }
 
   async queryContactsCustom(
@@ -243,7 +247,7 @@ export class HolmanApiService {
     }
   ): Promise<HolmanBaseResponse<HolmanContact>> {
     return this.makeRequest<HolmanBaseResponse<HolmanContact>>(
-      '/contact/custom',
+      '/contacts/custom-query',
       'POST',
       query
     );
@@ -251,7 +255,7 @@ export class HolmanApiService {
 
   async submitContact(contactData: Partial<HolmanContact>): Promise<any> {
     return this.makeRequest(
-      '/contact/submit',
+      '/contacts/submit',
       'POST',
       contactData
     );
@@ -260,13 +264,15 @@ export class HolmanApiService {
   async getMaintenance(
     lesseeCode?: string,
     pageNumber: number = 1,
-    pageSize: number = 100
+    pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanMaintenance>> {
-    const endpoint = lesseeCode
-      ? `/maintenance/basic?lesseeCode=${lesseeCode}&pageNumber=${pageNumber}&pageSize=${pageSize}`
-      : `/maintenance/basic?pageNumber=${pageNumber}&pageSize=${pageSize}`;
+    const params = new URLSearchParams({
+      lesseeCodes: lesseeCode || '',
+      pageNumber: pageNumber.toString(),
+      pageSize: pageSize.toString()
+    });
     
-    return this.makeRequest<HolmanBaseResponse<HolmanMaintenance>>(endpoint);
+    return this.makeRequest<HolmanBaseResponse<HolmanMaintenance>>(`/maintenance/purchase-orders/basic-query?${params}`);
   }
 
   async queryMaintenanceCustom(
@@ -280,7 +286,7 @@ export class HolmanApiService {
     }
   ): Promise<HolmanBaseResponse<HolmanMaintenance>> {
     return this.makeRequest<HolmanBaseResponse<HolmanMaintenance>>(
-      '/maintenance/custom',
+      '/maintenance/purchase-orders/custom-query',
       'POST',
       query
     );
@@ -288,7 +294,7 @@ export class HolmanApiService {
 
   async submitMaintenance(maintenanceData: Partial<HolmanMaintenance>): Promise<any> {
     return this.makeRequest(
-      '/maintenance/submit',
+      '/maintenance/purchase-orders/submit',
       'POST',
       maintenanceData
     );
@@ -297,13 +303,16 @@ export class HolmanApiService {
   async getOdometer(
     lesseeCode?: string,
     pageNumber: number = 1,
-    pageSize: number = 100
+    pageSize: number = 1000
   ): Promise<HolmanBaseResponse<HolmanOdometer>> {
-    const endpoint = lesseeCode
-      ? `/odometer/basic?lesseeCode=${lesseeCode}&pageNumber=${pageNumber}&pageSize=${pageSize}`
-      : `/odometer/basic?pageNumber=${pageNumber}&pageSize=${pageSize}`;
+    const params = new URLSearchParams({
+      lesseeCodes: lesseeCode || '',
+      pageNumber: pageNumber.toString(),
+      pageSize: pageSize.toString(),
+      odometerHistoryDateCode: '1'
+    });
     
-    return this.makeRequest<HolmanBaseResponse<HolmanOdometer>>(endpoint);
+    return this.makeRequest<HolmanBaseResponse<HolmanOdometer>>(`/odometer/basic-query?${params}`);
   }
 
   async queryOdometerCustom(
@@ -317,7 +326,7 @@ export class HolmanApiService {
     }
   ): Promise<HolmanBaseResponse<HolmanOdometer>> {
     return this.makeRequest<HolmanBaseResponse<HolmanOdometer>>(
-      '/odometer/custom',
+      '/odometer/custom-query',
       'POST',
       query
     );

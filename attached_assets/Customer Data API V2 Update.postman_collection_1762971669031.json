@@ -1,0 +1,2109 @@
+{
+	"info": {
+		"_postman_id": "e83f16e0-5dba-4d8d-8560-86e0455400dc",
+		"name": "Customer Data API V2 Update",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "35149629"
+	},
+	"item": [
+		{
+			"name": "Accidents",
+			"item": [
+				{
+					"name": "Get Accidents",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/accident/claims/basic-query?lesseeCodes=&pageNumber=1&pageSize=1000",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"accident",
+								"claims",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "claimModifiedDateCode",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Accidents Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"additionalFilters\": [\r\n        {\r\n            \"name\": \"claimModifiedDateCode\",\r\n            \"values\": [\r\n                \"5\"\r\n            ]\r\n        }\r\n    ],\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 1\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/accident/claims/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"accident",
+								"claims",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Accident Claim",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let refToken = pm.response.json().user_Ref_Token;\r",
+									"pm.environment.set('refToken', refToken);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"vehicle_details\": {\r\n      \"lesseeCode\": \"9010\",\r\n      \"holmanVehicleNumber\": \"000014\",\r\n      \"odometer\": \"14000\"\r\n    },\r\n    \"driver_details\": {\r\n      \"driverFirstName\": \"MOONSHINE\",\r\n      \"driverLastName\": \"CAPRON\",\r\n      \"relationship\": \"1\"\r\n    },\r\n    \"conditions\": {\r\n      \"reportedVia\": \"03\",\r\n      \"locationAddress1\": \"4001 LEADENHALL RD\",\r\n      \"locationCity\": \"MOUNT LAUREL\",\r\n      \"locationState\": \"NJ\",\r\n      \"vehicleUse\": \"1\",\r\n      \"weatherDescription\": \"3\",\r\n      \"vehicleDrivable\": \"02\"\r\n    },\r\n    \"accident_details\": {\r\n      \"reportedDate\": \"07/24/2023 13:25\",\r\n      \"accidentDate\": \"07/24/2023 11:25\",\r\n      \"accidentTypeDescription\": \"9\",\r\n      \"responsibility\": \"PR\",\r\n      \"fleetVehicleDamage\": \"3\",\r\n      \"injury\": \"1\"\r\n    },\r\n    \"subrogation_details\": {\r\n      \"totalPoEstimates\": \"4586.74\",\r\n      \"clientClaimNumber\": \"APITEST5\",\r\n      \"totalPoCost\": \"3000.74\"\r\n    },\r\n    \"misc_info\": {\r\n      \"driverEmail\": \"testv@arifleet.com\",\r\n      \"policeOnScene\": \"Y\",\r\n      \"roadCondition\": \"1\",\r\n      \"closedDate\": \"07/24/2023 11:25\",\r\n      \"employeeId\": \"305826B\",\r\n      \"seatBelt\": \"N\",\r\n      \"handsFreeDevice\": \"Y\",\r\n      \"driverStatement\": \"INSURED WAS PULLING INTO A BODY SHOP, SCRAPED OTHER PARKED UNATTENDED VEHICLE.\",\r\n      \"vendorName\": \"NATIONAL\"\r\n    }\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/accident/claims/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"accident",
+								"claims",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Adjunct Address",
+			"item": [
+				{
+					"name": "Submit Adjunct Address",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let refToken = pm.response.json().user_Ref_Token;\r",
+									"pm.environment.set('refToken', refToken);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"lesseeCode\": \"9010\",\r\n    \"divisionId\": \"**\",\r\n    \"dataSource\": \"client data 1\",\r\n    \"dataValue\": \"X234\",\r\n    \"companyName\": \"string\",\r\n    \"firstName\": \"string\",\r\n    \"lastName\": \"string\",\r\n    \"address1\": \"string\",\r\n    \"address2\": \"string\",\r\n    \"address3\": \"string\",\r\n    \"city\": \"Mount Laurel\",\r\n    \"state\": \"NJ\",\r\n    \"zipCode\": \"08054\",\r\n    \"contactFirstName\": \"string\",\r\n    \"contactLastName\": \"string\",\r\n    \"homePhone\": \"1234567890\",\r\n    \"officePhone\": \"1234567890\",\r\n    \"officeExt\": \"1234\",\r\n    \"cellPhone\": \"1234567890\",\r\n    \"fax\": \"1234567890\",\r\n    \"internationalPhone\": \"1234567890\",\r\n    \"officeEmail\": \"test@holman.com\",\r\n    \"billingEmail\": \"test@holman.com\",\r\n    \"cd1Mapping\": \"string\",\r\n    \"cd2Mapping\": \"string\",\r\n    \"cd3Mapping\": \"string\",\r\n    \"cd4Mapping\": \"string\",\r\n    \"cd5Mapping\": \"string\",\r\n    \"cd6Mapping\": \"string\",\r\n    \"cd7Mapping\": \"string\",\r\n    \"ad1Mapping\": \"string\",\r\n    \"ad2Mapping\": \"string\",\r\n    \"ad3Mapping\": \"string\",\r\n    \"ad4Mapping\": \"string\",\r\n    \"ad5Mapping\": \"string\",\r\n    \"ad6Mapping\": \"string\",\r\n    \"ad7Mapping\": \"string\",\r\n    \"ad8Mapping\": \"string\",\r\n    \"ad9Mapping\": \"string\",\r\n    \"ad10Mapping\": \"string\",\r\n    \"ad11Mapping\": \"string\",\r\n    \"ad12Mapping\": \"string\",\r\n    \"ad13Mapping\": \"string\",\r\n    \"ad14Mapping\": \"string\",\r\n    \"divisionMapping\": \"**\",\r\n    \"subDivisionMapping\": \"XXXX\",\r\n    \"execDriverMapping\": \"Y\",\r\n    \"driverClassMapping\": \"Z\",\r\n    \"ad1DateMapping\": \"12/30/2024\",\r\n    \"ad2DateMapping\": \"12/30/2024\",\r\n    \"ad3DateMapping\": \"12/30/2024\",\r\n    \"ad4DateMapping\": \"12/30/2024\"\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/adjunct-addresses/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"adjunct-addresses",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Adjunct Address",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"lesseeCode\": \"9010\",\r\n    \"divisionId\": \"**\",\r\n    \"dataSource\": \"client data 1\",\r\n    \"dataValue\": \"X234\"\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/adjunct-addresses/delete",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"adjunct-addresses",
+								"delete"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Billing",
+			"item": [
+				{
+					"name": "Get Billing",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/billing/invoices/basic-query?lesseeCodes=&invoiceDateCode=&pageNumber=1&pageSize=1000",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"billing",
+								"invoices",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "billingTypeCode",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "invoiceDateCode",
+									"value": ""
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Billing Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 1\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ],\r\n    \"includeNonBilled\": true,\r\n    \"billingTypeCode\": 2\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/billing/invoices/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"billing",
+								"invoices",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Engine Hour",
+			"item": [
+				{
+					"name": "Get Hour Meter",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/engine-hours/basic-query?lesseeCodes=&hourmeterHistDateCode=1&pageNumber=1&pageSize=1000",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"engine-hours",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "hourmeterHistDateCode",
+									"value": "1"
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Hour Meter Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"additionalFilters\": [\r\n        // {\r\n        //     \"name\": \"holmanVehicleNumber\",\r\n        //     \"values\": [\r\n        //         \"00203\"\r\n        //     ]\r\n        // },\r\n        {\r\n            \"name\": \"hourmeterHistDateCode\",\r\n            \"values\": [\r\n                \"5\"\r\n            ]\r\n        }\r\n    ],\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 1\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/engine-hours/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"engine-hours",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Add New Hour Meter",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let refToken = pm.response.json().user_Ref_Token;\r",
+									"pm.environment.set('refToken', refToken);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n    {\r\n        \"lesseeCode\": \"9010\", \r\n        \"holmanVehicleNumber\": \"39021T\",\r\n        \"hourMeter\": \"63\", \r\n        \"hourMeterDate\": \"01/02/2025\", \r\n        \"datasource\": \"API\"\r\n    }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/engine-hours/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"engine-hours",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Fuel",
+			"item": [
+				{
+					"name": "Get Fuel Transactions",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/fuel/transactions/basic-query?lesseeCodes=&transactionLoadDateCode=1&pageNumber=1&pageSize=1000",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"fuel",
+								"transactions",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "transactionLoadDateCode",
+									"value": "1"
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Fuel Transactions Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"include\": [\r\n        \"countryCode\",\r\n        \"lesseeCode\",\r\n        \"vin\",\r\n        \"ccNo\"\r\n    ],\r\n    \"additionalFilters\": [\r\n        {\r\n            \"name\": \"transactionLoadDateCode\",\r\n            \"values\": [\r\n                \"3\"\r\n            ]\r\n        }\r\n    ],\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 1\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/fuel/transactions/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"fuel",
+								"transactions",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit US Fuel Transactions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let refToken = pm.response.json().user_Ref_Token;\r",
+									"pm.environment.set('refToken', refToken);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"amount\": \"114.22\",\r\n    \"clientVehicleNumber\": \"00195\",\r\n    \"driverFirst\": \"JEFFREY M\",\r\n    \"driverFuelPin\": \"238492\",\r\n    \"driverLast\": \"AURE\",\r\n    \"gallons\": \"22\",\r\n    \"holmanVehicleNumber\": \"00195\",\r\n    \"lesseeCode\": \"9010\",\r\n    \"odometer\": \"86914\",\r\n    \"productName\": \"UNLEADED\",\r\n    \"siteAddress\": \"580 REDWOOD HWY FRON\",\r\n    \"siteCity\": \"MILL VALLEY\",\r\n    \"siteName\": \"CHEVRON 0309332\",\r\n    \"siteState\": \"CA\",\r\n    \"siteZip\": \"94941\",\r\n    \"transactionDate\": \"01/13/2025\",\r\n    \"unitCost\": \"5.099\",\r\n    \"vendorName\": \"string\",\r\n    \"vin\": \"1FTYR1ZMXGKA09811\"\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/fuel/transactions/us/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"fuel",
+								"transactions",
+								"us",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Canada Fuel Transactions",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let refToken = pm.response.json().user_Ref_Token;\r",
+									"pm.environment.set('refToken', refToken);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"clientVehicleNumber\": \"18B05\",\r\n    \"driverFirstName\": \"DUHX\",\r\n    \"driverLastName\": \"BACK\",\r\n    \"fuelCode\": \"BD\",\r\n    \"fuelCost\": \"287.83\",\r\n    \"holmanVehicleNumber\": \"A00060\",\r\n    \"lesseeCode\": \"7K77\",\r\n    \"litres\": \"268\",\r\n    \"oilCost\": \"0\",\r\n    \"oilLitres\": \"0\",\r\n    \"otherCost\": \"0\",\r\n    \"siteAddress\": \"TERXACE\",\r\n    \"siteCity\": \"Victoria\",\r\n    \"siteName\": \"SUPERPASS\",\r\n    \"sitePostalCode\": \"V1M4A6\",\r\n    \"siteProvince\": \"BC\",\r\n    \"ticketNumber\": \"600\",\r\n    \"transactionDate\": \"01/06/2025\",\r\n    \"vendorName\": \"CL PETRO CANADA - SUPERPASS\",\r\n    \"vin\": \"3HTDTAPT5KN447175\"\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/fuel/transactions/canada/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"fuel",
+								"transactions",
+								"canada",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Fuel PIN",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let refToken = pm.response.json().user_Ref_Token;\r",
+									"pm.environment.set('refToken', refToken);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"lesseeCode\": \"9010\",\r\n    \"employeeId\": \"JP9010\",\r\n    \"wexPinActive\": \"Y\"\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/fuel/cards/pins/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"fuel",
+								"cards",
+								"pins",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Inspections",
+			"item": [
+				{
+					"name": "Get Inspections",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/inspections/driver/basic-query?lesseeCodes=&inspectionDateCode=1&pageSize=1000&pageNumber=1",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"inspections",
+								"driver",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "inspectionDateCode",
+									"value": "1"
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Inspections Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 1\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/inspections/driver/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"inspections",
+								"driver",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Maintenance",
+			"item": [
+				{
+					"name": "Get Maintenance PO",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/maintenance/purchase-orders/basic-query?lesseeCodes=&poDateCode=1&pageSize=1000&pageNumber=1",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"maintenance",
+								"purchase-orders",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "poDateCode",
+									"value": "1"
+								},
+								{
+									"key": "billPaidDateCode",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Maintenance Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"additionalFilters\": [\r\n        {\r\n            \"name\": \"billPaidDateCode\",\r\n            \"values\": [\r\n                \"3\"\r\n            ]\r\n        }\r\n    ],\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 200\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/maintenance/purchase-orders/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"maintenance",
+								"purchase-orders",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Purchase Order",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let refToken = pm.response.json().user_Ref_Token;\r",
+									"pm.environment.set('refToken', refToken);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"customerPoNumber\": \"\", \r\n    \"invoiceDate\": \"01/14/2025\",\r\n    \"invoiceNumber\": \"JP1000002\",\r\n    \"poNotes\": \"Test PO Submit - Customer API 2.0\", \r\n    \"repairDate\": \"01/14/2025\", \r\n    \"po_details\": [\r\n      {\r\n        \"ataCode\": \"1D001006\",\r\n        \"ataDescription\": \"NON-EMERGENCY - ROADSIDE SERVICE\",\r\n        \"cost\": \"360\",\r\n        \"quantity\": \"1\",\r\n        \"type\": \"RS\" \r\n      }\r\n    ],\r\n    \"vehicle_details\": {\r\n      \"clientVehicleNumber\": \"\", \r\n      \"holmanVehicleNumber\": \"172295\",\r\n      \"lesseeCode\": \"9010\",\r\n      \"odometer\": \"164774\",\r\n      \"vin\": \"1FDUF4GY1HED54302\"\r\n    },\r\n    \"vendor_details\": {\r\n      \"vendorAddressLine1\": \"215 STEEL RD\",\r\n      \"vendorAddressLine2\": \"TEST\",\r\n      \"vendorCity\": \"DALTON\",\r\n      \"vendorName\": \"PHILLIPS TOWING AND GARAGE\",\r\n      \"vendorStateProvince\": \"GA\",\r\n      \"vendorZipPostalCode\": \"30721\"\r\n    }\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/maintenance/purchase-orders/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"maintenance",
+								"purchase-orders",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Maintenance Approver",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let refToken = pm.response.json().user_Ref_Token;\r",
+									"pm.environment.set('refToken', refToken);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n    {\r\n        \"lesseeCode\": \"9010\",\r\n        \"oldEmail\": \"JPMANUAL@GMAIL.COM\",\r\n        \"newEmail\": \"JONATHAN.PAGAR@HOLMAN.COM\",\r\n        \"newName\": \"Jonathan Pagar\",\r\n        \"newPhoneNumber\": \"54085063333\",\r\n        \"newExtension\": \"string\",\r\n        \"newMobileNumber\": \"54085063333\"\r\n    }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/maintenance/approvers/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"maintenance",
+								"approvers",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Odometer",
+			"item": [
+				{
+					"name": "Get Odometer",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/odometer/basic-query?lesseeCodes=&odometerHistoryDateCode=1&pageNumber=1&pageSize=1000",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"odometer",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "odometerHistoryDateCode",
+									"value": "1"
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Odometer Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"additionalFilters\": [\r\n        {\r\n            \"name\": \"odometerHistoryDateCode\",\r\n            \"values\": [\r\n                5\r\n            ]\r\n        }\r\n    ],\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 1\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/odometer/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"odometer",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Odometer",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"datasource\": \"API\",\r\n    \"holmanVehicleNumber\": \"39021T\",\r\n    \"lesseeCode\": \"9010\",\r\n    \"odometer\": \"1000\",\r\n    \"odometerDate\": \"01/02/2025\"\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/odometer/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"odometer",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Order",
+			"item": [
+				{
+					"name": "Get Order Status",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/order/status/basic-query?lesseeCodes=&pageSize=1000&pageNumber=1",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"order",
+								"status",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "orderStatusDateCode",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "orderReceivedDateCode",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": null,
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": null,
+									"disabled": true
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Order Status Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"additionalFilters\": [\r\n        {\r\n            \"name\": \"orderReceivedDateCode\",\r\n            \"values\": [\r\n                \"5\"\r\n            ]\r\n        },\r\n        {\r\n            \"name\": \"holmanVehicleNumber\",\r\n            \"values\": [\r\n                \"240002\"\r\n            ]\r\n        }\r\n    ],\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 1\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/order/status/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"order",
+								"status",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Order Approver",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let refToken = pm.response.json().user_Ref_Token;\r",
+									"pm.environment.set('refToken', refToken);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"userId\": \"ARIJP95\",\r\n    \"approvalId\": \"ARIJP96\",\r\n    \"finalApprovalId\": \"ARIJP97\",\r\n    \"deleteInd\": \"N\"\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/order/approvers/pricenet/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"order",
+								"approvers",
+								"pricenet",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Person",
+			"item": [
+				{
+					"name": "Get Person",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/contacts/basic-query?lesseeCodes=&pageSize=1000&pageNumber=1",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"contacts",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "hireDateCode",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "activationDateCode",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "deactivationDateCode",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "terminationDateCode",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Person Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"include\": [\r\n        \"contactActivationDate\",\r\n        \"contactAddress1\"\r\n    ],\r\n    \"additionalFilters\": [\r\n        {\r\n            \"name\": \"contactEmployeeId\",\r\n            \"values\": [\r\n                \"10100860\"\r\n            ]\r\n        }\r\n    ],\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 200\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/contacts/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"contacts",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Submit Person",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"contactFirstName\": \"James\",\r\n    \"contactMiddleName\": \"\",\r\n    \"contactLastName\": \"Newheart\",\r\n    \"contactEmployeeId\": \"RNTST2\",\r\n    \"contactActivationDate\": \"07/11/2024\",\r\n    \"contactTerminationDate\": \"\",\r\n    \"contactDeactivationDate\": \"\",\r\n    \"contactHireDate\": \"07/10/2024\",\r\n    \"contactEmail\": \"RNTST2@Test.COM\",\r\n    \"contactCellPhone\": \"5555975396\",\r\n    \"contactCellAcceptsText\": \"Y\",\r\n    \"contactWorkPhone\": \"5555975588\",\r\n    \"contactWorkPhoneExtension\": \"\",\r\n    \"contactHomePhone\": \"5555975586\",\r\n    \"contactAddress1\": \"123 Nativity Lane\",\r\n    \"contactAddress2\": \"\",\r\n    \"contactAddress3\": \"\",\r\n    \"city\": \"Mount Laurel\",\r\n    \"stateProvince\": \"NJ\",\r\n    \"zipPostalCode\": \"08054\",\r\n    \"country\": \"US\",\r\n    \"languagePreference\": \"en-US\",\r\n    \"supervisorEmail\": \"\",\r\n    \"contactData1\": \"PnaL6\",\r\n    \"contactData3\": \"dfN6M\",\r\n    \"contactData4\": \"6x6mt\",\r\n    \"contactData5\": \"M747j\",\r\n    \"contactData6\": \"t574d\",\r\n    \"contactData7\": \"CO9AG\",\r\n    \"contactAuxData1\": \"LETS SEE IF\",\r\n    \"contactAuxData2\": \"THIS WORKS AS\",\r\n    \"contactAuxData3\": \"INTENDED. I\",\r\n    \"contactAuxData4\": \"CERTAINLY HOPE SO\",\r\n    \"contactAuxData5\": \"AS IT WOULD BE\",\r\n    \"contactAuxData6\": \"UNFORTUNATE\",\r\n    \"contactAuxData7\": \"IF THIS DID NOT WORK\",\r\n    \"contactAuxData8\": \"TESTING THIS IN\",\r\n    \"contactAuxData9\": \"POSTMAN API\",\r\n    \"contactAuxData10\": \"DEV ON 8/1/2024\",\r\n    \"contactAuxData11\": \"CROSSING MY FINGERS\",\r\n    \"contactAuxData12\": \"THAT THIS WORKS\",\r\n    \"contactAuxData13\": \"ABOUT TO HIT SEND\",\r\n    \"contactAuxData14\": \"AFTER THE DATE FIELDS\",\r\n    \"contactAuxDate1\": \"\",\r\n    \"contactAuxDate2\": \"\",\r\n    \"safety\": {\r\n      \"lesseeCode\": \"9010\",\r\n      \"division\": \"01\",\r\n      \"prefix\": \"0001\",\r\n      \"clientData1\": \"111111\",\r\n      \"clientData2\": \"ACCMAN3\",\r\n      \"clientData3\": \"333333\",\r\n      \"clientData4\": \"44444\",\r\n      \"clientData5\": \"55555\",\r\n      \"clientData6\": \"66666\",\r\n      \"clientData7\": \"TEST\",\r\n      \"auxData1\": \"AUX1A\",\r\n      \"auxData2\": \"AUX2A\",\r\n      \"auxData3\": \"AUX3A\",\r\n      \"auxData4\": \"AUX4A\",\r\n      \"auxData5\": \"AUX5A\",\r\n      \"auxData6\": \"AUX6A\",\r\n      \"auxData7\": \"AUX7A\",\r\n      \"auxData8\": \"AUX8A\",\r\n      \"auxData9\": \"AUX9A\",\r\n      \"auxData10\": \"AUX10A\",\r\n      \"auxData11\": \"AUX9A\",\r\n      \"auxData12\": \"AUX12A\",\r\n      \"auxData13\": \"AUX13A\",\r\n      \"auxData14\": \"AUX14A\",\r\n      \"excludeFromSafety\": \"Y\",\r\n      \"safetyTermDate\": \"\",\r\n      \"updateLegalName\": \"N\"\r\n    },\r\n    \"inventory\": {\r\n      \"lesseeCode\": \"7V71\",\r\n      \"holmanVehicleNumber\": \"ABC123\",\r\n      \"clientVehicleNumber\": \"\",\r\n      \"vin\": \"\",\r\n      \"licensePlate\": \"\",\r\n      \"grantDrvAppAccess\": \"\",\r\n      \"syncDrvNameAndEmpId\": \"\",\r\n      \"syncDrvPhoneAndEmail\": \"\",\r\n      \"syncDrvAddress\": \"\"\r\n    }\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/contacts/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"contacts",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Preventative Maintenance (PM)",
+			"item": [
+				{
+					"name": "Get PM Reminders",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/maintenance/preventive-reminders/basic-query?lesseeCodes=&pmDueDateCode=1&pageSize=1000&pageNumber=1",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"maintenance",
+								"preventive-reminders",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "pmDueDateCode",
+									"value": "1"
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "PM Reminder Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 1\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/maintenance/preventive-reminders/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"maintenance",
+								"preventive-reminders",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Status",
+			"item": [
+				{
+					"name": "Get Status",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/submission/status?refToken={{refToken}}",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"submission",
+								"status"
+							],
+							"query": [
+								{
+									"key": "refToken",
+									"value": "{{refToken}}"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Vehicle",
+			"item": [
+				{
+					"name": "Get Vehicles",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/vehicles/basic-query?lesseeCodes=&statusCodes=&pageSize=1000&pageNumber=1",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"vehicles",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "statusCodes",
+									"value": ""
+								},
+								{
+									"key": "soldDateCode",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Vehicle Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 200\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/vehicles/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"vehicles",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Vehicle Submit",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n    {\r\n        \"lesseeCode\": \"9010\",\r\n        \"holmanVehicleNumber\": \"37035\",\r\n        \"clientVehicleNumber\": \"CPT-1Z053\",\r\n        \"vin\": \"11111111111111111\",\r\n        \"prefix\": \"1647\",\r\n        \"division\": \"01\",\r\n        \"firstName\": \"Test\",\r\n        \"lastName\": \"10-1068-00\",\r\n        \"addressLine1\": \"16055 SPACE CENTER BLVD\",\r\n        \"addressLine2\": \"SUITE 500\",\r\n        \"city\": \"HOUSTON\",\r\n        \"stateProvince\": \"TX\",\r\n        \"zipPostalCode\": \"77062\",\r\n        \"assetType\": \"EQUIPMENT\",\r\n        \"assetSubType\": \"OTHER\",\r\n        \"vendorCode\": \"OTH\",\r\n        \"clientData1\": \"EC SOURCE SE\",\r\n        \"clientData2\": \"\",\r\n        \"clientData3\": \"10\",\r\n        \"clientData4\": \"100-70-00\",\r\n        \"clientData5\": \"10-1068-00\",\r\n        \"clientData6\": \"10-1068-00\",\r\n        \"clientData7\": \"10\",\r\n        \"auxData3\": \"CPT-Z302\",\r\n        \"auxData4\": \"VIBRATORY SOIL COMPACTOR\",\r\n        \"auxData5\": \"\",\r\n        \"auxData8\": \"Test\",\r\n        \"auxData9\": \"R\",\r\n        \"modelYear\": \"2024\",\r\n        \"makeClient\": \"CAT\",\r\n        \"modelClient\": \"CS12\",\r\n        \"deliveryDate\": \"06/17/2024\",\r\n        \"soldAmount\": 0.0,\r\n        \"gvw\": 0,\r\n        \"vehicleType\": 4,\r\n        \"fuelTypeCode\": \"31\",\r\n        \"fuelCapacity\": 0.0,\r\n        \"fuelMeasureType\": \"G\"\r\n    }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/vehicles/submit",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"vehicles",
+								"submit"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Violations",
+			"item": [
+				{
+					"name": "Get Violations",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_endpoint}}/violations-tolls/basic-query?lesseeCodes=&violationDateCode=1&pageSize=1000&pageNumber=1",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"violations-tolls",
+								"basic-query"
+							],
+							"query": [
+								{
+									"key": "lesseeCodes",
+									"value": ""
+								},
+								{
+									"key": "violationDateCode",
+									"value": "1"
+								},
+								{
+									"key": "lastChangeRecordId",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "lastChangeDate",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "pageSize",
+									"value": "1000"
+								},
+								{
+									"key": "pageNumber",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Violations Query",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"additionalFilters\": [\r\n        {\r\n            \"name\": \"violationDateCode\",\r\n            \"values\": [\r\n                \"5\"\r\n            ]\r\n        },\r\n        {\r\n            \"name\": \"division\",\r\n            \"values\": [\r\n                \"WE\"\r\n            ]\r\n        }\r\n    ],\r\n    \"paging\": {\r\n        \"pageNumber\": 1,\r\n        \"pageSize\": 200\r\n    },\r\n    \"lesseeCodes\": [\r\n        \"9010\"\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/violations-tolls/custom-query",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"violations-tolls",
+								"custom-query"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Insights User Admin",
+			"item": [
+				{
+					"name": "Copy Insights User",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "[\r\n  {\r\n    \"user_details\": {\r\n      \"userEmail\": \"testapi57@holman.com\",\r\n      \"prefix\": \"X125\",\r\n      \"userName\": \"testUserAPI57\",\r\n      \"address1\": \"Test Address\",\r\n      \"address2\": \"Test Address 2\",\r\n      \"city\": \"Mount Laurel\",\r\n      \"state\": \"NJ\",\r\n      \"zipCode\": \"08054\",\r\n      \"country\": \"USA\",\r\n      \"status\": \"ADDPENDING\",\r\n      \"initialPermissionRequested\": \"READ\",\r\n      \"dashboardMasterId\": \"123\",\r\n      \"fleetViewMasterId\": \"456\",\r\n      \"selectorMasterId\": \"789\",\r\n      \"language\": \"EN\",\r\n      \"personaId\": \"012\"\r\n    },\r\n    \"lessee_details\": [\r\n      {\r\n        \"lesseeCode\": \"9010\",\r\n        \"divisions\": \"XX\",\r\n        \"prefixes\": \"X111\"\r\n      },\r\n      {\r\n        \"lesseeCode\": \"9010\",\r\n        \"divisions\": \"XY\",\r\n        \"prefixes\": \"X112\"\r\n      },\r\n      {\r\n        \"lesseeCode\": \"9010\",\r\n        \"divisions\": \"ZZ\",\r\n        \"prefixes\": \"X111\"\r\n      }\r\n    ]\r\n  },\r\n  {\r\n    \"user_details\": {\r\n      \"userEmail\": \"testapi562@holman.com\",\r\n      \"prefix\": \"X125\",\r\n      \"userName\": \"testUserAPI562\",\r\n      \"address1\": \"Test Address\",\r\n      \"address2\": \"Test Address 2\",\r\n      \"city\": \"Toronto\",\r\n      \"state\": \"ON\",\r\n      \"zipCode\": \"M4B1B6\",\r\n      \"country\": \"CANADA\",\r\n      \"status\": \"ADDPENDING\",\r\n      \"initialPermissionRequested\": \"CANREAD\",\r\n      \"dashboardMasterId\": \"123\",\r\n      \"fleetViewMasterId\": \"456\",\r\n      \"selectorMasterId\": \"789\",\r\n      \"language\": \"EN\",\r\n      \"personaId\": \"012\"\r\n    },\r\n    \"lessee_details\": [\r\n      {\r\n        \"lesseeCode\": \"9010\",\r\n        \"divisions\": \"XX\",\r\n        \"prefixes\": \"X111\"\r\n      }\r\n    ]\r\n  }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{api_endpoint}}/insights/users/create",
+							"host": [
+								"{{api_endpoint}}"
+							],
+							"path": [
+								"insights",
+								"users",
+								"create"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Auth",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"let response = pm.response.json();\r",
+							"pm.collectionVariables.set('token', response.access_token);"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "oauth2",
+					"oauth2": [
+						{
+							"key": "grant_type",
+							"value": "client_credentials",
+							"type": "string"
+						},
+						{
+							"key": "clientSecret",
+							"value": "secret_db1eeb30d3029dea94c497a0af308f46f879b46c7ef87829f3559527581f89ed",
+							"type": "string"
+						},
+						{
+							"key": "clientId",
+							"value": "qa-cda-client.dev",
+							"type": "string"
+						},
+						{
+							"key": "accessTokenUrl",
+							"value": "https://api.dev.holman.solutions/sso/sts/connect/token",
+							"type": "string"
+						},
+						{
+							"key": "tokenName",
+							"value": "token",
+							"type": "string"
+						},
+						{
+							"key": "refreshRequestParams",
+							"value": [],
+							"type": "any"
+						},
+						{
+							"key": "tokenRequestParams",
+							"value": [],
+							"type": "any"
+						},
+						{
+							"key": "authRequestParams",
+							"value": [],
+							"type": "any"
+						},
+						{
+							"key": "challengeAlgorithm",
+							"value": "S256",
+							"type": "string"
+						},
+						{
+							"key": "addTokenTo",
+							"value": "queryParams",
+							"type": "string"
+						},
+						{
+							"key": "client_authentication",
+							"value": "header",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "grant_type",
+							"value": "client_credentials",
+							"type": "text"
+						},
+						{
+							"key": "client_id",
+							"value": "{{client_id}}",
+							"type": "text"
+						},
+						{
+							"key": "client_secret",
+							"value": "{{client_secret}}",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{auth_endpoint}}/sso/sts/connect/token",
+					"host": [
+						"{{auth_endpoint}}"
+					],
+					"path": [
+						"sso",
+						"sts",
+						"connect",
+						"token"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "vin",
+			"value": "",
+			"type": "string",
+			"disabled": true
+		},
+		{
+			"key": "auth_endpoint",
+			"value": "https://api.dev.holman.solutions",
+			"type": "default"
+		},
+		{
+			"key": "client_id",
+			"value": "im-cda-client.dev",
+			"type": "default"
+		},
+		{
+			"key": "client_secret",
+			"value": "secret_784eff6b5a72733efe96ff20ce2262ecae7d2e59397dfa048b75314b4d741b98",
+			"type": "default"
+		},
+		{
+			"key": "api_endpoint",
+			"value": "https://api.dev.holman.solutions/CustomerDataAPI",
+			"type": "string"
+		},
+		{
+			"key": "refToken",
+			"value": "",
+			"type": "default"
+		},
+		{
+			"key": "token",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
