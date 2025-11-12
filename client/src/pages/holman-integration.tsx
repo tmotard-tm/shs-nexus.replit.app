@@ -270,10 +270,41 @@ export default function HolmanIntegration() {
             Showing {items.length} of {data.totalCount} records
             {data.pageInfo && ` (Page ${data.pageInfo.pageNumber} of ${data.pageInfo.totalPages})`}
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (type === 'vehicles') setVehiclesParams({...vehiclesParams, pageNumber: Math.max(1, vehiclesParams.pageNumber - 1)});
+                else if (type === 'contacts') setContactsParams({...contactsParams, pageNumber: Math.max(1, contactsParams.pageNumber - 1)});
+                else if (type === 'maintenance') setMaintenanceParams({...maintenanceParams, pageNumber: Math.max(1, maintenanceParams.pageNumber - 1)});
+                else if (type === 'odometer') setOdometerParams({...odometerParams, pageNumber: Math.max(1, odometerParams.pageNumber - 1)});
+              }}
+              disabled={
+                (type === 'vehicles' && vehiclesParams.pageNumber === 1) ||
+                (type === 'contacts' && contactsParams.pageNumber === 1) ||
+                (type === 'maintenance' && maintenanceParams.pageNumber === 1) ||
+                (type === 'odometer' && odometerParams.pageNumber === 1)
+              }
+            >
+              Previous
+            </Button>
             <span className="text-sm text-muted-foreground">
               Page {type === 'vehicles' ? vehiclesParams.pageNumber : type === 'contacts' ? contactsParams.pageNumber : type === 'maintenance' ? maintenanceParams.pageNumber : odometerParams.pageNumber}
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (type === 'vehicles') setVehiclesParams({...vehiclesParams, pageNumber: vehiclesParams.pageNumber + 1});
+                else if (type === 'contacts') setContactsParams({...contactsParams, pageNumber: contactsParams.pageNumber + 1});
+                else if (type === 'maintenance') setMaintenanceParams({...maintenanceParams, pageNumber: maintenanceParams.pageNumber + 1});
+                else if (type === 'odometer') setOdometerParams({...odometerParams, pageNumber: odometerParams.pageNumber + 1});
+              }}
+              disabled={data.pageInfo && data.pageInfo.pageNumber >= data.pageInfo.totalPages}
+            >
+              Next
+            </Button>
           </div>
         </div>
         <div className="border rounded-lg max-w-full">
@@ -309,15 +340,15 @@ export default function HolmanIntegration() {
                           <PopoverContent className="w-56 max-h-64 overflow-y-auto" align="start">
                             <div className="space-y-2">
                               <div className="font-medium text-sm">Filter by {col}</div>
-                              {getUniqueValues(col).map((value) => (
-                                <div key={value} className="flex items-center space-x-2">
+                              {getUniqueValues(col).map((value: string) => (
+                                <div key={String(value)} className="flex items-center space-x-2">
                                   <Checkbox
-                                    id={`${col}-${value}`}
-                                    checked={filters[col]?.includes(value) || false}
-                                    onCheckedChange={() => toggleFilter(col, value)}
+                                    id={`${col}-${String(value)}`}
+                                    checked={filters[col]?.includes(String(value)) || false}
+                                    onCheckedChange={() => toggleFilter(col, String(value))}
                                   />
                                   <label
-                                    htmlFor={`${col}-${value}`}
+                                    htmlFor={`${col}-${String(value)}`}
                                     className="text-sm cursor-pointer flex-1"
                                   >
                                     {value || '(empty)'}
