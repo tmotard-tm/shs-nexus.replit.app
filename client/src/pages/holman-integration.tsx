@@ -188,7 +188,7 @@ export default function HolmanIntegration() {
       );
     }
 
-    const items = data.items.slice(0, 10);
+    const items = data.items;
     let allColumns = items.length > 0 ? Object.keys(items[0]) : [];
     
     // Show only the most important columns to fit in the container
