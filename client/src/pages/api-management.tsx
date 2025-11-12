@@ -218,25 +218,23 @@ export default function ApiManagement() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/holman-integration">
-              <a className="block group" data-testid="link-holman-integration">
-                <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary hover:bg-accent transition-all cursor-pointer">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <Database className="h-6 w-6 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
-                        Holman Fleet Integration
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        Manage vehicles, contacts, maintenance records, and odometer data
-                      </p>
-                    </div>
+            <Link href="/holman-integration" data-testid="link-holman-integration">
+              <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary hover:bg-accent transition-all cursor-pointer group">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                    <Database className="h-6 w-6 text-primary" />
                   </div>
-                  <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                  <div>
+                    <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
+                      Holman Fleet Integration
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      Manage vehicles, contacts, maintenance records, and odometer data
+                    </p>
+                  </div>
                 </div>
-              </a>
+                <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+              </div>
             </Link>
           </CardContent>
         </Card>
