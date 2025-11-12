@@ -67,19 +67,18 @@ export class HolmanApiService {
   private apiEndpoint: string;
   private clientId: string;
   private clientSecret: string;
+  private tokenCache: { token: string; expiresAt: number } | null = null;
 
   constructor() {
-    this.authEndpoint = process.env.HOLMAN_AUTH_ENDPOINT || '';
+    this.authEndpoint = 'https://api.holman.solutions/sso/sts/connect/token';
     this.apiEndpoint = process.env.HOLMAN_API_ENDPOINT || '';
     this.clientId = process.env.HOLMAN_CLIENT_ID || '';
     this.clientSecret = process.env.HOLMAN_CLIENT_SECRET || '';
 
-    if (!this.authEndpoint || !this.apiEndpoint || !this.clientId || !this.clientSecret) {
-      console.warn('Holman API credentials not fully configured');
+    if (!this.apiEndpoint || !this.clientId || !this.clientSecret) {
+      console.warn('[Holman] API credentials not fully configured');
     }
   }
-
-  private tokenCache: { token: string; expiresAt: number } | null = null;
 
   private async authenticate(): Promise<string> {
     console.log('[Holman] Attempting authentication to:', this.authEndpoint);
@@ -110,7 +109,8 @@ export class HolmanApiService {
     const data: HolmanAuthResponse = await response.json();
     console.log('[Holman] Authentication successful, token expires in:', data.expires_in, 'seconds');
     
-    const expiresInMs = (data.expires_in - 60) * 1000;
+    // Cache token with 5-minute buffer (60 min - 5 min = 55 min cache)
+    const expiresInMs = (data.expires_in - 300) * 1000;
     this.tokenCache = {
       token: data.access_token,
       expiresAt: Date.now() + expiresInMs
@@ -120,10 +120,12 @@ export class HolmanApiService {
   }
 
   private async getAccessToken(): Promise<string> {
+    // Return cached token if still valid
     if (this.tokenCache && Date.now() < this.tokenCache.expiresAt) {
       return this.tokenCache.token;
     }
     
+    // Otherwise authenticate to get new token
     return this.authenticate();
   }
 
