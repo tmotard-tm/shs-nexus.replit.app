@@ -213,10 +213,10 @@ export default function HolmanIntegration() {
         </div>
         <div className="border rounded-lg overflow-x-auto overflow-y-auto max-h-[500px]">
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 bg-background z-10">
               <TableRow>
                 {columns.map((col) => (
-                  <TableHead key={col} className="capitalize whitespace-nowrap">
+                  <TableHead key={col} className="capitalize whitespace-nowrap bg-background">
                     {col.replace(/([A-Z])/g, ' $1').trim()}
                   </TableHead>
                 ))}
