@@ -425,7 +425,7 @@ export default function HolmanIntegration() {
     <MainContent>
       <TopBar 
         title="Holman API Integration" 
-        breadcrumbs={["Home", "API Management", "Holman"]}
+        breadcrumbs={["Home", "Integrations Management", "Holman"]}
       />
       
       <main className="p-6">

@@ -288,7 +288,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
-      <Route path="/snowflake">
+      <Route path="/snowflake-integration">
         <ProtectedRoute>
           <SnowflakeIntegration />
         </ProtectedRoute>

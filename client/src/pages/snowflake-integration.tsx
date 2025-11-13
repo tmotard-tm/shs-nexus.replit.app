@@ -101,11 +101,14 @@ export default function SnowflakeIntegration() {
 
   return (
     <MainContent>
-      <TopBar title="Snowflake Integration" />
+      <TopBar 
+        title="Snowflake Data Warehouse" 
+        breadcrumbs={["Home", "Integrations Management", "Snowflake"]}
+      />
       <div className="p-6 max-w-7xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <BackButton />
+            <BackButton href="/api-management" />
             <div>
               <h1 className="text-3xl font-bold flex items-center gap-2">
                 <Database className="h-8 w-8" />

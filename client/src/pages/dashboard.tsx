@@ -63,7 +63,7 @@ export default function Dashboard() {
       path: "/approver",
     },
     {
-      name: "API Management",
+      name: "Integrations Management",
       icon: "fas fa-plug", 
       description: "Manage API connections",
       path: "/api-management",
