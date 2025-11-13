@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +23,16 @@ export default function SnowflakeIntegration() {
   const { toast } = useToast();
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to results when they appear
+  useEffect(() => {
+    if (queryResults && queryResults.length > 0 && resultsRef.current) {
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 100);
+    }
+  }, [queryResults]);
 
   const { data: status, isLoading: statusLoading } = useQuery<{ configured: boolean }>({
     queryKey: ["/api/snowflake/status"],
@@ -63,12 +73,15 @@ export default function SnowflakeIntegration() {
     },
     onSuccess: (data: any) => {
       if (data.success) {
+        console.log('[Snowflake] Query successful, rows:', data.data?.length, 'Sample:', data.data?.[0]);
         setQueryResults(data.data);
         toast({
-          title: "Query Executed",
-          description: `Returned ${data.data.length} row(s)`,
+          title: "Query Executed Successfully",
+          description: `Returned ${data.data.length} row(s). Scroll down to see results.`,
         });
       } else {
+        console.error('[Snowflake] Query failed:', data.message);
+        setQueryResults(null);
         toast({
           title: "Query Failed",
           description: data.message,
@@ -219,7 +232,7 @@ export default function SnowflakeIntegration() {
         </Card>
 
         {queryResults && queryResults.length > 0 && (
-          <Card>
+          <Card ref={resultsRef}>
             <CardHeader>
               <CardTitle>Query Results</CardTitle>
               <CardDescription>
