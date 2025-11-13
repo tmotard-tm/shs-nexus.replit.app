@@ -99,6 +99,20 @@ export default function SnowflakeIntegration() {
     executeQueryMutation.mutate(sqlQuery);
   };
 
+  const handleTabKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const target = e.target as HTMLTextAreaElement;
+      const start = target.selectionStart;
+      const end = target.selectionEnd;
+      const newValue = sqlQuery.substring(0, start) + '\t' + sqlQuery.substring(end);
+      setSqlQuery(newValue);
+      setTimeout(() => {
+        target.selectionStart = target.selectionEnd = start + 1;
+      }, 0);
+    }
+  };
+
   return (
     <MainContent>
       <TopBar 
@@ -178,6 +192,7 @@ export default function SnowflakeIntegration() {
                 id="sql-query"
                 value={sqlQuery}
                 onChange={(e) => setSqlQuery(e.target.value)}
+                onKeyDown={handleTabKey}
                 placeholder="Enter your SQL query here..."
                 className="font-mono min-h-[150px]"
                 data-testid="textarea-sql-query"
