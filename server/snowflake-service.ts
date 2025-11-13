@@ -80,8 +80,15 @@ export class SnowflakeService {
         return;
       }
 
+      // Strip .snowflakecomputing.com suffix if present to avoid duplication
+      // The SDK will append it automatically
+      let accountIdentifier = this.config.account;
+      if (accountIdentifier.endsWith('.snowflakecomputing.com')) {
+        accountIdentifier = accountIdentifier.replace('.snowflakecomputing.com', '');
+      }
+
       const connectionConfig: any = {
-        account: this.config.account,
+        account: accountIdentifier,
         username: this.config.username,
         authenticator: 'SNOWFLAKE_JWT',
         privateKey: this.privateKeyPem,
