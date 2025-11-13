@@ -128,10 +128,27 @@ async function seedTemplatesOnStartup() {
 async function initializeSnowflake() {
   try {
     const { initializeSnowflakeService } = await import("./snowflake-service");
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const { fileURLToPath } = await import("url");
     
     const account = process.env.SNOWFLAKE_ACCOUNT;
     const username = process.env.SNOWFLAKE_USER;
-    const privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+    let privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+    
+    // Try to read from file if environment variable is not set or malformed
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const keyFilePath = path.join(__dirname, "snowflake-private-key.p8");
+    try {
+      const fileExists = await fs.access(keyFilePath).then(() => true).catch(() => false);
+      if (fileExists) {
+        privateKey = await fs.readFile(keyFilePath, 'utf-8');
+        log("📄 Using Snowflake private key from file");
+      }
+    } catch (fileError) {
+      // File doesn't exist or can't be read, continue with env var
+    }
     
     if (!account || !username || !privateKey) {
       log("⚠️ Snowflake credentials not configured. Snowflake integration will be unavailable.");

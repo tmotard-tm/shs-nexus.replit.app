@@ -23,6 +23,33 @@ export class SnowflakeService {
     // Handle escaped newlines that often appear in environment variables
     let normalizedPem = config.privateKey.replace(/\\n/g, '\n');
     
+    // Fix broken headers where newlines appear within "-----BEGIN PRIVATE KEY-----"
+    // First, remove all line breaks from the headers and footers specifically
+    const beginMatch = normalizedPem.match(/-----BEGIN[^-]*-----/);
+    const endMatch = normalizedPem.match(/-----END[^-]*-----/);
+    
+    if (beginMatch) {
+      const brokenBegin = beginMatch[0];
+      const fixedBegin = brokenBegin.replace(/\s+/g, ' ').trim().replace(/ /g, ' ');
+      // Normalize to standard PRIVATE KEY format
+      const cleanBegin = fixedBegin.replace(/BEGIN\s+PRIVATE\s+KEY/, 'BEGIN PRIVATE KEY')
+                                   .replace(/BEGIN\s+RSA\s+PRIVATE\s+KEY/, 'BEGIN RSA PRIVATE KEY');
+      normalizedPem = normalizedPem.replace(brokenBegin, cleanBegin);
+      console.log('[Snowflake] Fixed BEGIN header from:', brokenBegin.replace(/\n/g, '\\n'));
+      console.log('[Snowflake] Fixed BEGIN header to:', cleanBegin);
+    }
+    
+    if (endMatch) {
+      const brokenEnd = endMatch[0];
+      const fixedEnd = brokenEnd.replace(/\s+/g, ' ').trim().replace(/ /g, ' ');
+      // Normalize to standard PRIVATE KEY format
+      const cleanEnd = fixedEnd.replace(/END\s+PRIVATE\s+KEY/, 'END PRIVATE KEY')
+                               .replace(/END\s+RSA\s+PRIVATE\s+KEY/, 'END RSA PRIVATE KEY');
+      normalizedPem = normalizedPem.replace(brokenEnd, cleanEnd);
+      console.log('[Snowflake] Fixed END header from:', brokenEnd.replace(/\n/g, '\\n'));
+      console.log('[Snowflake] Fixed END header to:', cleanEnd);
+    }
+    
     // Ensure the key has proper line breaks if it doesn't already
     if (!normalizedPem.includes('\n') && normalizedPem.includes(' ')) {
       // Space-separated format - replace spaces with newlines
