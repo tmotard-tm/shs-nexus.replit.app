@@ -1,4 +1,5 @@
 import snowflake from 'snowflake-sdk';
+import crypto from 'crypto';
 
 interface SnowflakeConfig {
   account: string;
@@ -13,9 +14,34 @@ interface SnowflakeConfig {
 export class SnowflakeService {
   private config: SnowflakeConfig;
   private connection: any = null;
+  private privateKeyObject: crypto.KeyObject;
 
   constructor(config: SnowflakeConfig) {
     this.config = config;
+    
+    // Convert PEM string to KeyObject required by Snowflake SDK
+    // Handle escaped newlines that often appear in environment variables
+    let normalizedPem = config.privateKey.replace(/\\n/g, '\n');
+    
+    // Ensure the key has proper line breaks if it doesn't already
+    if (!normalizedPem.includes('\n') && normalizedPem.includes(' ')) {
+      // Space-separated format - replace spaces with newlines
+      normalizedPem = normalizedPem.replace(/-----BEGIN (.*?)-----\s*/,  '-----BEGIN $1-----\n');
+      normalizedPem = normalizedPem.replace(/\s*-----END (.*?)-----/, '\n-----END $1-----');
+      normalizedPem = normalizedPem.replace(/\s+/g, '\n');
+    }
+    
+    try {
+      this.privateKeyObject = crypto.createPrivateKey({
+        key: normalizedPem,
+        format: 'pem'
+      });
+      console.log('[Snowflake] Private key successfully parsed');
+    } catch (error: any) {
+      console.error('[Snowflake] Failed to parse private key:', error.message);
+      console.error('[Snowflake] Key starts with:', normalizedPem.substring(0, 50));
+      throw new Error(`Invalid private key format: ${error.message}. Please ensure you're using a PKCS#8 format private key.`);
+    }
   }
 
   async connect(): Promise<void> {
@@ -29,7 +55,7 @@ export class SnowflakeService {
         account: this.config.account,
         username: this.config.username,
         authenticator: 'SNOWFLAKE_JWT',
-        privateKey: this.config.privateKey,
+        privateKey: this.privateKeyObject,
       };
 
       if (this.config.database) {

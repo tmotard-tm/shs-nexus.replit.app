@@ -4948,6 +4948,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  console.log("Registering Snowflake API routes...");
+  const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+
+  app.get("/api/snowflake/status", requireAuth, async (req: any, res) => {
+    try {
+      const configured = isSnowflakeConfigured();
+      res.json({ configured });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/snowflake/test", requireAuth, async (req: any, res) => {
+    try {
+      const snowflakeService = getSnowflakeService();
+      const result = await snowflakeService.testConnection();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error testing Snowflake connection:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/snowflake/query", requireAuth, async (req: any, res) => {
+    try {
+      const { sql } = req.body;
+      if (!sql) {
+        return res.status(400).json({ message: "SQL query is required" });
+      }
+      
+      const snowflakeService = getSnowflakeService();
+      const results = await snowflakeService.executeQuery(sql);
+      res.json({ success: true, data: results });
+    } catch (error: any) {
+      console.error("Error executing Snowflake query:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack

@@ -23,6 +23,7 @@ import ApproverInterface from "@/pages/approver";
 import RequestsPage from "@/pages/requests";
 import ApiManagement from "@/pages/api-management";
 import HolmanIntegration from "@/pages/holman-integration";
+import SnowflakeIntegration from "@/pages/snowflake-integration";
 import QueueManagement from "@/pages/queue-management";
 import NTAOQueuePage from "@/pages/ntao-queue";
 import AssetsQueuePage from "@/pages/assets-queue";
@@ -289,11 +290,7 @@ function Router() {
       
       <Route path="/snowflake">
         <ProtectedRoute>
-          <MainContent className="p-6">
-            <BackButton href="/" />
-            <h1 className="text-2xl font-bold">Snowflake Configuration</h1>
-            <p className="text-muted-foreground mt-2">Coming soon...</p>
-          </MainContent>
+          <SnowflakeIntegration />
         </ProtectedRoute>
       </Route>
       

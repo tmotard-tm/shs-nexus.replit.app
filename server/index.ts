@@ -122,11 +122,47 @@ async function seedTemplatesOnStartup() {
   }
 }
 
+/**
+ * Initialize Snowflake service with environment variables
+ */
+async function initializeSnowflake() {
+  try {
+    const { initializeSnowflakeService } = await import("./snowflake-service");
+    
+    const account = process.env.SNOWFLAKE_ACCOUNT;
+    const username = process.env.SNOWFLAKE_USER;
+    const privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+    
+    if (!account || !username || !privateKey) {
+      log("⚠️ Snowflake credentials not configured. Snowflake integration will be unavailable.");
+      return;
+    }
+    
+    initializeSnowflakeService({
+      account,
+      username,
+      privateKey,
+      database: process.env.SNOWFLAKE_DATABASE,
+      schema: process.env.SNOWFLAKE_SCHEMA,
+      warehouse: process.env.SNOWFLAKE_WAREHOUSE,
+      role: process.env.SNOWFLAKE_ROLE,
+    });
+    
+    log("✅ Snowflake service initialized");
+  } catch (error) {
+    console.error("❌ Failed to initialize Snowflake service:", error);
+    log("⚠️ Snowflake integration will be unavailable");
+  }
+}
+
 (async () => {
   const server = await registerRoutes(app);
 
   // Seed templates during startup
   await seedTemplatesOnStartup();
+
+  // Initialize Snowflake service
+  await initializeSnowflake();
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
