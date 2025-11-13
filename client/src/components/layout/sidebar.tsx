@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { LogOut, Settings, Database, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp, Key, FileCode } from "lucide-react";
+import { LogOut, Settings, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp, Key, FileCode } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
@@ -30,7 +30,6 @@ export function Sidebar() {
       requests: { name: "Requests", href: "/requests", icon: FileText },
       approvals: { name: "Approvals", href: "/approvals", icon: CheckCircle },
       apiManagement: { name: "Integrations Management", href: "/api-management", icon: Settings },
-      snowflake: { name: "Snowflake Config", href: "/snowflake-integration", icon: Database },
       userManagement: { name: "User Management", href: "/users", icon: Users },
       templateManagement: { name: "Template Management", href: "/templates", icon: FileCode },
       activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity },
@@ -80,7 +79,6 @@ export function Sidebar() {
           baseItems.storageSpots,
           baseItems.approvals,
           baseItems.apiManagement,
-          baseItems.snowflake,
           baseItems.userManagement,
           baseItems.templateManagement,
           baseItems.activityLogs,
