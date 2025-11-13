@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { BackButton } from "@/components/ui/back-button";
-import { MainContent } from "@/components/layout/main-content";
 import { Database, CheckCircle, XCircle, Loader2, Play } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -114,11 +113,12 @@ export default function SnowflakeIntegration() {
   };
 
   return (
-    <MainContent>
+    <>
       <TopBar 
         title="Snowflake Data Warehouse" 
         breadcrumbs={["Home", "Integrations Management", "Snowflake"]}
       />
+      <main className="flex-1 overflow-auto">
       <div className="p-6 max-w-7xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -263,6 +263,7 @@ export default function SnowflakeIntegration() {
           </Card>
         )}
       </div>
-    </MainContent>
+      </main>
+    </>
   );
 }
