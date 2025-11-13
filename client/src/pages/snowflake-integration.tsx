@@ -218,8 +218,8 @@ export default function SnowflakeIntegration() {
           </CardContent>
         </Card>
 
-        {queryResults && Array.isArray(queryResults) && queryResults.length > 0 && (
-          <Card data-testid="card-query-results">
+        {queryResults && queryResults.length > 0 && (
+          <Card>
             <CardHeader>
               <CardTitle>Query Results</CardTitle>
               <CardDescription>
@@ -231,7 +231,7 @@ export default function SnowflakeIntegration() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      {queryResults[0] && Object.keys(queryResults[0]).map((column) => (
+                      {Object.keys(queryResults[0]).map((column) => (
                         <TableHead key={column} className="font-semibold">
                           {column}
                         </TableHead>
@@ -241,9 +241,9 @@ export default function SnowflakeIntegration() {
                   <TableBody>
                     {queryResults.map((row, idx) => (
                       <TableRow key={idx} data-testid={`row-result-${idx}`}>
-                        {row && Object.values(row).map((value: any, cellIdx) => (
+                        {Object.values(row).map((value: any, cellIdx) => (
                           <TableCell key={cellIdx} className="font-mono text-sm">
-                            {typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value ?? '')}
+                            {typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')}
                           </TableCell>
                         ))}
                       </TableRow>
