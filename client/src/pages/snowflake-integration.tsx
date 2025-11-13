@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,16 +23,6 @@ export default function SnowflakeIntegration() {
   const { toast } = useToast();
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
-  const resultsRef = useRef<HTMLDivElement>(null);
-
-  // Scroll to results when they appear
-  useEffect(() => {
-    if (queryResults && queryResults.length > 0 && resultsRef.current) {
-      setTimeout(() => {
-        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }, 100);
-    }
-  }, [queryResults]);
 
   const { data: status, isLoading: statusLoading } = useQuery<{ configured: boolean }>({
     queryKey: ["/api/snowflake/status"],
@@ -232,7 +222,7 @@ export default function SnowflakeIntegration() {
         </Card>
 
         {queryResults && queryResults.length > 0 && (
-          <Card ref={resultsRef}>
+          <Card>
             <CardHeader>
               <CardTitle>Query Results</CardTitle>
               <CardDescription>
