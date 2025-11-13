@@ -14,12 +14,12 @@ interface SnowflakeConfig {
 export class SnowflakeService {
   private config: SnowflakeConfig;
   private connection: any = null;
-  private privateKeyObject: crypto.KeyObject;
+  private privateKeyPem: string;
 
   constructor(config: SnowflakeConfig) {
     this.config = config;
     
-    // Convert PEM string to KeyObject required by Snowflake SDK
+    // Normalize PEM string for Snowflake SDK
     // Handle escaped newlines that often appear in environment variables
     let normalizedPem = config.privateKey.replace(/\\n/g, '\n');
     
@@ -58,12 +58,14 @@ export class SnowflakeService {
       normalizedPem = normalizedPem.replace(/\s+/g, '\n');
     }
     
+    // Validate the key by creating a KeyObject, but store the PEM string
     try {
-      this.privateKeyObject = crypto.createPrivateKey({
+      crypto.createPrivateKey({
         key: normalizedPem,
         format: 'pem'
       });
-      console.log('[Snowflake] Private key successfully parsed');
+      this.privateKeyPem = normalizedPem;
+      console.log('[Snowflake] Private key successfully validated');
     } catch (error: any) {
       console.error('[Snowflake] Failed to parse private key:', error.message);
       console.error('[Snowflake] Key starts with:', normalizedPem.substring(0, 50));
@@ -82,7 +84,7 @@ export class SnowflakeService {
         account: this.config.account,
         username: this.config.username,
         authenticator: 'SNOWFLAKE_JWT',
-        privateKey: this.privateKeyObject,
+        privateKey: this.privateKeyPem,
       };
 
       if (this.config.database) {
