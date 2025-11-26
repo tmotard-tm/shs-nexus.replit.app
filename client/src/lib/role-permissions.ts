@@ -19,7 +19,7 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/create-vehicle-location',
     '/assign-vehicle-location',
     '/onboard-hire',
-    '/offboard-vehicle-location',
+    '/offboard-technician',
     '/sears-drive-enrollment',
   ],
   fleet: [
@@ -36,7 +36,7 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/create-vehicle-location',
     '/assign-vehicle-location',
     '/onboard-hire',
-    '/offboard-vehicle-location',
+    '/offboard-technician',
     '/sears-drive-enrollment',
   ],
   inventory: [
@@ -53,7 +53,7 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/create-vehicle-location',
     '/assign-vehicle-location',
     '/onboard-hire',
-    '/offboard-vehicle-location',
+    '/offboard-technician',
     '/sears-drive-enrollment',
   ],
   ntao: [
@@ -70,7 +70,7 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/create-vehicle-location',
     '/assign-vehicle-location',
     '/onboard-hire',
-    '/offboard-vehicle-location',
+    '/offboard-technician',
     '/sears-drive-enrollment',
   ],
   field: [
@@ -85,7 +85,7 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/create-vehicle-location',
     '/assign-vehicle-location', 
     '/onboard-hire',
-    '/offboard-vehicle-location',
+    '/offboard-technician',
     '/sears-drive-enrollment',
     '/change-password', // All users can change their password
   ],
@@ -107,7 +107,7 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/create-vehicle-location',
     '/assign-vehicle-location',
     '/onboard-hire',
-    '/offboard-vehicle-location',
+    '/offboard-technician',
     '/sears-drive-enrollment',
   ],
   approver: [
@@ -125,7 +125,7 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/create-vehicle-location',
     '/assign-vehicle-location',
     '/onboard-hire',
-    '/offboard-vehicle-location',
+    '/offboard-technician',
     '/sears-drive-enrollment',
   ],
   requester: [
@@ -143,7 +143,7 @@ export const ROLE_ROUTES: Record<UserRole, string[]> = {
     '/create-vehicle-location',
     '/assign-vehicle-location',
     '/onboard-hire',
-    '/offboard-vehicle-location',
+    '/offboard-technician',
     '/sears-drive-enrollment',
   ],
 };

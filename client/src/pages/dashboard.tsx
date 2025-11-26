@@ -271,10 +271,10 @@ export default function Dashboard() {
                     Offboarding
                   </h3>
                   <p className="text-xs text-muted-foreground mb-4" data-testid="text-offboarding-description">
-                    Remove Vehicles or Locations from the System
+                    Process Technician Offboarding
                   </p>
                 </div>
-                <Link href="/offboard-vehicle-location">
+                <Link href="/offboard-technician">
                   <Button size="sm" className="w-full" data-testid="button-start-offboarding">
                     Start Offboarding
                   </Button>

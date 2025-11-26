@@ -19,6 +19,12 @@ import {
   type InsertTemplate,
   type Session,
   type InsertSession,
+  type TermedTech,
+  type InsertTermedTech,
+  type AllTech,
+  type InsertAllTech,
+  type SyncLog,
+  type InsertSyncLog,
   users,
   requests,
   apiConfigurations,
@@ -28,6 +34,9 @@ import {
   vehicles,
   templates,
   sessions,
+  termedTechs,
+  allTechs,
+  syncLogs,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -173,6 +182,29 @@ export interface IStorage {
   deleteSession(sessionId: string): Promise<boolean>;
   updateSession(sessionId: string, updates: Partial<Session>): Promise<Session | undefined>;
   cleanExpiredSessions(): Promise<number>; // Returns number of sessions cleaned
+
+  // Termed Techs Module (Snowflake sync)
+  getTermedTech(id: string): Promise<TermedTech | undefined>;
+  getTermedTechByEmployeeId(employeeId: string): Promise<TermedTech | undefined>;
+  getTermedTechs(): Promise<TermedTech[]>;
+  getTermedTechsNeedingOffboarding(): Promise<TermedTech[]>;
+  upsertTermedTech(tech: InsertTermedTech): Promise<TermedTech>;
+  updateTermedTech(id: string, updates: Partial<TermedTech>): Promise<TermedTech | undefined>;
+  markTermedTechOffboardingCreated(employeeId: string, queueItemId: string): Promise<TermedTech | undefined>;
+
+  // All Techs Module (Snowflake sync - complete roster)
+  getAllTech(id: string): Promise<AllTech | undefined>;
+  getAllTechByEmployeeId(employeeId: string): Promise<AllTech | undefined>;
+  getAllTechs(): Promise<AllTech[]>;
+  upsertAllTech(tech: InsertAllTech): Promise<AllTech>;
+  updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined>;
+
+  // Sync Logs Module
+  getSyncLog(id: string): Promise<SyncLog | undefined>;
+  getSyncLogs(): Promise<SyncLog[]>;
+  getLatestSyncLog(syncType: string): Promise<SyncLog | undefined>;
+  createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
+  updateSyncLog(id: string, updates: Partial<SyncLog>): Promise<SyncLog | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -990,6 +1022,78 @@ export class MemStorage implements IStorage {
     }
     
     return cleanedCount;
+  }
+
+  // Termed Techs Module - Stub implementation for MemStorage
+  // These methods are primarily used with database storage for Snowflake sync
+  async getTermedTech(_id: string): Promise<TermedTech | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getTermedTechByEmployeeId(_employeeId: string): Promise<TermedTech | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getTermedTechs(): Promise<TermedTech[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async getTermedTechsNeedingOffboarding(): Promise<TermedTech[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async upsertTermedTech(_tech: InsertTermedTech): Promise<TermedTech> {
+    throw new Error("Termed techs not implemented in memory storage - use database storage");
+  }
+
+  async updateTermedTech(_id: string, _updates: Partial<TermedTech>): Promise<TermedTech | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async markTermedTechOffboardingCreated(_employeeId: string, _queueItemId: string): Promise<TermedTech | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  // All Techs Module - Stub implementation for MemStorage
+  async getAllTech(_id: string): Promise<AllTech | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getAllTechByEmployeeId(_employeeId: string): Promise<AllTech | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getAllTechs(): Promise<AllTech[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async upsertAllTech(_tech: InsertAllTech): Promise<AllTech> {
+    throw new Error("All techs not implemented in memory storage - use database storage");
+  }
+
+  async updateAllTech(_id: string, _updates: Partial<AllTech>): Promise<AllTech | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  // Sync Logs Module - Stub implementation for MemStorage
+  async getSyncLog(_id: string): Promise<SyncLog | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getSyncLogs(): Promise<SyncLog[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async getLatestSyncLog(_syncType: string): Promise<SyncLog | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async createSyncLog(_log: InsertSyncLog): Promise<SyncLog> {
+    throw new Error("Sync logs not implemented in memory storage - use database storage");
+  }
+
+  async updateSyncLog(_id: string, _updates: Partial<SyncLog>): Promise<SyncLog | undefined> {
+    return undefined; // Not implemented in memory storage
   }
 
   // Activity Logs
@@ -2622,6 +2726,147 @@ export class DatabaseStorage implements IStorage {
     const now = new Date();
     const result = await db.delete(sessions).where(sql`${sessions.expiresAt} <= ${now}`);
     return result.rowCount!;
+  }
+
+  // Termed Techs Module (Snowflake sync)
+  async getTermedTech(id: string): Promise<TermedTech | undefined> {
+    const result = await db.select().from(termedTechs).where(eq(termedTechs.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getTermedTechByEmployeeId(employeeId: string): Promise<TermedTech | undefined> {
+    const result = await db.select().from(termedTechs).where(eq(termedTechs.employeeId, employeeId)).limit(1);
+    return result[0];
+  }
+
+  async getTermedTechs(): Promise<TermedTech[]> {
+    return await db.select().from(termedTechs).orderBy(desc(termedTechs.lastDayWorked));
+  }
+
+  async getTermedTechsNeedingOffboarding(): Promise<TermedTech[]> {
+    return await db.select().from(termedTechs)
+      .where(eq(termedTechs.offboardingTaskCreated, false))
+      .orderBy(desc(termedTechs.lastDayWorked));
+  }
+
+  async upsertTermedTech(tech: InsertTermedTech): Promise<TermedTech> {
+    const result = await db.insert(termedTechs)
+      .values(tech)
+      .onConflictDoUpdate({
+        target: termedTechs.employeeId,
+        set: {
+          techRacfid: tech.techRacfid,
+          techName: tech.techName,
+          lastDayWorked: tech.lastDayWorked,
+          firstName: tech.firstName,
+          lastName: tech.lastName,
+          jobTitle: tech.jobTitle,
+          districtNo: tech.districtNo,
+          planningAreaName: tech.planningAreaName,
+          employmentStatus: tech.employmentStatus,
+          effectiveDate: tech.effectiveDate,
+          syncedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result[0];
+  }
+
+  async updateTermedTech(id: string, updates: Partial<TermedTech>): Promise<TermedTech | undefined> {
+    const result = await db.update(termedTechs)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(termedTechs.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async markTermedTechOffboardingCreated(employeeId: string, queueItemId: string): Promise<TermedTech | undefined> {
+    const result = await db.update(termedTechs)
+      .set({
+        offboardingTaskCreated: true,
+        offboardingTaskId: queueItemId,
+        updatedAt: new Date(),
+      })
+      .where(eq(termedTechs.employeeId, employeeId))
+      .returning();
+    return result[0];
+  }
+
+  // All Techs Module (Snowflake sync - complete roster)
+  async getAllTech(id: string): Promise<AllTech | undefined> {
+    const result = await db.select().from(allTechs).where(eq(allTechs.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getAllTechByEmployeeId(employeeId: string): Promise<AllTech | undefined> {
+    const result = await db.select().from(allTechs).where(eq(allTechs.employeeId, employeeId)).limit(1);
+    return result[0];
+  }
+
+  async getAllTechs(): Promise<AllTech[]> {
+    return await db.select().from(allTechs).orderBy(allTechs.techName);
+  }
+
+  async upsertAllTech(tech: InsertAllTech): Promise<AllTech> {
+    const result = await db.insert(allTechs)
+      .values(tech)
+      .onConflictDoUpdate({
+        target: allTechs.employeeId,
+        set: {
+          techRacfid: tech.techRacfid,
+          techName: tech.techName,
+          firstName: tech.firstName,
+          lastName: tech.lastName,
+          jobTitle: tech.jobTitle,
+          districtNo: tech.districtNo,
+          planningAreaName: tech.planningAreaName,
+          employmentStatus: tech.employmentStatus,
+          syncedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result[0];
+  }
+
+  async updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined> {
+    const result = await db.update(allTechs)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(allTechs.id, id))
+      .returning();
+    return result[0];
+  }
+
+  // Sync Logs Module
+  async getSyncLog(id: string): Promise<SyncLog | undefined> {
+    const result = await db.select().from(syncLogs).where(eq(syncLogs.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getSyncLogs(): Promise<SyncLog[]> {
+    return await db.select().from(syncLogs).orderBy(desc(syncLogs.startedAt));
+  }
+
+  async getLatestSyncLog(syncType: string): Promise<SyncLog | undefined> {
+    const result = await db.select().from(syncLogs)
+      .where(eq(syncLogs.syncType, syncType))
+      .orderBy(desc(syncLogs.startedAt))
+      .limit(1);
+    return result[0];
+  }
+
+  async createSyncLog(log: InsertSyncLog): Promise<SyncLog> {
+    const result = await db.insert(syncLogs).values(log).returning();
+    return result[0];
+  }
+
+  async updateSyncLog(id: string, updates: Partial<SyncLog>): Promise<SyncLog | undefined> {
+    const result = await db.update(syncLogs)
+      .set(updates)
+      .where(eq(syncLogs.id, id))
+      .returning();
+    return result[0];
   }
 
   // Requests

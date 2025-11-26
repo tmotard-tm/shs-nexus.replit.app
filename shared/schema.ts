@@ -186,6 +186,78 @@ export const sessions = pgTable("sessions", {
   };
 });
 
+// Termed Technicians from Snowflake DRIVELINE_TERMED_TECHS_LAST30 view
+export const termedTechs = pgTable("termed_techs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Core fields from Snowflake (mapped per user requirements)
+  employeeId: varchar("employee_id", { length: 11 }).notNull().unique(), // EMPL_ID
+  techRacfid: varchar("tech_racfid", { length: 7 }).notNull(), // ENTERPRISE_ID
+  techName: text("tech_name").notNull(), // FULL_NAME
+  lastDayWorked: date("last_day_worked"), // DATE_LAST_WORKED
+  // Additional useful fields from Snowflake
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  jobTitle: text("job_title"),
+  districtNo: varchar("district_no"),
+  planningAreaName: text("planning_area_name"),
+  employmentStatus: varchar("employment_status", { length: 5 }),
+  effectiveDate: date("effective_date"), // EFFDT
+  // Sync and offboarding tracking
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  offboardingTaskCreated: boolean("offboarding_task_created").notNull().default(false),
+  offboardingTaskId: varchar("offboarding_task_id"), // Reference to queue_items.id
+  processedAt: timestamp("processed_at"), // When offboarding was fully processed
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    employeeIdIdx: index("termed_techs_employee_id_idx").on(table.employeeId),
+    techRacfidIdx: index("termed_techs_tech_racfid_idx").on(table.techRacfid),
+    lastDayWorkedIdx: index("termed_techs_last_day_worked_idx").on(table.lastDayWorked),
+    offboardingTaskCreatedIdx: index("termed_techs_offboarding_task_created_idx").on(table.offboardingTaskCreated),
+  };
+});
+
+// All Technicians from Snowflake DRIVELINE_ALL_TECHS view (complete roster)
+export const allTechs = pgTable("all_techs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Core fields
+  employeeId: varchar("employee_id", { length: 11 }).notNull().unique(), // EMPL_ID
+  techRacfid: varchar("tech_racfid", { length: 7 }).notNull(), // ENTERPRISE_ID
+  techName: text("tech_name").notNull(), // FULL_NAME
+  // Additional fields from Snowflake
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  jobTitle: text("job_title"),
+  districtNo: varchar("district_no"),
+  planningAreaName: text("planning_area_name"),
+  employmentStatus: varchar("employment_status", { length: 5 }),
+  // Sync tracking
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    employeeIdIdx: index("all_techs_employee_id_idx").on(table.employeeId),
+    techRacfidIdx: index("all_techs_tech_racfid_idx").on(table.techRacfid),
+    employmentStatusIdx: index("all_techs_employment_status_idx").on(table.employmentStatus),
+  };
+});
+
+// Sync Log for tracking Snowflake sync history
+export const syncLogs = pgTable("sync_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  syncType: text("sync_type").notNull(), // termed_techs, all_techs
+  status: text("status").notNull().default("pending"), // pending, running, completed, failed
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  recordsProcessed: integer("records_processed").default(0),
+  recordsCreated: integer("records_created").default(0),
+  recordsUpdated: integer("records_updated").default(0),
+  queueItemsCreated: integer("queue_items_created").default(0),
+  errorMessage: text("error_message"),
+  triggeredBy: text("triggered_by"), // scheduler, manual, api
+});
 
 // Password validation schema
 export const passwordValidationSchema = z.string()
@@ -243,6 +315,25 @@ export const insertTemplateSchema = createInsertSchema(templates).omit({
 
 export const insertSessionSchema = createInsertSchema(sessions).omit({
   createdAt: true,
+});
+
+export const insertTermedTechSchema = createInsertSchema(termedTechs).omit({
+  id: true,
+  syncedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAllTechSchema = createInsertSchema(allTechs).omit({
+  id: true,
+  syncedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertSyncLogSchema = createInsertSchema(syncLogs).omit({
+  id: true,
+  startedAt: true,
 });
 
 // API endpoint validation schemas
@@ -396,6 +487,12 @@ export type Template = typeof templates.$inferSelect;
 export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
 export type Session = typeof sessions.$inferSelect;
 export type InsertSession = z.infer<typeof insertSessionSchema>;
+export type TermedTech = typeof termedTechs.$inferSelect;
+export type InsertTermedTech = z.infer<typeof insertTermedTechSchema>;
+export type AllTech = typeof allTechs.$inferSelect;
+export type InsertAllTech = z.infer<typeof insertAllTechSchema>;
+export type SyncLog = typeof syncLogs.$inferSelect;
+export type InsertSyncLog = z.infer<typeof insertSyncLogSchema>;
 
 // Combined queue item with module information for unified queue access
 export type CombinedQueueItem = QueueItem & {

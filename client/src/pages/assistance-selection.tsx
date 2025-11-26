@@ -58,13 +58,13 @@ export default function AssistanceSelection() {
       action: () => setLocation("/sears-drive-enrollment")
     },
     {
-      id: "offboard-vehicle-location",
-      title: "Offboarding", 
-      description: "Remove Vehicles or Locations from the System",
+      id: "offboard-technician",
+      title: "Offboard Technician", 
+      description: "Process Technician Offboarding",
       icon: UserMinus,
       bgColor: "bg-red-100 dark:bg-red-900/20",
       iconColor: "text-red-600 dark:text-red-400",
-      action: () => setLocation("/offboard-vehicle-location")
+      action: () => setLocation("/offboard-technician")
     },
     {
       id: "other",
@@ -325,8 +325,8 @@ export default function AssistanceSelection() {
                     <UserMinus className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <CardTitle className="text-lg text-gray-800">Offboarding</CardTitle>
-                    <CardDescription className="text-gray-600">Offboard Employee from Vehicle or Complete Employee Offboarding</CardDescription>
+                    <CardTitle className="text-lg text-gray-800">Offboard Technician</CardTitle>
+                    <CardDescription className="text-gray-600">Process Technician Offboarding</CardDescription>
                   </div>
                 </div>
               </CardHeader>
@@ -356,7 +356,7 @@ export default function AssistanceSelection() {
                   </div>
                 </div>
                 <Button 
-                  onClick={() => setLocation("/offboard-vehicle-location")}
+                  onClick={() => setLocation("/offboard-technician")}
                   className="w-full mt-4"
                   data-testid="button-offboarding"
                 >

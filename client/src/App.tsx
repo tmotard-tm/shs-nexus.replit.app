@@ -15,7 +15,7 @@ import CreateVehicle from "@/pages/create-vehicle-location";
 import AssignVehicleLocation from "@/pages/assign-vehicle-location";
 import UpdateVehicle from "@/pages/update-vehicle";
 import OnboardHire from "@/pages/onboard-hire";
-import OffboardVehicleLocation from "@/pages/offboard-vehicle-location";
+import OffboardTechnician from "@/pages/offboard-technician";
 import ActiveVehicles from "@/pages/active-vehicles";
 import Dashboard from "@/pages/dashboard";
 import RequesterInterface from "@/pages/requester";
@@ -167,7 +167,7 @@ function Router() {
       <Route path="/forms/offboarding">
         <PublicFormRoute>
           <MainContent>
-            <OffboardVehicleLocation />
+            <OffboardTechnician />
           </MainContent>
         </PublicFormRoute>
       </Route>
@@ -220,10 +220,10 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
-      <Route path="/offboard-vehicle-location">
+      <Route path="/offboard-technician">
         <ProtectedRoute>
           <MainContent>
-            <OffboardVehicleLocation />
+            <OffboardTechnician />
           </MainContent>
         </ProtectedRoute>
       </Route>
