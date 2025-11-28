@@ -96,7 +96,7 @@ export default function OffboardTechnician() {
         vehicleLocation: "",
         vehicleType: "",
         reason: "",
-        effectiveDate: technician.lastDayWorked || "",
+        effectiveDate: technician.effectiveDate || "",
         notes: "",
         returnCondition: ""
       });

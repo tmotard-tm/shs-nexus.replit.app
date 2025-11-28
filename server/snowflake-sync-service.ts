@@ -204,6 +204,7 @@ export class SnowflakeSyncService {
                 firstName: tech.firstName,
                 lastName: tech.lastName,
                 lastDayWorked: tech.lastDayWorked,
+                effectiveDate: tech.effectiveDate,
                 jobTitle: tech.jobTitle,
                 district: tech.districtNo,
                 planningArea: tech.planningAreaName,
