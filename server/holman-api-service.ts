@@ -290,10 +290,12 @@ export class HolmanApiService {
         
         if (matchingVehicle) {
           console.log('[Holman] Found matching vehicle:', matchingVehicle.holmanVehicleNumber);
+          // Use modelYear field (not year) for the vehicle year
+          const vehicleYear = matchingVehicle.modelYear || matchingVehicle.year || '';
           return {
             success: true,
             vehicle: {
-              year: String(matchingVehicle.year || ''),
+              year: String(vehicleYear),
               make: matchingVehicle.makeVin || matchingVehicle.makeClient || '',
               model: matchingVehicle.modelVin || matchingVehicle.modelClient || '',
               holmanVehicleNumber: matchingVehicle.holmanVehicleNumber || '',
