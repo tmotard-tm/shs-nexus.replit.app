@@ -39,6 +39,9 @@ export default function Integrations() {
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
   const [tpmsTestId, setTpmsTestId] = useState("");
+  const [holmanEnabled, setHolmanEnabled] = useState(true);
+  const [snowflakeEnabled, setSnowflakeEnabled] = useState(true);
+  const [tpmsEnabled, setTpmsEnabled] = useState(true);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -376,31 +379,53 @@ export default function Integrations() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {/* Holman Integration - Links to separate page */}
-            <Link href="/holman-integration" data-testid="link-holman-integration">
-              <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary hover:bg-accent transition-all cursor-pointer group">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
-                    <Database className="h-6 w-6 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
-                      Holman Fleet Integration
-                    </h3>
-                    <p className="text-sm text-muted-foreground">
-                      Manage vehicles, contacts, maintenance records, and odometer data
-                    </p>
-                  </div>
+            {/* Holman Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/holman-integration" data-testid="link-holman-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <Database className="h-6 w-6 text-primary" />
                 </div>
-                <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                <div>
+                  <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
+                    Holman Fleet Integration
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Manage vehicles, contacts, maintenance records, and odometer data
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toast({ title: "Holman Test", description: "Connection test not yet implemented" })}
+                  data-testid="button-test-holman"
+                >
+                  <TestTube className="h-4 w-4 mr-1" />
+                  Test
+                </Button>
+                <Switch
+                  checked={holmanEnabled}
+                  onCheckedChange={setHolmanEnabled}
+                  data-testid="switch-holman-enabled"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => toast({ title: "Delete", description: "Integration deletion not yet implemented", variant: "destructive" })}
+                  data-testid="button-delete-holman"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </div>
-            </Link>
+            </div>
             
             {/* Snowflake Integration - Expandable inline */}
             <Collapsible open={snowflakeExpanded} onOpenChange={setSnowflakeExpanded}>
-              <CollapsibleTrigger asChild>
-                <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-blue-500 hover:bg-accent transition-all cursor-pointer group">
-                  <div className="flex items-center gap-4">
+              <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+                <CollapsibleTrigger asChild>
+                  <div className="flex items-center gap-4 flex-1 cursor-pointer group">
                     <div className="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center">
                       <Database className="h-6 w-6 text-blue-500" />
                     </div>
@@ -428,13 +453,38 @@ export default function Integrations() {
                       </p>
                     </div>
                   </div>
-                  {snowflakeExpanded ? (
-                    <ChevronDown className="h-5 w-5 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-blue-500 transition-all" />
-                  )}
+                </CollapsibleTrigger>
+                <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testSnowflakeMutation.mutate()}
+                    disabled={!snowflakeStatus?.configured || testSnowflakeMutation.isPending}
+                    data-testid="button-test-snowflake-inline"
+                  >
+                    {testSnowflakeMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <TestTube className="h-4 w-4 mr-1" />
+                    )}
+                    Test
+                  </Button>
+                  <Switch
+                    checked={snowflakeEnabled}
+                    onCheckedChange={setSnowflakeEnabled}
+                    data-testid="switch-snowflake-enabled"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => toast({ title: "Delete", description: "Integration deletion not yet implemented", variant: "destructive" })}
+                    data-testid="button-delete-snowflake"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
-              </CollapsibleTrigger>
+              </div>
               <CollapsibleContent className="mt-2 ml-4 border-l-2 border-blue-500/20 pl-4 space-y-4">
                 {/* Connection Test */}
                 <Card>
@@ -541,9 +591,9 @@ export default function Integrations() {
 
             {/* TPMS Integration - Expandable inline */}
             <Collapsible open={tpmsExpanded} onOpenChange={setTpmsExpanded}>
-              <CollapsibleTrigger asChild>
-                <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-orange-500 hover:bg-accent transition-all cursor-pointer group">
-                  <div className="flex items-center gap-4">
+              <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+                <CollapsibleTrigger asChild>
+                  <div className="flex items-center gap-4 flex-1 cursor-pointer group">
                     <div className="w-12 h-12 bg-orange-500/10 rounded-lg flex items-center justify-center">
                       <Truck className="h-6 w-6 text-orange-500" />
                     </div>
@@ -571,39 +621,39 @@ export default function Integrations() {
                       </p>
                     </div>
                   </div>
-                  {tpmsExpanded ? (
-                    <ChevronDown className="h-5 w-5 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-orange-500 transition-all" />
-                  )}
+                </CollapsibleTrigger>
+                <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testTpmsMutation.mutate()}
+                    disabled={!tpmsStatus?.configured || testTpmsMutation.isPending}
+                    data-testid="button-test-tpms-inline"
+                  >
+                    {testTpmsMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <TestTube className="h-4 w-4 mr-1" />
+                    )}
+                    Test
+                  </Button>
+                  <Switch
+                    checked={tpmsEnabled}
+                    onCheckedChange={setTpmsEnabled}
+                    data-testid="switch-tpms-enabled"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => toast({ title: "Delete", description: "Integration deletion not yet implemented", variant: "destructive" })}
+                    data-testid="button-delete-tpms"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
-              </CollapsibleTrigger>
+              </div>
               <CollapsibleContent className="mt-2 ml-4 border-l-2 border-orange-500/20 pl-4 space-y-4">
-                {/* Connection Test */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Connection Test</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <Button
-                      onClick={() => testTpmsMutation.mutate()}
-                      disabled={!tpmsStatus?.configured || testTpmsMutation.isPending}
-                      data-testid="button-test-tpms"
-                    >
-                      {testTpmsMutation.isPending ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Testing...
-                        </>
-                      ) : (
-                        <>
-                          <Truck className="mr-2 h-4 w-4" />
-                          Test Connection
-                        </>
-                      )}
-                    </Button>
-                  </CardContent>
-                </Card>
 
                 {/* TPMS Lookup */}
                 <Card>
