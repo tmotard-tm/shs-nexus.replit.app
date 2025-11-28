@@ -229,7 +229,7 @@ class TPMSService {
         console.error(`[TPMS] Truck lookup failed: ${response.status} - ${errorText}`);
         return {
           success: false,
-          message: `Truck lookup failed: ${response.status} - No tech found for truck ${cleanTruckNo}`,
+          message: `No technician found assigned to truck ${cleanTruckNo}`,
         };
       }
 
