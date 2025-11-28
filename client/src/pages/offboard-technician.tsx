@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
-import { Car, AlertTriangle, Trash2 } from "lucide-react";
+import { Car, AlertTriangle, Trash2, Search, Loader2, Truck } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
@@ -35,6 +35,13 @@ export default function OffboardTechnician() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSubmissionTime, setLastSubmissionTime] = useState<{[key: string]: number}>({});
+  const [isLookingUpTruck, setIsLookingUpTruck] = useState(false);
+  const [tpmsLookupResult, setTpmsLookupResult] = useState<{
+    success: boolean;
+    truckNo?: string;
+    techInfo?: any;
+    error?: string;
+  } | null>(null);
 
   const vehicles = [
     { id: "1", name: "Toyota Camry (ABC-1234)", status: "assigned", assignedTo: "John Doe" },
@@ -90,6 +97,68 @@ export default function OffboardTechnician() {
       setTechnicianOffboard(prev => ({ ...prev, ...processedData }));
     }
   }, []);
+
+  const handleTpmsLookup = async () => {
+    const enterpriseId = technicianOffboard.techRacfId.trim();
+    
+    if (!enterpriseId) {
+      toast({
+        title: "Missing Tech RACF ID",
+        description: "Please enter a Tech RACF ID before looking up truck info.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsLookingUpTruck(true);
+    setTpmsLookupResult(null);
+
+    try {
+      const response = await fetch(`/api/tpms/truck/${encodeURIComponent(enterpriseId)}`, {
+        credentials: 'include'
+      });
+      
+      const result = await response.json();
+      setTpmsLookupResult(result);
+
+      if (result.success && result.truckNo) {
+        setTechnicianOffboard(prev => {
+          const updates: Partial<typeof prev> = {
+            vehicleNumber: result.truckNo.trim()
+          };
+          
+          if (result.techInfo) {
+            if (result.techInfo.firstName && result.techInfo.lastName && !prev.techName) {
+              updates.techName = `${result.techInfo.firstName} ${result.techInfo.lastName}`.trim();
+            }
+          }
+          
+          return { ...prev, ...updates };
+        });
+
+        toast({
+          title: "Truck Found",
+          description: `Truck number ${result.truckNo.trim()} has been filled in for ${enterpriseId}.`,
+        });
+      } else {
+        toast({
+          title: "Truck Not Found",
+          description: result.error || `No truck assigned to technician ${enterpriseId}.`,
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
+      console.error('TPMS lookup error:', error);
+      setTpmsLookupResult({ success: false, error: error.message });
+      toast({
+        title: "Lookup Failed",
+        description: error.message || "Failed to look up truck information.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLookingUpTruck(false);
+    }
+  };
 
   const handleTechnicianOffboard = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -475,14 +544,41 @@ export default function OffboardTechnician() {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="vehicleNumber">Vehicle Number *</Label>
-                        <Input
-                          id="vehicleNumber"
-                          placeholder="Enter vehicle number"
-                          value={technicianOffboard.vehicleNumber}
-                          onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleNumber: e.target.value })}
-                          required
-                          data-testid="input-vehicle-number"
-                        />
+                        <div className="flex gap-2">
+                          <Input
+                            id="vehicleNumber"
+                            placeholder="Enter vehicle number"
+                            value={technicianOffboard.vehicleNumber}
+                            onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleNumber: e.target.value })}
+                            required
+                            data-testid="input-vehicle-number"
+                            className="flex-1"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleTpmsLookup}
+                            disabled={isLookingUpTruck || !technicianOffboard.techRacfId}
+                            title="Look up truck number from TPMS using Tech RACF ID"
+                            data-testid="button-tpms-lookup"
+                          >
+                            {isLookingUpTruck ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Truck className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Enter Tech RACF ID first, then click the truck icon to auto-fill from TPMS
+                        </p>
+                        {tpmsLookupResult && (
+                          <div className={`text-xs p-2 rounded ${tpmsLookupResult.success ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}>
+                            {tpmsLookupResult.success 
+                              ? `Found truck: ${tpmsLookupResult.truckNo}${tpmsLookupResult.techInfo?.firstName ? ` (${tpmsLookupResult.techInfo.firstName} ${tpmsLookupResult.techInfo.lastName})` : ''}`
+                              : `Lookup failed: ${tpmsLookupResult.error || 'Unknown error'}`}
+                          </div>
+                        )}
                       </div>
                     </div>
 
