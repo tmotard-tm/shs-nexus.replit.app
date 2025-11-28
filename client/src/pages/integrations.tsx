@@ -321,72 +321,25 @@ export default function Integrations() {
       
       <main className="p-6">
         <BackButton href="/" />
-        
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardContent className="flex items-center p-6">
-              <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center mr-4">
-                <Settings className="h-4 w-4 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold" data-testid="text-total-apis">{integrationStats.total}</p>
-                <p className="text-sm text-muted-foreground">Total APIs</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="flex items-center p-6">
-              <div className="w-8 h-8 bg-[hsl(var(--chart-2))]/10 rounded-lg flex items-center justify-center mr-4">
-                <CheckCircle className="h-4 w-4 text-[hsl(var(--chart-2))]" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold" data-testid="text-active-apis">{integrationStats.active}</p>
-                <p className="text-sm text-muted-foreground">Active</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="flex items-center p-6">
-              <div className="w-8 h-8 bg-[hsl(var(--chart-2))]/10 rounded-lg flex items-center justify-center mr-4">
-                <CheckCircle className="h-4 w-4 text-[hsl(var(--chart-2))]" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold" data-testid="text-healthy-apis">{integrationStats.healthy}</p>
-                <p className="text-sm text-muted-foreground">Healthy</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="flex items-center p-6">
-              <div className="w-8 h-8 bg-destructive/10 rounded-lg flex items-center justify-center mr-4">
-                <XCircle className="h-4 w-4 text-destructive" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold" data-testid="text-error-apis">{integrationStats.errors}</p>
-                <p className="text-sm text-muted-foreground">Errors</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
 
         {/* Data Integrations */}
         <Card className="mb-6">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle data-testid="text-fleet-integrations-title">Data Integrations</CardTitle>
-                <CardDescription>
-                  Access fleet management systems, data warehouses, and third-party integrations
-                </CardDescription>
-              </div>
-              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button data-testid="button-add-api">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add API
-                  </Button>
-                </DialogTrigger>
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle data-testid="text-fleet-integrations-title">Data Integrations</CardTitle>
+                  <CardDescription>
+                    Access fleet management systems, data warehouses, and third-party integrations
+                  </CardDescription>
+                </div>
+                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button data-testid="button-add-api">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add API
+                    </Button>
+                  </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle data-testid="text-add-api-title">Add API Configuration</DialogTitle>
@@ -441,6 +394,41 @@ export default function Integrations() {
                   </form>
                 </DialogContent>
               </Dialog>
+              </div>
+              
+              {/* Inline Stats */}
+              <div className="flex items-center gap-6 pt-2 border-t border-border">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-primary/10 rounded flex items-center justify-center">
+                    <Settings className="h-3 w-3 text-primary" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Total:</span>
+                  <span className="text-sm font-semibold" data-testid="text-total-apis">{integrationStats.total}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-[hsl(var(--chart-2))]/10 rounded flex items-center justify-center">
+                    <CheckCircle className="h-3 w-3 text-[hsl(var(--chart-2))]" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Active:</span>
+                  <span className="text-sm font-semibold" data-testid="text-active-apis">{integrationStats.active}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-[hsl(var(--chart-2))]/10 rounded flex items-center justify-center">
+                    <CheckCircle className="h-3 w-3 text-[hsl(var(--chart-2))]" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Healthy:</span>
+                  <span className="text-sm font-semibold" data-testid="text-healthy-apis">{integrationStats.healthy}</span>
+                </div>
+                {integrationStats.errors > 0 && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 bg-destructive/10 rounded flex items-center justify-center">
+                      <XCircle className="h-3 w-3 text-destructive" />
+                    </div>
+                    <span className="text-sm text-muted-foreground">Errors:</span>
+                    <span className="text-sm font-semibold text-destructive" data-testid="text-error-apis">{integrationStats.errors}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
