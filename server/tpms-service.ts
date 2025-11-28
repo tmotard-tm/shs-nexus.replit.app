@@ -210,48 +210,19 @@ class TPMSService {
     console.log(`[TPMS] Looking up tech by truck number: ${cleanTruckNo}`);
     
     try {
-      const token = await this.getToken();
+      // Use the same endpoint as Enterprise ID - TPMS API auto-detects the input type
+      const techInfo = await this.getTechInfo(cleanTruckNo);
       
-      const url = `${this.apiEndpoint}/TechProfile/TechByTruckNo/${cleanTruckNo}`;
-      console.log(`[TPMS] Truck lookup URL: ${url}`);
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[TPMS] Truck lookup failed: ${response.status} - ${errorText}`);
-        return {
-          success: false,
-          message: `No technician found assigned to truck ${cleanTruckNo}`,
-        };
-      }
-
-      const data: TechInfoResponse = await response.json();
-      
-      if (data.messages && !data.messages.includes('SUCCESS')) {
-        return {
-          success: false,
-          message: `TPMS error: ${data.messages.join(', ')}`,
-        };
-      }
-
-      console.log(`[TPMS] Tech found for truck ${cleanTruckNo}: ${data.firstName} ${data.lastName}`);
+      console.log(`[TPMS] Tech found for truck ${cleanTruckNo}: ${techInfo.firstName} ${techInfo.lastName}`);
       return {
         success: true,
-        data,
+        data: techInfo,
       };
     } catch (error: any) {
       console.error(`[TPMS] Error looking up truck ${cleanTruckNo}:`, error.message);
       return {
         success: false,
-        message: error.message,
+        message: `No technician found for ${cleanTruckNo}`,
       };
     }
   }
