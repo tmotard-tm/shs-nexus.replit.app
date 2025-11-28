@@ -459,7 +459,11 @@ export default function Integrations() {
                   </p>
                 </div>
               </Link>
-              <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className="text-sm text-green-500 font-medium">healthy</span>
+                <Badge variant={holmanEnabled ? "default" : "secondary"} className="text-xs">
+                  {holmanEnabled ? "Active" : "Inactive"}
+                </Badge>
                 <Button
                   variant="outline"
                   size="sm"
@@ -519,7 +523,13 @@ export default function Integrations() {
                     </div>
                   </div>
                 </CollapsibleTrigger>
-                <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                  <span className={`text-sm font-medium ${snowflakeStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                    {snowflakeStatus?.configured ? 'healthy' : 'not configured'}
+                  </span>
+                  <Badge variant={snowflakeEnabled ? "default" : "secondary"} className="text-xs">
+                    {snowflakeEnabled ? "Active" : "Inactive"}
+                  </Badge>
                   <Button
                     variant="outline"
                     size="sm"
@@ -661,7 +671,13 @@ export default function Integrations() {
                     </div>
                   </div>
                 </CollapsibleTrigger>
-                <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                  <span className={`text-sm font-medium ${tpmsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                    {tpmsStatus?.configured ? 'healthy' : 'not configured'}
+                  </span>
+                  <Badge variant={tpmsEnabled ? "default" : "secondary"} className="text-xs">
+                    {tpmsEnabled ? "Active" : "Inactive"}
+                  </Badge>
                   <Button
                     variant="outline"
                     size="sm"
