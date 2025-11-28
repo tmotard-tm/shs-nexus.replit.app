@@ -57,24 +57,48 @@ export default function OffboardTechnician() {
   ) || [];
 
   // Function to load queue item data into the form
-  const loadQueueItem = (item: any) => {
+  const loadQueueItem = async (item: any) => {
     try {
       const data = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
       const technician = data?.technician || {};
+      const vehicle = data?.vehicle || {};
+      
+      // Get truck number from vehicle data if available
+      let truckNumber = vehicle?.truckNo || vehicle?.vehicleNumber || "";
+      
+      // If no truck number in data but we have a tech RACF ID, try TPMS lookup
+      const techRacfId = technician.techRacfid || technician.enterpriseId || "";
+      if (!truckNumber && techRacfId) {
+        try {
+          const response = await fetch(`/api/tpms/truck/${encodeURIComponent(techRacfId)}`, {
+            credentials: 'include'
+          });
+          const result = await response.json();
+          if (result.success && result.truckNo) {
+            truckNumber = result.truckNo.trim();
+            toast({
+              title: "Truck Found",
+              description: `Found truck ${truckNumber} for ${techRacfId}`,
+            });
+          }
+        } catch (e) {
+          console.log('TPMS lookup during load failed:', e);
+        }
+      }
       
       setTechnicianOffboard({
         vehicleId: "",
-        techRacfId: technician.techRacfid || technician.enterpriseId || "",
+        techRacfId: techRacfId,
         techName: technician.techName || technician.name || "",
         employeeId: technician.employeeId || "",
         lastDayWorked: technician.lastDayWorked || "",
-        vehicleNumber: data?.vehicle?.vehicleNumber || "",
-        vehicleLocation: data?.vehicle?.location || "",
-        vehicleType: data?.vehicle?.type || "",
-        reason: data?.vehicle?.reason || "",
+        vehicleNumber: truckNumber,
+        vehicleLocation: vehicle?.location || "",
+        vehicleType: vehicle?.type || "",
+        reason: vehicle?.reason || "",
         effectiveDate: technician.lastDayWorked || "",
         notes: "",
-        returnCondition: data?.vehicle?.condition || ""
+        returnCondition: vehicle?.condition || ""
       });
 
       toast({
