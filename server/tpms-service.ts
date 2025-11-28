@@ -80,6 +80,7 @@ class TPMSService {
     }
 
     console.log('[TPMS] Fetching new auth token...');
+    console.log('[TPMS] Auth endpoint URL:', this.authEndpoint);
 
     if (!this.authEndpoint || !this.basicAuthCredential) {
       throw new Error('TPMS authentication not configured. Please set TPMS_AUTH_ENDPOINT and TPMS_AUTHORIZATION.');
