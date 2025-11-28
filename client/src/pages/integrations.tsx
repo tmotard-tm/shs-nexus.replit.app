@@ -305,11 +305,11 @@ export default function Integrations() {
     }
   };
 
-  const apiStats = {
-    total: (configurations as ApiConfiguration[])?.length || 0,
-    active: (configurations as ApiConfiguration[])?.filter(api => api.isActive).length || 0,
-    healthy: (configurations as ApiConfiguration[])?.filter(api => api.healthStatus === "healthy").length || 0,
-    errors: (configurations as ApiConfiguration[])?.filter(api => api.healthStatus === "error").length || 0,
+  const integrationStats = {
+    total: 3,
+    active: [holmanEnabled, snowflakeEnabled, tpmsEnabled].filter(Boolean).length,
+    healthy: [true, snowflakeStatus?.configured, tpmsStatus?.configured].filter(Boolean).length,
+    errors: [false, !snowflakeStatus?.configured, !tpmsStatus?.configured].filter(Boolean).length,
   };
 
   return (
@@ -330,7 +330,7 @@ export default function Integrations() {
                 <Settings className="h-4 w-4 text-primary" />
               </div>
               <div>
-                <p className="text-2xl font-bold" data-testid="text-total-apis">{apiStats.total}</p>
+                <p className="text-2xl font-bold" data-testid="text-total-apis">{integrationStats.total}</p>
                 <p className="text-sm text-muted-foreground">Total APIs</p>
               </div>
             </CardContent>
@@ -341,7 +341,7 @@ export default function Integrations() {
                 <CheckCircle className="h-4 w-4 text-[hsl(var(--chart-2))]" />
               </div>
               <div>
-                <p className="text-2xl font-bold" data-testid="text-active-apis">{apiStats.active}</p>
+                <p className="text-2xl font-bold" data-testid="text-active-apis">{integrationStats.active}</p>
                 <p className="text-sm text-muted-foreground">Active</p>
               </div>
             </CardContent>
@@ -352,7 +352,7 @@ export default function Integrations() {
                 <CheckCircle className="h-4 w-4 text-[hsl(var(--chart-2))]" />
               </div>
               <div>
-                <p className="text-2xl font-bold" data-testid="text-healthy-apis">{apiStats.healthy}</p>
+                <p className="text-2xl font-bold" data-testid="text-healthy-apis">{integrationStats.healthy}</p>
                 <p className="text-sm text-muted-foreground">Healthy</p>
               </div>
             </CardContent>
@@ -363,7 +363,7 @@ export default function Integrations() {
                 <XCircle className="h-4 w-4 text-destructive" />
               </div>
               <div>
-                <p className="text-2xl font-bold" data-testid="text-error-apis">{apiStats.errors}</p>
+                <p className="text-2xl font-bold" data-testid="text-error-apis">{integrationStats.errors}</p>
                 <p className="text-sm text-muted-foreground">Errors</p>
               </div>
             </CardContent>
