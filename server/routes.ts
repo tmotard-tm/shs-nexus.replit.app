@@ -5004,7 +5004,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/snowflake/sync/termed-techs", requireAuth, async (req: any, res) => {
     try {
-      if (req.user?.role !== 'superadmin' && req.user?.role !== 'admin') {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
         return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
       }
       
@@ -5019,7 +5020,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/snowflake/sync/all-techs", requireAuth, async (req: any, res) => {
     try {
-      if (req.user?.role !== 'superadmin' && req.user?.role !== 'admin') {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
         return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
       }
       
