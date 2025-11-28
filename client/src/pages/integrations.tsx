@@ -622,8 +622,10 @@ export default function Integrations() {
                       />
                       <Button
                         onClick={() => {
-                          const isNumeric = /^\d+$/.test(tpmsTestId.trim());
-                          lookupTpmsTechMutation.mutate({ id: tpmsTestId, type: isNumeric ? 'truck' : 'enterprise' });
+                          const trimmedId = tpmsTestId.trim();
+                          const isNumeric = /^\d+$/.test(trimmedId);
+                          const lookupId = isNumeric ? trimmedId.padStart(6, '0') : trimmedId;
+                          lookupTpmsTechMutation.mutate({ id: lookupId, type: isNumeric ? 'truck' : 'enterprise' });
                         }}
                         disabled={!tpmsStatus?.configured || !tpmsTestId || lookupTpmsTechMutation.isPending}
                         data-testid="button-lookup-tech"
