@@ -1,5 +1,4 @@
 import { ReactNode } from "react";
-import { useSidebar } from "@/hooks/use-sidebar";
 import { cn } from "@/lib/utils";
 
 interface MainContentProps {
@@ -8,13 +7,10 @@ interface MainContentProps {
 }
 
 export function MainContent({ children, className }: MainContentProps) {
-  const { isCollapsed } = useSidebar();
-  
   return (
     <div 
       className={cn(
-        "flex-1 w-full min-w-0 overflow-x-hidden flex flex-col transition-all duration-300",
-        isCollapsed ? "pl-16" : "pl-64",
+        "flex-1 w-full min-w-0 overflow-x-hidden flex flex-col pt-16",
         className
       )}
     >

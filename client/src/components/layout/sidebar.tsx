@@ -1,49 +1,91 @@
 import { Link, useLocation } from "wouter";
+import { useState } from "react";
 import { RoleSelector } from "@/components/role-selector";
 import { useAuth } from "@/hooks/use-auth";
-import { useSidebar } from "@/hooks/use-sidebar";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { LogOut, Settings, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp, Key, FileCode, HelpCircle } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuPortal,
+} from "@/components/ui/dropdown-menu";
+import { 
+  LogOut, 
+  Settings, 
+  Users, 
+  FileText, 
+  CheckCircle, 
+  Activity, 
+  BarChart3, 
+  Home, 
+  Clock, 
+  MapPin, 
+  Key, 
+  FileCode, 
+  HelpCircle,
+  Menu
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+
+type NavItem = {
+  name: string;
+  href: string;
+  icon: typeof Home;
+  category?: string;
+};
+
+type NavCategory = {
+  name: string;
+  icon: typeof Home;
+  items: NavItem[];
+};
 
 export function Sidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
-  const { isCollapsed, setIsCollapsed } = useSidebar();
   const { startOnboarding, resetOnboarding } = useOnboarding();
+  const [isOpen, setIsOpen] = useState(false);
   
   const handleStartTutorial = () => {
     resetOnboarding();
     setTimeout(() => startOnboarding(), 100);
+    setIsOpen(false);
+  };
+
+  const handleNavClick = () => {
+    setIsOpen(false);
   };
 
   if (!user) return null;
 
-  // Role-based navigation system
   const getNavigationForRole = (userRole: string, userDepartmentAccess?: string[]) => {
     const baseItems = {
-      home: { name: "Home", href: "/", icon: Home },
-      dashboard: { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
-      analytics: { name: "Vehicle Assignment Dash", href: "/analytics", icon: Activity },
-      operations: { name: "Operations Dashboard", href: "/operations", icon: BarChart3 },
-      queueManagement: { name: "Queue Management", href: "/queue-management", icon: Clock },
-      ntaoQueue: { name: "NTAO — National Truck Assortment Queue", href: "/ntao-queue", icon: Clock },
-      assetsQueue: { name: "Assets Queue", href: "/assets-queue", icon: Clock },
-      inventoryQueue: { name: "Inventory Queue", href: "/inventory-queue", icon: Clock },
-      fleetQueue: { name: "Fleet Queue", href: "/fleet-queue", icon: Clock },
-      storageSpots: { name: "Storage Spots", href: "/storage-spots", icon: MapPin },
-      requests: { name: "Requests", href: "/requests", icon: FileText },
-      approvals: { name: "Approvals", href: "/approvals", icon: CheckCircle },
-      apiManagement: { name: "Integrations Management", href: "/api-management", icon: Settings },
-      userManagement: { name: "User Management", href: "/users", icon: Users },
-      templateManagement: { name: "Template Management", href: "/templates", icon: FileCode },
-      activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity },
-      changePassword: { name: "Change Password", href: "/change-password", icon: Key },
+      home: { name: "Home", href: "/", icon: Home, category: "main" },
+      dashboard: { name: "Dashboard", href: "/dashboard", icon: BarChart3, category: "dashboards" },
+      analytics: { name: "Vehicle Assignment Dash", href: "/analytics", icon: Activity, category: "dashboards" },
+      operations: { name: "Operations Dashboard", href: "/operations", icon: BarChart3, category: "dashboards" },
+      queueManagement: { name: "Queue Management", href: "/queue-management", icon: Clock, category: "queues" },
+      ntaoQueue: { name: "NTAO Queue", href: "/ntao-queue", icon: Clock, category: "queues" },
+      assetsQueue: { name: "Assets Queue", href: "/assets-queue", icon: Clock, category: "queues" },
+      inventoryQueue: { name: "Inventory Queue", href: "/inventory-queue", icon: Clock, category: "queues" },
+      fleetQueue: { name: "Fleet Queue", href: "/fleet-queue", icon: Clock, category: "queues" },
+      storageSpots: { name: "Storage Spots", href: "/storage-spots", icon: MapPin, category: "management" },
+      requests: { name: "Requests", href: "/requests", icon: FileText, category: "management" },
+      approvals: { name: "Approvals", href: "/approvals", icon: CheckCircle, category: "management" },
+      apiManagement: { name: "Integrations", href: "/api-management", icon: Settings, category: "management" },
+      userManagement: { name: "User Management", href: "/users", icon: Users, category: "management" },
+      templateManagement: { name: "Templates", href: "/templates", icon: FileCode, category: "management" },
+      activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity, category: "activity" },
+      changePassword: { name: "Change Password", href: "/change-password", icon: Key, category: "account" },
     };
 
-    // Handle agent users based on their department access
     if (userRole === 'agent' && userDepartmentAccess?.length) {
       const primaryDept = userDepartmentAccess[0].toLowerCase();
       switch (primaryDept) {
@@ -74,14 +116,14 @@ export function Sidebar() {
         return [baseItems.home, baseItems.ntaoQueue, baseItems.changePassword];
       
       case 'field':
-        return [baseItems.home, baseItems.changePassword]; // Field users can change their password
+        return [baseItems.home, baseItems.changePassword];
       
       case 'superadmin':
         return [
           baseItems.home,
           baseItems.dashboard,
           baseItems.analytics,
-          baseItems.operations, // Operations dashboard with comprehensive metrics
+          baseItems.operations,
           baseItems.queueManagement,
           baseItems.storageSpots,
           baseItems.approvals,
@@ -93,7 +135,6 @@ export function Sidebar() {
         ];
       
       default:
-        // Legacy fallback for existing users
         return [
           baseItems.home,
           baseItems.dashboard,
@@ -105,114 +146,152 @@ export function Sidebar() {
     }
   };
 
-  const navigation = getNavigationForRole(user.role, user.departmentAccess ?? undefined);
+  const allNavItems = getNavigationForRole(user.role, user.departmentAccess ?? undefined);
+  
+  // Normalize location by stripping query strings and hash for accurate matching
+  const normalizedLocation = location.split(/[?#]/)[0];
+  const filteredNavItems = allNavItems.filter(item => item.href !== normalizedLocation);
+
+  const organizeByCategory = (items: NavItem[]): { standalone: NavItem[], categories: NavCategory[] } => {
+    const categoryMap: Record<string, NavItem[]> = {};
+    const standalone: NavItem[] = [];
+
+    items.forEach(item => {
+      if (item.category === 'main') {
+        standalone.push(item);
+      } else if (item.category) {
+        if (!categoryMap[item.category]) {
+          categoryMap[item.category] = [];
+        }
+        categoryMap[item.category].push(item);
+      }
+    });
+
+    const categoryConfig: Record<string, { name: string; icon: typeof Home }> = {
+      dashboards: { name: "Dashboards", icon: BarChart3 },
+      queues: { name: "Queues", icon: Clock },
+      management: { name: "Management", icon: Settings },
+      activity: { name: "Activity", icon: Activity },
+      account: { name: "Account", icon: Key },
+    };
+
+    const categories: NavCategory[] = Object.entries(categoryMap)
+      .filter(([_, items]) => items.length > 0)
+      .map(([key, items]) => ({
+        name: categoryConfig[key]?.name || key,
+        icon: categoryConfig[key]?.icon || Settings,
+        items,
+      }));
+
+    return { standalone, categories };
+  };
+
+  const { standalone, categories } = organizeByCategory(filteredNavItems);
 
   return (
-    <div className={cn(
-      "bg-card border-r border-border fixed h-full left-0 top-0 z-40 transition-all duration-300",
-      isCollapsed ? "w-16" : "w-64"
-    )}>
-      {/* Toggle Button */}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setIsCollapsed(!isCollapsed)}
-        className={cn(
-          "fixed top-6 z-50 h-6 w-6 rounded-full border border-border bg-background transition-all duration-300",
-          isCollapsed ? "left-14" : "left-60"
-        )}
-        data-testid="button-toggle-sidebar"
-      >
-        {isCollapsed ? (
-          <ChevronRight className="h-3 w-3" />
-        ) : (
-          <ChevronLeft className="h-3 w-3" />
-        )}
-      </Button>
-
-      <div className={cn("p-6", isCollapsed && "p-3")}>
-        <div className={cn("flex items-center gap-3 mb-8", isCollapsed && "justify-center mb-6")}>
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-            <Settings className="h-4 w-4 text-primary-foreground" />
+    <div className="fixed top-4 left-4 z-50">
+      <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-10 w-10 bg-background shadow-md"
+            data-testid="button-hamburger-menu"
+          >
+            <Menu className="h-5 w-5" />
+            <span className="sr-only">Open navigation menu</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent 
+          align="start" 
+          className="w-64 max-h-[calc(100vh-100px)] overflow-y-auto"
+          sideOffset={8}
+        >
+          <div className="flex items-center gap-3 px-3 py-2 border-b border-border mb-2">
+            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+              <Settings className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <span className="font-semibold text-sm">Admin Platform</span>
+            <div className="ml-auto">
+              <ThemeToggle />
+            </div>
           </div>
-          {!isCollapsed && (
-            <h1 className="font-semibold text-lg" data-testid="text-app-title">Admin Platform</h1>
-          )}
-        </div>
 
-        {!isCollapsed && (
-          <div className="mb-6">
+          <div className="px-2 py-2 border-b border-border mb-2">
             <RoleSelector />
           </div>
-        )}
 
-        <nav className="space-y-1">
-          {!isCollapsed ? (
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Navigation
-              </div>
-              <ThemeToggle />
-            </div>
-          ) : (
-            <div className="flex justify-center mb-4">
-              <ThemeToggle />
-            </div>
-          )}
-          {navigation.map((item) => {
-            const isActive = location === item.href;
+          {standalone.map((item) => {
             const Icon = item.icon;
-            
             return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 p-3 rounded-lg transition-colors",
-                  isActive 
-                    ? "bg-accent text-accent-foreground font-medium" 
-                    : "hover:bg-accent hover:text-accent-foreground",
-                  isCollapsed && "justify-center"
-                )}
-                data-testid={`link-nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
-                title={isCollapsed ? item.name : undefined}
-              >
-                <Icon className="h-4 w-4" />
-                {!isCollapsed && item.name}
-              </Link>
+              <DropdownMenuItem key={item.href} asChild>
+                <Link
+                  href={item.href}
+                  onClick={handleNavClick}
+                  className="flex items-center gap-3 cursor-pointer"
+                  data-testid={`link-nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.name}
+                </Link>
+              </DropdownMenuItem>
             );
           })}
-          
-          {/* Help & Tutorial Button */}
-          <div className="pt-4 mt-4 border-t border-border">
-            <button
-              onClick={handleStartTutorial}
-              className={cn(
-                "flex items-center gap-3 p-3 rounded-lg transition-colors w-full text-left",
-                "hover:bg-accent hover:text-accent-foreground text-muted-foreground",
-                isCollapsed && "justify-center"
-              )}
-              data-testid="button-start-tutorial"
-              title={isCollapsed ? "Help & Tutorial" : undefined}
-            >
-              <HelpCircle className="h-4 w-4" />
-              {!isCollapsed && "Help & Tutorial"}
-            </button>
-          </div>
-        </nav>
-      </div>
 
-      <div className={cn(
-        "absolute bottom-0 left-0 right-0 p-6 border-t border-border",
-        isCollapsed && "p-3"
-      )}>
-        {/* User Section */}
-        <div className={cn("flex items-center gap-3", isCollapsed && "justify-center")}>
-          <div className="w-8 h-8 bg-secondary rounded-full flex items-center justify-center">
-            <Users className="h-4 w-4 text-secondary-foreground" />
-          </div>
-          {!isCollapsed && (
-            <>
+          {standalone.length > 0 && categories.length > 0 && (
+            <DropdownMenuSeparator />
+          )}
+
+          {categories.map((category) => {
+            const CategoryIcon = category.icon;
+            return (
+              <DropdownMenuSub key={category.name}>
+                <DropdownMenuSubTrigger className="flex items-center gap-3" data-testid={`menu-category-${category.name.toLowerCase()}`}>
+                  <CategoryIcon className="h-4 w-4" />
+                  <span>{category.name}</span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent className="min-w-48">
+                    {category.items.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <DropdownMenuItem key={item.href} asChild>
+                          <Link
+                            href={item.href}
+                            onClick={handleNavClick}
+                            className="flex items-center gap-3 cursor-pointer"
+                            data-testid={`link-nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                          >
+                            <Icon className="h-4 w-4" />
+                            {item.name}
+                          </Link>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
+            );
+          })}
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuItem
+            onClick={handleStartTutorial}
+            className="flex items-center gap-3 cursor-pointer text-muted-foreground"
+            data-testid="button-start-tutorial"
+          >
+            <HelpCircle className="h-4 w-4" />
+            Help & Tutorial
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
+          <div className="px-3 py-2 border-t border-border mt-2">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-secondary rounded-full flex items-center justify-center">
+                <Users className="h-4 w-4 text-secondary-foreground" />
+              </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium truncate" data-testid="text-user-name">
                   {user.username}
@@ -224,27 +303,18 @@ export function Sidebar() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={logout}
+                onClick={() => {
+                  logout();
+                  setIsOpen(false);
+                }}
                 data-testid="button-logout"
               >
                 <LogOut className="h-4 w-4" />
               </Button>
-            </>
-          )}
-          {isCollapsed && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={logout}
-              className="w-8 h-8 p-0 absolute bottom-2"
-              data-testid="button-logout"
-              title="Logout"
-            >
-              <LogOut className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      </div>
+            </div>
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
