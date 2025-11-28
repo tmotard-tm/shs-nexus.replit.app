@@ -4840,6 +4840,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Vehicle lookup by number (for offboarding form)
+  app.get("/api/holman/vehicle/:vehicleNumber", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber } = req.params;
+      console.log('[Holman] Vehicle lookup request for:', vehicleNumber);
+      const result = await holmanApiService.findVehicleByNumber(vehicleNumber);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error looking up Holman vehicle:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Failed to look up vehicle from Holman API" 
+      });
+    }
+  });
+
   // Contacts endpoints
   app.get("/api/holman/contacts", requireAuth, async (req: any, res) => {
     try {

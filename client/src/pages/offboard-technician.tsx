@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { useQuery } from "@tanstack/react-query";
-import { ClipboardList, AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar } from "lucide-react";
+import { ClipboardList, AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar, Car } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
@@ -29,19 +29,32 @@ export default function OffboardTechnician() {
     vehicleNumber: "",
     vehicleLocation: "",
     vehicleType: "",
-    reason: "",
     effectiveDate: "",
     notes: "",
-    returnCondition: ""
+    returnCondition: "",
+    vehicleYear: "",
+    vehicleMake: "",
+    vehicleModel: ""
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSubmissionTime, setLastSubmissionTime] = useState<{[key: string]: number}>({});
   const [isLookingUpTruck, setIsLookingUpTruck] = useState(false);
+  const [isLookingUpHolman, setIsLookingUpHolman] = useState(false);
   const [tpmsLookupResult, setTpmsLookupResult] = useState<{
     success: boolean;
     truckNo?: string;
     techInfo?: any;
+    error?: string;
+  } | null>(null);
+  const [holmanLookupResult, setHolmanLookupResult] = useState<{
+    success: boolean;
+    vehicle?: {
+      year: string;
+      make: string;
+      model: string;
+      holmanVehicleNumber: string;
+    };
     error?: string;
   } | null>(null);
 
@@ -95,11 +108,18 @@ export default function OffboardTechnician() {
         vehicleNumber: truckNumber,
         vehicleLocation: "",
         vehicleType: "",
-        reason: "",
         effectiveDate: technician.effectiveDate || "",
         notes: "",
-        returnCondition: ""
+        returnCondition: "",
+        vehicleYear: "",
+        vehicleMake: "",
+        vehicleModel: ""
       });
+      
+      // If vehicle number is available, look up Holman info
+      if (truckNumber) {
+        handleHolmanLookup(truckNumber);
+      }
 
       toast({
         title: "Queue Item Loaded",
@@ -115,29 +135,61 @@ export default function OffboardTechnician() {
     }
   };
 
-  const offboardReasons = [
-    "Involuntary Termination",
-    "Voluntary Termination",
-    "End of lease",
-    "Vehicle sold",
-    "Damaged beyond repair",
-    "High maintenance costs",
-    "Employee terminated",
-    "Employee resigned",
-    "Employee retired",
-    "Employee transferred",
-    "Employee on leave",
-    "Location closure",
-    "Lease expiration",
-    "Downsizing",
-    "Relocation",
-    "Other"
-  ];
+  // Holman vehicle lookup by vehicle number (left-padded to 6 chars)
+  const handleHolmanLookup = async (vehicleNum: string) => {
+    if (!vehicleNum) return;
+    
+    // Left-pad vehicle number to 6 characters
+    const paddedVehicleNum = vehicleNum.padStart(6, '0');
+    
+    setIsLookingUpHolman(true);
+    setHolmanLookupResult(null);
+
+    try {
+      const response = await fetch(`/api/holman/vehicle/${encodeURIComponent(paddedVehicleNum)}`, {
+        credentials: 'include'
+      });
+      
+      const result = await response.json();
+      setHolmanLookupResult(result);
+
+      if (result.success && result.vehicle) {
+        setTechnicianOffboard(prev => ({
+          ...prev,
+          vehicleYear: result.vehicle.year || '',
+          vehicleMake: result.vehicle.make || '',
+          vehicleModel: result.vehicle.model || ''
+        }));
+
+        toast({
+          title: "Vehicle Info Found",
+          description: `Found ${result.vehicle.year} ${result.vehicle.make} ${result.vehicle.model}`,
+        });
+      } else {
+        toast({
+          title: "Vehicle Not Found",
+          description: result.error || `No vehicle found with number ${paddedVehicleNum} in Holman.`,
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
+      console.error('Holman lookup error:', error);
+      setHolmanLookupResult({ success: false, error: error.message });
+      toast({
+        title: "Holman Lookup Failed",
+        description: error.message || "Failed to look up vehicle in Holman.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLookingUpHolman(false);
+    }
+  };
 
   useEffect(() => {
     const offboardFields = [
       'vehicleId', 'techRacfId', 'techName', 'employeeId', 'lastDayWorked',
-      'vehicleNumber', 'vehicleLocation', 'vehicleType', 'reason', 'effectiveDate', 'notes', 'returnCondition'
+      'vehicleNumber', 'vehicleLocation', 'vehicleType', 'effectiveDate', 'notes', 'returnCondition',
+      'vehicleYear', 'vehicleMake', 'vehicleModel'
     ];
 
     const prefill = getPrefillParams(offboardFields);
@@ -286,10 +338,12 @@ export default function OffboardTechnician() {
         vehicle: {
           vehicleNumber: technicianOffboard.vehicleNumber,
           vehicleName: technicianOffboard.vehicleNumber,
-          reason: technicianOffboard.reason,
           location: technicianOffboard.vehicleLocation,
           condition: technicianOffboard.returnCondition,
-          type: technicianOffboard.vehicleType
+          type: technicianOffboard.vehicleType,
+          year: technicianOffboard.vehicleYear,
+          make: technicianOffboard.vehicleMake,
+          model: technicianOffboard.vehicleModel
         },
         submitter: user ? {
           name: user.username || user.email || "Unknown User",
@@ -303,7 +357,7 @@ export default function OffboardTechnician() {
       await apiRequest("POST", "/api/ntao-queue", {
         workflowType: "offboarding",
         title: `Day 0: NTAO — National Truck Assortment - Stop Truck Stock Replenishment - ${technicianOffboard.techName}`,
-        description: `IMMEDIATE TASK: Stop truck stock replenishment for ${technicianOffboard.techName} (${technicianOffboard.techRacfId}). Vehicle: ${technicianOffboard.vehicleNumber}. Last day: ${technicianOffboard.lastDayWorked}. Reason: ${technicianOffboard.reason}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+        description: `IMMEDIATE TASK: Stop truck stock replenishment for ${technicianOffboard.techName} (${technicianOffboard.techRacfId}). Vehicle: ${technicianOffboard.vehicleNumber} (${technicianOffboard.vehicleYear} ${technicianOffboard.vehicleMake} ${technicianOffboard.vehicleModel}). Last day: ${technicianOffboard.lastDayWorked}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
         priority: "high",
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
@@ -438,8 +492,7 @@ export default function OffboardTechnician() {
           employeeName: technicianOffboard.techName,
           employeeId: technicianOffboard.employeeId,
           racfId: technicianOffboard.techRacfId,
-          lastDayWorked: technicianOffboard.lastDayWorked,
-          reason: technicianOffboard.reason
+          lastDayWorked: technicianOffboard.lastDayWorked
         });
       } catch (emailError) {
         console.error('Error sending credit card deactivation email:', emailError);
@@ -482,11 +535,14 @@ export default function OffboardTechnician() {
       vehicleNumber: "",
       vehicleLocation: "",
       vehicleType: "",
-      reason: "",
       effectiveDate: "",
       notes: "",
-      returnCondition: ""
+      returnCondition: "",
+      vehicleYear: "",
+      vehicleMake: "",
+      vehicleModel: ""
     });
+    setHolmanLookupResult(null);
     
     setIsSubmitting(false);
   };
@@ -657,17 +713,68 @@ export default function OffboardTechnician() {
                       )}
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="vehicleLocation">Vehicle Location *</Label>
-                      <Input
-                        id="vehicleLocation"
-                        placeholder="Enter current location"
-                        value={technicianOffboard.vehicleLocation}
-                        onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleLocation: e.target.value })}
-                        required
-                        data-testid="input-vehicle-location"
-                      />
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="vehicleYear">Year</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="vehicleYear"
+                            placeholder="Year"
+                            value={technicianOffboard.vehicleYear}
+                            onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleYear: e.target.value })}
+                            data-testid="input-vehicle-year"
+                            className="flex-1"
+                            readOnly
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => handleHolmanLookup(technicianOffboard.vehicleNumber)}
+                            disabled={isLookingUpHolman || !technicianOffboard.vehicleNumber}
+                            title="Look up vehicle info from Holman"
+                            data-testid="button-holman-lookup"
+                          >
+                            {isLookingUpHolman ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Car className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="vehicleMake">Make</Label>
+                        <Input
+                          id="vehicleMake"
+                          placeholder="Make"
+                          value={technicianOffboard.vehicleMake}
+                          onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleMake: e.target.value })}
+                          data-testid="input-vehicle-make"
+                          readOnly
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="vehicleModel">Model</Label>
+                        <Input
+                          id="vehicleModel"
+                          placeholder="Model"
+                          value={technicianOffboard.vehicleModel}
+                          onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleModel: e.target.value })}
+                          data-testid="input-vehicle-model"
+                          readOnly
+                        />
+                      </div>
                     </div>
+                    <p className="text-xs text-muted-foreground -mt-4">
+                      Enter Vehicle Number above, then click the car icon to auto-fill Year/Make/Model from Holman
+                    </p>
+                    {holmanLookupResult && (
+                      <div className={`text-xs p-2 rounded ${holmanLookupResult.success ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}>
+                        {holmanLookupResult.success 
+                          ? `Found: ${holmanLookupResult.vehicle?.year} ${holmanLookupResult.vehicle?.make} ${holmanLookupResult.vehicle?.model}`
+                          : `Lookup failed: ${holmanLookupResult.error || 'Unknown error'}`}
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       <Label htmlFor="vehicleType">Vehicle Type *</Label>
@@ -695,23 +802,15 @@ export default function OffboardTechnician() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="reason">Reason for Offboarding *</Label>
-                      <Select
-                        value={technicianOffboard.reason}
-                        onValueChange={(value) => setTechnicianOffboard({ ...technicianOffboard, reason: value })}
+                      <Label htmlFor="vehicleLocation">Vehicle Location *</Label>
+                      <Input
+                        id="vehicleLocation"
+                        placeholder="Enter current location"
+                        value={technicianOffboard.vehicleLocation}
+                        onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleLocation: e.target.value })}
                         required
-                      >
-                        <SelectTrigger data-testid="select-offboard-reason">
-                          <SelectValue placeholder="Select reason" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {offboardReasons.map((reason) => (
-                            <SelectItem key={reason} value={reason}>
-                              {reason}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        data-testid="input-vehicle-location"
+                      />
                     </div>
 
                     <div className="space-y-2">

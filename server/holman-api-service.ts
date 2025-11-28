@@ -236,6 +236,92 @@ export class HolmanApiService {
     );
   }
 
+  async findVehicleByNumber(vehicleNumber: string): Promise<{
+    success: boolean;
+    vehicle?: {
+      year: string;
+      make: string;
+      model: string;
+      holmanVehicleNumber: string;
+      vin?: string;
+      status?: string;
+    };
+    error?: string;
+  }> {
+    try {
+      console.log('[Holman] Looking up vehicle by number:', vehicleNumber);
+      
+      // Left-pad vehicle number to 6 characters for Holman search
+      const paddedVehicleNum = vehicleNumber.padStart(6, '0');
+      
+      // Search all vehicles with lesseeCode 2B56
+      let allVehicles: any[] = [];
+      let pageNumber = 1;
+      const pageSize = 200;
+      const maxPages = 65; // ~12,369 vehicles / 200 = 62 pages
+      
+      const token = await this.getAccessToken();
+      
+      while (pageNumber <= maxPages) {
+        const url = `${this.apiEndpoint}/vehicles/basic-query?lesseeCodes=2B56&pageSize=${pageSize}&pageNumber=${pageNumber}`;
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error(`API request failed: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.items || data.items.length === 0) break;
+        
+        // Check for matching vehicle in this batch
+        const matchingVehicle = data.items.find((v: any) => {
+          const holmanNum = (v.holmanVehicleNumber || '').padStart(6, '0');
+          const clientNum = (v.clientVehicleNumber || '').padStart(6, '0');
+          return holmanNum === paddedVehicleNum || clientNum === paddedVehicleNum;
+        });
+        
+        if (matchingVehicle) {
+          console.log('[Holman] Found matching vehicle:', matchingVehicle.holmanVehicleNumber);
+          return {
+            success: true,
+            vehicle: {
+              year: String(matchingVehicle.year || ''),
+              make: matchingVehicle.makeVin || matchingVehicle.makeClient || '',
+              model: matchingVehicle.modelVin || matchingVehicle.modelClient || '',
+              holmanVehicleNumber: matchingVehicle.holmanVehicleNumber || '',
+              vin: matchingVehicle.vin || '',
+              status: matchingVehicle.status || matchingVehicle.assignedStatus || ''
+            }
+          };
+        }
+        
+        if (pageNumber >= data.pageInfo?.totalPages) break;
+        pageNumber++;
+      }
+      
+      console.log('[Holman] Vehicle not found:', vehicleNumber);
+      return {
+        success: false,
+        error: `No vehicle found with number ${vehicleNumber}`
+      };
+      
+    } catch (error: any) {
+      console.error('[Holman] Vehicle lookup error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to look up vehicle'
+      };
+    }
+  }
+
   async getContacts(
     lesseeCode?: string,
     pageNumber: number = 1,
