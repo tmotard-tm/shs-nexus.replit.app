@@ -42,7 +42,6 @@ export default function Integrations() {
   const [holmanEnabled, setHolmanEnabled] = useState(true);
   const [snowflakeEnabled, setSnowflakeEnabled] = useState(true);
   const [tpmsEnabled, setTpmsEnabled] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'healthy' | 'errors'>('all');
 
   const [formData, setFormData] = useState({
     name: "",
@@ -306,33 +305,11 @@ export default function Integrations() {
     }
   };
 
-  const integrations = [
-    { id: 'holman', name: 'Holman', enabled: holmanEnabled, healthy: true },
-    { id: 'snowflake', name: 'Snowflake', enabled: snowflakeEnabled, healthy: snowflakeStatus?.configured ?? false },
-    { id: 'tpms', name: 'TPMS', enabled: tpmsEnabled, healthy: tpmsStatus?.configured ?? false },
-  ];
-
   const integrationStats = {
     total: 3,
-    active: integrations.filter(i => i.enabled).length,
-    healthy: integrations.filter(i => i.healthy).length,
-    errors: integrations.filter(i => !i.healthy).length,
-  };
-
-  const shouldShowIntegration = (id: string) => {
-    const integration = integrations.find(i => i.id === id);
-    if (!integration) return true;
-    
-    switch (statusFilter) {
-      case 'active':
-        return integration.enabled;
-      case 'healthy':
-        return integration.healthy;
-      case 'errors':
-        return !integration.healthy;
-      default:
-        return true;
-    }
+    active: [holmanEnabled, snowflakeEnabled, tpmsEnabled].filter(Boolean).length,
+    healthy: [true, snowflakeStatus?.configured, tpmsStatus?.configured].filter(Boolean).length,
+    errors: [false, !snowflakeStatus?.configured, !tpmsStatus?.configured].filter(Boolean).length,
   };
 
   return (
@@ -419,80 +396,43 @@ export default function Integrations() {
               </Dialog>
               </div>
               
+              {/* Inline Stats */}
+              <div className="flex items-center gap-6 pt-2 border-t border-border">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-primary/10 rounded flex items-center justify-center">
+                    <Settings className="h-3 w-3 text-primary" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Total:</span>
+                  <span className="text-sm font-semibold" data-testid="text-total-apis">{integrationStats.total}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-[hsl(var(--chart-2))]/10 rounded flex items-center justify-center">
+                    <CheckCircle className="h-3 w-3 text-[hsl(var(--chart-2))]" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Active:</span>
+                  <span className="text-sm font-semibold" data-testid="text-active-apis">{integrationStats.active}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-[hsl(var(--chart-2))]/10 rounded flex items-center justify-center">
+                    <CheckCircle className="h-3 w-3 text-[hsl(var(--chart-2))]" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Healthy:</span>
+                  <span className="text-sm font-semibold" data-testid="text-healthy-apis">{integrationStats.healthy}</span>
+                </div>
+                {integrationStats.errors > 0 && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 bg-destructive/10 rounded flex items-center justify-center">
+                      <XCircle className="h-3 w-3 text-destructive" />
+                    </div>
+                    <span className="text-sm text-muted-foreground">Errors:</span>
+                    <span className="text-sm font-semibold text-destructive" data-testid="text-error-apis">{integrationStats.errors}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </CardHeader>
-          
-          {/* Filter Stats Cards */}
-          <div className="px-6 pb-4">
-            <div className="grid grid-cols-4 gap-3">
-              <button
-                onClick={() => setStatusFilter('all')}
-                className={`p-4 rounded-lg text-left transition-all ${
-                  statusFilter === 'all' 
-                    ? 'bg-blue-600 text-white ring-2 ring-blue-400' 
-                    : 'bg-blue-600/80 text-white hover:bg-blue-600'
-                }`}
-                data-testid="filter-all"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium opacity-90">All Integrations</span>
-                  <Settings className="h-4 w-4 opacity-70" />
-                </div>
-                <p className="text-2xl font-bold" data-testid="text-total-apis">{integrationStats.total}</p>
-              </button>
-              
-              <button
-                onClick={() => setStatusFilter('active')}
-                className={`p-4 rounded-lg text-left transition-all ${
-                  statusFilter === 'active' 
-                    ? 'bg-amber-500 text-white ring-2 ring-amber-300' 
-                    : 'bg-amber-500/80 text-white hover:bg-amber-500'
-                }`}
-                data-testid="filter-active"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium opacity-90">Active</span>
-                  <Play className="h-4 w-4 opacity-70" />
-                </div>
-                <p className="text-2xl font-bold" data-testid="text-active-apis">{integrationStats.active}</p>
-              </button>
-              
-              <button
-                onClick={() => setStatusFilter('healthy')}
-                className={`p-4 rounded-lg text-left transition-all ${
-                  statusFilter === 'healthy' 
-                    ? 'bg-green-600 text-white ring-2 ring-green-400' 
-                    : 'bg-green-600/80 text-white hover:bg-green-600'
-                }`}
-                data-testid="filter-healthy"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium opacity-90">Healthy</span>
-                  <CheckCircle className="h-4 w-4 opacity-70" />
-                </div>
-                <p className="text-2xl font-bold" data-testid="text-healthy-apis">{integrationStats.healthy}</p>
-              </button>
-              
-              <button
-                onClick={() => setStatusFilter('errors')}
-                className={`p-4 rounded-lg text-left transition-all ${
-                  statusFilter === 'errors' 
-                    ? 'bg-red-600 text-white ring-2 ring-red-400' 
-                    : 'bg-red-600/80 text-white hover:bg-red-600'
-                }`}
-                data-testid="filter-errors"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium opacity-90">Errors</span>
-                  <XCircle className="h-4 w-4 opacity-70" />
-                </div>
-                <p className="text-2xl font-bold" data-testid="text-error-apis">{integrationStats.errors}</p>
-              </button>
-            </div>
-          </div>
           <CardContent className="space-y-3">
             {/* Holman Integration */}
-            {shouldShowIntegration('holman') && (
             <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
               <Link href="/holman-integration" data-testid="link-holman-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
                 <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
@@ -543,10 +483,8 @@ export default function Integrations() {
                 </Button>
               </div>
             </div>
-            )}
             
             {/* Snowflake Integration - Expandable inline */}
-            {shouldShowIntegration('snowflake') && (
             <Collapsible open={snowflakeExpanded} onOpenChange={setSnowflakeExpanded}>
               <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
                 <CollapsibleTrigger asChild>
@@ -693,10 +631,8 @@ export default function Integrations() {
                 )}
               </CollapsibleContent>
             </Collapsible>
-            )}
 
             {/* TPMS Integration - Expandable inline */}
-            {shouldShowIntegration('tpms') && (
             <Collapsible open={tpmsExpanded} onOpenChange={setTpmsExpanded}>
               <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
                 <CollapsibleTrigger asChild>
@@ -813,14 +749,6 @@ export default function Integrations() {
                 </Card>
               </CollapsibleContent>
             </Collapsible>
-            )}
-            
-            {/* Empty state when no integrations match filter */}
-            {!shouldShowIntegration('holman') && !shouldShowIntegration('snowflake') && !shouldShowIntegration('tpms') && (
-              <div className="text-center py-8 text-muted-foreground">
-                No integrations match the selected filter
-              </div>
-            )}
           </CardContent>
         </Card>
 
