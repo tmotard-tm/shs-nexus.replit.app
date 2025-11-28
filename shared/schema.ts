@@ -652,3 +652,116 @@ export type TemplateLoadResult = {
   warning?: string; // Warning message for fallback templates
   suggestions?: string[]; // Alternative template IDs if exact match not found
 };
+
+// ============================================
+// Field Mapping Tables for Visual Data Mapping
+// ============================================
+
+// Integration Data Sources - represents a data source (Snowflake table, Holman API, internal DB table)
+export const integrationDataSources = pgTable("integration_data_sources", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  displayName: text("display_name").notNull(),
+  sourceType: text("source_type").notNull(), // 'snowflake', 'holman', 'internal', 'page_object'
+  connectionInfo: text("connection_info"), // JSON with connection details (table name, API endpoint, etc.)
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  metadata: text("metadata"), // JSON for additional properties
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Data Source Fields - individual fields within a data source
+export const dataSourceFields = pgTable("data_source_fields", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sourceId: varchar("source_id").notNull().references(() => integrationDataSources.id, { onDelete: 'cascade' }),
+  fieldName: text("field_name").notNull(),
+  displayName: text("display_name").notNull(),
+  fieldPath: text("field_path"), // JSON path or SQL column path
+  dataType: text("data_type").notNull(), // 'string', 'number', 'boolean', 'date', 'object', 'array'
+  isPrimaryKey: boolean("is_primary_key").notNull().default(false),
+  isForeignKey: boolean("is_foreign_key").notNull().default(false),
+  isRequired: boolean("is_required").notNull().default(false),
+  sampleValue: text("sample_value"),
+  description: text("description"),
+  metadata: text("metadata"), // JSON for additional properties
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Mapping Sets - a collection of field mappings (like a mapping project)
+export const mappingSets = pgTable("mapping_sets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  context: text("context"), // 'offboarding', 'onboarding', 'sync', etc.
+  createdBy: varchar("created_by").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  metadata: text("metadata"), // JSON for canvas state, zoom, pan, etc.
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Mapping Nodes - visual positions of data sources on the canvas
+export const mappingNodes = pgTable("mapping_nodes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  mappingSetId: varchar("mapping_set_id").notNull().references(() => mappingSets.id, { onDelete: 'cascade' }),
+  sourceId: varchar("source_id").notNull().references(() => integrationDataSources.id, { onDelete: 'cascade' }),
+  positionX: decimal("position_x").notNull().default("0"),
+  positionY: decimal("position_y").notNull().default("0"),
+  isExpanded: boolean("is_expanded").notNull().default(true),
+  metadata: text("metadata"), // JSON for node styling, etc.
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Field Mappings - connections between fields
+export const fieldMappings = pgTable("field_mappings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  mappingSetId: varchar("mapping_set_id").notNull().references(() => mappingSets.id, { onDelete: 'cascade' }),
+  sourceFieldId: varchar("source_field_id").notNull().references(() => dataSourceFields.id, { onDelete: 'cascade' }),
+  targetFieldId: varchar("target_field_id").notNull().references(() => dataSourceFields.id, { onDelete: 'cascade' }),
+  direction: text("direction").notNull().default("push"), // 'push', 'pull', 'bidirectional'
+  transformation: text("transformation"), // JSON with transformation rules
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  metadata: text("metadata"), // JSON for edge styling, etc.
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ============================================
+// Field Mapping Zod Schemas
+// ============================================
+
+export const insertIntegrationDataSourceSchema = createInsertSchema(integrationDataSources).omit({ 
+  id: true, 
+  createdAt: true, 
+  updatedAt: true 
+});
+export const insertDataSourceFieldSchema = createInsertSchema(dataSourceFields).omit({ 
+  id: true, 
+  createdAt: true 
+});
+export const insertMappingSetSchema = createInsertSchema(mappingSets).omit({ 
+  id: true, 
+  createdAt: true, 
+  updatedAt: true 
+});
+export const insertMappingNodeSchema = createInsertSchema(mappingNodes).omit({ 
+  id: true, 
+  createdAt: true 
+});
+export const insertFieldMappingSchema = createInsertSchema(fieldMappings).omit({ 
+  id: true, 
+  createdAt: true 
+});
+
+// Field Mapping Types
+export type IntegrationDataSource = typeof integrationDataSources.$inferSelect;
+export type InsertIntegrationDataSource = z.infer<typeof insertIntegrationDataSourceSchema>;
+export type DataSourceField = typeof dataSourceFields.$inferSelect;
+export type InsertDataSourceField = z.infer<typeof insertDataSourceFieldSchema>;
+export type MappingSet = typeof mappingSets.$inferSelect;
+export type InsertMappingSet = z.infer<typeof insertMappingSetSchema>;
+export type MappingNode = typeof mappingNodes.$inferSelect;
+export type InsertMappingNode = z.infer<typeof insertMappingNodeSchema>;
+export type FieldMapping = typeof fieldMappings.$inferSelect;
+export type InsertFieldMapping = z.infer<typeof insertFieldMappingSchema>;
