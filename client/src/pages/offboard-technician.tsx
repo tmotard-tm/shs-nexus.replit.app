@@ -628,6 +628,30 @@ export default function OffboardTechnician() {
                               techName: tech.techName
                             }));
 
+                            // Auto-lookup termed tech dates (effectiveDate, lastDayWorked)
+                            if (tech.employeeId) {
+                              try {
+                                const termedResponse = await fetch(`/api/termed-techs/lookup/${encodeURIComponent(tech.employeeId)}`, {
+                                  credentials: 'include'
+                                });
+                                const termedResult = await termedResponse.json();
+                                
+                                if (termedResult.found) {
+                                  setTechnicianOffboard(prev => ({
+                                    ...prev,
+                                    effectiveDate: termedResult.effectiveDate ? new Date(termedResult.effectiveDate).toISOString().split('T')[0] : prev.effectiveDate,
+                                    lastDayWorked: termedResult.lastDayWorked ? new Date(termedResult.lastDayWorked).toISOString().split('T')[0] : prev.lastDayWorked
+                                  }));
+                                  toast({
+                                    title: "Termination Dates Found",
+                                    description: `Auto-filled dates from termination records`,
+                                  });
+                                }
+                              } catch (termedError) {
+                                console.log('Termed tech lookup - tech not in terminated list:', termedError);
+                              }
+                            }
+
                             // Auto-lookup vehicle from TPMS using RACF ID
                             if (tech.techRacfid) {
                               setIsLookingUpTruck(true);

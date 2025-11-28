@@ -5072,6 +5072,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Look up a termed tech by employee ID (for auto-filling dates)
+  app.get("/api/termed-techs/lookup/:employeeId", requireAuth, async (req: any, res) => {
+    try {
+      const { employeeId } = req.params;
+      const termedTechs = await storage.getTermedTechs();
+      const termedTech = termedTechs.find(t => t.employeeId === employeeId);
+      
+      if (termedTech) {
+        res.json({
+          found: true,
+          effectiveDate: termedTech.effectiveDate,
+          lastDayWorked: termedTech.lastDayWorked
+        });
+      } else {
+        res.json({ found: false });
+      }
+    } catch (error: any) {
+      console.error("Error looking up termed tech:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get sync logs
   app.get("/api/sync-logs", requireAuth, async (req: any, res) => {
     try {
