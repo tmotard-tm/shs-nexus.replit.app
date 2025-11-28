@@ -486,32 +486,6 @@ export default function Integrations() {
                 </div>
               </div>
               <CollapsibleContent className="mt-2 ml-4 border-l-2 border-blue-500/20 pl-4 space-y-4">
-                {/* Connection Test */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Connection Test</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <Button
-                      onClick={() => testSnowflakeMutation.mutate()}
-                      disabled={!snowflakeStatus?.configured || testSnowflakeMutation.isPending}
-                      data-testid="button-test-snowflake"
-                    >
-                      {testSnowflakeMutation.isPending ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Testing...
-                        </>
-                      ) : (
-                        <>
-                          <Database className="mr-2 h-4 w-4" />
-                          Test Connection
-                        </>
-                      )}
-                    </Button>
-                  </CardContent>
-                </Card>
-
                 {/* SQL Query */}
                 <Card>
                   <CardHeader className="pb-3">
