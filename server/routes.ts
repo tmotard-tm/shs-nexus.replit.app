@@ -5340,79 +5340,265 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Only superadmin users can seed data sources" });
       }
 
-      const defaultSources = [
+      // Define sources with their fields
+      const sourcesWithFields = [
         {
-          name: 'snowflake_all_techs',
-          displayName: 'Snowflake: All Technicians',
-          sourceType: 'snowflake',
-          connectionInfo: JSON.stringify({ table: 'DRIVELINE_ALL_TECHS' }),
-          description: 'Complete technician roster from Snowflake data warehouse'
+          source: {
+            name: 'snowflake_termed_techs',
+            displayName: 'Snowflake: Termed Technicians',
+            sourceType: 'snowflake',
+            connectionInfo: JSON.stringify({ table: 'DRIVELINE_TERMED_TECHS_LAST30' }),
+            description: 'Terminated technicians from the last 30 days'
+          },
+          fields: [
+            { fieldName: 'EMPL_ID', displayName: 'Employee ID', dataType: 'string', isPrimaryKey: true, isRequired: true, sampleValue: '01024631440', description: 'Unique employee identifier' },
+            { fieldName: 'ENTERPRISE_ID', displayName: 'Enterprise ID (RACF)', dataType: 'string', isRequired: true, sampleValue: 'JJORDAN', description: 'LDAP/RACF username' },
+            { fieldName: 'FULL_NAME', displayName: 'Full Name', dataType: 'string', isRequired: true, sampleValue: 'JORDAN, JUSTIN', description: 'Employee full name (Last, First)' },
+            { fieldName: 'FIRST_NAME', displayName: 'First Name', dataType: 'string', sampleValue: 'JUSTIN', description: 'Employee first name' },
+            { fieldName: 'LAST_NAME', displayName: 'Last Name', dataType: 'string', sampleValue: 'JORDAN', description: 'Employee last name' },
+            { fieldName: 'DATE_LAST_WORKED', displayName: 'Last Day Worked', dataType: 'date', sampleValue: '2025-11-28', description: 'Final working day' },
+            { fieldName: 'JOB_TITLE', displayName: 'Job Title', dataType: 'string', sampleValue: 'Service Technician 1, In-Home', description: 'Employee job title' },
+            { fieldName: 'DISTRICT_NO', displayName: 'District Number', dataType: 'string', isForeignKey: true, sampleValue: '07670', description: 'District identifier' },
+            { fieldName: 'PLANNING_AREA_NM', displayName: 'Planning Area', dataType: 'string', sampleValue: 'WEST REGION', description: 'Planning area name' },
+            { fieldName: 'EMPLOYMENT_STATUS', displayName: 'Employment Status', dataType: 'string', sampleValue: 'TERMINATED', description: 'Current employment status' },
+            { fieldName: 'EFFDT', displayName: 'Effective Date', dataType: 'date', sampleValue: '2025-11-28', description: 'Status effective date' },
+          ]
         },
         {
-          name: 'snowflake_termed_techs',
-          displayName: 'Snowflake: Termed Technicians',
-          sourceType: 'snowflake',
-          connectionInfo: JSON.stringify({ table: 'DRIVELINE_TERMED_TECHS_LAST30' }),
-          description: 'Terminated technicians from the last 30 days'
+          source: {
+            name: 'snowflake_all_techs',
+            displayName: 'Snowflake: All Technicians',
+            sourceType: 'snowflake',
+            connectionInfo: JSON.stringify({ table: 'DRIVELINE_ALL_TECHS' }),
+            description: 'Complete technician roster from Snowflake data warehouse'
+          },
+          fields: [
+            { fieldName: 'EMPL_ID', displayName: 'Employee ID', dataType: 'string', isPrimaryKey: true, isRequired: true, sampleValue: '71024318227', description: 'Unique employee identifier' },
+            { fieldName: 'ENTERPRISE_ID', displayName: 'Enterprise ID (RACF)', dataType: 'string', isRequired: true, sampleValue: 'LYOUNGB', description: 'LDAP/RACF username' },
+            { fieldName: 'FULL_NAME', displayName: 'Full Name', dataType: 'string', isRequired: true, sampleValue: 'YOUNGBLOOD, LEONARD', description: 'Employee full name' },
+            { fieldName: 'FIRST_NAME', displayName: 'First Name', dataType: 'string', sampleValue: 'LEONARD', description: 'Employee first name' },
+            { fieldName: 'LAST_NAME', displayName: 'Last Name', dataType: 'string', sampleValue: 'YOUNGBLOOD', description: 'Employee last name' },
+            { fieldName: 'JOB_TITLE', displayName: 'Job Title', dataType: 'string', sampleValue: 'Service Technician 1, In-Home', description: 'Employee job title' },
+            { fieldName: 'DISTRICT_NO', displayName: 'District Number', dataType: 'string', isForeignKey: true, sampleValue: '08420', description: 'District identifier' },
+            { fieldName: 'PLANNING_AREA_NM', displayName: 'Planning Area', dataType: 'string', sampleValue: 'EAST REGION', description: 'Planning area name' },
+            { fieldName: 'EMPLOYMENT_STATUS', displayName: 'Employment Status', dataType: 'string', sampleValue: 'ACTIVE', description: 'Current employment status' },
+          ]
         },
         {
-          name: 'holman_vehicles',
-          displayName: 'Holman API: Vehicles',
-          sourceType: 'holman',
-          connectionInfo: JSON.stringify({ endpoint: '/vehicles' }),
-          description: 'Vehicle data from Holman Fleet API'
+          source: {
+            name: 'tpms_tech_info',
+            displayName: 'TPMS: Technician Profile',
+            sourceType: 'tpms',
+            connectionInfo: JSON.stringify({ endpoint: '/techinfo' }),
+            description: 'Technician profile data from TPMS API'
+          },
+          fields: [
+            { fieldName: 'ldapId', displayName: 'Enterprise ID (LDAP)', dataType: 'string', isPrimaryKey: true, isRequired: true, sampleValue: 'JJORDAN', description: 'LDAP/Enterprise ID' },
+            { fieldName: 'techId', displayName: 'Tech ID', dataType: 'string', isRequired: true, sampleValue: '12345', description: 'Internal tech identifier' },
+            { fieldName: 'firstName', displayName: 'First Name', dataType: 'string', sampleValue: 'Justin', description: 'Technician first name' },
+            { fieldName: 'lastName', displayName: 'Last Name', dataType: 'string', sampleValue: 'Jordan', description: 'Technician last name' },
+            { fieldName: 'districtNo', displayName: 'District Number', dataType: 'string', isForeignKey: true, sampleValue: '07670', description: 'District identifier' },
+            { fieldName: 'techManagerLdapId', displayName: 'Manager Enterprise ID', dataType: 'string', isForeignKey: true, sampleValue: 'MSMITH', description: 'Manager LDAP ID' },
+            { fieldName: 'truckNo', displayName: 'Truck Number', dataType: 'string', sampleValue: '023680', description: 'Assigned truck number' },
+            { fieldName: 'contactNo', displayName: 'Contact Number', dataType: 'string', sampleValue: '555-123-4567', description: 'Phone number' },
+            { fieldName: 'email', displayName: 'Email Address', dataType: 'string', sampleValue: 'justin.jordan@company.com', description: 'Email address' },
+            { fieldName: 'addresses.PRIMARY.addrLine1', displayName: 'Primary Address Line 1', dataType: 'string', sampleValue: '123 Main St', description: 'Primary address street' },
+            { fieldName: 'addresses.PRIMARY.city', displayName: 'Primary City', dataType: 'string', sampleValue: 'Chicago', description: 'Primary address city' },
+            { fieldName: 'addresses.PRIMARY.stateCd', displayName: 'Primary State', dataType: 'string', sampleValue: 'IL', description: 'Primary address state' },
+            { fieldName: 'addresses.PRIMARY.zipCd', displayName: 'Primary ZIP', dataType: 'string', sampleValue: '60601', description: 'Primary address ZIP code' },
+            { fieldName: 'techReplenishment.primarySrc', displayName: 'Replenishment Source', dataType: 'string', sampleValue: 'STORE', description: 'Parts replenishment source' },
+            { fieldName: 'techReplenishment.providerName', displayName: 'Provider Name', dataType: 'string', sampleValue: 'NAPA', description: 'Parts provider name' },
+            { fieldName: 'latestShippingHold.holdReason', displayName: 'Shipping Hold Reason', dataType: 'string', sampleValue: 'VACATION', description: 'Reason for shipping hold' },
+          ]
         },
         {
-          name: 'holman_contacts',
-          displayName: 'Holman API: Contacts',
-          sourceType: 'holman',
-          connectionInfo: JSON.stringify({ endpoint: '/contacts' }),
-          description: 'Contact data from Holman Fleet API'
+          source: {
+            name: 'holman_vehicles',
+            displayName: 'Holman API: Vehicles',
+            sourceType: 'holman',
+            connectionInfo: JSON.stringify({ endpoint: '/vehicles' }),
+            description: 'Vehicle data from Holman Fleet API'
+          },
+          fields: [
+            { fieldName: 'vin', displayName: 'VIN', dataType: 'string', isPrimaryKey: true, isRequired: true, sampleValue: '1FTFW1E80NFA12345', description: 'Vehicle Identification Number' },
+            { fieldName: 'unitNumber', displayName: 'Unit Number', dataType: 'string', isRequired: true, sampleValue: '023680', description: 'Fleet unit number' },
+            { fieldName: 'year', displayName: 'Model Year', dataType: 'number', sampleValue: '2023', description: 'Vehicle model year' },
+            { fieldName: 'make', displayName: 'Make', dataType: 'string', sampleValue: 'Ford', description: 'Vehicle manufacturer' },
+            { fieldName: 'model', displayName: 'Model', dataType: 'string', sampleValue: 'F-150', description: 'Vehicle model' },
+            { fieldName: 'color', displayName: 'Color', dataType: 'string', sampleValue: 'White', description: 'Vehicle color' },
+            { fieldName: 'licensePlate', displayName: 'License Plate', dataType: 'string', sampleValue: 'ABC1234', description: 'License plate number' },
+            { fieldName: 'licensePlateState', displayName: 'License Plate State', dataType: 'string', sampleValue: 'IL', description: 'License plate state' },
+            { fieldName: 'status', displayName: 'Vehicle Status', dataType: 'string', sampleValue: 'ACTIVE', description: 'Current vehicle status' },
+            { fieldName: 'currentOdometer', displayName: 'Current Odometer', dataType: 'number', sampleValue: '45678', description: 'Current odometer reading' },
+            { fieldName: 'assignedDriverId', displayName: 'Assigned Driver ID', dataType: 'string', isForeignKey: true, sampleValue: 'DRV001', description: 'ID of assigned driver' },
+            { fieldName: 'assignedDriverName', displayName: 'Assigned Driver Name', dataType: 'string', sampleValue: 'John Smith', description: 'Name of assigned driver' },
+            { fieldName: 'clientCode', displayName: 'Client Code', dataType: 'string', sampleValue: 'SEARS', description: 'Client identifier' },
+            { fieldName: 'divisionCode', displayName: 'Division Code', dataType: 'string', sampleValue: 'SHS', description: 'Division identifier' },
+            { fieldName: 'departmentCode', displayName: 'Department Code', dataType: 'string', sampleValue: 'FLEET', description: 'Department identifier' },
+            { fieldName: 'fuelType', displayName: 'Fuel Type', dataType: 'string', sampleValue: 'GASOLINE', description: 'Vehicle fuel type' },
+            { fieldName: 'inServiceDate', displayName: 'In Service Date', dataType: 'date', sampleValue: '2023-01-15', description: 'Date vehicle entered service' },
+          ]
         },
         {
-          name: 'internal_queue_items',
-          displayName: 'Internal: Queue Items',
-          sourceType: 'internal',
-          connectionInfo: JSON.stringify({ table: 'queue_items' }),
-          description: 'Internal queue items table'
+          source: {
+            name: 'holman_contacts',
+            displayName: 'Holman API: Contacts',
+            sourceType: 'holman',
+            connectionInfo: JSON.stringify({ endpoint: '/contacts' }),
+            description: 'Contact data from Holman Fleet API'
+          },
+          fields: [
+            { fieldName: 'contactId', displayName: 'Contact ID', dataType: 'string', isPrimaryKey: true, isRequired: true, sampleValue: 'CNT001', description: 'Unique contact identifier' },
+            { fieldName: 'firstName', displayName: 'First Name', dataType: 'string', sampleValue: 'John', description: 'Contact first name' },
+            { fieldName: 'lastName', displayName: 'Last Name', dataType: 'string', sampleValue: 'Smith', description: 'Contact last name' },
+            { fieldName: 'email', displayName: 'Email', dataType: 'string', sampleValue: 'john.smith@company.com', description: 'Email address' },
+            { fieldName: 'phone', displayName: 'Phone', dataType: 'string', sampleValue: '555-123-4567', description: 'Phone number' },
+            { fieldName: 'mobilePhone', displayName: 'Mobile Phone', dataType: 'string', sampleValue: '555-987-6543', description: 'Mobile phone number' },
+            { fieldName: 'jobTitle', displayName: 'Job Title', dataType: 'string', sampleValue: 'Fleet Manager', description: 'Contact job title' },
+            { fieldName: 'department', displayName: 'Department', dataType: 'string', sampleValue: 'Fleet Operations', description: 'Department name' },
+            { fieldName: 'address1', displayName: 'Address Line 1', dataType: 'string', sampleValue: '123 Corporate Dr', description: 'Street address' },
+            { fieldName: 'city', displayName: 'City', dataType: 'string', sampleValue: 'Chicago', description: 'City' },
+            { fieldName: 'state', displayName: 'State', dataType: 'string', sampleValue: 'IL', description: 'State' },
+            { fieldName: 'zip', displayName: 'ZIP Code', dataType: 'string', sampleValue: '60601', description: 'ZIP code' },
+            { fieldName: 'status', displayName: 'Status', dataType: 'string', sampleValue: 'ACTIVE', description: 'Contact status' },
+          ]
         },
         {
-          name: 'internal_vehicles',
-          displayName: 'Internal: Vehicles',
-          sourceType: 'internal',
-          connectionInfo: JSON.stringify({ table: 'vehicles' }),
-          description: 'Internal vehicles table'
+          source: {
+            name: 'holman_maintenance',
+            displayName: 'Holman API: Maintenance',
+            sourceType: 'holman',
+            connectionInfo: JSON.stringify({ endpoint: '/maintenance' }),
+            description: 'Maintenance records from Holman Fleet API'
+          },
+          fields: [
+            { fieldName: 'maintenanceId', displayName: 'Maintenance ID', dataType: 'string', isPrimaryKey: true, isRequired: true, sampleValue: 'MNT001', description: 'Unique maintenance record ID' },
+            { fieldName: 'vin', displayName: 'VIN', dataType: 'string', isForeignKey: true, isRequired: true, sampleValue: '1FTFW1E80NFA12345', description: 'Vehicle VIN' },
+            { fieldName: 'unitNumber', displayName: 'Unit Number', dataType: 'string', sampleValue: '023680', description: 'Fleet unit number' },
+            { fieldName: 'serviceDate', displayName: 'Service Date', dataType: 'date', sampleValue: '2025-11-15', description: 'Date of service' },
+            { fieldName: 'serviceType', displayName: 'Service Type', dataType: 'string', sampleValue: 'OIL_CHANGE', description: 'Type of service performed' },
+            { fieldName: 'description', displayName: 'Description', dataType: 'string', sampleValue: 'Routine oil change', description: 'Service description' },
+            { fieldName: 'vendorName', displayName: 'Vendor Name', dataType: 'string', sampleValue: 'Quick Lube', description: 'Service vendor' },
+            { fieldName: 'totalCost', displayName: 'Total Cost', dataType: 'number', sampleValue: '89.99', description: 'Total service cost' },
+            { fieldName: 'laborCost', displayName: 'Labor Cost', dataType: 'number', sampleValue: '45.00', description: 'Labor cost' },
+            { fieldName: 'partsCost', displayName: 'Parts Cost', dataType: 'number', sampleValue: '44.99', description: 'Parts cost' },
+            { fieldName: 'odometerReading', displayName: 'Odometer Reading', dataType: 'number', sampleValue: '45678', description: 'Odometer at service' },
+            { fieldName: 'status', displayName: 'Status', dataType: 'string', sampleValue: 'COMPLETED', description: 'Service status' },
+          ]
         },
         {
-          name: 'page_offboarding_form',
-          displayName: 'Page: Offboarding Form',
-          sourceType: 'page_object',
-          connectionInfo: JSON.stringify({ page: '/offboard-technician' }),
-          description: 'Offboarding form fields'
+          source: {
+            name: 'internal_queue_items',
+            displayName: 'Internal: Queue Items',
+            sourceType: 'internal',
+            connectionInfo: JSON.stringify({ table: 'queue_items' }),
+            description: 'Internal queue items for workflow processing'
+          },
+          fields: [
+            { fieldName: 'id', displayName: 'Queue Item ID', dataType: 'string', isPrimaryKey: true, isRequired: true, sampleValue: 'qi-001', description: 'Unique queue item ID' },
+            { fieldName: 'module', displayName: 'Module', dataType: 'string', isRequired: true, sampleValue: 'fleet', description: 'Queue module (ntao, assets, inventory, fleet)' },
+            { fieldName: 'type', displayName: 'Task Type', dataType: 'string', isRequired: true, sampleValue: 'offboarding', description: 'Type of task' },
+            { fieldName: 'title', displayName: 'Title', dataType: 'string', isRequired: true, sampleValue: 'Offboard JORDAN, JUSTIN', description: 'Task title' },
+            { fieldName: 'description', displayName: 'Description', dataType: 'string', sampleValue: 'Process offboarding for termed technician', description: 'Task description' },
+            { fieldName: 'status', displayName: 'Status', dataType: 'string', sampleValue: 'pending', description: 'Task status' },
+            { fieldName: 'priority', displayName: 'Priority', dataType: 'string', sampleValue: 'high', description: 'Task priority' },
+            { fieldName: 'assignedTo', displayName: 'Assigned To', dataType: 'string', isForeignKey: true, sampleValue: 'user-001', description: 'Assigned user ID' },
+            { fieldName: 'technicianName', displayName: 'Technician Name', dataType: 'string', sampleValue: 'JORDAN, JUSTIN', description: 'Associated technician name' },
+            { fieldName: 'employeeId', displayName: 'Employee ID', dataType: 'string', isForeignKey: true, sampleValue: '01024631440', description: 'Associated employee ID' },
+            { fieldName: 'enterpriseId', displayName: 'Enterprise ID', dataType: 'string', sampleValue: 'JJORDAN', description: 'Enterprise/RACF ID' },
+            { fieldName: 'truckNumber', displayName: 'Truck Number', dataType: 'string', sampleValue: '023680', description: 'Associated truck number' },
+            { fieldName: 'lastDayWorked', displayName: 'Last Day Worked', dataType: 'date', sampleValue: '2025-11-28', description: 'Technician last working day' },
+            { fieldName: 'formData', displayName: 'Form Data', dataType: 'object', sampleValue: '{}', description: 'JSON form data' },
+            { fieldName: 'createdAt', displayName: 'Created At', dataType: 'date', sampleValue: '2025-11-28', description: 'Creation timestamp' },
+          ]
         },
         {
-          name: 'page_onboarding_form',
-          displayName: 'Page: Onboarding Form',
-          sourceType: 'page_object',
-          connectionInfo: JSON.stringify({ page: '/onboard-hire' }),
-          description: 'Onboarding form fields'
-        }
+          source: {
+            name: 'internal_termed_techs',
+            displayName: 'Internal: Termed Technicians',
+            sourceType: 'internal',
+            connectionInfo: JSON.stringify({ table: 'termed_techs' }),
+            description: 'Synced terminated technicians from Snowflake'
+          },
+          fields: [
+            { fieldName: 'id', displayName: 'Record ID', dataType: 'string', isPrimaryKey: true, isRequired: true, sampleValue: 'tt-001', description: 'Internal record ID' },
+            { fieldName: 'employeeId', displayName: 'Employee ID', dataType: 'string', isRequired: true, sampleValue: '01024631440', description: 'Employee identifier' },
+            { fieldName: 'techRacfid', displayName: 'Enterprise ID', dataType: 'string', sampleValue: 'JJORDAN', description: 'RACF/Enterprise ID' },
+            { fieldName: 'techName', displayName: 'Full Name', dataType: 'string', sampleValue: 'JORDAN, JUSTIN', description: 'Full name' },
+            { fieldName: 'firstName', displayName: 'First Name', dataType: 'string', sampleValue: 'JUSTIN', description: 'First name' },
+            { fieldName: 'lastName', displayName: 'Last Name', dataType: 'string', sampleValue: 'JORDAN', description: 'Last name' },
+            { fieldName: 'lastDayWorked', displayName: 'Last Day Worked', dataType: 'date', sampleValue: '2025-11-28', description: 'Final working day' },
+            { fieldName: 'jobTitle', displayName: 'Job Title', dataType: 'string', sampleValue: 'Service Tech 2 Trainee, PP', description: 'Job title' },
+            { fieldName: 'districtNo', displayName: 'District Number', dataType: 'string', sampleValue: '07670', description: 'District identifier' },
+            { fieldName: 'offboardingTaskCreated', displayName: 'Offboarding Created', dataType: 'boolean', sampleValue: 'true', description: 'Whether offboarding task was created' },
+            { fieldName: 'offboardingTaskId', displayName: 'Offboarding Task ID', dataType: 'string', isForeignKey: true, sampleValue: 'qi-001', description: 'Link to queue item' },
+            { fieldName: 'syncedAt', displayName: 'Synced At', dataType: 'date', sampleValue: '2025-11-28', description: 'Last sync timestamp' },
+          ]
+        },
+        {
+          source: {
+            name: 'page_offboarding_form',
+            displayName: 'Page: Offboarding Form',
+            sourceType: 'page_object',
+            connectionInfo: JSON.stringify({ page: '/offboard-technician' }),
+            description: 'Offboarding form fields for UI display'
+          },
+          fields: [
+            { fieldName: 'technicianName', displayName: 'Technician Name', dataType: 'string', isRequired: true, sampleValue: 'JORDAN, JUSTIN', description: 'Technician full name' },
+            { fieldName: 'employeeId', displayName: 'Employee ID', dataType: 'string', isRequired: true, sampleValue: '01024631440', description: 'Employee identifier' },
+            { fieldName: 'enterpriseId', displayName: 'Enterprise ID', dataType: 'string', sampleValue: 'JJORDAN', description: 'Enterprise/RACF ID' },
+            { fieldName: 'lastDayWorked', displayName: 'Last Day Worked', dataType: 'date', sampleValue: '2025-11-28', description: 'Final working day' },
+            { fieldName: 'truckNumber', displayName: 'Truck Number', dataType: 'string', sampleValue: '023680', description: 'Assigned truck' },
+            { fieldName: 'districtNumber', displayName: 'District Number', dataType: 'string', sampleValue: '07670', description: 'District' },
+            { fieldName: 'jobTitle', displayName: 'Job Title', dataType: 'string', sampleValue: 'Service Technician', description: 'Job title' },
+            { fieldName: 'managerName', displayName: 'Manager Name', dataType: 'string', sampleValue: 'Mike Smith', description: 'Manager name' },
+            { fieldName: 'returnDate', displayName: 'Equipment Return Date', dataType: 'date', sampleValue: '2025-12-01', description: 'Equipment return date' },
+            { fieldName: 'notes', displayName: 'Notes', dataType: 'string', sampleValue: 'Voluntary resignation', description: 'Additional notes' },
+          ]
+        },
       ];
 
-      const created = [];
-      for (const source of defaultSources) {
+      const createdSources = [];
+      const createdFields = [];
+
+      for (const { source, fields } of sourcesWithFields) {
         try {
-          const existing = await storage.getIntegrationDataSources();
-          if (!existing.find(s => s.name === source.name)) {
-            const newSource = await storage.createIntegrationDataSource(source);
-            created.push(newSource);
+          const existingSources = await storage.getIntegrationDataSources();
+          let sourceRecord = existingSources.find(s => s.name === source.name);
+          
+          if (!sourceRecord) {
+            sourceRecord = await storage.createIntegrationDataSource(source);
+            createdSources.push(sourceRecord);
+          }
+
+          // Add fields for this source
+          const existingFields = await storage.getDataSourceFields(sourceRecord.id);
+          for (const field of fields) {
+            if (!existingFields.find(f => f.fieldName === field.fieldName)) {
+              const newField = await storage.createDataSourceField({
+                sourceId: sourceRecord.id,
+                fieldName: field.fieldName,
+                displayName: field.displayName,
+                dataType: field.dataType,
+                isPrimaryKey: field.isPrimaryKey || false,
+                isForeignKey: field.isForeignKey || false,
+                isRequired: field.isRequired || false,
+                sampleValue: field.sampleValue,
+                description: field.description,
+              });
+              createdFields.push(newField);
+            }
           }
         } catch (e) {
           console.error(`Error creating source ${source.name}:`, e);
         }
       }
 
-      res.json({ message: `Seeded ${created.length} data sources`, sources: created });
+      res.json({ 
+        message: `Seeded ${createdSources.length} data sources and ${createdFields.length} fields`, 
+        sources: createdSources,
+        fieldsCreated: createdFields.length
+      });
     } catch (error: any) {
       console.error("Error seeding data sources:", error);
       res.status(500).json({ message: error.message });
