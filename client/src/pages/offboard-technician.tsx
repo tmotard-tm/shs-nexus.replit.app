@@ -7,10 +7,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
-import { Car, AlertTriangle, Trash2, Search, Loader2, Truck } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ClipboardList, AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
@@ -43,12 +45,51 @@ export default function OffboardTechnician() {
     error?: string;
   } | null>(null);
 
-  const vehicles = [
-    { id: "1", name: "Toyota Camry (ABC-1234)", status: "assigned", assignedTo: "John Doe" },
-    { id: "2", name: "Honda Civic (XYZ-5678)", status: "maintenance", assignedTo: null },
-    { id: "3", name: "Ford F-150 (DEF-9012)", status: "available", assignedTo: null },
-    { id: "4", name: "BMW X5 (GHI-3456)", status: "assigned", assignedTo: "Jane Smith" }
-  ];
+  // Fetch pending offboarding queue items
+  const { data: offboardingQueue, isLoading: isLoadingQueue } = useQuery<any[]>({
+    queryKey: ['/api/fleet-queue'],
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
+  // Filter to show only pending/in_progress offboarding tasks
+  const pendingOffboardings = offboardingQueue?.filter(
+    (item: any) => item.workflowType === 'offboarding' && item.status !== 'completed'
+  ) || [];
+
+  // Function to load queue item data into the form
+  const loadQueueItem = (item: any) => {
+    try {
+      const data = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
+      const technician = data?.technician || {};
+      
+      setTechnicianOffboard({
+        vehicleId: "",
+        techRacfId: technician.techRacfid || technician.enterpriseId || "",
+        techName: technician.techName || technician.name || "",
+        employeeId: technician.employeeId || "",
+        lastDayWorked: technician.lastDayWorked || "",
+        vehicleNumber: data?.vehicle?.vehicleNumber || "",
+        vehicleLocation: data?.vehicle?.location || "",
+        vehicleType: data?.vehicle?.type || "",
+        reason: data?.vehicle?.reason || "",
+        effectiveDate: technician.lastDayWorked || "",
+        notes: "",
+        returnCondition: data?.vehicle?.condition || ""
+      });
+
+      toast({
+        title: "Queue Item Loaded",
+        description: `Loaded data for ${technician.techName || 'technician'}. Review and complete the form.`,
+      });
+    } catch (e) {
+      console.error('Error parsing queue item data:', e);
+      toast({
+        title: "Error Loading Data",
+        description: "Could not parse queue item data.",
+        variant: "destructive"
+      });
+    }
+  };
 
   const offboardReasons = [
     "Involuntary Termination",
@@ -205,8 +246,6 @@ export default function OffboardTechnician() {
     setIsSubmitting(true);
     setLastSubmissionTime(prev => ({...prev, [submissionKey]: now}));
     
-    const vehicle = vehicles.find(veh => veh.id === technicianOffboard.vehicleId);
-    
     const workflowId = `offboard_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     try {
@@ -222,7 +261,7 @@ export default function OffboardTechnician() {
         },
         vehicle: {
           vehicleNumber: technicianOffboard.vehicleNumber,
-          vehicleName: vehicle?.name || technicianOffboard.vehicleNumber,
+          vehicleName: technicianOffboard.vehicleNumber,
           reason: technicianOffboard.reason,
           location: technicianOffboard.vehicleLocation,
           condition: technicianOffboard.returnCondition,
@@ -698,36 +737,84 @@ export default function OffboardTechnician() {
 
             <div>
               <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2" data-testid="text-vehicle-details-title">
-                    <Car className="h-5 w-5" />
-                    Vehicle Details
-                  </CardTitle>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2" data-testid="text-offboarding-queue-title">
+                      <ClipboardList className="h-5 w-5" />
+                      Offboarding Queue
+                    </CardTitle>
+                    <Badge variant="secondary" className="text-xs">
+                      {pendingOffboardings.length} pending
+                    </Badge>
+                  </div>
+                  <CardDescription className="text-xs">
+                    Click an item to load into form
+                  </CardDescription>
                 </CardHeader>
-                <CardContent>
-                  {technicianOffboard.vehicleNumber ? (
-                    <div className="space-y-4">
-                      <div className="p-4 bg-muted rounded-lg">
-                        <h4 className="font-semibold mb-2">{technicianOffboard.vehicleNumber}</h4>
-                        <div className="space-y-1 text-sm">
-                          <p><span className="text-muted-foreground">Type:</span> {technicianOffboard.vehicleType || "Not specified"}</p>
-                          <p><span className="text-muted-foreground">Location:</span> {technicianOffboard.vehicleLocation || "Not specified"}</p>
-                          <p><span className="text-muted-foreground">Condition:</span> {technicianOffboard.returnCondition || "Not assessed"}</p>
-                        </div>
-                      </div>
-                      {technicianOffboard.techName && (
-                        <div className="p-4 border rounded-lg">
-                          <h4 className="font-semibold mb-2">Assigned Technician</h4>
-                          <p className="text-sm">{technicianOffboard.techName}</p>
-                          <p className="text-xs text-muted-foreground">RACF: {technicianOffboard.techRacfId}</p>
-                          <p className="text-xs text-muted-foreground">Employee ID: {technicianOffboard.employeeId}</p>
-                        </div>
-                      )}
+                <CardContent className="p-0">
+                  {isLoadingQueue ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : pendingOffboardings.length === 0 ? (
+                    <div className="px-4 py-8 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        No pending offboardings
+                      </p>
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Enter vehicle information to view details
-                    </p>
+                    <ScrollArea className="h-[400px]">
+                      <div className="divide-y">
+                        {pendingOffboardings.map((item: any) => {
+                          const data = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
+                          const technician = data?.technician || {};
+                          const statusColor = item.status === 'pending' 
+                            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                            : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+                          
+                          return (
+                            <button
+                              key={item.id}
+                              onClick={() => loadQueueItem(item)}
+                              className="w-full p-3 text-left hover:bg-muted/50 transition-colors"
+                              data-testid={`queue-item-${item.id}`}
+                            >
+                              <div className="flex items-start justify-between gap-2 mb-1">
+                                <span className="font-medium text-sm truncate flex-1">
+                                  {technician.techName || 'Unknown Technician'}
+                                </span>
+                                <Badge className={`${statusColor} text-[10px] px-1.5 py-0`}>
+                                  {item.status}
+                                </Badge>
+                              </div>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <User className="h-3 w-3" />
+                                  <span>{technician.techRacfid || technician.enterpriseId || 'N/A'}</span>
+                                </div>
+                                {technician.lastDayWorked && (
+                                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                    <Calendar className="h-3 w-3" />
+                                    <span>Last day: {technician.lastDayWorked}</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <Clock className="h-3 w-3" />
+                                  <span>
+                                    {new Date(item.createdAt).toLocaleDateString()}
+                                  </span>
+                                </div>
+                                {technician.planningArea && (
+                                  <div className="text-xs text-muted-foreground truncate">
+                                    {technician.planningArea}
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </ScrollArea>
                   )}
                 </CardContent>
               </Card>
