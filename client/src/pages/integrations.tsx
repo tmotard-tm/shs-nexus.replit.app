@@ -373,10 +373,75 @@ export default function Integrations() {
         {/* Data Integrations */}
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle data-testid="text-fleet-integrations-title">Data Integrations</CardTitle>
-            <CardDescription>
-              Access fleet management systems, data warehouses, and third-party integrations
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle data-testid="text-fleet-integrations-title">Data Integrations</CardTitle>
+                <CardDescription>
+                  Access fleet management systems, data warehouses, and third-party integrations
+                </CardDescription>
+              </div>
+              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button data-testid="button-add-api">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add API
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle data-testid="text-add-api-title">Add API Configuration</DialogTitle>
+                    <DialogDescription>
+                      Configure a new external API connection
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Name *</Label>
+                      <Input
+                        id="name"
+                        value={formData.name}
+                        onChange={(e) => handleInputChange("name", e.target.value)}
+                        placeholder="e.g., Salesforce API"
+                        data-testid="input-api-name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="endpoint">Endpoint *</Label>
+                      <Input
+                        id="endpoint"
+                        value={formData.endpoint}
+                        onChange={(e) => handleInputChange("endpoint", e.target.value)}
+                        placeholder="https://api.example.com"
+                        data-testid="input-api-endpoint"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="apiKey">API Key</Label>
+                      <Input
+                        id="apiKey"
+                        type="password"
+                        value={formData.apiKey}
+                        onChange={(e) => handleInputChange("apiKey", e.target.value)}
+                        placeholder="Enter API key"
+                        data-testid="input-api-key"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id="isActive"
+                        checked={formData.isActive}
+                        onCheckedChange={(value) => handleInputChange("isActive", value)}
+                        data-testid="switch-is-active"
+                      />
+                      <Label htmlFor="isActive">Active</Label>
+                    </div>
+                    <Button type="submit" className="w-full" data-testid="button-submit-api">
+                      Add Configuration
+                    </Button>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
             {/* Holman Integration */}
@@ -680,89 +745,10 @@ export default function Integrations() {
         {/* API Configurations */}
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle data-testid="text-api-configs-title">API Configurations</CardTitle>
-                <CardDescription>
-                  Manage your external API connections and monitor their health
-                </CardDescription>
-              </div>
-              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button data-testid="button-add-api">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add API
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle data-testid="text-add-api-title">Add API Configuration</DialogTitle>
-                    <DialogDescription>
-                      Configure a new external API connection
-                    </DialogDescription>
-                  </DialogHeader>
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="name">Name *</Label>
-                      <Input
-                        id="name"
-                        value={formData.name}
-                        onChange={(e) => handleInputChange("name", e.target.value)}
-                        placeholder="e.g., Salesforce API"
-                        data-testid="input-api-name"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="endpoint">Endpoint *</Label>
-                      <Input
-                        id="endpoint"
-                        value={formData.endpoint}
-                        onChange={(e) => handleInputChange("endpoint", e.target.value)}
-                        placeholder="https://api.example.com"
-                        data-testid="input-api-endpoint"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="apiKey">API Key</Label>
-                      <Input
-                        id="apiKey"
-                        type="password"
-                        value={formData.apiKey}
-                        onChange={(e) => handleInputChange("apiKey", e.target.value)}
-                        placeholder="Enter API key"
-                        data-testid="input-api-key"
-                      />
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="isActive"
-                        checked={formData.isActive}
-                        onCheckedChange={(value) => handleInputChange("isActive", value)}
-                        data-testid="switch-is-active"
-                      />
-                      <Label htmlFor="isActive">Active</Label>
-                    </div>
-                    <div className="flex justify-end gap-3 pt-4">
-                      <Button 
-                        type="button" 
-                        variant="outline" 
-                        onClick={() => setIsDialogOpen(false)}
-                        data-testid="button-cancel"
-                      >
-                        Cancel
-                      </Button>
-                      <Button 
-                        type="submit" 
-                        disabled={createConfigMutation.isPending}
-                        data-testid="button-create-api"
-                      >
-                        {createConfigMutation.isPending ? "Creating..." : "Create API"}
-                      </Button>
-                    </div>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            </div>
+            <CardTitle data-testid="text-api-configs-title">API Configurations</CardTitle>
+            <CardDescription>
+              Manage your external API connections and monitor their health
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
