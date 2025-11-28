@@ -618,21 +618,89 @@ export default function OffboardTechnician() {
                       <Label htmlFor="techSearch">Search Technician *</Label>
                       <TechCombobox
                         value={technicianOffboard.techName}
-                        onSelect={(tech) => {
+                        onSelect={async (tech) => {
                           if (tech) {
+                            // Set basic tech info first
                             setTechnicianOffboard(prev => ({
                               ...prev,
                               employeeId: tech.employeeId,
                               techRacfId: tech.techRacfid,
                               techName: tech.techName
                             }));
+
+                            // Auto-lookup vehicle from TPMS using RACF ID
+                            if (tech.techRacfid) {
+                              setIsLookingUpTruck(true);
+                              setTpmsLookupResult(null);
+                              try {
+                                const tpmsResponse = await fetch(`/api/tpms/truck/${encodeURIComponent(tech.techRacfid)}`, {
+                                  credentials: 'include'
+                                });
+                                const tpmsResult = await tpmsResponse.json();
+                                setTpmsLookupResult(tpmsResult);
+
+                                if (tpmsResult.success && tpmsResult.truckNo) {
+                                  const truckNo = tpmsResult.truckNo.trim();
+                                  setTechnicianOffboard(prev => ({
+                                    ...prev,
+                                    vehicleNumber: truckNo
+                                  }));
+
+                                  // Auto-lookup vehicle details from Holman
+                                  if (truckNo) {
+                                    setIsLookingUpHolman(true);
+                                    setHolmanLookupResult(null);
+                                    try {
+                                      const paddedVehicleNum = truckNo.padStart(6, '0');
+                                      const holmanResponse = await fetch(`/api/holman/vehicle/${encodeURIComponent(paddedVehicleNum)}`, {
+                                        credentials: 'include'
+                                      });
+                                      const holmanResult = await holmanResponse.json();
+                                      setHolmanLookupResult(holmanResult);
+
+                                      if (holmanResult.success && holmanResult.vehicle) {
+                                        setTechnicianOffboard(prev => ({
+                                          ...prev,
+                                          vehicleYear: holmanResult.vehicle.year || '',
+                                          vehicleMake: holmanResult.vehicle.make || '',
+                                          vehicleModel: holmanResult.vehicle.model || ''
+                                        }));
+                                        toast({
+                                          title: "Vehicle Info Found",
+                                          description: `Auto-filled: ${holmanResult.vehicle.year} ${holmanResult.vehicle.make} ${holmanResult.vehicle.model}`,
+                                        });
+                                      }
+                                    } catch (holmanError) {
+                                      console.error('Holman lookup error:', holmanError);
+                                    } finally {
+                                      setIsLookingUpHolman(false);
+                                    }
+                                  }
+
+                                  toast({
+                                    title: "Truck Found",
+                                    description: `Auto-filled truck ${truckNo} for ${tech.techRacfid}`,
+                                  });
+                                }
+                              } catch (tpmsError) {
+                                console.error('TPMS lookup error:', tpmsError);
+                              } finally {
+                                setIsLookingUpTruck(false);
+                              }
+                            }
                           } else {
                             setTechnicianOffboard(prev => ({
                               ...prev,
                               employeeId: "",
                               techRacfId: "",
-                              techName: ""
+                              techName: "",
+                              vehicleNumber: "",
+                              vehicleYear: "",
+                              vehicleMake: "",
+                              vehicleModel: ""
                             }));
+                            setTpmsLookupResult(null);
+                            setHolmanLookupResult(null);
                           }
                         }}
                         searchField="techName"
@@ -640,7 +708,7 @@ export default function OffboardTechnician() {
                         data-testid="input-tech-search"
                       />
                       <p className="text-xs text-muted-foreground">
-                        Search the tech roster by Employee ID, RACF ID, or Name
+                        Search the tech roster - selecting a technician will auto-fill all available information
                       </p>
                     </div>
 
