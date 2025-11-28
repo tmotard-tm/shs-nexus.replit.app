@@ -112,10 +112,14 @@ const nodeTypes = {
   dataSource: DataSourceNode,
 };
 
+type DataSourceNodeData = { source: IntegrationDataSource; fields: DataSourceField[] };
+type AppNode = Node<DataSourceNodeData>;
+type AppEdge = Edge;
+
 export default function FieldMapping() {
   const { toast } = useToast();
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<AppNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<AppEdge>([]);
   const [selectedMappingSet, setSelectedMappingSet] = useState<string | null>(null);
   const [isCreateSetOpen, setIsCreateSetOpen] = useState(false);
   const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
@@ -137,7 +141,10 @@ export default function FieldMapping() {
   });
 
   const seedSourcesMutation = useMutation({
-    mutationFn: () => apiRequest('/api/mapping/seed-sources', { method: 'POST' }),
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/mapping/seed-sources');
+      return res.json();
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/mapping/sources'] });
       toast({ title: 'Data sources seeded successfully' });
@@ -148,8 +155,10 @@ export default function FieldMapping() {
   });
 
   const createMappingSetMutation = useMutation({
-    mutationFn: (data: { name: string; description: string }) => 
-      apiRequest('/api/mapping/sets', { method: 'POST', body: JSON.stringify(data) }),
+    mutationFn: async (data: { name: string; description: string }) => {
+      const res = await apiRequest('POST', '/api/mapping/sets', data);
+      return res.json() as Promise<MappingSet>;
+    },
     onSuccess: (newSet: MappingSet) => {
       queryClient.invalidateQueries({ queryKey: ['/api/mapping/sets'] });
       setSelectedMappingSet(newSet.id);
@@ -164,11 +173,10 @@ export default function FieldMapping() {
   });
 
   const saveNodesMutation = useMutation({
-    mutationFn: (data: { nodes: any[] }) => 
-      apiRequest(`/api/mapping/sets/${selectedMappingSet}/nodes`, { 
-        method: 'PUT', 
-        body: JSON.stringify(data) 
-      }),
+    mutationFn: async (data: { nodes: any[] }) => {
+      const res = await apiRequest('PUT', `/api/mapping/sets/${selectedMappingSet}/nodes`, data);
+      return res.json();
+    },
     onSuccess: () => {
       toast({ title: 'Layout saved' });
     },
@@ -178,11 +186,10 @@ export default function FieldMapping() {
   });
 
   const saveMappingsMutation = useMutation({
-    mutationFn: (data: { mappings: any[] }) => 
-      apiRequest(`/api/mapping/sets/${selectedMappingSet}/mappings`, { 
-        method: 'PUT', 
-        body: JSON.stringify(data) 
-      }),
+    mutationFn: async (data: { mappings: any[] }) => {
+      const res = await apiRequest('PUT', `/api/mapping/sets/${selectedMappingSet}/mappings`, data);
+      return res.json();
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/mapping/sets', selectedMappingSet] });
       toast({ title: 'Mappings saved' });
@@ -230,7 +237,7 @@ export default function FieldMapping() {
 
     const fields = await loadSourceFields(sourceId);
     
-    const newNode: Node = {
+    const newNode: AppNode = {
       id: `source-${sourceId}`,
       type: 'dataSource',
       position: { 
@@ -275,7 +282,7 @@ export default function FieldMapping() {
   useEffect(() => {
     const loadSetData = async () => {
       if (currentSet && currentSet.nodes) {
-        const loadedNodes: Node[] = [];
+        const loadedNodes: AppNode[] = [];
         
         for (const savedNode of currentSet.nodes) {
           const source = sources.find(s => s.id === savedNode.sourceId);
@@ -296,7 +303,7 @@ export default function FieldMapping() {
         setNodes(loadedNodes);
 
         if (currentSet.mappings) {
-          const loadedEdges: Edge[] = currentSet.mappings.map((mapping: any, index: number) => ({
+          const loadedEdges: AppEdge[] = currentSet.mappings.map((mapping: any, index: number) => ({
             id: `edge-${index}`,
             source: loadedNodes.find(n => 
               n.data.fields?.some((f: DataSourceField) => f.id === mapping.sourceFieldId)
@@ -310,7 +317,7 @@ export default function FieldMapping() {
             animated: true,
             markerEnd: { type: MarkerType.ArrowClosed },
             style: { stroke: 'hsl(var(--primary))' },
-          })).filter((e: Edge) => e.source && e.target);
+          })).filter((e: AppEdge) => e.source && e.target);
 
           setEdges(loadedEdges);
         }
@@ -503,7 +510,8 @@ export default function FieldMapping() {
               <Controls />
               <MiniMap 
                 nodeColor={(node) => {
-                  const colorClass = sourceTypeColors[node.data?.source?.sourceType] || 'bg-gray-500';
+                  const nodeData = node.data as DataSourceNodeData | undefined;
+                  const colorClass = sourceTypeColors[nodeData?.source?.sourceType || ''] || 'bg-gray-500';
                   return colorClass.replace('bg-', '').replace('-500', '');
                 }}
               />
