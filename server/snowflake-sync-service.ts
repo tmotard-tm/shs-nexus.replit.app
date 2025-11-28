@@ -1,4 +1,5 @@
 import { getSnowflakeService, isSnowflakeConfigured } from './snowflake-service';
+import { getTPMSService } from './tpms-service';
 import { storage } from './storage';
 import { randomUUID } from 'crypto';
 import type { InsertTermedTech, InsertAllTech, InsertQueueItem } from '@shared/schema';
@@ -142,12 +143,53 @@ export class SnowflakeSyncService {
       const techsNeedingOffboarding = await storage.getTermedTechsNeedingOffboarding();
       console.log(`[Sync] Found ${techsNeedingOffboarding.length} techs needing offboarding tasks`);
 
+      // Initialize TPMS service for truck lookups
+      const tpmsService = getTPMSService();
+      const tpmsConfigured = tpmsService.isConfigured();
+      if (tpmsConfigured) {
+        console.log('[Sync] TPMS is configured - will attempt truck lookups');
+      } else {
+        console.log('[Sync] TPMS is not configured - skipping truck lookups');
+      }
+
       for (const tech of techsNeedingOffboarding) {
         try {
+          // Attempt to look up truck from TPMS if configured
+          let truckInfo: {
+            truckNo?: string;
+            districtNo?: string;
+            techManagerLdapId?: string;
+            lookupSuccess: boolean;
+            lookupError?: string;
+          } = { lookupSuccess: false };
+
+          if (tpmsConfigured && tech.techRacfid) {
+            try {
+              console.log(`[Sync] Looking up truck for tech ${tech.techRacfid}...`);
+              const tpmsResult = await tpmsService.lookupTruckByEnterpriseId(tech.techRacfid);
+              
+              if (tpmsResult.success && tpmsResult.techInfo) {
+                truckInfo = {
+                  truckNo: tpmsResult.techInfo.truckNo?.trim() || undefined,
+                  districtNo: tpmsResult.techInfo.districtNo?.trim() || undefined,
+                  techManagerLdapId: tpmsResult.techInfo.techManagerLdapId?.trim() || undefined,
+                  lookupSuccess: true,
+                };
+                console.log(`[Sync] TPMS lookup successful for ${tech.techRacfid}: Truck ${truckInfo.truckNo || 'N/A'}`);
+              } else {
+                truckInfo.lookupError = tpmsResult.error || 'Unknown error';
+                console.log(`[Sync] TPMS lookup failed for ${tech.techRacfid}: ${truckInfo.lookupError}`);
+              }
+            } catch (tpmsError: any) {
+              truckInfo.lookupError = tpmsError.message;
+              console.error(`[Sync] TPMS error for ${tech.techRacfid}:`, tpmsError.message);
+            }
+          }
+
           const queueItem: InsertQueueItem = {
             workflowType: 'offboarding',
-            title: `Offboard Technician - ${tech.techName}`,
-            description: `Auto-generated offboarding task for terminated technician ${tech.techName} (${tech.techRacfid})`,
+            title: `Offboard Technician - ${tech.techName}${truckInfo.truckNo ? ` (Truck ${truckInfo.truckNo})` : ''}`,
+            description: `Auto-generated offboarding task for terminated technician ${tech.techName} (${tech.techRacfid})${truckInfo.truckNo ? ` - Assigned Truck: ${truckInfo.truckNo}` : ''}`,
             status: 'pending',
             priority: 'high',
             requesterId: 'system',
@@ -166,12 +208,23 @@ export class SnowflakeSyncService {
                 district: tech.districtNo,
                 planningArea: tech.planningAreaName,
               },
-              vehicles: [], // Placeholder for future TPMS API integration
-              vehicleLinkingNote: 'Vehicle data will be populated when TPMS API integration is complete',
+              vehicle: truckInfo.truckNo ? {
+                truckNo: truckInfo.truckNo,
+                districtNo: truckInfo.districtNo,
+                techManagerLdapId: truckInfo.techManagerLdapId,
+                source: 'tpms',
+                lookupTime: new Date().toISOString(),
+              } : null,
+              tpmsLookup: {
+                attempted: tpmsConfigured,
+                success: truckInfo.lookupSuccess,
+                error: truckInfo.lookupError || null,
+              },
             }),
             metadata: JSON.stringify({
               createdVia: 'automated_sync',
               snowflakeSyncId: result.syncLogId,
+              tpmsTruckNo: truckInfo.truckNo || null,
             }),
           };
 
@@ -179,7 +232,7 @@ export class SnowflakeSyncService {
           await storage.markTermedTechOffboardingCreated(tech.employeeId, createdItem.id);
           
           result.queueItemsCreated++;
-          console.log(`[Sync] Created offboarding task for ${tech.techName} (${tech.employeeId})`);
+          console.log(`[Sync] Created offboarding task for ${tech.techName} (${tech.employeeId})${truckInfo.truckNo ? ` with truck ${truckInfo.truckNo}` : ''}`);
         } catch (error: any) {
           console.error(`[Sync] Error creating queue item for ${tech.employeeId}:`, error.message);
           result.errors.push(`Error creating queue item for ${tech.employeeId}: ${error.message}`);
