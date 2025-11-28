@@ -154,8 +154,10 @@ class TPMSService {
     const token = await this.getToken();
     const cleanId = enterpriseId.trim().toUpperCase();
     
-    const url = `${this.apiEndpoint}/techinfo/${cleanId}`;
+    const baseUrl = this.apiEndpoint.endsWith('/') ? this.apiEndpoint.slice(0, -1) : this.apiEndpoint;
+    const url = `${baseUrl}/techinfo/${cleanId}`;
     console.log(`[TPMS] Fetching tech info for: ${cleanId}`);
+    console.log(`[TPMS] Tech info URL: ${url}`);
 
     try {
       const response = await fetch(url, {
