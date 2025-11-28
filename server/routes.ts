@@ -5419,6 +5419,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============================================
+  // TPMS API Routes
+  // ============================================
+  console.log("Registering TPMS API routes...");
+  const { getTPMSService } = await import("./tpms-service");
+
+  // Test TPMS connection
+  app.get("/api/tpms/test", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const result = await tpmsService.testConnection();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error testing TPMS connection:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get tech info by enterprise ID (LDAP ID)
+  app.get("/api/tpms/techinfo/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const techInfo = await tpmsService.getTechInfo(req.params.enterpriseId);
+      res.json({ success: true, data: techInfo });
+    } catch (error: any) {
+      console.error("Error getting tech info:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Look up truck number by enterprise ID
+  app.get("/api/tpms/truck/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const result = await tpmsService.lookupTruckByEnterpriseId(req.params.enterpriseId);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error looking up truck:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Check if TPMS is configured
+  app.get("/api/tpms/status", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      res.json({ 
+        configured: tpmsService.isConfigured(),
+        message: tpmsService.isConfigured() 
+          ? 'TPMS is configured and ready' 
+          : 'TPMS is not fully configured. Please set TPMS_AUTH_ENDPOINT, TPMS_API_ENDPOINT, and TPMS_CLIENT_SECRET.'
+      });
+    } catch (error: any) {
+      console.error("Error checking TPMS status:", error);
+      res.status(500).json({ configured: false, message: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack
