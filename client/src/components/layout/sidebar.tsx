@@ -2,15 +2,22 @@ import { Link, useLocation } from "wouter";
 import { RoleSelector } from "@/components/role-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "@/hooks/use-sidebar";
+import { useOnboarding } from "@/hooks/use-onboarding";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { LogOut, Settings, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp, Key, FileCode } from "lucide-react";
+import { LogOut, Settings, Users, FileText, CheckCircle, Activity, BarChart3, Home, ChevronLeft, ChevronRight, Clock, MapPin, TrendingUp, Key, FileCode, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
   const { isCollapsed, setIsCollapsed } = useSidebar();
+  const { startOnboarding, resetOnboarding } = useOnboarding();
+  
+  const handleStartTutorial = () => {
+    resetOnboarding();
+    setTimeout(() => startOnboarding(), 100);
+  };
 
   if (!user) return null;
 
@@ -175,6 +182,23 @@ export function Sidebar() {
               </Link>
             );
           })}
+          
+          {/* Help & Tutorial Button */}
+          <div className="pt-4 mt-4 border-t border-border">
+            <button
+              onClick={handleStartTutorial}
+              className={cn(
+                "flex items-center gap-3 p-3 rounded-lg transition-colors w-full text-left",
+                "hover:bg-accent hover:text-accent-foreground text-muted-foreground",
+                isCollapsed && "justify-center"
+              )}
+              data-testid="button-start-tutorial"
+              title={isCollapsed ? "Help & Tutorial" : undefined}
+            >
+              <HelpCircle className="h-4 w-4" />
+              {!isCollapsed && "Help & Tutorial"}
+            </button>
+          </div>
         </nav>
       </div>
 

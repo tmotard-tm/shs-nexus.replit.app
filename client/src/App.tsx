@@ -7,7 +7,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { SidebarProvider } from "@/hooks/use-sidebar";
 import { ThemeProvider } from "@/hooks/use-theme";
+import { OnboardingProvider } from "@/hooks/use-onboarding";
 import { Sidebar } from "@/components/layout/sidebar";
+import { OnboardingOverlay } from "@/components/onboarding-overlay";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import AssistanceSelection from "@/pages/assistance-selection";
@@ -361,8 +363,11 @@ function App() {
         <ThemeProvider>
           <AuthProvider>
             <SidebarProvider>
-              <Toaster />
-              <Router />
+              <OnboardingProvider>
+                <Toaster />
+                <OnboardingOverlay />
+                <Router />
+              </OnboardingProvider>
             </SidebarProvider>
           </AuthProvider>
         </ThemeProvider>
