@@ -614,89 +614,71 @@ export default function OffboardTechnician() {
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={handleTechnicianOffboard} className="space-y-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="techSearch">Search Technician *</Label>
+                      <TechCombobox
+                        value={technicianOffboard.techName}
+                        onSelect={(tech) => {
+                          if (tech) {
+                            setTechnicianOffboard(prev => ({
+                              ...prev,
+                              employeeId: tech.employeeId,
+                              techRacfId: tech.techRacfid,
+                              techName: tech.techName
+                            }));
+                          } else {
+                            setTechnicianOffboard(prev => ({
+                              ...prev,
+                              employeeId: "",
+                              techRacfId: "",
+                              techName: ""
+                            }));
+                          }
+                        }}
+                        searchField="techName"
+                        placeholder="Search by ID, RACF ID, or Name..."
+                        data-testid="input-tech-search"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Search the tech roster by Employee ID, RACF ID, or Name
+                      </p>
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="employeeId">Employee ID *</Label>
-                        <TechCombobox
+                        <Input
+                          id="employeeId"
+                          placeholder="Auto-filled from search"
                           value={technicianOffboard.employeeId}
-                          onSelect={(tech) => {
-                            if (tech) {
-                              setTechnicianOffboard(prev => ({
-                                ...prev,
-                                employeeId: tech.employeeId,
-                                techRacfId: tech.techRacfid,
-                                techName: tech.techName
-                              }));
-                            } else {
-                              setTechnicianOffboard(prev => ({
-                                ...prev,
-                                employeeId: "",
-                                techRacfId: "",
-                                techName: ""
-                              }));
-                            }
-                          }}
-                          searchField="employeeId"
-                          placeholder="Search by Employee ID..."
+                          readOnly
+                          className="bg-muted"
                           data-testid="input-employee-id"
                         />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="techRacfId">Tech RACF ID *</Label>
-                        <TechCombobox
+                        <Input
+                          id="techRacfId"
+                          placeholder="Auto-filled from search"
                           value={technicianOffboard.techRacfId}
-                          onSelect={(tech) => {
-                            if (tech) {
-                              setTechnicianOffboard(prev => ({
-                                ...prev,
-                                employeeId: tech.employeeId,
-                                techRacfId: tech.techRacfid,
-                                techName: tech.techName
-                              }));
-                            } else {
-                              setTechnicianOffboard(prev => ({
-                                ...prev,
-                                employeeId: "",
-                                techRacfId: "",
-                                techName: ""
-                              }));
-                            }
-                          }}
-                          searchField="techRacfid"
-                          placeholder="Search by RACF ID..."
+                          readOnly
+                          className="bg-muted"
                           data-testid="input-tech-racfid"
                         />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="techName">Tech Name *</Label>
-                        <TechCombobox
+                        <Input
+                          id="techName"
+                          placeholder="Auto-filled from search"
                           value={technicianOffboard.techName}
-                          onSelect={(tech) => {
-                            if (tech) {
-                              setTechnicianOffboard(prev => ({
-                                ...prev,
-                                employeeId: tech.employeeId,
-                                techRacfId: tech.techRacfid,
-                                techName: tech.techName
-                              }));
-                            } else {
-                              setTechnicianOffboard(prev => ({
-                                ...prev,
-                                employeeId: "",
-                                techRacfId: "",
-                                techName: ""
-                              }));
-                            }
-                          }}
-                          searchField="techName"
-                          placeholder="Search by Name..."
+                          readOnly
+                          className="bg-muted"
                           data-testid="input-tech-name"
                         />
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground -mt-4">
-                      Search and select a technician from the roster. Selecting from any field will auto-fill all three.
-                    </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
