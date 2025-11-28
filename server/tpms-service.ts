@@ -62,7 +62,7 @@ class TPMSService {
   constructor() {
     this.authEndpoint = process.env.TPMS_AUTH_ENDPOINT || '';
     this.apiEndpoint = process.env.TPMS_API_ENDPOINT || '';
-    this.basicAuthCredential = process.env.TPMS_CLIENT_SECRET || '';
+    this.basicAuthCredential = process.env.TPMS_AUTHORIZATION || process.env.TPMS_CLIENT_SECRET || '';
     
     if (!this.authEndpoint) {
       console.warn('[TPMS] Warning: TPMS_AUTH_ENDPOINT not configured');
@@ -82,7 +82,7 @@ class TPMSService {
     console.log('[TPMS] Fetching new auth token...');
 
     if (!this.authEndpoint || !this.basicAuthCredential) {
-      throw new Error('TPMS authentication not configured. Please set TPMS_AUTH_ENDPOINT and TPMS_CLIENT_SECRET.');
+      throw new Error('TPMS authentication not configured. Please set TPMS_AUTH_ENDPOINT and TPMS_AUTHORIZATION.');
     }
 
     try {
@@ -202,7 +202,7 @@ class TPMSService {
       if (!this.authEndpoint || !this.basicAuthCredential || !this.apiEndpoint) {
         return {
           success: false,
-          message: 'TPMS is not fully configured. Please set TPMS_AUTH_ENDPOINT, TPMS_API_ENDPOINT, and TPMS_CLIENT_SECRET.',
+          message: 'TPMS is not fully configured. Please set TPMS_AUTH_ENDPOINT, TPMS_API_ENDPOINT, and TPMS_AUTHORIZATION.',
         };
       }
 
