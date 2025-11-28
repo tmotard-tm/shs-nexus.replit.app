@@ -5067,6 +5067,358 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============================================
+  // Field Mapping API Routes
+  // ============================================
+  console.log("Registering Field Mapping API routes...");
+
+  // Integration Data Sources
+  app.get("/api/mapping/sources", requireAuth, async (req: any, res) => {
+    try {
+      const sources = await storage.getIntegrationDataSources();
+      res.json(sources);
+    } catch (error: any) {
+      console.error("Error getting data sources:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/mapping/sources/:id", requireAuth, async (req: any, res) => {
+    try {
+      const source = await storage.getIntegrationDataSource(req.params.id);
+      if (!source) {
+        return res.status(404).json({ message: "Data source not found" });
+      }
+      res.json(source);
+    } catch (error: any) {
+      console.error("Error getting data source:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/mapping/sources", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can create data sources" });
+      }
+      const source = await storage.createIntegrationDataSource(req.body);
+      res.status(201).json(source);
+    } catch (error: any) {
+      console.error("Error creating data source:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/mapping/sources/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can update data sources" });
+      }
+      const source = await storage.updateIntegrationDataSource(req.params.id, req.body);
+      if (!source) {
+        return res.status(404).json({ message: "Data source not found" });
+      }
+      res.json(source);
+    } catch (error: any) {
+      console.error("Error updating data source:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/mapping/sources/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can delete data sources" });
+      }
+      const deleted = await storage.deleteIntegrationDataSource(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Data source not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting data source:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Data Source Fields
+  app.get("/api/mapping/sources/:sourceId/fields", requireAuth, async (req: any, res) => {
+    try {
+      const fields = await storage.getDataSourceFields(req.params.sourceId);
+      res.json(fields);
+    } catch (error: any) {
+      console.error("Error getting fields:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/mapping/sources/:sourceId/fields", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can create fields" });
+      }
+      const field = await storage.createDataSourceField({
+        ...req.body,
+        sourceId: req.params.sourceId
+      });
+      res.status(201).json(field);
+    } catch (error: any) {
+      console.error("Error creating field:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/mapping/sources/:sourceId/fields/bulk", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can create fields" });
+      }
+      const fields = await storage.createDataSourceFieldsBulk(
+        req.body.fields.map((f: any) => ({ ...f, sourceId: req.params.sourceId }))
+      );
+      res.status(201).json(fields);
+    } catch (error: any) {
+      console.error("Error creating fields:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Mapping Sets
+  app.get("/api/mapping/sets", requireAuth, async (req: any, res) => {
+    try {
+      const sets = await storage.getMappingSets();
+      res.json(sets);
+    } catch (error: any) {
+      console.error("Error getting mapping sets:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/mapping/sets/:id", requireAuth, async (req: any, res) => {
+    try {
+      const set = await storage.getMappingSet(req.params.id);
+      if (!set) {
+        return res.status(404).json({ message: "Mapping set not found" });
+      }
+      
+      // Also fetch nodes and mappings
+      const nodes = await storage.getMappingNodes(req.params.id);
+      const mappings = await storage.getFieldMappings(req.params.id);
+      
+      res.json({ ...set, nodes, mappings });
+    } catch (error: any) {
+      console.error("Error getting mapping set:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/mapping/sets", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can create mapping sets" });
+      }
+      const set = await storage.createMappingSet({
+        ...req.body,
+        createdBy: currentUser.id
+      });
+      res.status(201).json(set);
+    } catch (error: any) {
+      console.error("Error creating mapping set:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/mapping/sets/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can update mapping sets" });
+      }
+      const set = await storage.updateMappingSet(req.params.id, req.body);
+      if (!set) {
+        return res.status(404).json({ message: "Mapping set not found" });
+      }
+      res.json(set);
+    } catch (error: any) {
+      console.error("Error updating mapping set:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/mapping/sets/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can delete mapping sets" });
+      }
+      const deleted = await storage.deleteMappingSet(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Mapping set not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting mapping set:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Mapping Nodes (positions on canvas)
+  app.put("/api/mapping/sets/:id/nodes", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can update nodes" });
+      }
+      const nodes = await storage.upsertMappingNodes(req.params.id, req.body.nodes || []);
+      res.json(nodes);
+    } catch (error: any) {
+      console.error("Error upserting nodes:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Field Mappings (connections)
+  app.put("/api/mapping/sets/:id/mappings", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can update mappings" });
+      }
+      const mappings = await storage.upsertFieldMappings(req.params.id, req.body.mappings || []);
+      res.json(mappings);
+    } catch (error: any) {
+      console.error("Error upserting mappings:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/mapping/sets/:id/mappings", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can create mappings" });
+      }
+      const mapping = await storage.createFieldMapping({
+        ...req.body,
+        mappingSetId: req.params.id
+      });
+      res.status(201).json(mapping);
+    } catch (error: any) {
+      console.error("Error creating mapping:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/mapping/mappings/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can delete mappings" });
+      }
+      const deleted = await storage.deleteFieldMapping(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Mapping not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting mapping:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Seed default data sources from known integrations
+  app.post("/api/mapping/seed-sources", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can seed data sources" });
+      }
+
+      const defaultSources = [
+        {
+          name: 'snowflake_all_techs',
+          displayName: 'Snowflake: All Technicians',
+          sourceType: 'snowflake',
+          connectionInfo: JSON.stringify({ table: 'DRIVELINE_ALL_TECHS' }),
+          description: 'Complete technician roster from Snowflake data warehouse'
+        },
+        {
+          name: 'snowflake_termed_techs',
+          displayName: 'Snowflake: Termed Technicians',
+          sourceType: 'snowflake',
+          connectionInfo: JSON.stringify({ table: 'DRIVELINE_TERMED_TECHS_LAST30' }),
+          description: 'Terminated technicians from the last 30 days'
+        },
+        {
+          name: 'holman_vehicles',
+          displayName: 'Holman API: Vehicles',
+          sourceType: 'holman',
+          connectionInfo: JSON.stringify({ endpoint: '/vehicles' }),
+          description: 'Vehicle data from Holman Fleet API'
+        },
+        {
+          name: 'holman_contacts',
+          displayName: 'Holman API: Contacts',
+          sourceType: 'holman',
+          connectionInfo: JSON.stringify({ endpoint: '/contacts' }),
+          description: 'Contact data from Holman Fleet API'
+        },
+        {
+          name: 'internal_queue_items',
+          displayName: 'Internal: Queue Items',
+          sourceType: 'internal',
+          connectionInfo: JSON.stringify({ table: 'queue_items' }),
+          description: 'Internal queue items table'
+        },
+        {
+          name: 'internal_vehicles',
+          displayName: 'Internal: Vehicles',
+          sourceType: 'internal',
+          connectionInfo: JSON.stringify({ table: 'vehicles' }),
+          description: 'Internal vehicles table'
+        },
+        {
+          name: 'page_offboarding_form',
+          displayName: 'Page: Offboarding Form',
+          sourceType: 'page_object',
+          connectionInfo: JSON.stringify({ page: '/offboard-technician' }),
+          description: 'Offboarding form fields'
+        },
+        {
+          name: 'page_onboarding_form',
+          displayName: 'Page: Onboarding Form',
+          sourceType: 'page_object',
+          connectionInfo: JSON.stringify({ page: '/onboard-hire' }),
+          description: 'Onboarding form fields'
+        }
+      ];
+
+      const created = [];
+      for (const source of defaultSources) {
+        try {
+          const existing = await storage.getIntegrationDataSources();
+          if (!existing.find(s => s.name === source.name)) {
+            const newSource = await storage.createIntegrationDataSource(source);
+            created.push(newSource);
+          }
+        } catch (e) {
+          console.error(`Error creating source ${source.name}:`, e);
+        }
+      }
+
+      res.json({ message: `Seeded ${created.length} data sources`, sources: created });
+    } catch (error: any) {
+      console.error("Error seeding data sources:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack

@@ -25,6 +25,16 @@ import {
   type InsertAllTech,
   type SyncLog,
   type InsertSyncLog,
+  type IntegrationDataSource,
+  type InsertIntegrationDataSource,
+  type DataSourceField,
+  type InsertDataSourceField,
+  type MappingSet,
+  type InsertMappingSet,
+  type MappingNode,
+  type InsertMappingNode,
+  type FieldMapping,
+  type InsertFieldMapping,
   users,
   requests,
   apiConfigurations,
@@ -37,6 +47,11 @@ import {
   termedTechs,
   allTechs,
   syncLogs,
+  integrationDataSources,
+  dataSourceFields,
+  mappingSets,
+  mappingNodes,
+  fieldMappings,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -205,6 +220,38 @@ export interface IStorage {
   getLatestSyncLog(syncType: string): Promise<SyncLog | undefined>;
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
   updateSyncLog(id: string, updates: Partial<SyncLog>): Promise<SyncLog | undefined>;
+
+  // Field Mapping Module
+  getIntegrationDataSources(): Promise<IntegrationDataSource[]>;
+  getIntegrationDataSource(id: string): Promise<IntegrationDataSource | undefined>;
+  createIntegrationDataSource(source: InsertIntegrationDataSource): Promise<IntegrationDataSource>;
+  updateIntegrationDataSource(id: string, updates: Partial<IntegrationDataSource>): Promise<IntegrationDataSource | undefined>;
+  deleteIntegrationDataSource(id: string): Promise<boolean>;
+  
+  getDataSourceFields(sourceId: string): Promise<DataSourceField[]>;
+  getDataSourceField(id: string): Promise<DataSourceField | undefined>;
+  createDataSourceField(field: InsertDataSourceField): Promise<DataSourceField>;
+  createDataSourceFieldsBulk(fields: InsertDataSourceField[]): Promise<DataSourceField[]>;
+  updateDataSourceField(id: string, updates: Partial<DataSourceField>): Promise<DataSourceField | undefined>;
+  deleteDataSourceField(id: string): Promise<boolean>;
+  
+  getMappingSets(): Promise<MappingSet[]>;
+  getMappingSet(id: string): Promise<MappingSet | undefined>;
+  createMappingSet(set: InsertMappingSet): Promise<MappingSet>;
+  updateMappingSet(id: string, updates: Partial<MappingSet>): Promise<MappingSet | undefined>;
+  deleteMappingSet(id: string): Promise<boolean>;
+  
+  getMappingNodes(mappingSetId: string): Promise<MappingNode[]>;
+  createMappingNode(node: InsertMappingNode): Promise<MappingNode>;
+  updateMappingNode(id: string, updates: Partial<MappingNode>): Promise<MappingNode | undefined>;
+  deleteMappingNode(id: string): Promise<boolean>;
+  upsertMappingNodes(mappingSetId: string, nodes: InsertMappingNode[]): Promise<MappingNode[]>;
+  
+  getFieldMappings(mappingSetId: string): Promise<FieldMapping[]>;
+  createFieldMapping(mapping: InsertFieldMapping): Promise<FieldMapping>;
+  updateFieldMapping(id: string, updates: Partial<FieldMapping>): Promise<FieldMapping | undefined>;
+  deleteFieldMapping(id: string): Promise<boolean>;
+  upsertFieldMappings(mappingSetId: string, mappings: InsertFieldMapping[]): Promise<FieldMapping[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -3809,6 +3856,205 @@ export class DatabaseStorage implements IStorage {
     }
     
     return result;
+  }
+
+  // ============================================
+  // Field Mapping Module Implementation
+  // ============================================
+
+  async getIntegrationDataSources(): Promise<IntegrationDataSource[]> {
+    return await db.select().from(integrationDataSources).orderBy(integrationDataSources.name);
+  }
+
+  async getIntegrationDataSource(id: string): Promise<IntegrationDataSource | undefined> {
+    const [source] = await db.select().from(integrationDataSources).where(eq(integrationDataSources.id, id));
+    return source;
+  }
+
+  async createIntegrationDataSource(source: InsertIntegrationDataSource): Promise<IntegrationDataSource> {
+    const [created] = await db.insert(integrationDataSources).values({
+      ...source,
+      id: randomUUID(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).returning();
+    return created;
+  }
+
+  async updateIntegrationDataSource(id: string, updates: Partial<IntegrationDataSource>): Promise<IntegrationDataSource | undefined> {
+    const [updated] = await db.update(integrationDataSources)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(integrationDataSources.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteIntegrationDataSource(id: string): Promise<boolean> {
+    const result = await db.delete(integrationDataSources).where(eq(integrationDataSources.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getDataSourceFields(sourceId: string): Promise<DataSourceField[]> {
+    return await db.select().from(dataSourceFields)
+      .where(eq(dataSourceFields.sourceId, sourceId))
+      .orderBy(dataSourceFields.fieldName);
+  }
+
+  async getDataSourceField(id: string): Promise<DataSourceField | undefined> {
+    const [field] = await db.select().from(dataSourceFields).where(eq(dataSourceFields.id, id));
+    return field;
+  }
+
+  async createDataSourceField(field: InsertDataSourceField): Promise<DataSourceField> {
+    const [created] = await db.insert(dataSourceFields).values({
+      ...field,
+      id: randomUUID(),
+      createdAt: new Date(),
+    }).returning();
+    return created;
+  }
+
+  async createDataSourceFieldsBulk(fields: InsertDataSourceField[]): Promise<DataSourceField[]> {
+    if (fields.length === 0) return [];
+    const created = await db.insert(dataSourceFields).values(
+      fields.map(field => ({
+        ...field,
+        id: randomUUID(),
+        createdAt: new Date(),
+      }))
+    ).returning();
+    return created;
+  }
+
+  async updateDataSourceField(id: string, updates: Partial<DataSourceField>): Promise<DataSourceField | undefined> {
+    const [updated] = await db.update(dataSourceFields)
+      .set(updates)
+      .where(eq(dataSourceFields.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteDataSourceField(id: string): Promise<boolean> {
+    const result = await db.delete(dataSourceFields).where(eq(dataSourceFields.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getMappingSets(): Promise<MappingSet[]> {
+    return await db.select().from(mappingSets).orderBy(desc(mappingSets.createdAt));
+  }
+
+  async getMappingSet(id: string): Promise<MappingSet | undefined> {
+    const [set] = await db.select().from(mappingSets).where(eq(mappingSets.id, id));
+    return set;
+  }
+
+  async createMappingSet(set: InsertMappingSet): Promise<MappingSet> {
+    const [created] = await db.insert(mappingSets).values({
+      ...set,
+      id: randomUUID(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).returning();
+    return created;
+  }
+
+  async updateMappingSet(id: string, updates: Partial<MappingSet>): Promise<MappingSet | undefined> {
+    const [updated] = await db.update(mappingSets)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(mappingSets.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteMappingSet(id: string): Promise<boolean> {
+    const result = await db.delete(mappingSets).where(eq(mappingSets.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getMappingNodes(mappingSetId: string): Promise<MappingNode[]> {
+    return await db.select().from(mappingNodes).where(eq(mappingNodes.mappingSetId, mappingSetId));
+  }
+
+  async createMappingNode(node: InsertMappingNode): Promise<MappingNode> {
+    const [created] = await db.insert(mappingNodes).values({
+      ...node,
+      id: randomUUID(),
+      createdAt: new Date(),
+    }).returning();
+    return created;
+  }
+
+  async updateMappingNode(id: string, updates: Partial<MappingNode>): Promise<MappingNode | undefined> {
+    const [updated] = await db.update(mappingNodes)
+      .set(updates)
+      .where(eq(mappingNodes.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteMappingNode(id: string): Promise<boolean> {
+    const result = await db.delete(mappingNodes).where(eq(mappingNodes.id, id));
+    return result.rowCount > 0;
+  }
+
+  async upsertMappingNodes(mappingSetId: string, nodes: InsertMappingNode[]): Promise<MappingNode[]> {
+    // Delete existing nodes for this mapping set
+    await db.delete(mappingNodes).where(eq(mappingNodes.mappingSetId, mappingSetId));
+    
+    if (nodes.length === 0) return [];
+    
+    const created = await db.insert(mappingNodes).values(
+      nodes.map(node => ({
+        ...node,
+        mappingSetId,
+        id: randomUUID(),
+        createdAt: new Date(),
+      }))
+    ).returning();
+    return created;
+  }
+
+  async getFieldMappings(mappingSetId: string): Promise<FieldMapping[]> {
+    return await db.select().from(fieldMappings).where(eq(fieldMappings.mappingSetId, mappingSetId));
+  }
+
+  async createFieldMapping(mapping: InsertFieldMapping): Promise<FieldMapping> {
+    const [created] = await db.insert(fieldMappings).values({
+      ...mapping,
+      id: randomUUID(),
+      createdAt: new Date(),
+    }).returning();
+    return created;
+  }
+
+  async updateFieldMapping(id: string, updates: Partial<FieldMapping>): Promise<FieldMapping | undefined> {
+    const [updated] = await db.update(fieldMappings)
+      .set(updates)
+      .where(eq(fieldMappings.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteFieldMapping(id: string): Promise<boolean> {
+    const result = await db.delete(fieldMappings).where(eq(fieldMappings.id, id));
+    return result.rowCount > 0;
+  }
+
+  async upsertFieldMappings(mappingSetId: string, mappings: InsertFieldMapping[]): Promise<FieldMapping[]> {
+    // Delete existing mappings for this mapping set
+    await db.delete(fieldMappings).where(eq(fieldMappings.mappingSetId, mappingSetId));
+    
+    if (mappings.length === 0) return [];
+    
+    const created = await db.insert(fieldMappings).values(
+      mappings.map(mapping => ({
+        ...mapping,
+        mappingSetId,
+        id: randomUUID(),
+        createdAt: new Date(),
+      }))
+    ).returning();
+    return created;
   }
 
   // Migration method to bulk-insert data from MemStorage
