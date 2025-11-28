@@ -86,6 +86,9 @@ export default function OffboardTechnician() {
         }
       }
       
+      // Use technician's planning area as default vehicle location
+      const defaultLocation = technician.planningArea || technician.district || vehicle?.location || "";
+      
       setTechnicianOffboard({
         vehicleId: "",
         techRacfId: techRacfId,
@@ -93,11 +96,11 @@ export default function OffboardTechnician() {
         employeeId: technician.employeeId || "",
         lastDayWorked: technician.lastDayWorked || "",
         vehicleNumber: truckNumber,
-        vehicleLocation: vehicle?.location || "",
+        vehicleLocation: defaultLocation,
         vehicleType: vehicle?.type || "",
         reason: vehicle?.reason || "",
         effectiveDate: technician.lastDayWorked || "",
-        notes: "",
+        notes: `Job Title: ${technician.jobTitle || 'N/A'}`,
         returnCondition: vehicle?.condition || ""
       });
 
