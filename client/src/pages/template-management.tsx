@@ -89,6 +89,7 @@ export default function TemplateManagement() {
   const [deletingTemplate, setDeletingTemplate] = useState<Template | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [workflowTypeFilter, setWorkflowTypeFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -332,7 +333,7 @@ export default function TemplateManagement() {
     }
   };
 
-  // Filter templates by search, department and status
+  // Filter templates by search, department, status, and workflow type
   const filteredTemplates = Array.isArray(allTemplates) ? allTemplates.filter((template: Template) => {
     const matchesSearch = searchQuery === "" || 
       template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -343,8 +344,9 @@ export default function TemplateManagement() {
     const matchesStatus = statusFilter === "all" || 
       (statusFilter === "active" && template.isActive) ||
       (statusFilter === "inactive" && !template.isActive);
+    const matchesWorkflowType = workflowTypeFilter === "all" || template.workflowType === workflowTypeFilter;
     
-    return matchesSearch && matchesDepartment && matchesStatus;
+    return matchesSearch && matchesDepartment && matchesStatus && matchesWorkflowType;
   }) : [];
 
   // Statistics
@@ -497,6 +499,20 @@ export default function TemplateManagement() {
             <SelectItem value="inactive">Inactive</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={workflowTypeFilter} onValueChange={setWorkflowTypeFilter}>
+          <SelectTrigger className="w-full sm:w-[180px]" data-testid="select-workflow-type-filter">
+            <SelectValue placeholder="Filter by workflow type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Workflow Types</SelectItem>
+            <SelectItem value="onboarding">Onboarding</SelectItem>
+            <SelectItem value="offboarding">Offboarding</SelectItem>
+            <SelectItem value="vehicle_assignment">Vehicle Assignment</SelectItem>
+            <SelectItem value="decommission">Decommission</SelectItem>
+            <SelectItem value="byov_assignment">BYOV Assignment</SelectItem>
+            <SelectItem value="storage_request">Storage Request</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Templates Table */}
@@ -525,7 +541,7 @@ export default function TemplateManagement() {
               {filteredTemplates.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                    {searchQuery || departmentFilter !== "all" || statusFilter !== "all" 
+                    {searchQuery || departmentFilter !== "all" || statusFilter !== "all" || workflowTypeFilter !== "all"
                       ? "No templates found matching your filters."
                       : "No templates found. Create your first template to get started."
                     }
