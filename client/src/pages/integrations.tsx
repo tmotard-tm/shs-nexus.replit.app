@@ -451,9 +451,15 @@ export default function Integrations() {
                   <Database className="h-6 w-6 text-primary" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
-                    Holman Fleet Integration
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
+                      Holman Fleet Integration
+                    </h3>
+                    <Badge variant="default" className="flex items-center gap-1 text-xs">
+                      <CheckCircle className="h-3 w-3" />
+                      Connected
+                    </Badge>
+                  </div>
                   <p className="text-sm text-muted-foreground">
                     Manage vehicles, contacts, maintenance records, and odometer data
                   </p>
