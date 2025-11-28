@@ -571,6 +571,17 @@ export default function OffboardTechnician() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
+                        <Label htmlFor="effectiveDate">Effective Date *</Label>
+                        <Input
+                          id="effectiveDate"
+                          type="date"
+                          value={technicianOffboard.effectiveDate}
+                          onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, effectiveDate: e.target.value })}
+                          required
+                          data-testid="input-effective-date"
+                        />
+                      </div>
+                      <div className="space-y-2">
                         <Label htmlFor="lastDayWorked">Last Day Worked *</Label>
                         <Input
                           id="lastDayWorked"
@@ -581,44 +592,45 @@ export default function OffboardTechnician() {
                           data-testid="input-last-day-worked"
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="vehicleNumber">Vehicle Number *</Label>
-                        <div className="flex gap-2">
-                          <Input
-                            id="vehicleNumber"
-                            placeholder="Enter vehicle number"
-                            value={technicianOffboard.vehicleNumber}
-                            onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleNumber: e.target.value })}
-                            required
-                            data-testid="input-vehicle-number"
-                            className="flex-1"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={handleTpmsLookup}
-                            disabled={isLookingUpTruck || !technicianOffboard.techRacfId}
-                            title="Look up truck number from TPMS using Tech RACF ID"
-                            data-testid="button-tpms-lookup"
-                          >
-                            {isLookingUpTruck ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Truck className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Enter Tech RACF ID first, then click the truck icon to auto-fill from TPMS
-                        </p>
-                        {tpmsLookupResult && (
-                          <div className={`text-xs p-2 rounded ${tpmsLookupResult.success ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}>
-                            {tpmsLookupResult.success 
-                              ? `Found truck: ${tpmsLookupResult.truckNo}${tpmsLookupResult.techInfo?.firstName ? ` (${tpmsLookupResult.techInfo.firstName} ${tpmsLookupResult.techInfo.lastName})` : ''}`
-                              : `Lookup failed: ${tpmsLookupResult.error || 'Unknown error'}`}
-                          </div>
-                        )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="vehicleNumber">Vehicle Number *</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="vehicleNumber"
+                          placeholder="Enter vehicle number"
+                          value={technicianOffboard.vehicleNumber}
+                          onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleNumber: e.target.value })}
+                          required
+                          data-testid="input-vehicle-number"
+                          className="flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleTpmsLookup}
+                          disabled={isLookingUpTruck || !technicianOffboard.techRacfId}
+                          title="Look up truck number from TPMS using Tech RACF ID"
+                          data-testid="button-tpms-lookup"
+                        >
+                          {isLookingUpTruck ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Truck className="h-4 w-4" />
+                          )}
+                        </Button>
                       </div>
+                      <p className="text-xs text-muted-foreground">
+                        Enter Tech RACF ID first, then click the truck icon to auto-fill from TPMS
+                      </p>
+                      {tpmsLookupResult && (
+                        <div className={`text-xs p-2 rounded ${tpmsLookupResult.success ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}>
+                          {tpmsLookupResult.success 
+                            ? `Found truck: ${tpmsLookupResult.truckNo}${tpmsLookupResult.techInfo?.firstName ? ` (${tpmsLookupResult.techInfo.firstName} ${tpmsLookupResult.techInfo.lastName})` : ''}`
+                            : `Lookup failed: ${tpmsLookupResult.error || 'Unknown error'}`}
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-2">
@@ -658,37 +670,24 @@ export default function OffboardTechnician() {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="reason">Reason for Offboarding *</Label>
-                        <Select
-                          value={technicianOffboard.reason}
-                          onValueChange={(value) => setTechnicianOffboard({ ...technicianOffboard, reason: value })}
-                          required
-                        >
-                          <SelectTrigger data-testid="select-offboard-reason">
-                            <SelectValue placeholder="Select reason" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {offboardReasons.map((reason) => (
-                              <SelectItem key={reason} value={reason}>
-                                {reason}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="effectiveDate">Effective Date *</Label>
-                        <Input
-                          id="effectiveDate"
-                          type="date"
-                          value={technicianOffboard.effectiveDate}
-                          onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, effectiveDate: e.target.value })}
-                          required
-                          data-testid="input-effective-date"
-                        />
-                      </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="reason">Reason for Offboarding *</Label>
+                      <Select
+                        value={technicianOffboard.reason}
+                        onValueChange={(value) => setTechnicianOffboard({ ...technicianOffboard, reason: value })}
+                        required
+                      >
+                        <SelectTrigger data-testid="select-offboard-reason">
+                          <SelectValue placeholder="Select reason" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {offboardReasons.map((reason) => (
+                            <SelectItem key={reason} value={reason}>
+                              {reason}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div className="space-y-2">
