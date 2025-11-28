@@ -5461,6 +5461,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Look up tech info by truck number
+  app.get("/api/tpms/lookup/truck/:truckNumber", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const result = await tpmsService.lookupByTruckNumber(req.params.truckNumber);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error looking up by truck number:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Check if TPMS is configured
   app.get("/api/tpms/status", requireAuth, async (req: any, res) => {
     try {

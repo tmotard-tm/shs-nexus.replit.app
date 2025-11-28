@@ -39,6 +39,7 @@ export default function Integrations() {
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
   const [tpmsTestId, setTpmsTestId] = useState("");
+  const [tpmsLookupType, setTpmsLookupType] = useState<'enterprise' | 'truck'>('enterprise');
 
   const [formData, setFormData] = useState({
     name: "",
@@ -202,8 +203,11 @@ export default function Integrations() {
   });
 
   const lookupTpmsTechMutation = useMutation({
-    mutationFn: async (enterpriseId: string) => {
-      const response = await fetch(`/api/tpms/techinfo/${enterpriseId}`, { credentials: "include" });
+    mutationFn: async ({ id, type }: { id: string; type: 'enterprise' | 'truck' }) => {
+      const endpoint = type === 'enterprise' 
+        ? `/api/tpms/techinfo/${id}` 
+        : `/api/tpms/lookup/truck/${id}`;
+      const response = await fetch(endpoint, { credentials: "include" });
       return response.json();
     },
     onSuccess: (data: any) => {
@@ -602,23 +606,47 @@ export default function Integrations() {
                   </CardContent>
                 </Card>
 
-                {/* Tech Lookup */}
+                {/* Tech/Truck Lookup */}
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Tech Lookup</CardTitle>
-                    <CardDescription>Look up technician info by RACF/Enterprise ID</CardDescription>
+                    <CardTitle className="text-base">Tech or Truck Assignment Lookup</CardTitle>
+                    <CardDescription>Look up technician info by Enterprise ID or Truck Number</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="lookupType" 
+                          value="enterprise" 
+                          checked={tpmsLookupType === 'enterprise'}
+                          onChange={() => setTpmsLookupType('enterprise')}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm">Enterprise ID</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="lookupType" 
+                          value="truck" 
+                          checked={tpmsLookupType === 'truck'}
+                          onChange={() => setTpmsLookupType('truck')}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm">Truck Number</span>
+                      </label>
+                    </div>
                     <div className="flex gap-2">
                       <Input
-                        placeholder="Enter RACF ID (e.g., JSMITH)"
+                        placeholder={tpmsLookupType === 'enterprise' ? "Enter Enterprise ID (e.g., JSMITH)" : "Enter Truck Number (e.g., 123456)"}
                         value={tpmsTestId}
-                        onChange={(e) => setTpmsTestId(e.target.value.toUpperCase())}
+                        onChange={(e) => setTpmsTestId(tpmsLookupType === 'enterprise' ? e.target.value.toUpperCase() : e.target.value)}
                         className="flex-1"
                         data-testid="input-tpms-test-id"
                       />
                       <Button
-                        onClick={() => lookupTpmsTechMutation.mutate(tpmsTestId)}
+                        onClick={() => lookupTpmsTechMutation.mutate({ id: tpmsTestId, type: tpmsLookupType })}
                         disabled={!tpmsStatus?.configured || !tpmsTestId || lookupTpmsTechMutation.isPending}
                         data-testid="button-lookup-tech"
                       >
@@ -633,6 +661,7 @@ export default function Integrations() {
                       <div className="p-3 bg-muted rounded-lg text-sm space-y-1">
                         <p><strong>Name:</strong> {lookupTpmsTechMutation.data.data.firstName} {lookupTpmsTechMutation.data.data.lastName}</p>
                         <p><strong>Tech ID:</strong> {lookupTpmsTechMutation.data.data.techId}</p>
+                        <p><strong>Enterprise ID:</strong> {lookupTpmsTechMutation.data.data.ldapId || 'N/A'}</p>
                         <p><strong>District:</strong> {lookupTpmsTechMutation.data.data.districtNo}</p>
                         <p><strong>Truck:</strong> {lookupTpmsTechMutation.data.data.truckNo || 'N/A'}</p>
                       </div>
