@@ -39,7 +39,6 @@ export default function Integrations() {
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
   const [tpmsTestId, setTpmsTestId] = useState("");
-  const [tpmsLookupType, setTpmsLookupType] = useState<'enterprise' | 'truck'>('enterprise');
 
   const [formData, setFormData] = useState({
     name: "",
@@ -606,47 +605,26 @@ export default function Integrations() {
                   </CardContent>
                 </Card>
 
-                {/* Tech/Truck Lookup */}
+                {/* TPMS Lookup */}
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Tech or Truck Assignment Lookup</CardTitle>
+                    <CardTitle className="text-base">TPMS Lookup</CardTitle>
                     <CardDescription>Look up technician info by Enterprise ID or Truck Number</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="flex gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input 
-                          type="radio" 
-                          name="lookupType" 
-                          value="enterprise" 
-                          checked={tpmsLookupType === 'enterprise'}
-                          onChange={() => setTpmsLookupType('enterprise')}
-                          className="w-4 h-4"
-                        />
-                        <span className="text-sm">Enterprise ID</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input 
-                          type="radio" 
-                          name="lookupType" 
-                          value="truck" 
-                          checked={tpmsLookupType === 'truck'}
-                          onChange={() => setTpmsLookupType('truck')}
-                          className="w-4 h-4"
-                        />
-                        <span className="text-sm">Truck Number</span>
-                      </label>
-                    </div>
                     <div className="flex gap-2">
                       <Input
-                        placeholder={tpmsLookupType === 'enterprise' ? "Enter Enterprise ID (e.g., JSMITH)" : "Enter Truck Number (e.g., 123456)"}
+                        placeholder="Enter Enterprise ID or Truck Number"
                         value={tpmsTestId}
-                        onChange={(e) => setTpmsTestId(tpmsLookupType === 'enterprise' ? e.target.value.toUpperCase() : e.target.value)}
+                        onChange={(e) => setTpmsTestId(e.target.value.toUpperCase())}
                         className="flex-1"
                         data-testid="input-tpms-test-id"
                       />
                       <Button
-                        onClick={() => lookupTpmsTechMutation.mutate({ id: tpmsTestId, type: tpmsLookupType })}
+                        onClick={() => {
+                          const isNumeric = /^\d+$/.test(tpmsTestId.trim());
+                          lookupTpmsTechMutation.mutate({ id: tpmsTestId, type: isNumeric ? 'truck' : 'enterprise' });
+                        }}
                         disabled={!tpmsStatus?.configured || !tpmsTestId || lookupTpmsTechMutation.isPending}
                         data-testid="button-lookup-tech"
                       >
