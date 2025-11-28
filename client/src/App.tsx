@@ -23,9 +23,8 @@ import Dashboard from "@/pages/dashboard";
 import RequesterInterface from "@/pages/requester";
 import ApproverInterface from "@/pages/approver";
 import RequestsPage from "@/pages/requests";
-import ApiManagement from "@/pages/api-management";
+import Integrations from "@/pages/integrations";
 import HolmanIntegration from "@/pages/holman-integration";
-import SnowflakeIntegration from "@/pages/snowflake-integration";
 import QueueManagement from "@/pages/queue-management";
 import NTAOQueuePage from "@/pages/ntao-queue";
 import AssetsQueuePage from "@/pages/assets-queue";
@@ -276,10 +275,10 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/api-management">
+      <Route path="/integrations">
         <ProtectedRoute>
           <MainContent>
-            <ApiManagement />
+            <Integrations />
           </MainContent>
         </ProtectedRoute>
       </Route>
@@ -288,14 +287,6 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <HolmanIntegration />
-          </MainContent>
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/snowflake-integration">
-        <ProtectedRoute>
-          <MainContent>
-            <SnowflakeIntegration />
           </MainContent>
         </ProtectedRoute>
       </Route>

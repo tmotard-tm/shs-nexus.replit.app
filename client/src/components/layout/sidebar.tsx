@@ -81,7 +81,7 @@ export function Sidebar() {
       storageSpots: { name: "Storage Spots", href: "/storage-spots", icon: MapPin, category: "management" },
       requests: { name: "Requests", href: "/requests", icon: FileText, category: "management" },
       approvals: { name: "Approvals", href: "/approvals", icon: CheckCircle, category: "management" },
-      apiManagement: { name: "Integrations", href: "/api-management", icon: Settings, category: "management" },
+      apiManagement: { name: "Integrations", href: "/integrations", icon: Settings, category: "management" },
       userManagement: { name: "User Management", href: "/users", icon: Users, category: "management" },
       templateManagement: { name: "Templates", href: "/templates", icon: FileCode, category: "management" },
       activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity, category: "activity" },

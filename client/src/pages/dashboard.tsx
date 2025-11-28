@@ -66,7 +66,7 @@ export default function Dashboard() {
       name: "Integrations Management",
       icon: "fas fa-plug", 
       description: "Manage API connections",
-      path: "/api-management",
+      path: "/integrations",
     },
   ];
 

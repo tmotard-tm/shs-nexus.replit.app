@@ -429,7 +429,7 @@ export default function HolmanIntegration() {
       />
       
       <main className="p-6">
-        <BackButton href="/api-management" />
+        <BackButton href="/integrations" />
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <Card>
