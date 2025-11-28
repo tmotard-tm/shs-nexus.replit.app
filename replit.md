@@ -6,6 +6,18 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
 
 **Template Management System**: Added comprehensive template management system for superadmin users (September 2025). Provides full CRUD operations for workflow templates across all departments with security-first implementation including server-side ID generation, field whitelisting, and multi-layer access control.
 
+**Snowflake Sync System** (November 2025): Automated daily sync at 5am EST from Snowflake data warehouse for technician management:
+- `DRIVELINE_TERMED_TECHS_LAST30`: Tracks terminated technicians from the last 30 days, automatically creates offboarding queue items in the Fleet department
+- `DRIVELINE_ALL_TECHS`: Complete technician roster for lookup and reference
+- Database tables: `termed_techs`, `all_techs`, `sync_logs` track sync status and offboarding task creation
+- Manual sync available via superadmin UI at /snowflake-integration or /tech-roster pages
+
+**TPMS API Integration** (Planned): Future integration with TPMS (Tire Pressure Monitoring System) API to link technicians to their assigned vehicles. This will enhance the offboarding process by:
+- Automatically identifying vehicles assigned to termed technicians
+- Pre-populating vehicle information in offboarding queue items
+- Enabling vehicle recovery tracking during the offboarding workflow
+- API documentation pending from fleet management team
+
 # User Preferences
 
 Preferred communication style: Simple, everyday language.

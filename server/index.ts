@@ -181,6 +181,15 @@ async function initializeSnowflake() {
   // Initialize Snowflake service
   await initializeSnowflake();
 
+  // Start the sync scheduler for daily 5am EST syncs
+  try {
+    const { startSyncScheduler } = await import("./sync-scheduler");
+    startSyncScheduler();
+    log("✅ Sync scheduler started (daily at 5am EST)");
+  } catch (error) {
+    console.error("❌ Failed to start sync scheduler:", error);
+  }
+
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

@@ -4987,6 +4987,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Snowflake Sync Routes
+  console.log("Registering Snowflake Sync API routes...");
+  const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+
+  app.get("/api/snowflake/sync/status", requireAuth, async (req: any, res) => {
+    try {
+      const syncService = getSnowflakeSyncService();
+      const status = await syncService.getSyncStatus();
+      res.json(status);
+    } catch (error: any) {
+      console.error("Error getting sync status:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/snowflake/sync/termed-techs", requireAuth, async (req: any, res) => {
+    try {
+      if (req.user?.role !== 'superadmin' && req.user?.role !== 'admin') {
+        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      }
+      
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.syncTermedTechs('manual');
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error syncing termed techs:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/snowflake/sync/all-techs", requireAuth, async (req: any, res) => {
+    try {
+      if (req.user?.role !== 'superadmin' && req.user?.role !== 'admin') {
+        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      }
+      
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.syncAllTechs('manual');
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error syncing all techs:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get termed techs list
+  app.get("/api/termed-techs", requireAuth, async (req: any, res) => {
+    try {
+      const techs = await storage.getTermedTechs();
+      res.json(techs);
+    } catch (error: any) {
+      console.error("Error getting termed techs:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get all techs list (complete roster)
+  app.get("/api/all-techs", requireAuth, async (req: any, res) => {
+    try {
+      const techs = await storage.getAllTechs();
+      res.json(techs);
+    } catch (error: any) {
+      console.error("Error getting all techs:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get sync logs
+  app.get("/api/sync-logs", requireAuth, async (req: any, res) => {
+    try {
+      const logs = await storage.getSyncLogs();
+      res.json(logs);
+    } catch (error: any) {
+      console.error("Error getting sync logs:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack

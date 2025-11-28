@@ -38,6 +38,7 @@ import OperationsDashboard from "@/pages/operations-dashboard";
 import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import TaskWorkPage from "@/pages/task-work";
+import TechRoster from "@/pages/tech-roster";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
@@ -293,6 +294,12 @@ function Router() {
           <MainContent>
             <SnowflakeIntegration />
           </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/tech-roster">
+        <ProtectedRoute>
+          <TechRoster />
         </ProtectedRoute>
       </Route>
       

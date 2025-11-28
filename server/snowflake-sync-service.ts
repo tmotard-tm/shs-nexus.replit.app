@@ -113,15 +113,15 @@ export class SnowflakeSyncService {
             techRacfid: row.ENTERPRISE_ID || '',
             techName: row.FULL_NAME || 'Unknown',
             lastDayWorked: this.formatDateForDB(row.DATE_LAST_WORKED),
-            firstName: row.FIRST_NAME || null,
-            lastName: row.LAST_NAME || null,
-            jobTitle: row.JOB_TITLE || null,
-            districtNo: row.DISTRICT_NO || null,
-            planningAreaName: row.PLANNING_AREA_NM || null,
-            employmentStatus: row.EMPLOYMENT_STATUS || null,
+            firstName: row.FIRST_NAME ?? null,
+            lastName: row.LAST_NAME ?? null,
+            jobTitle: row.JOB_TITLE ?? null,
+            districtNo: row.DISTRICT_NO ?? null,
+            planningAreaName: row.PLANNING_AREA_NM ?? null,
+            employmentStatus: row.EMPLOYMENT_STATUS ?? null,
             effectiveDate: this.formatDateForDB(row.EFFDT),
-            offboardingTaskCreated: existingTech?.offboardingTaskCreated || false,
-            offboardingTaskId: existingTech?.offboardingTaskId || null,
+            offboardingTaskCreated: existingTech?.offboardingTaskCreated ?? false,
+            offboardingTaskId: existingTech?.offboardingTaskId ?? null,
           };
 
           await storage.upsertTermedTech(techData);
