@@ -87,10 +87,15 @@ class TPMSService {
     }
 
     try {
+      const authHeader = this.basicAuthCredential.startsWith('Basic ') 
+        ? this.basicAuthCredential 
+        : `Basic ${this.basicAuthCredential}`;
+      console.log('[TPMS] Using auth header format:', authHeader.substring(0, 15) + '...');
+      
       const response = await fetch(this.authEndpoint, {
         method: 'GET',
         headers: {
-          'Authorization': `Basic ${this.basicAuthCredential}`,
+          'Authorization': authHeader,
         },
       });
 
