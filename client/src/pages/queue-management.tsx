@@ -97,6 +97,7 @@ export default function UnifiedQueueManagement() {
   // Filters
   const [selectedFilter, setSelectedFilter] = useState<string>("all");
   const [selectedAgent, setSelectedAgent] = useState<string>("all");
+  const [selectedWorkflowType, setSelectedWorkflowType] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [expandedQueues, setExpandedQueues] = useState<Record<QueueModule, boolean>>({} as Record<QueueModule, boolean>);
@@ -423,13 +424,18 @@ export default function UnifiedQueueManagement() {
     }
   };
 
-  // Filter items based on date and agent criteria
+  // Filter items based on date, agent, and workflow type criteria
   const getFilteredItems = (items: CombinedQueueItem[]) => {
     let filtered = items;
 
     // Apply agent filter
     if (selectedAgent !== "all") {
       filtered = filtered.filter(item => item.assignedTo === selectedAgent);
+    }
+
+    // Apply workflow type filter
+    if (selectedWorkflowType !== "all") {
+      filtered = filtered.filter(item => item.workflowType === selectedWorkflowType);
     }
 
     // Apply date filters
@@ -611,7 +617,25 @@ export default function UnifiedQueueManagement() {
                 </Tabs>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <Label htmlFor="workflow-type">Workflow Type</Label>
+                  <Select value={selectedWorkflowType} onValueChange={setSelectedWorkflowType}>
+                    <SelectTrigger data-testid="select-workflow-type">
+                      <SelectValue placeholder="Select workflow type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Workflow Types</SelectItem>
+                      <SelectItem value="onboarding">Onboarding</SelectItem>
+                      <SelectItem value="offboarding">Offboarding</SelectItem>
+                      <SelectItem value="vehicle_assignment">Vehicle Assignment</SelectItem>
+                      <SelectItem value="decommission">Decommission</SelectItem>
+                      <SelectItem value="byov_assignment">BYOV Assignment</SelectItem>
+                      <SelectItem value="storage_request">Storage Request</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div>
                   <Label htmlFor="agent">Assigned Agent</Label>
                   <Select value={selectedAgent} onValueChange={setSelectedAgent}>
