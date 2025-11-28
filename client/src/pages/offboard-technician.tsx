@@ -16,6 +16,7 @@ import { ClipboardList, AlertTriangle, Trash2, Loader2, Truck, Clock, User, Cale
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
+import { TechCombobox, TechRosterEntry } from "@/components/ui/tech-combobox";
 
 export default function OffboardTechnician() {
   const { toast } = useToast();
@@ -616,38 +617,86 @@ export default function OffboardTechnician() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="employeeId">Employee ID *</Label>
-                        <Input
-                          id="employeeId"
-                          placeholder="EMP-001"
+                        <TechCombobox
                           value={technicianOffboard.employeeId}
-                          onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, employeeId: e.target.value })}
-                          required
+                          onSelect={(tech) => {
+                            if (tech) {
+                              setTechnicianOffboard(prev => ({
+                                ...prev,
+                                employeeId: tech.employeeId,
+                                techRacfId: tech.techRacfid,
+                                techName: tech.techName
+                              }));
+                            } else {
+                              setTechnicianOffboard(prev => ({
+                                ...prev,
+                                employeeId: "",
+                                techRacfId: "",
+                                techName: ""
+                              }));
+                            }
+                          }}
+                          searchField="employeeId"
+                          placeholder="Search by Employee ID..."
                           data-testid="input-employee-id"
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="techRacfId">Tech Racfid *</Label>
-                        <Input
-                          id="techRacfId"
-                          placeholder="Enter tech Racfid"
+                        <Label htmlFor="techRacfId">Tech RACF ID *</Label>
+                        <TechCombobox
                           value={technicianOffboard.techRacfId}
-                          onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, techRacfId: e.target.value })}
-                          required
+                          onSelect={(tech) => {
+                            if (tech) {
+                              setTechnicianOffboard(prev => ({
+                                ...prev,
+                                employeeId: tech.employeeId,
+                                techRacfId: tech.techRacfid,
+                                techName: tech.techName
+                              }));
+                            } else {
+                              setTechnicianOffboard(prev => ({
+                                ...prev,
+                                employeeId: "",
+                                techRacfId: "",
+                                techName: ""
+                              }));
+                            }
+                          }}
+                          searchField="techRacfid"
+                          placeholder="Search by RACF ID..."
                           data-testid="input-tech-racfid"
                         />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="techName">Tech Name *</Label>
-                        <Input
-                          id="techName"
-                          placeholder="Enter tech name"
+                        <TechCombobox
                           value={technicianOffboard.techName}
-                          onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, techName: e.target.value })}
-                          required
+                          onSelect={(tech) => {
+                            if (tech) {
+                              setTechnicianOffboard(prev => ({
+                                ...prev,
+                                employeeId: tech.employeeId,
+                                techRacfId: tech.techRacfid,
+                                techName: tech.techName
+                              }));
+                            } else {
+                              setTechnicianOffboard(prev => ({
+                                ...prev,
+                                employeeId: "",
+                                techRacfId: "",
+                                techName: ""
+                              }));
+                            }
+                          }}
+                          searchField="techName"
+                          placeholder="Search by Name..."
                           data-testid="input-tech-name"
                         />
                       </div>
                     </div>
+                    <p className="text-xs text-muted-foreground -mt-4">
+                      Search and select a technician from the roster. Selecting from any field will auto-fill all three.
+                    </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
