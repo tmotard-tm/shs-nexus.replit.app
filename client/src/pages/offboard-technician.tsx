@@ -720,7 +720,7 @@ export default function OffboardTechnician() {
                                   newLocationOptions.push({
                                     id: 'tpms-primary',
                                     source: 'tpms',
-                                    label: `TPMS Last Known Primary Address: ${fileDate}`,
+                                    label: 'TPMS Primary Address',
                                     address: tpmsResult.primaryAddress,
                                     lastUpdated: fileDate
                                   });
@@ -729,7 +729,7 @@ export default function OffboardTechnician() {
                                   newLocationOptions.push({
                                     id: 'tpms-reassort',
                                     source: 'tpms',
-                                    label: `TPMS Last Known Reassort Address: ${fileDate}`,
+                                    label: 'TPMS Reassort Address',
                                     address: tpmsResult.reassortAddress,
                                     lastUpdated: fileDate
                                   });
@@ -738,7 +738,7 @@ export default function OffboardTechnician() {
                                   newLocationOptions.push({
                                     id: 'tpms-alternate',
                                     source: 'tpms',
-                                    label: `TPMS Last Known Alternate Address: ${fileDate}`,
+                                    label: 'TPMS Alternate Address',
                                     address: tpmsResult.alternateAddress,
                                     lastUpdated: fileDate
                                   });
@@ -747,7 +747,7 @@ export default function OffboardTechnician() {
                                   newLocationOptions.push({
                                     id: 'tpms-return',
                                     source: 'tpms',
-                                    label: `TPMS Last Known Return Address: ${fileDate}`,
+                                    label: 'TPMS Return Address',
                                     address: tpmsResult.returnAddress,
                                     lastUpdated: fileDate
                                   });
@@ -777,7 +777,7 @@ export default function OffboardTechnician() {
                                       newLocationOptions.push({
                                         id: 'holman-address',
                                         source: 'holman',
-                                        label: `Holman Address: today()`,
+                                        label: 'Holman Address',
                                         address: holmanResult.vehicle.garagingAddress || '',
                                         lastUpdated: today
                                       });
@@ -809,7 +809,7 @@ export default function OffboardTechnician() {
                                       newLocationOptions.unshift({
                                         id: 'samsara-gps',
                                         source: 'samsara',
-                                        label: `Samsara GPS Last Updated: ${samsaraDate}`,
+                                        label: 'Samsara GPS',
                                         address: samsaraResult.address,
                                         latitude: samsaraResult.latitude,
                                         longitude: samsaraResult.longitude,
@@ -1066,6 +1066,7 @@ export default function OffboardTechnician() {
                               <th className="w-10 px-3 py-2 text-left"></th>
                               <th className="px-3 py-2 text-left font-medium">Location Source</th>
                               <th className="px-3 py-2 text-left font-medium">Address</th>
+                              <th className="w-24 px-3 py-2 text-left font-medium">As Of</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y">
@@ -1079,12 +1080,12 @@ export default function OffboardTechnician() {
                               const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
                               
                               const rows = [
-                                { id: 'samsara-gps', label: samsaraOption?.label || `Samsara GPS Last Updated:`, address: samsaraOption?.address || '', hasData: !!samsaraOption },
-                                { id: 'tpms-primary', label: tpmsPrimary?.label || `TPMS Last Known Primary Address:`, address: tpmsPrimary?.address || '', hasData: !!tpmsPrimary },
-                                { id: 'tpms-reassort', label: tpmsReassort?.label || `TPMS Last Known Reassort Address:`, address: tpmsReassort?.address || '', hasData: !!tpmsReassort },
-                                { id: 'tpms-alternate', label: tpmsAlternate?.label || `TPMS Last Known Alternate Address:`, address: tpmsAlternate?.address || '', hasData: !!tpmsAlternate },
-                                { id: 'tpms-return', label: tpmsReturn?.label || `TPMS Last Known Return Address:`, address: tpmsReturn?.address || '', hasData: !!tpmsReturn },
-                                { id: 'holman-address', label: holmanOption?.label || `Holman Address: today()`, address: holmanOption?.address || '', hasData: !!holmanOption },
+                                { id: 'samsara-gps', label: 'Samsara GPS', address: samsaraOption?.address || '', asOf: samsaraOption?.lastUpdated || '', hasData: !!samsaraOption },
+                                { id: 'tpms-primary', label: 'TPMS Primary Address', address: tpmsPrimary?.address || '', asOf: tpmsPrimary?.lastUpdated || '', hasData: !!tpmsPrimary },
+                                { id: 'tpms-reassort', label: 'TPMS Reassort Address', address: tpmsReassort?.address || '', asOf: tpmsReassort?.lastUpdated || '', hasData: !!tpmsReassort },
+                                { id: 'tpms-alternate', label: 'TPMS Alternate Address', address: tpmsAlternate?.address || '', asOf: tpmsAlternate?.lastUpdated || '', hasData: !!tpmsAlternate },
+                                { id: 'tpms-return', label: 'TPMS Return Address', address: tpmsReturn?.address || '', asOf: tpmsReturn?.lastUpdated || '', hasData: !!tpmsReturn },
+                                { id: 'holman-address', label: 'Holman Address', address: holmanOption?.address || '', asOf: holmanOption?.lastUpdated || '', hasData: !!holmanOption },
                               ];
                               
                               return rows.map((row) => (
@@ -1121,6 +1122,7 @@ export default function OffboardTechnician() {
                                   </td>
                                   <td className="px-3 py-2 whitespace-nowrap">{row.label}</td>
                                   <td className="px-3 py-2">{row.address}</td>
+                                  <td className="px-3 py-2 text-muted-foreground">{row.asOf}</td>
                                 </tr>
                               ));
                             })()}
@@ -1158,6 +1160,7 @@ export default function OffboardTechnician() {
                                   <span className="text-muted-foreground italic"></span>
                                 )}
                               </td>
+                              <td className="px-3 py-2"></td>
                             </tr>
                           </tbody>
                         </table>
