@@ -5511,6 +5511,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           },
           fields: [
             { fieldName: 'vin', displayName: 'VIN', dataType: 'string', isPrimaryKey: true, isRequired: true, sampleValue: '1FTFW1E80NFA12345', description: 'Vehicle Identification Number' },
+            { fieldName: 'vehicleNumber', displayName: 'Vehicle Number', dataType: 'string', isRequired: true, isForeignKey: true, sampleValue: '023680', description: 'Vehicle number (maps to TPMS Truck Number)' },
             { fieldName: 'unitNumber', displayName: 'Unit Number', dataType: 'string', isRequired: true, sampleValue: '023680', description: 'Fleet unit number' },
             { fieldName: 'year', displayName: 'Model Year', dataType: 'number', sampleValue: '2023', description: 'Vehicle model year' },
             { fieldName: 'make', displayName: 'Make', dataType: 'string', sampleValue: 'Ford', description: 'Vehicle manufacturer' },
@@ -5522,11 +5523,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             { fieldName: 'currentOdometer', displayName: 'Current Odometer', dataType: 'number', sampleValue: '45678', description: 'Current odometer reading' },
             { fieldName: 'assignedDriverId', displayName: 'Assigned Driver ID', dataType: 'string', isForeignKey: true, sampleValue: 'DRV001', description: 'ID of assigned driver' },
             { fieldName: 'assignedDriverName', displayName: 'Assigned Driver Name', dataType: 'string', sampleValue: 'John Smith', description: 'Name of assigned driver' },
+            { fieldName: 'assignedDriverEnterpriseId', displayName: 'Assigned Driver Enterprise ID', dataType: 'string', isForeignKey: true, sampleValue: 'JSMITH', description: 'Enterprise ID of assigned driver (maps to TPMS LDAP)' },
             { fieldName: 'clientCode', displayName: 'Client Code', dataType: 'string', sampleValue: 'SEARS', description: 'Client identifier' },
             { fieldName: 'divisionCode', displayName: 'Division Code', dataType: 'string', sampleValue: 'SHS', description: 'Division identifier' },
             { fieldName: 'departmentCode', displayName: 'Department Code', dataType: 'string', sampleValue: 'FLEET', description: 'Department identifier' },
             { fieldName: 'fuelType', displayName: 'Fuel Type', dataType: 'string', sampleValue: 'GASOLINE', description: 'Vehicle fuel type' },
             { fieldName: 'inServiceDate', displayName: 'In Service Date', dataType: 'date', sampleValue: '2023-01-15', description: 'Date vehicle entered service' },
+            { fieldName: 'outOfServiceDate', displayName: 'Out of Service Date', dataType: 'date', sampleValue: '', description: 'Date vehicle was removed from service' },
+            { fieldName: 'location', displayName: 'Current Location', dataType: 'string', sampleValue: 'Chicago, IL', description: 'Current vehicle location' },
           ]
         },
         {

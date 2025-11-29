@@ -14,6 +14,7 @@ import {
   Panel,
   MiniMap,
   MarkerType,
+  ConnectionLineType,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -52,6 +53,7 @@ const sourceTypeIcons: Record<string, typeof Database> = {
   holman: Link2,
   internal: Database,
   page_object: FileJson,
+  tpms: Table,
 };
 
 const sourceTypeColors: Record<string, string> = {
@@ -59,6 +61,7 @@ const sourceTypeColors: Record<string, string> = {
   holman: 'bg-green-500',
   internal: 'bg-purple-500',
   page_object: 'bg-orange-500',
+  tpms: 'bg-cyan-500',
 };
 
 function DataSourceNode({ data }: { data: { source: IntegrationDataSource; fields: DataSourceField[] } }) {
@@ -66,39 +69,48 @@ function DataSourceNode({ data }: { data: { source: IntegrationDataSource; field
   const colorClass = sourceTypeColors[data.source.sourceType] || 'bg-gray-500';
 
   return (
-    <div className="bg-card border border-border rounded-lg shadow-lg min-w-[250px] max-w-[300px]">
+    <div className="bg-card border border-border rounded-lg shadow-lg min-w-[280px] max-w-[320px]">
       <div className={`${colorClass} text-white px-3 py-2 rounded-t-lg flex items-center gap-2`}>
         <Icon className="h-4 w-4" />
         <span className="font-medium text-sm truncate">{data.source.displayName}</span>
       </div>
-      <div className="p-2 space-y-1 max-h-[300px] overflow-y-auto">
+      <div className="p-2 space-y-0.5 max-h-[350px] overflow-y-auto">
         {data.fields.length === 0 ? (
           <p className="text-xs text-muted-foreground px-2 py-1">No fields defined</p>
         ) : (
-          data.fields.map((field, index) => (
+          data.fields.map((field) => (
             <div 
               key={field.id} 
-              className="relative flex items-center gap-2 px-2 py-1 text-xs hover:bg-muted rounded group"
+              className="relative flex items-center gap-2 px-4 py-1.5 text-xs hover:bg-muted/50 rounded-sm group transition-colors"
             >
+              {/* Left handle - for receiving connections */}
               <Handle
                 type="target"
                 position={Position.Left}
                 id={`${field.id}-target`}
-                className="!w-2 !h-2 !bg-primary !border-2 !border-background"
+                isConnectable={true}
+                className="!w-3 !h-3 !bg-primary !border-2 !border-background hover:!bg-primary/80 hover:!scale-125 transition-transform !-left-1.5"
+                style={{ pointerEvents: 'auto' }}
               />
-              <div className="flex items-center gap-1 flex-1 min-w-0">
+              
+              {/* Field content */}
+              <div className="flex items-center gap-1.5 flex-1 min-w-0 pointer-events-none select-none">
                 {field.isPrimaryKey && <Key className="h-3 w-3 text-yellow-500 flex-shrink-0" />}
                 {field.isForeignKey && <Link2 className="h-3 w-3 text-blue-500 flex-shrink-0" />}
-                <span className="truncate">{field.displayName}</span>
+                <span className="truncate font-medium">{field.displayName}</span>
               </div>
-              <Badge variant="outline" className="text-[10px] px-1 py-0 flex-shrink-0">
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 flex-shrink-0 pointer-events-none">
                 {field.dataType}
               </Badge>
+              
+              {/* Right handle - for creating connections */}
               <Handle
                 type="source"
                 position={Position.Right}
                 id={`${field.id}-source`}
-                className="!w-2 !h-2 !bg-primary !border-2 !border-background"
+                isConnectable={true}
+                className="!w-3 !h-3 !bg-primary !border-2 !border-background hover:!bg-primary/80 hover:!scale-125 transition-transform !-right-1.5"
+                style={{ pointerEvents: 'auto' }}
               />
             </div>
           ))
@@ -505,6 +517,16 @@ export default function FieldMapping() {
               nodeTypes={nodeTypes}
               fitView
               className="bg-muted/30"
+              connectionLineType={ConnectionLineType.SmoothStep}
+              connectionLineStyle={{ stroke: 'hsl(var(--primary))', strokeWidth: 2 }}
+              defaultEdgeOptions={{
+                type: 'smoothstep',
+                animated: true,
+                markerEnd: { type: MarkerType.ArrowClosed },
+                style: { stroke: 'hsl(var(--primary))' },
+              }}
+              snapToGrid={true}
+              snapGrid={[10, 10]}
             >
               <Background />
               <Controls />
@@ -524,6 +546,10 @@ export default function FieldMapping() {
                   <div className="flex items-center gap-1">
                     <div className="w-3 h-3 rounded bg-green-500" />
                     <span>Holman</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-cyan-500" />
+                    <span>TPMS</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <div className="w-3 h-3 rounded bg-purple-500" />
