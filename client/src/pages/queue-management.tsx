@@ -37,6 +37,7 @@ import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
+import { TechCombobox, TechRosterEntry } from "@/components/ui/tech-combobox";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
 
 // Module labels for display
@@ -97,6 +98,7 @@ export default function UnifiedQueueManagement() {
   const [selectedFilter, setSelectedFilter] = useState<string>("all");
   const [selectedAgent, setSelectedAgent] = useState<string>("all");
   const [selectedWorkflowType, setSelectedWorkflowType] = useState<string>("all");
+  const [selectedEmployee, setSelectedEmployee] = useState<TechRosterEntry | null>(null);
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [expandedQueues, setExpandedQueues] = useState<Record<QueueModule, boolean>>({} as Record<QueueModule, boolean>);
@@ -424,7 +426,7 @@ export default function UnifiedQueueManagement() {
     }
   };
 
-  // Filter items based on date, agent, and workflow type criteria
+  // Filter items based on date, agent, workflow type, and employee criteria
   const getFilteredItems = (items: CombinedQueueItem[]) => {
     let filtered = items;
 
@@ -436,6 +438,27 @@ export default function UnifiedQueueManagement() {
     // Apply workflow type filter
     if (selectedWorkflowType !== "all") {
       filtered = filtered.filter(item => item.workflowType === selectedWorkflowType);
+    }
+
+    // Apply employee filter - search through the data JSON field
+    if (selectedEmployee) {
+      filtered = filtered.filter(item => {
+        if (!item.data) return false;
+        try {
+          const data = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
+          const technician = data?.technician || data;
+          
+          // Match by employeeId, techRacfid/enterpriseId, or name
+          const employeeIdMatch = technician?.employeeId === selectedEmployee.employeeId;
+          const racfIdMatch = (technician?.techRacfid || technician?.enterpriseId) === selectedEmployee.techRacfid;
+          const nameMatch = technician?.techName === selectedEmployee.techName || 
+                           technician?.name === selectedEmployee.techName;
+          
+          return employeeIdMatch || racfIdMatch || nameMatch;
+        } catch {
+          return false;
+        }
+      });
     }
 
     // Apply date filters
@@ -629,6 +652,37 @@ export default function UnifiedQueueManagement() {
                 </Card>
               </div>
               
+              {/* Employee Search Filter - Full Width Row */}
+              <div className="mb-4">
+                <Label htmlFor="employee-search">Search Employee</Label>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <TechCombobox
+                      value={selectedEmployee?.techName || ""}
+                      onSelect={(tech) => setSelectedEmployee(tech)}
+                      searchField="techName"
+                      placeholder="Search by name, ID, or Enterprise ID..."
+                      data-testid="combobox-employee-filter"
+                    />
+                  </div>
+                  {selectedEmployee && (
+                    <Button 
+                      variant="outline" 
+                      size="icon"
+                      onClick={() => setSelectedEmployee(null)}
+                      data-testid="button-clear-employee-filter"
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                {selectedEmployee && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Filtering by: {selectedEmployee.techName} (ID: {selectedEmployee.employeeId}, Enterprise: {selectedEmployee.techRacfid})
+                  </p>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <Label htmlFor="workflow-type">Workflow Type</Label>
