@@ -1436,33 +1436,57 @@ export default function OffboardTechnician() {
                             ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
                             : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
                           
-                          const getPhaseLabel = (phase: string) => {
-                            switch (phase) {
-                              case 'day0': return 'Day 0';
-                              case 'day1': return 'Day 1';
-                              case 'day2': return 'Day 2';
-                              case 'day3': return 'Day 3';
-                              case 'day7': return 'Day 7';
-                              case 'day14': return 'Day 14';
-                              case 'day30': return 'Day 30';
-                              default: return phase || 'Initial';
+                          const getPhaseInfo = (data: any) => {
+                            // Check for explicit phase field first
+                            if (data?.phase) {
+                              const phaseLabels: Record<string, string> = {
+                                'day0': 'Day 0',
+                                'day1': 'Day 1',
+                                'day2': 'Day 2',
+                                'day3': 'Day 3',
+                                'day7': 'Day 7',
+                                'day14': 'Day 14',
+                                'day30': 'Day 30',
+                              };
+                              const phaseColors: Record<string, string> = {
+                                'day0': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
+                                'day1': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',
+                                'day2': 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400',
+                                'day3': 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',
+                                'day7': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+                                'day14': 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+                                'day30': 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+                              };
+                              return {
+                                label: phaseLabels[data.phase] || data.phase,
+                                color: phaseColors[data.phase] || 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                              };
                             }
+                            
+                            // Check for Snowflake sync items (need triage)
+                            if (data?.source === 'snowflake_sync') {
+                              return {
+                                label: 'New',
+                                color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                              };
+                            }
+                            
+                            // Check for workflowStep to derive phase
+                            if (data?.workflowStep) {
+                              return {
+                                label: `Step ${data.workflowStep}`,
+                                color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+                              };
+                            }
+                            
+                            // Default for items without phase info
+                            return {
+                              label: 'Pending',
+                              color: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                            };
                           };
                           
-                          const getPhaseColor = (phase: string) => {
-                            switch (phase) {
-                              case 'day0': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400';
-                              case 'day1': return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400';
-                              case 'day2': return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400';
-                              case 'day3': return 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400';
-                              case 'day7': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
-                              case 'day14': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
-                              case 'day30': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
-                              default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400';
-                            }
-                          };
-                          
-                          const phase = data?.phase || '';
+                          const phaseInfo = getPhaseInfo(data);
                           
                           return (
                             <button
@@ -1476,11 +1500,9 @@ export default function OffboardTechnician() {
                                   {technician.techName || 'Unknown Technician'}
                                 </span>
                                 <div className="flex items-center gap-1">
-                                  {phase && (
-                                    <Badge className={`${getPhaseColor(phase)} text-[10px] px-1.5 py-0`}>
-                                      {getPhaseLabel(phase)}
-                                    </Badge>
-                                  )}
+                                  <Badge className={`${phaseInfo.color} text-[10px] px-1.5 py-0`}>
+                                    {phaseInfo.label}
+                                  </Badge>
                                   <Badge className={`${statusColor} text-[10px] px-1.5 py-0`}>
                                     {item.status}
                                   </Badge>
