@@ -520,7 +520,7 @@ export class SnowflakeSyncService {
         WHERE TRUCK.TRUCKNO IS NOT NULL 
           AND UPPER(TECH.LDAPID) = ?
           AND TECH.PRIMARYADDR1 IS NOT NULL
-        QUALIFY ROW_NUMBER() OVER (PARTITION BY TRUCK.TRUCKNO, TECH.LDAPID ORDER BY TRUCK.FILE_DATE DESC) = 1
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY UPPER(TECH.LDAPID) ORDER BY TECH.FILE_DATE DESC) = 1
       `;
 
       const rows = await snowflake.executeQuery(query, [enterpriseId]) as Array<{
