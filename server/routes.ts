@@ -5063,6 +5063,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get tech addresses from Snowflake TPMS data
+  app.get("/api/snowflake/tech-addresses/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      const { enterpriseId } = req.params;
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.getTechAddressesFromSnowflake(enterpriseId.toUpperCase());
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error looking up tech addresses from Snowflake:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Get termed techs list
   app.get("/api/termed-techs", requireAuth, async (req: any, res) => {
     try {
