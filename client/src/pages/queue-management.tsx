@@ -638,12 +638,12 @@ export default function UnifiedQueueManagement() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Workflow Types</SelectItem>
-                      <SelectItem value="onboarding">Onboarding</SelectItem>
-                      <SelectItem value="offboarding">Offboarding</SelectItem>
-                      <SelectItem value="vehicle_assignment">Vehicle Assignment</SelectItem>
-                      <SelectItem value="decommission">Decommission</SelectItem>
                       <SelectItem value="byov_assignment">BYOV Assignment</SelectItem>
+                      <SelectItem value="decommission">Decommission</SelectItem>
+                      <SelectItem value="offboarding">Offboarding</SelectItem>
+                      <SelectItem value="onboarding">Onboarding</SelectItem>
                       <SelectItem value="storage_request">Storage Request</SelectItem>
+                      <SelectItem value="vehicle_assignment">Vehicle Assignment</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -656,7 +656,9 @@ export default function UnifiedQueueManagement() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Agents</SelectItem>
-                      {users.map((selectUser: UserType) => (
+                      {[...users].sort((a: UserType, b: UserType) => 
+                        a.username.localeCompare(b.username)
+                      ).map((selectUser: UserType) => (
                         <SelectItem key={selectUser.id} value={selectUser.id}>
                           {selectUser.username}
                         </SelectItem>
