@@ -40,7 +40,7 @@ export default function TechRoster() {
     onSuccess: (result: any) => {
       toast({
         title: "Sync Complete",
-        description: `Processed ${result.recordsProcessed} technicians (${result.recordsCreated} new, ${result.recordsUpdated} updated)`,
+        description: `Processed ${result.recordsProcessed} Employees (${result.recordsCreated} new, ${result.recordsUpdated} updated)`,
       });
       queryClient.invalidateQueries({ queryKey: ['/api/all-techs'] });
       queryClient.invalidateQueries({ queryKey: ['/api/snowflake/sync/status'] });
@@ -48,7 +48,7 @@ export default function TechRoster() {
     onError: (error: any) => {
       toast({
         title: "Sync Failed",
-        description: error.message || "Failed to sync technician data",
+        description: error.message || "Failed to sync Employee data",
         variant: "destructive",
       });
     },
@@ -81,8 +81,8 @@ export default function TechRoster() {
   return (
     <MainContent>
       <TopBar 
-        title="Technician Roster"
-        breadcrumbs={["Home", "Fleet", "Technician Roster"]}
+        title="Employee Roster"
+        breadcrumbs={["Home", "Fleet", "Employee Roster"]}
       />
       
       <main className="p-6">
@@ -96,9 +96,9 @@ export default function TechRoster() {
                   <div className="flex items-center gap-3">
                     <Users className="h-6 w-6 text-blue-600" />
                     <div>
-                      <CardTitle data-testid="text-roster-title">Technician Roster</CardTitle>
+                      <CardTitle data-testid="text-roster-title">Employee Roster</CardTitle>
                       <CardDescription>
-                        Complete list of technicians synced from Snowflake
+                        Complete list of Employees synced from Snowflake
                       </CardDescription>
                     </div>
                   </div>
@@ -190,7 +190,7 @@ export default function TechRoster() {
                 </Collapsible>
 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>Showing {filteredTechs.length} of {techs.length} technicians</span>
+                  <span>Showing {filteredTechs.length} of {techs.length} Employees</span>
                 </div>
               </CardContent>
             </Card>
@@ -200,16 +200,16 @@ export default function TechRoster() {
                 {isLoading ? (
                   <div className="flex items-center justify-center p-8">
                     <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-                    <span className="ml-2 text-muted-foreground">Loading technicians...</span>
+                    <span className="ml-2 text-muted-foreground">Loading Employees...</span>
                   </div>
                 ) : filteredTechs.length === 0 ? (
                   <div className="flex flex-col items-center justify-center p-8 text-center">
                     <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-                    <h3 className="font-semibold text-lg">No Technicians Found</h3>
+                    <h3 className="font-semibold text-lg">No Employees Found</h3>
                     <p className="text-muted-foreground">
                       {techs.length === 0 
-                        ? "Click 'Sync Now' to pull technician data from Snowflake"
-                        : "No technicians match your current filters"}
+                        ? "Click 'Sync Now' to pull Employee data from Snowflake"
+                        : "No Employees match your current filters"}
                     </p>
                   </div>
                 ) : (

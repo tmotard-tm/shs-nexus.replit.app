@@ -59,8 +59,8 @@ export default function AssistanceSelection() {
     },
     {
       id: "offboard-technician",
-      title: "Offboard Technician", 
-      description: "Process Technician Offboarding",
+      title: "Offboard Employee", 
+      description: "Process Employee Offboarding",
       icon: UserMinus,
       bgColor: "bg-red-100 dark:bg-red-900/20",
       iconColor: "text-red-600 dark:text-red-400",
@@ -325,8 +325,8 @@ export default function AssistanceSelection() {
                     <UserMinus className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <CardTitle className="text-lg text-gray-800">Offboard Technician</CardTitle>
-                    <CardDescription className="text-gray-600">Process Technician Offboarding</CardDescription>
+                    <CardTitle className="text-lg text-gray-800">Offboard Employee</CardTitle>
+                    <CardDescription className="text-gray-600">Process Employee Offboarding</CardDescription>
                   </div>
                 </div>
               </CardHeader>

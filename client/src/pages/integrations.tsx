@@ -660,7 +660,7 @@ export default function Integrations() {
                         )}
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        Technician and truck lookup for offboarding workflow
+                        Employee and truck lookup for offboarding workflow
                       </p>
                     </div>
                   </div>
@@ -708,7 +708,7 @@ export default function Integrations() {
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">TPMS Lookup</CardTitle>
-                    <CardDescription>Look up technician info by Enterprise ID or Truck Number</CardDescription>
+                    <CardDescription>Look up Employee info by Enterprise ID or Truck Number</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex gap-2">
@@ -739,7 +739,7 @@ export default function Integrations() {
                     {lookupTpmsTechMutation.data?.success && (
                       <div className="p-3 bg-muted rounded-lg text-sm space-y-1">
                         <p><strong>Name:</strong> {lookupTpmsTechMutation.data.data.firstName} {lookupTpmsTechMutation.data.data.lastName}</p>
-                        <p><strong>Tech ID:</strong> {lookupTpmsTechMutation.data.data.techId}</p>
+                        <p><strong>Employee ID:</strong> {lookupTpmsTechMutation.data.data.techId}</p>
                         <p><strong>Enterprise ID:</strong> {lookupTpmsTechMutation.data.data.ldapId || 'N/A'}</p>
                         <p><strong>District:</strong> {lookupTpmsTechMutation.data.data.districtNo}</p>
                         <p><strong>Truck:</strong> {lookupTpmsTechMutation.data.data.truckNo || 'N/A'}</p>

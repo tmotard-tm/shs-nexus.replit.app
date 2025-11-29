@@ -445,7 +445,7 @@ export function WorkModuleDialog({
                   <p className="font-mono text-sm" data-testid="text-request-id">{requestDetails.requestId}</p>
                 </div>
                 <div>
-                  <Label className="text-sm font-medium text-muted-foreground">Tech ID</Label>
+                  <Label className="text-sm font-medium text-muted-foreground">Employee ID</Label>
                   <p className="font-mono text-sm" data-testid="text-tech-id">{requestDetails.techId}</p>
                 </div>
                 <div>
@@ -479,7 +479,7 @@ export function WorkModuleDialog({
               </TabsTrigger>
               <TabsTrigger value="instructions" className="flex items-center gap-2">
                 <User className="h-4 w-4" />
-                Tech Details
+                Employee Details
               </TabsTrigger>
             </TabsList>
             
@@ -594,15 +594,15 @@ export function WorkModuleDialog({
             </TabsContent>
 
             <TabsContent value="instructions" className="space-y-4">
-              {/* Technician Details Information */}
+              {/* Employee Details Information */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <User className="h-4 w-4" />
-                    Technician Information
+                    Employee Information
                   </CardTitle>
                   <CardDescription>
-                    Complete technician details and onboarding information
+                    Complete Employee details and onboarding information
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -697,7 +697,7 @@ export function WorkModuleDialog({
                       <div>
                         <Label className="text-sm font-medium text-muted-foreground">Position</Label>
                         <p className="text-sm" data-testid="text-position">
-                          {taskData.employee?.position || taskData.position || "Technician"}
+                          {taskData.employee?.position || taskData.position || "Employee"}
                         </p>
                       </div>
                       <div>
@@ -726,7 +726,7 @@ export function WorkModuleDialog({
                     <Label className="text-sm font-medium text-primary">Technical Information</Label>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
                       <div>
-                        <Label className="text-sm font-medium text-muted-foreground">Tech ID</Label>
+                        <Label className="text-sm font-medium text-muted-foreground">Employee ID</Label>
                         <p className="font-mono text-sm" data-testid="text-tech-id-detail">
                           {taskData.employee?.techId || taskData.techId || taskData.employee?.enterpriseId || "N/A"}
                         </p>
@@ -738,7 +738,7 @@ export function WorkModuleDialog({
                         </p>
                       </div>
                       <div className="md:col-span-2">
-                        <Label className="text-sm font-medium text-primary">Parts to Ship - Technician Specialties</Label>
+                        <Label className="text-sm font-medium text-primary">Parts to Ship - Employee Specialties</Label>
                         {(taskData.employee?.specialties || taskData.specialties) ? (
                           <div className="flex flex-wrap gap-2 mt-2" data-testid="specialties-badges">
                             {(Array.isArray(taskData.employee?.specialties || taskData.specialties)
@@ -761,15 +761,15 @@ export function WorkModuleDialog({
                         </p>
                       </div>
                       <div>
-                        <Label className="text-sm font-medium text-muted-foreground">FSSL Tech Status</Label>
+                        <Label className="text-sm font-medium text-muted-foreground">FSSL Status</Label>
                         {(taskData.employee?.isFSSLTech || taskData.isFSSLTech) ? (
                           <div className="flex items-center gap-2 mt-1">
                             <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium">
-                              🏆 FSSL Tech (Field Service Support Lead)
+                              🏆 FSSL (Field Service Support Lead)
                             </span>
                           </div>
                         ) : (
-                          <p className="text-sm text-muted-foreground mt-1">Standard Technician</p>
+                          <p className="text-sm text-muted-foreground mt-1">Standard Employee</p>
                         )}
                       </div>
                     </div>

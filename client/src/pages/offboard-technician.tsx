@@ -300,7 +300,7 @@ export default function OffboardTechnician() {
 
       toast({
         title: "Queue Item Loaded",
-        description: `Loaded data for ${technician.techName || 'technician'}. Review and complete the form.`,
+        description: `Loaded data for ${technician.techName || 'Employee'}. Review and complete the form.`,
       });
     } catch (e) {
       console.error('Error parsing queue item data:', e);
@@ -397,8 +397,8 @@ export default function OffboardTechnician() {
     
     if (!enterpriseId) {
       toast({
-        title: "Missing Tech RACF ID",
-        description: "Please enter a Tech RACF ID before looking up truck info.",
+        title: "Missing Employee RACF ID",
+        description: "Please enter an Employee RACF ID before looking up truck info.",
         variant: "destructive"
       });
       return;
@@ -437,7 +437,7 @@ export default function OffboardTechnician() {
       } else {
         toast({
           title: "Truck Not Found",
-          description: result.error || `No truck assigned to technician ${enterpriseId}.`,
+          description: result.error || `No truck assigned to Employee ${enterpriseId}.`,
           variant: "destructive"
         });
       }
@@ -490,7 +490,7 @@ export default function OffboardTechnician() {
     if (!/^[a-zA-Z0-9]{7}$/.test(technicianOffboard.techRacfId)) {
       toast({
         title: "Validation Error",
-        description: "Tech RACF ID must be exactly 7 characters (letters and numbers only).",
+        description: "Employee RACF ID must be exactly 7 characters (letters and numbers only).",
         variant: "destructive"
       });
       return;
@@ -554,9 +554,9 @@ export default function OffboardTechnician() {
           ...sharedTriggerData,
           instructions: [
             "Place a shipping hold to prevent future shipments",
-            "Cancel any pending orders for this technician",
+            "Cancel any pending orders for this Employee",
             "Cancel all backorders associated with the vehicle",
-            "Remove technician from automatic replenishment system",
+            "Remove Employee from automatic replenishment system",
             "Update truck status in NTAO — National Truck Assortment system",
             "Complete Day 0 task - no follow-up tasks until all teams complete Day 0"
           ]
@@ -600,7 +600,7 @@ export default function OffboardTechnician() {
       await apiRequest("POST", "/api/fleet-queue", {
         workflowType: "offboarding",
         title: `Day 0: Initial Vehicle Coordination - ${technicianOffboard.vehicleNumber}`,
-        description: `IMMEDIATE TASK: Begin initial coordination for vehicle ${technicianOffboard.vehicleNumber}. Employee: ${technicianOffboard.techName} (${technicianOffboard.techRacfId}). Contact technician and begin preliminary arrangements. This is a Day 0 task - must be completed before Phase 2 (Day 1-5) Fleet tasks are triggered.`,
+        description: `IMMEDIATE TASK: Begin initial coordination for vehicle ${technicianOffboard.vehicleNumber}. Employee: ${technicianOffboard.techName} (${technicianOffboard.techRacfId}). Contact Employee and begin preliminary arrangements. This is a Day 0 task - must be completed before Phase 2 (Day 1-5) Fleet tasks are triggered.`,
         priority: "high",
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
@@ -619,10 +619,10 @@ export default function OffboardTechnician() {
           },
           ...sharedTriggerData,
           instructions: [
-            "Contact technician immediately to notify of offboarding process",
+            "Contact Employee immediately to notify of offboarding process",
             "Arrange preliminary meeting/call to discuss vehicle handover",
             "Obtain current vehicle location and condition information",
-            "Begin coordination with technician for vehicle retrieval timing",
+            "Begin coordination with Employee for vehicle retrieval timing",
             "Assess any immediate vehicle security or safety concerns",
             "Document initial vehicle status and location",
             "Complete Day 0 task - detailed Fleet work will follow in Phase 2"
@@ -633,7 +633,7 @@ export default function OffboardTechnician() {
       await apiRequest("POST", "/api/inventory-queue", {
         workflowType: "offboarding",
         title: `Day 0: Remove from TPMS & Stop Orders - ${technicianOffboard.vehicleNumber}`,
-        description: `IMMEDIATE TASK: Remove terminated technician's truck ${technicianOffboard.vehicleNumber} from TPMS assignment and stop all inventory processes. Employee: ${technicianOffboard.techName} (${technicianOffboard.techRacfId}). This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+        description: `IMMEDIATE TASK: Remove terminated Employee's truck ${technicianOffboard.vehicleNumber} from TPMS assignment and stop all inventory processes. Employee: ${technicianOffboard.techName} (${technicianOffboard.techRacfId}). This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
         priority: "high",
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
@@ -653,10 +653,10 @@ export default function OffboardTechnician() {
           ...sharedTriggerData,
           instructions: [
             "Access TPMS (Truck Parts Management System) immediately",
-            "Locate vehicle assignment for terminated technician",
+            "Locate vehicle assignment for terminated Employee",
             `Remove vehicle ${technicianOffboard.vehicleNumber} from TPMS assignment`,
             "Update vehicle status to unassigned/pending-offboard",
-            "Clear and cancel any pending parts orders for this vehicle/technician",
+            "Clear and cancel any pending parts orders for this vehicle/Employee",
             "Stop any automatic inventory replenishment processes",
             "Document current inventory assignment status",
             "Complete Day 0 task - detailed inventory work will follow in Phase 2"
@@ -739,7 +739,7 @@ export default function OffboardTechnician() {
   return (
     <div className="flex-1">
       <TopBar 
-        title="Offboard Technician" 
+        title="Offboard Employee" 
         breadcrumbs={["Home", "Offboard"]}
       />
       
@@ -756,10 +756,10 @@ export default function OffboardTechnician() {
                       <div className="space-y-1">
                         <CardTitle className="flex items-center gap-2" data-testid="text-technician-offboard-title">
                           <Trash2 className="h-5 w-5" />
-                          Remove Technician from Fleet
+                          Remove Employee from Fleet
                         </CardTitle>
                         <CardDescription>
-                          Process technician removal and document the reason
+                          Process Employee removal and document the reason
                         </CardDescription>
                       </div>
                       <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
@@ -794,7 +794,7 @@ export default function OffboardTechnician() {
                 <CardContent>
                   <form onSubmit={handleTechnicianOffboard} className="space-y-6">
                     <div className="space-y-2">
-                      <Label htmlFor="techSearch">Search Technician *</Label>
+                      <Label htmlFor="techSearch">Search Employee *</Label>
                       <TechCombobox
                         value={technicianOffboard.techName}
                         onSelect={async (tech) => {
@@ -1052,7 +1052,7 @@ export default function OffboardTechnician() {
                         data-testid="input-tech-search"
                       />
                       <p className="text-xs text-muted-foreground">
-                        Search the tech roster - selecting a technician will auto-fill all available information
+                        Search the Employee roster - selecting an Employee will auto-fill all available information
                       </p>
                     </div>
 
@@ -1069,7 +1069,7 @@ export default function OffboardTechnician() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="techRacfId">Tech RACF ID *</Label>
+                        <Label htmlFor="techRacfId">Employee RACF ID *</Label>
                         <Input
                           id="techRacfId"
                           placeholder="Auto-filled from search"
@@ -1080,7 +1080,7 @@ export default function OffboardTechnician() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="techName">Tech Name *</Label>
+                        <Label htmlFor="techName">Employee Name *</Label>
                         <Input
                           id="techName"
                           placeholder="Auto-filled from search"
@@ -1134,7 +1134,7 @@ export default function OffboardTechnician() {
                           variant="outline"
                           onClick={handleTpmsLookup}
                           disabled={isLookingUpTruck || !technicianOffboard.techRacfId}
-                          title="Look up truck number from TPMS using Tech RACF ID"
+                          title="Look up truck number from TPMS using Employee RACF ID"
                           data-testid="button-tpms-lookup"
                         >
                           {isLookingUpTruck ? (
@@ -1145,7 +1145,7 @@ export default function OffboardTechnician() {
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Enter Tech RACF ID first, then click the truck icon to auto-fill from TPMS
+                        Enter Employee RACF ID first, then click the truck icon to auto-fill from TPMS
                       </p>
                       {tpmsLookupResult && (
                         <div className={`text-xs p-2 rounded ${tpmsLookupResult.success ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}>
@@ -1515,8 +1515,8 @@ export default function OffboardTechnician() {
                           const phaseInfo = getPhaseInfo(data);
                           const subtaskInfo = getSubtaskInfo(data);
                           
-                          // Get technician name - check multiple possible locations
-                          const techName = technician.techName || technician.name || data?.employee?.name || 'Unknown Technician';
+                          // Get Employee name - check multiple possible locations
+                          const techName = technician.techName || technician.name || data?.employee?.name || 'Unknown Employee';
                           
                           return (
                             <button

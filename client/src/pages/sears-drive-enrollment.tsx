@@ -19,8 +19,8 @@ import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 const enrollmentSchema = z.object({
   districtNumber: z.string().min(1, "District number is required"),
   currentTruckNumber: z.string().min(1, "Current truck number is required"),
-  techFirstName: z.string().min(1, "Tech first name is required"),
-  techLastName: z.string().min(1, "Tech last name is required"),
+  techFirstName: z.string().min(1, "Employee first name is required"),
+  techLastName: z.string().min(1, "Employee last name is required"),
   ldap: z.string().min(1, "LDAP is required"),
   techEmail: z.string().email("Valid email is required"),
   referredBy: z.string().min(1, "Referred by is required"),
@@ -223,11 +223,11 @@ export default function SearsDriveEnrollment() {
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
                 
-                {/* Technician Information */}
+                {/* Employee Information */}
                 <div className="space-y-6">
                   <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <User className="h-5 w-5" />
-                    Technician Information
+                    Employee Information
                   </h3>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -264,7 +264,7 @@ export default function SearsDriveEnrollment() {
                       name="techFirstName"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Tech First Name *</FormLabel>
+                          <FormLabel>Employee First Name *</FormLabel>
                           <FormControl>
                             <Input placeholder="Enter first name" {...field} data-testid="input-first-name" />
                           </FormControl>
@@ -278,7 +278,7 @@ export default function SearsDriveEnrollment() {
                       name="techLastName"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Tech Last Name *</FormLabel>
+                          <FormLabel>Employee Last Name *</FormLabel>
                           <FormControl>
                             <Input placeholder="Enter last name" {...field} data-testid="input-last-name" />
                           </FormControl>
@@ -306,7 +306,7 @@ export default function SearsDriveEnrollment() {
                       name="techEmail"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Tech Email *</FormLabel>
+                          <FormLabel>Employee Email *</FormLabel>
                           <FormControl>
                             <Input type="email" placeholder="Enter email address" {...field} data-testid="input-email" />
                           </FormControl>

@@ -232,9 +232,9 @@ export class SnowflakeSyncService {
               workflowStep: 1,
               instructions: [
                 "Place a shipping hold to prevent future shipments",
-                "Cancel any pending orders for this technician",
+                "Cancel any pending orders for this Employee",
                 "Cancel all backorders associated with the vehicle",
-                "Remove technician from automatic replenishment system",
+                "Remove Employee from automatic replenishment system",
                 "Update truck status in NTAO — National Truck Assortment system",
                 "Complete Day 0 task - no follow-up tasks until all teams complete Day 0"
               ],
@@ -259,16 +259,16 @@ export class SnowflakeSyncService {
             },
             {
               title: `Day 0: Initial Vehicle Coordination - ${vehicleNumber || tech.techName}`,
-              description: `IMMEDIATE TASK: Begin initial coordination for vehicle ${vehicleNumber || 'TBD'}. Employee: ${tech.techName} (${tech.techRacfid}). Contact technician and begin preliminary arrangements. This is a Day 0 task - must be completed before Phase 2 (Day 1-5) Fleet tasks are triggered.`,
+              description: `IMMEDIATE TASK: Begin initial coordination for vehicle ${vehicleNumber || 'TBD'}. Employee: ${tech.techName} (${tech.techRacfid}). Contact Employee and begin preliminary arrangements. This is a Day 0 task - must be completed before Phase 2 (Day 1-5) Fleet tasks are triggered.`,
               department: 'FLEET',
               step: 'fleet_initial_coordination_day0',
               subtask: 'Fleet',
               workflowStep: 3,
               instructions: [
-                "Contact technician immediately to notify of offboarding process",
+                "Contact Employee immediately to notify of offboarding process",
                 "Arrange preliminary meeting/call to discuss vehicle handover",
                 "Obtain current vehicle location and condition information",
-                "Begin coordination with technician for vehicle retrieval timing",
+                "Begin coordination with Employee for vehicle retrieval timing",
                 "Assess any immediate vehicle security or safety concerns",
                 "Document initial vehicle status and location",
                 "Complete Day 0 task - detailed Fleet work will follow in Phase 2"
@@ -276,17 +276,17 @@ export class SnowflakeSyncService {
             },
             {
               title: `Day 0: Remove from TPMS & Stop Orders - ${vehicleNumber || tech.techName}`,
-              description: `IMMEDIATE TASK: Remove terminated technician's truck ${vehicleNumber || 'TBD'} from TPMS assignment and stop all inventory processes. Employee: ${tech.techName} (${tech.techRacfid}). This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+              description: `IMMEDIATE TASK: Remove terminated Employee's truck ${vehicleNumber || 'TBD'} from TPMS assignment and stop all inventory processes. Employee: ${tech.techName} (${tech.techRacfid}). This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
               department: 'Inventory Control',
               step: 'inventory_remove_tpms_day0',
               subtask: 'Inventory',
               workflowStep: 4,
               instructions: [
                 "Access TPMS (Truck Parts Management System) immediately",
-                "Locate vehicle assignment for terminated technician",
+                "Locate vehicle assignment for terminated Employee",
                 `Remove vehicle ${vehicleNumber || 'TBD'} from TPMS assignment`,
                 "Update vehicle status to unassigned/pending-offboard",
-                "Clear and cancel any pending parts orders for this vehicle/technician",
+                "Clear and cancel any pending parts orders for this vehicle/Employee",
                 "Update inventory system to stop automatic replenishment",
                 "Complete Day 0 task - detailed Inventory work will follow in Phase 2"
               ],

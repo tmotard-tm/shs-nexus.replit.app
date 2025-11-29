@@ -271,7 +271,7 @@ export default function Dashboard() {
                     Offboarding
                   </h3>
                   <p className="text-xs text-muted-foreground mb-4" data-testid="text-offboarding-description">
-                    Process Technician Offboarding
+                    Process Employee Offboarding
                   </p>
                 </div>
                 <Link href="/offboard-technician">

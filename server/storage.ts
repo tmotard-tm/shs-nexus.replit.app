@@ -1927,7 +1927,7 @@ export class MemStorage implements IStorage {
       const retrievalTask = {
         workflowType: "offboarding",
         title: `Phase 2: Vehicle Retrieval - ${triggerData.vehicle?.vehicleNumber}`,
-        description: `PHASE 2 (Day 1-3): Retrieve vehicle from technician and transport to appropriate location. Vehicle: ${triggerData.vehicle?.vehicleNumber}. Employee: ${triggerData.employee?.name} (${triggerData.employee?.racfId}). All Day 0 tasks completed - proceed with Phase 2.`,
+        description: `PHASE 2 (Day 1-3): Retrieve vehicle from Employee and transport to appropriate location. Vehicle: ${triggerData.vehicle?.vehicleNumber}. Employee: ${triggerData.employee?.name} (${triggerData.employee?.racfId}). All Day 0 tasks completed - proceed with Phase 2.`,
         priority: "medium",
         requesterId: "system",
         department: "Fleet Management",
@@ -1980,7 +1980,7 @@ export class MemStorage implements IStorage {
   // Get vehicle retrieval instructions based on vehicle type
   private getVehicleRetrievalInstructions(vehicleType: string): string[] {
     const baseInstructions = [
-      "Contact technician to schedule vehicle pickup",
+      "Contact Employee to schedule vehicle pickup",
       "Confirm vehicle location and accessibility",
       "Coordinate pickup logistics and timing"
     ];

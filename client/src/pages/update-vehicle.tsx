@@ -746,7 +746,7 @@ export default function UpdateVehicle() {
                           id="dialog-position"
                           value={employeeData.position}
                           onChange={(e) => setEmployeeData(prev => ({ ...prev, position: e.target.value }))}
-                          placeholder="e.g., Technician"
+                          placeholder="e.g., Service Employee"
                           data-testid="dialog-input-position"
                         />
                       </div>
@@ -816,12 +816,12 @@ export default function UpdateVehicle() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="dialog-techId">Tech ID</Label>
+                        <Label htmlFor="dialog-techId">Employee ID</Label>
                         <Input
                           id="dialog-techId"
                           value={employeeData.techId}
                           onChange={(e) => setEmployeeData(prev => ({ ...prev, techId: e.target.value }))}
-                          placeholder="TECH-001"
+                          placeholder="EMP-001"
                           data-testid="dialog-input-tech-id"
                         />
                       </div>

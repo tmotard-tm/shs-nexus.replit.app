@@ -613,12 +613,12 @@ export default function OnboardHire() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="techId">Tech ID</Label>
+                          <Label htmlFor="techId">Employee ID</Label>
                           <Input
                             id="techId"
                             value={employeeForm.techId}
                             onChange={(e) => setEmployeeForm(prev => ({ ...prev, techId: e.target.value }))}
-                            placeholder="TECH-001"
+                            placeholder="EMP-001"
                             data-testid="input-tech-id"
                           />
                         </div>
@@ -663,7 +663,7 @@ export default function OnboardHire() {
                           </span>
                         </div>
 
-                        {/* FSSL Tech Option */}
+                        {/* FSSL Option */}
                         <div className="flex items-center space-x-2 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
                           <Checkbox
                             id="fssl-tech"
@@ -678,10 +678,10 @@ export default function OnboardHire() {
                           />
                           <div>
                             <Label htmlFor="fssl-tech" className="text-sm font-medium text-orange-800 dark:text-orange-200">
-                              FSSL Tech (Field Service Support Lead)
+                              FSSL (Field Service Support Lead)
                             </Label>
                             <span className="text-xs text-orange-600 dark:text-orange-300 ml-2">
-                              Check this if the technician is designated as an FSSL tech
+                              Check this if the Employee is designated as an FSSL
                             </span>
                           </div>
                         </div>
@@ -727,7 +727,7 @@ export default function OnboardHire() {
                               )}
                               {employeeForm.isFSSLTech && (
                                 <span className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium">
-                                  🏆 FSSL Tech
+                                  🏆 FSSL (Field Service Support Lead)
                                 </span>
                               )}
                               {!employeeForm.isGeneralist && employeeForm.specialties.map((specialty) => (

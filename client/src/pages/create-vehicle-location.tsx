@@ -327,12 +327,12 @@ export default function CreateVehicle() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="techId">Tech ID</Label>
+                      <Label htmlFor="techId">Employee ID</Label>
                       <Input
                         id="techId"
                         value={employeeData.techId}
                         onChange={(e) => setEmployeeData(prev => ({ ...prev, techId: e.target.value }))}
-                        placeholder="TECH-001"
+                        placeholder="EMP-001"
                         data-testid="input-tech-id"
                       />
                     </div>

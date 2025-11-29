@@ -226,7 +226,7 @@ export default function InventoryQueuePage() {
                 <TableRow>
                   <TableHead>ID</TableHead>
                   <TableHead>Submitted</TableHead>
-                  <TableHead>Tech ID</TableHead>
+                  <TableHead>Employee ID</TableHead>
                   <TableHead>District</TableHead>
                   <TableHead>Service Order</TableHead>
                   <TableHead>Amount</TableHead>

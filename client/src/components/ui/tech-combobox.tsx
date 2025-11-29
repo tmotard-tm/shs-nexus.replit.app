@@ -44,7 +44,7 @@ export function TechCombobox({
   value,
   onSelect,
   searchField,
-  placeholder = "Search technician...",
+  placeholder = "Search Employee...",
   disabled = false,
   className,
   "data-testid": dataTestId,
@@ -137,7 +137,7 @@ export function TechCombobox({
           />
           <CommandList>
             <CommandEmpty>
-              {isLoading ? "Loading technicians..." : "No technician found."}
+              {isLoading ? "Loading Employees..." : "No Employee found."}
             </CommandEmpty>
             <CommandGroup heading={`Select ${getFieldLabel()}`}>
               {filteredTechs.map((tech) => (

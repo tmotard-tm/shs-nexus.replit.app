@@ -222,7 +222,7 @@ class TPMSService {
       console.error(`[TPMS] Error looking up truck ${cleanTruckNo}:`, error.message);
       return {
         success: false,
-        message: `No technician found for ${cleanTruckNo}`,
+        message: `No Employee found for ${cleanTruckNo}`,
       };
     }
   }

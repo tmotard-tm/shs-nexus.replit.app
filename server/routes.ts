@@ -2995,7 +2995,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             task: "unassign_van",
             dependsOn: assignVanTask.id,
             nextActions: [
-              "Remove truck from technician assignment",
+              "Remove truck from Employee assignment",
               "Update fleet records",
               "Schedule vehicle return/pickup"
             ]
@@ -3262,11 +3262,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             taskIds.push(assetsTask.id);
             createdTasks.push({id: assetsTask.id, department: "ASSETS", type: "Issue/Verify Assets"});
 
-            // NTAO → Update Technician Profile (priority:3)
+            // NTAO → Update Employee Profile (priority:3)
             const ntaoTask = await storage.createNTAOQueueItem({
               workflowType: "vehicle_assignment",
-              title: "Update Technician Profile",
-              description: `Update technician profile for ${assignmentData.firstName} ${assignmentData.lastName}`,
+              title: "Update Employee Profile",
+              description: `Update Employee profile for ${assignmentData.firstName} ${assignmentData.lastName}`,
               priority: "low",
               requesterId: "anonymous",
               department: "NTAO",
@@ -3281,7 +3281,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               })
             });
             taskIds.push(ntaoTask.id);
-            createdTasks.push({id: ntaoTask.id, department: "NTAO", type: "Update Technician Profile"});
+            createdTasks.push({id: ntaoTask.id, department: "NTAO", type: "Update Employee Profile"});
           }
           break;
 
@@ -3292,7 +3292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const ntaoTask = await storage.createNTAOQueueItem({
               workflowType: "onboarding",
               title: "Create Tech Record & Access",
-              description: `Onboard new technician: ${onboardingData.firstName} ${onboardingData.lastName}`,
+              description: `Onboard new Employee: ${onboardingData.firstName} ${onboardingData.lastName}`,
               priority: "high",
               requesterId: "anonymous",
               department: "NTAO",
@@ -3380,7 +3380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const fleetTask1 = await storage.createFleetQueueItem({
               workflowType: "offboarding",
               title: "Day 0: Stop Truck Stock Replenishment",
-              description: `DAY 0 TASK: Stop replenishment for ${offboardingData.techName || 'technician'}`,
+              description: `DAY 0 TASK: Stop replenishment for ${offboardingData.techName || 'Employee'}`,
               priority: "high",
               requesterId: "anonymous",
               department: "FLEET",
@@ -3405,7 +3405,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const inventoryTask1 = await storage.createInventoryQueueItem({
               workflowType: "offboarding",
               title: "Day 0: Full Truck Count & Return",
-              description: `DAY 0 TASK: Perform full inventory count for ${offboardingData.techName || 'technician'}`,
+              description: `DAY 0 TASK: Perform full inventory count for ${offboardingData.techName || 'Employee'}`,
               priority: "high",
               requesterId: "anonymous",
               department: "INVENTORY",
@@ -3430,7 +3430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const assetsTask1 = await storage.createAssetsQueueItem({
               workflowType: "offboarding",
               title: "Day 0: Collect Company Assets",
-              description: `DAY 0 TASK: Collect all company assets from ${offboardingData.techName || 'technician'}`,
+              description: `DAY 0 TASK: Collect all company assets from ${offboardingData.techName || 'Employee'}`,
               priority: "high",
               requesterId: "anonymous",
               department: "ASSETS",
@@ -3455,7 +3455,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const ntaoTask1 = await storage.createNTAOQueueItem({
               workflowType: "offboarding",
               title: "Day 0: Access Removal / Separation Notice",
-              description: `DAY 0 TASK: Process access removal for ${offboardingData.techName || 'technician'}`,
+              description: `DAY 0 TASK: Process access removal for ${offboardingData.techName || 'Employee'}`,
               priority: "high",
               requesterId: "anonymous",
               department: "NTAO",
@@ -3481,7 +3481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const fleetTask2 = await storage.createFleetQueueItem({
               workflowType: "offboarding",
               title: "Vehicle Return / Reassign",
-              description: `Process vehicle return for ${offboardingData.techName || 'technician'}`,
+              description: `Process vehicle return for ${offboardingData.techName || 'Employee'}`,
               priority: "medium",
               requesterId: "anonymous",
               department: "FLEET",
