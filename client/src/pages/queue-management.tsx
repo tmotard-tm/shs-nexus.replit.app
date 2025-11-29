@@ -493,7 +493,7 @@ export default function UnifiedQueueManagement() {
           <CardContent className="space-y-4">
             {/* Show Queues Selection */}
             <div className="space-y-3">
-              <Label className="text-sm font-medium">Show Queues</Label>
+              <Label className="text-sm font-medium">Show Queues ({queueStats?.pending || 0} - Open Tasks)</Label>
               <div className="flex flex-wrap gap-4">
                 {(Object.keys(moduleLabels) as QueueModule[]).map((module) => {
                   const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
