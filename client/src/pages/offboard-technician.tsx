@@ -1059,155 +1059,109 @@ export default function OffboardTechnician() {
                     <div className="space-y-3">
                       <Label>Vehicle Location *</Label>
                       
-                      {locationOptions.length > 0 ? (
-                        <div className="space-y-3">
-                          <div className="border rounded-lg overflow-hidden">
-                            <table className="w-full text-sm">
-                              <thead className="bg-muted/50">
-                                <tr>
-                                  <th className="w-10 px-3 py-2 text-left"></th>
-                                  <th className="px-3 py-2 text-left font-medium">Location Source</th>
-                                  <th className="px-3 py-2 text-left font-medium">Address</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y">
-                                {locationOptions.map((option) => (
-                                  <tr 
-                                    key={option.id} 
-                                    className={`hover:bg-accent/50 cursor-pointer transition-colors ${selectedLocationId === option.id ? 'bg-accent/30' : ''}`}
-                                    onClick={() => {
-                                      setSelectedLocationId(option.id);
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="w-10 px-3 py-2 text-left"></th>
+                              <th className="px-3 py-2 text-left font-medium">Location Source</th>
+                              <th className="px-3 py-2 text-left font-medium">Address</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {(() => {
+                              const samsaraOption = locationOptions.find(o => o.id === 'samsara-gps');
+                              const tpmsPrimary = locationOptions.find(o => o.id === 'tpms-primary');
+                              const tpmsReassort = locationOptions.find(o => o.id === 'tpms-reassort');
+                              const tpmsAlternate = locationOptions.find(o => o.id === 'tpms-alternate');
+                              const tpmsReturn = locationOptions.find(o => o.id === 'tpms-return');
+                              const holmanOption = locationOptions.find(o => o.id === 'holman-address');
+                              const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+                              
+                              const rows = [
+                                { id: 'samsara-gps', label: samsaraOption?.label || `Samsara GPS Last Updated:`, address: samsaraOption?.address || '', hasData: !!samsaraOption },
+                                { id: 'tpms-primary', label: tpmsPrimary?.label || `TPMS Primary Address Last Known:`, address: tpmsPrimary?.address || '', hasData: !!tpmsPrimary },
+                                { id: 'tpms-reassort', label: tpmsReassort?.label || `TPMS Reassort Address Last Known:`, address: tpmsReassort?.address || '', hasData: !!tpmsReassort },
+                                { id: 'tpms-alternate', label: tpmsAlternate?.label || `TPMS Alternate Address Last Known:`, address: tpmsAlternate?.address || '', hasData: !!tpmsAlternate },
+                                { id: 'tpms-return', label: tpmsReturn?.label || `TPMS Return Address Last Known:`, address: tpmsReturn?.address || '', hasData: !!tpmsReturn },
+                                { id: 'holman-address', label: holmanOption?.label || `Holman Address: today()`, address: holmanOption?.address || '', hasData: !!holmanOption },
+                              ];
+                              
+                              return rows.map((row) => (
+                                <tr 
+                                  key={row.id}
+                                  className={`hover:bg-accent/50 cursor-pointer transition-colors ${selectedLocationId === row.id ? 'bg-accent/30' : ''} ${!row.hasData ? 'opacity-50' : ''}`}
+                                  onClick={() => {
+                                    if (row.address) {
+                                      setSelectedLocationId(row.id);
                                       setTechnicianOffboard(prev => ({
                                         ...prev,
-                                        vehicleLocation: option.address
+                                        vehicleLocation: row.address
                                       }));
-                                    }}
-                                  >
-                                    <td className="px-3 py-2">
-                                      <input 
-                                        type="checkbox" 
-                                        checked={selectedLocationId === option.id}
-                                        onChange={() => {
-                                          setSelectedLocationId(option.id);
-                                          setTechnicianOffboard(prev => ({
-                                            ...prev,
-                                            vehicleLocation: option.address
-                                          }));
-                                        }}
-                                        className="h-4 w-4 rounded border-gray-300"
-                                        data-testid={`checkbox-location-${option.id}`}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2 whitespace-nowrap">{option.label}</td>
-                                    <td className="px-3 py-2">{option.address}</td>
-                                  </tr>
-                                ))}
-                                <tr 
-                                  className={`hover:bg-accent/50 cursor-pointer transition-colors ${selectedLocationId === 'other' ? 'bg-accent/30' : ''}`}
-                                  onClick={() => setSelectedLocationId('other')}
+                                    }
+                                  }}
                                 >
                                   <td className="px-3 py-2">
                                     <input 
                                       type="checkbox" 
-                                      checked={selectedLocationId === 'other'}
-                                      onChange={() => setSelectedLocationId('other')}
-                                      className="h-4 w-4 rounded border-gray-300"
-                                      data-testid="checkbox-location-other"
-                                    />
-                                  </td>
-                                  <td className="px-3 py-2 whitespace-nowrap">Other:</td>
-                                  <td className="px-3 py-2">
-                                    {selectedLocationId === 'other' ? (
-                                      <Input
-                                        placeholder="Enter address manually"
-                                        value={customLocation.address}
-                                        onClick={(e) => e.stopPropagation()}
-                                        onChange={(e) => {
-                                          setCustomLocation(prev => ({ ...prev, address: e.target.value }));
+                                      checked={selectedLocationId === row.id}
+                                      disabled={!row.address}
+                                      onChange={() => {
+                                        if (row.address) {
+                                          setSelectedLocationId(row.id);
                                           setTechnicianOffboard(prev => ({
                                             ...prev,
-                                            vehicleLocation: e.target.value
+                                            vehicleLocation: row.address
                                           }));
-                                        }}
-                                        className="h-8"
-                                        data-testid="input-custom-address"
-                                      />
-                                    ) : (
-                                      <span className="text-muted-foreground italic">Click to enter manually</span>
-                                    )}
+                                        }
+                                      }}
+                                      className="h-4 w-4 rounded border-gray-300"
+                                      data-testid={`checkbox-location-${row.id}`}
+                                    />
                                   </td>
+                                  <td className="px-3 py-2 whitespace-nowrap">{row.label}</td>
+                                  <td className="px-3 py-2">{row.address}</td>
                                 </tr>
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <p className="text-sm text-muted-foreground">No addresses found. Enter location manually:</p>
-                          <div className="flex gap-2 mb-2">
-                            <Button
-                              type="button"
-                              variant={customLocation.type === 'address' ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => setCustomLocation(prev => ({ ...prev, type: 'address' }))}
+                              ));
+                            })()}
+                            <tr 
+                              className={`hover:bg-accent/50 cursor-pointer transition-colors ${selectedLocationId === 'other' ? 'bg-accent/30' : ''}`}
+                              onClick={() => setSelectedLocationId('other')}
                             >
-                              Address
-                            </Button>
-                            <Button
-                              type="button"
-                              variant={customLocation.type === 'coordinates' ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => setCustomLocation(prev => ({ ...prev, type: 'coordinates' }))}
-                            >
-                              Lat/Long
-                            </Button>
-                          </div>
-                          
-                          {customLocation.type === 'address' ? (
-                            <Input
-                              id="vehicleLocation"
-                              placeholder="Enter street address"
-                              value={technicianOffboard.vehicleLocation}
-                              onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleLocation: e.target.value })}
-                              required
-                              data-testid="input-vehicle-location"
-                            />
-                          ) : (
-                            <div className="grid grid-cols-2 gap-2">
-                              <Input
-                                placeholder="Latitude"
-                                value={customLocation.latitude}
-                                onChange={(e) => {
-                                  setCustomLocation(prev => ({ ...prev, latitude: e.target.value }));
-                                  setTechnicianOffboard(prev => ({
-                                    ...prev,
-                                    vehicleLocation: `${e.target.value}, ${customLocation.longitude}`
-                                  }));
-                                }}
-                                data-testid="input-latitude-manual"
-                              />
-                              <Input
-                                placeholder="Longitude"
-                                value={customLocation.longitude}
-                                onChange={(e) => {
-                                  setCustomLocation(prev => ({ ...prev, longitude: e.target.value }));
-                                  setTechnicianOffboard(prev => ({
-                                    ...prev,
-                                    vehicleLocation: `${customLocation.latitude}, ${e.target.value}`
-                                  }));
-                                }}
-                                data-testid="input-longitude-manual"
-                              />
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      
-                      {technicianOffboard.vehicleLocation && (
-                        <div className="text-sm text-muted-foreground bg-muted p-2 rounded">
-                          <span className="font-medium">Selected:</span> {technicianOffboard.vehicleLocation}
-                        </div>
-                      )}
+                              <td className="px-3 py-2">
+                                <input 
+                                  type="checkbox" 
+                                  checked={selectedLocationId === 'other'}
+                                  onChange={() => setSelectedLocationId('other')}
+                                  className="h-4 w-4 rounded border-gray-300"
+                                  data-testid="checkbox-location-other"
+                                />
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap">Other:</td>
+                              <td className="px-3 py-2">
+                                {selectedLocationId === 'other' ? (
+                                  <Input
+                                    placeholder="Enter address manually"
+                                    value={customLocation.address}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => {
+                                      setCustomLocation(prev => ({ ...prev, address: e.target.value }));
+                                      setTechnicianOffboard(prev => ({
+                                        ...prev,
+                                        vehicleLocation: e.target.value
+                                      }));
+                                    }}
+                                    className="h-8"
+                                    data-testid="input-custom-address"
+                                  />
+                                ) : (
+                                  <span className="text-muted-foreground italic"></span>
+                                )}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
 
                     <div className="space-y-2">
