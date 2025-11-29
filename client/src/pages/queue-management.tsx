@@ -529,59 +529,6 @@ export default function UnifiedQueueManagement() {
           </CardContent>
         </Card>
 
-        {/* Dashboard Cards */}
-        {selectedModules.length > 0 && queueStats && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <Card className="bg-gradient-to-r from-orange-500 to-orange-600 text-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">New Tasks</CardTitle>
-                <Clock className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold" data-testid="text-new-tasks-count">
-                  {queueStats.pending}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">In Progress</CardTitle>
-                <Settings className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold" data-testid="text-in-progress-count">
-                  {queueStats.in_progress}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-r from-green-500 to-green-600 text-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Completed</CardTitle>
-                <CheckCircle className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold" data-testid="text-completed-count">
-                  {queueStats.completed}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-r from-red-500 to-red-600 text-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Requests</CardTitle>
-                <List className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold" data-testid="text-total-requests-count">
-                  {queueStats?.total || 0}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
         {/* Filters and Search */}
         {selectedModules.length > 0 && (
           <Card>
@@ -597,8 +544,8 @@ export default function UnifiedQueueManagement() {
                 <Card 
                   className={`cursor-pointer transition-all hover:scale-105 ${
                     selectedFilter === 'pending' 
-                      ? 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white ring-2 ring-yellow-400 ring-offset-2' 
-                      : 'bg-gradient-to-r from-yellow-500/20 to-yellow-600/20 hover:from-yellow-500/40 hover:to-yellow-600/40'
+                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white ring-2 ring-orange-400 ring-offset-2' 
+                      : 'bg-gradient-to-r from-orange-500/20 to-orange-600/20 hover:from-orange-500/40 hover:to-orange-600/40'
                   }`}
                   onClick={() => setSelectedFilter('pending')}
                   data-testid="tab-pending"
@@ -610,15 +557,15 @@ export default function UnifiedQueueManagement() {
                     <Clock className="h-4 w-4" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{queueStats?.pending || 0}</div>
+                    <div className="text-2xl font-bold" data-testid="text-new-tasks-count">{queueStats?.pending || 0}</div>
                   </CardContent>
                 </Card>
 
                 <Card 
                   className={`cursor-pointer transition-all hover:scale-105 ${
                     selectedFilter === 'in_progress' 
-                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white ring-2 ring-orange-400 ring-offset-2' 
-                      : 'bg-gradient-to-r from-orange-500/20 to-orange-600/20 hover:from-orange-500/40 hover:to-orange-600/40'
+                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white ring-2 ring-blue-400 ring-offset-2' 
+                      : 'bg-gradient-to-r from-blue-500/20 to-blue-600/20 hover:from-blue-500/40 hover:to-blue-600/40'
                   }`}
                   onClick={() => setSelectedFilter('in_progress')}
                   data-testid="tab-in-progress"
@@ -627,10 +574,10 @@ export default function UnifiedQueueManagement() {
                     <CardTitle className={`text-sm font-medium ${selectedFilter === 'in_progress' ? 'text-white' : ''}`}>
                       In Progress
                     </CardTitle>
-                    <User className="h-4 w-4" />
+                    <Settings className="h-4 w-4" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{queueStats?.in_progress || 0}</div>
+                    <div className="text-2xl font-bold" data-testid="text-in-progress-count">{queueStats?.in_progress || 0}</div>
                   </CardContent>
                 </Card>
 
@@ -650,15 +597,15 @@ export default function UnifiedQueueManagement() {
                     <CheckCircle className="h-4 w-4" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{queueStats?.completed || 0}</div>
+                    <div className="text-2xl font-bold" data-testid="text-completed-count">{queueStats?.completed || 0}</div>
                   </CardContent>
                 </Card>
 
                 <Card 
                   className={`cursor-pointer transition-all hover:scale-105 ${
                     selectedFilter === 'all' 
-                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white ring-2 ring-blue-400 ring-offset-2' 
-                      : 'bg-gradient-to-r from-blue-500/20 to-blue-600/20 hover:from-blue-500/40 hover:to-blue-600/40'
+                      ? 'bg-gradient-to-r from-red-500 to-red-600 text-white ring-2 ring-red-400 ring-offset-2' 
+                      : 'bg-gradient-to-r from-red-500/20 to-red-600/20 hover:from-red-500/40 hover:to-red-600/40'
                   }`}
                   onClick={() => setSelectedFilter('all')}
                   data-testid="tab-all"
@@ -670,7 +617,7 @@ export default function UnifiedQueueManagement() {
                     <List className="h-4 w-4" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{queueStats?.total || 0}</div>
+                    <div className="text-2xl font-bold" data-testid="text-total-requests-count">{queueStats?.total || 0}</div>
                   </CardContent>
                 </Card>
               </div>
