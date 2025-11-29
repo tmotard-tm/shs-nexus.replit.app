@@ -7,7 +7,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -593,28 +592,87 @@ export default function UnifiedQueueManagement() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Status Tabs */}
-              <div className="mb-6">
-                <Tabs value={selectedFilter} onValueChange={setSelectedFilter} className="w-full">
-                  <TabsList className="grid w-full grid-cols-4">
-                    <TabsTrigger value="pending" data-testid="tab-pending" className="flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      New Tasks ({queueStats?.pending || 0})
-                    </TabsTrigger>
-                    <TabsTrigger value="in_progress" data-testid="tab-in-progress" className="flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      In Progress ({queueStats?.in_progress || 0})
-                    </TabsTrigger>
-                    <TabsTrigger value="completed" data-testid="tab-completed" className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4" />
-                      Completed ({queueStats?.completed || 0})
-                    </TabsTrigger>
-                    <TabsTrigger value="all" data-testid="tab-all" className="flex items-center gap-2">
-                      <List className="h-4 w-4" />
+              {/* Status Filter Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <Card 
+                  className={`cursor-pointer transition-all hover:scale-105 ${
+                    selectedFilter === 'pending' 
+                      ? 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white ring-2 ring-yellow-400 ring-offset-2' 
+                      : 'bg-gradient-to-r from-yellow-500/20 to-yellow-600/20 hover:from-yellow-500/40 hover:to-yellow-600/40'
+                  }`}
+                  onClick={() => setSelectedFilter('pending')}
+                  data-testid="tab-pending"
+                >
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className={`text-sm font-medium ${selectedFilter === 'pending' ? 'text-white' : ''}`}>
+                      New Tasks
+                    </CardTitle>
+                    <Clock className="h-4 w-4" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{queueStats?.pending || 0}</div>
+                  </CardContent>
+                </Card>
+
+                <Card 
+                  className={`cursor-pointer transition-all hover:scale-105 ${
+                    selectedFilter === 'in_progress' 
+                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white ring-2 ring-orange-400 ring-offset-2' 
+                      : 'bg-gradient-to-r from-orange-500/20 to-orange-600/20 hover:from-orange-500/40 hover:to-orange-600/40'
+                  }`}
+                  onClick={() => setSelectedFilter('in_progress')}
+                  data-testid="tab-in-progress"
+                >
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className={`text-sm font-medium ${selectedFilter === 'in_progress' ? 'text-white' : ''}`}>
+                      In Progress
+                    </CardTitle>
+                    <User className="h-4 w-4" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{queueStats?.in_progress || 0}</div>
+                  </CardContent>
+                </Card>
+
+                <Card 
+                  className={`cursor-pointer transition-all hover:scale-105 ${
+                    selectedFilter === 'completed' 
+                      ? 'bg-gradient-to-r from-green-500 to-green-600 text-white ring-2 ring-green-400 ring-offset-2' 
+                      : 'bg-gradient-to-r from-green-500/20 to-green-600/20 hover:from-green-500/40 hover:to-green-600/40'
+                  }`}
+                  onClick={() => setSelectedFilter('completed')}
+                  data-testid="tab-completed"
+                >
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className={`text-sm font-medium ${selectedFilter === 'completed' ? 'text-white' : ''}`}>
+                      Completed
+                    </CardTitle>
+                    <CheckCircle className="h-4 w-4" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{queueStats?.completed || 0}</div>
+                  </CardContent>
+                </Card>
+
+                <Card 
+                  className={`cursor-pointer transition-all hover:scale-105 ${
+                    selectedFilter === 'all' 
+                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white ring-2 ring-blue-400 ring-offset-2' 
+                      : 'bg-gradient-to-r from-blue-500/20 to-blue-600/20 hover:from-blue-500/40 hover:to-blue-600/40'
+                  }`}
+                  onClick={() => setSelectedFilter('all')}
+                  data-testid="tab-all"
+                >
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className={`text-sm font-medium ${selectedFilter === 'all' ? 'text-white' : ''}`}>
                       All Requests
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
+                    </CardTitle>
+                    <List className="h-4 w-4" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{queueStats?.total || 0}</div>
+                  </CardContent>
+                </Card>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
