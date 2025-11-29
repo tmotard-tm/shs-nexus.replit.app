@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { BackButton } from "@/components/ui/back-button";
-import { Database, CheckCircle, XCircle, Loader2, Play } from "lucide-react";
+import { Database, CheckCircle, XCircle, Loader2, Play, RefreshCw, Users } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
@@ -83,6 +83,36 @@ export default function SnowflakeIntegration() {
       toast({
         title: "Query Execution Failed",
         description: error.message || "Failed to execute query",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const syncTermedTechsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/snowflake/sync/termed-techs");
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/snowflake/sync/status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/termed-techs'] });
+      if (data.success) {
+        toast({
+          title: "Sync Completed",
+          description: `Processed ${data.recordsProcessed} employees. Created ${data.queueItemsCreated} queue items.`,
+        });
+      } else {
+        toast({
+          title: "Sync Failed",
+          description: data.errors?.join(', ') || "Failed to sync termed employees",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to sync termed employees",
         variant: "destructive",
       });
     },
@@ -175,6 +205,41 @@ export default function SnowflakeIntegration() {
                 <>
                   <Database className="mr-2 h-4 w-4" />
                   Test Connection
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Sync Termed Employees
+            </CardTitle>
+            <CardDescription>
+              Sync terminated employees from Snowflake and create offboarding queue items
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              This will fetch the latest terminated employee data from the DRIVELINE_TERMED_TECHS_LAST30 table 
+              and create Day 0 offboarding tasks in NTAO, Assets, Fleet, and Inventory queues.
+            </p>
+            <Button
+              onClick={() => syncTermedTechsMutation.mutate()}
+              disabled={!status?.configured || syncTermedTechsMutation.isPending}
+              data-testid="button-sync-termed-techs"
+            >
+              {syncTermedTechsMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Syncing Employees...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Sync Termed Employees
                 </>
               )}
             </Button>
