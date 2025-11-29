@@ -493,7 +493,7 @@ export default function UnifiedQueueManagement() {
           <CardContent className="space-y-4">
             {/* Show Queues Selection */}
             <div className="space-y-3">
-              <Label className="text-sm font-medium">Show Queues ({queueStats?.pending || 0} - Total Open Tasks)</Label>
+              <Label className="text-sm font-medium">Show Queues ({(queueStats?.pending || 0) + (queueStats?.in_progress || 0)} - Total Open Tasks)</Label>
               <div className="flex flex-wrap gap-6">
                 {(Object.keys(moduleLabels) as QueueModule[]).map((module) => {
                   const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
@@ -501,7 +501,7 @@ export default function UnifiedQueueManagement() {
                   if (!userCanAccess) return null;
                   
                   const moduleOpenCount = queueItems.filter(
-                    item => item.module === module && item.status === 'pending'
+                    item => item.module === module && (item.status === 'pending' || item.status === 'in_progress')
                   ).length;
                   
                   return (
