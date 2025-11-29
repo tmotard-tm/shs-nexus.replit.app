@@ -1486,7 +1486,37 @@ export default function OffboardTechnician() {
                             };
                           };
                           
+                          const getSubtaskInfo = (data: any) => {
+                            const subtaskColors: Record<string, string> = {
+                              'NTAO': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+                              'Equipment': 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+                              'Fleet': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+                              'Inventory': 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400',
+                            };
+                            
+                            // Check for explicit subtask field
+                            if (data?.subtask) {
+                              return {
+                                label: data.subtask,
+                                color: subtaskColors[data.subtask] || 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                              };
+                            }
+                            
+                            // Try to derive from step name
+                            const step = data?.step || '';
+                            if (step.includes('ntao')) return { label: 'NTAO', color: subtaskColors['NTAO'] };
+                            if (step.includes('equipment')) return { label: 'Equipment', color: subtaskColors['Equipment'] };
+                            if (step.includes('fleet')) return { label: 'Fleet', color: subtaskColors['Fleet'] };
+                            if (step.includes('inventory')) return { label: 'Inventory', color: subtaskColors['Inventory'] };
+                            
+                            return null;
+                          };
+                          
                           const phaseInfo = getPhaseInfo(data);
+                          const subtaskInfo = getSubtaskInfo(data);
+                          
+                          // Get technician name - check multiple possible locations
+                          const techName = technician.techName || technician.name || data?.employee?.name || 'Unknown Technician';
                           
                           return (
                             <button
@@ -1497,9 +1527,14 @@ export default function OffboardTechnician() {
                             >
                               <div className="flex items-start justify-between gap-2 mb-1">
                                 <span className="font-medium text-sm truncate flex-1">
-                                  {technician.techName || 'Unknown Technician'}
+                                  {techName}
                                 </span>
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1 flex-wrap justify-end">
+                                  {subtaskInfo && (
+                                    <Badge className={`${subtaskInfo.color} text-[10px] px-1.5 py-0`}>
+                                      {subtaskInfo.label}
+                                    </Badge>
+                                  )}
                                   <Badge className={`${phaseInfo.color} text-[10px] px-1.5 py-0`}>
                                     {phaseInfo.label}
                                   </Badge>

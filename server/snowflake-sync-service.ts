@@ -190,20 +190,27 @@ export class SnowflakeSyncService {
           const workflowId = `offboard_sync_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
           const vehicleNumber = truckInfo.truckNo || '';
           
-          // Shared data for all Day 0 tasks
+          // Shared data for all Day 0 tasks - use 'technician' to match display expectations
           const sharedTriggerData = {
             workflowId,
             vehicleType: 'cargo_van',
-            employee: {
-              name: tech.techName,
-              racfId: tech.techRacfid,
-              employeeId: tech.employeeId,
-              lastDayWorked: tech.lastDayWorked,
+            technician: {
+              techName: tech.techName,
+              techRacfid: tech.techRacfid,
               enterpriseId: tech.techRacfid,
+              employeeId: tech.employeeId,
+              lastName: tech.lastName,
+              firstName: tech.firstName,
+              lastDayWorked: tech.lastDayWorked,
+              effectiveDate: tech.effectiveDate,
+              jobTitle: tech.jobTitle,
+              district: tech.districtNo,
+              planningArea: tech.planningAreaName,
             },
             vehicle: {
               vehicleNumber: vehicleNumber,
               vehicleName: vehicleNumber,
+              truckNo: vehicleNumber,
               location: '',
               condition: 'unknown',
               type: 'cargo_van',
@@ -221,6 +228,7 @@ export class SnowflakeSyncService {
               description: `IMMEDIATE TASK: Stop truck stock replenishment for ${tech.techName} (${tech.techRacfid}). Vehicle: ${vehicleNumber || 'TBD'}. Last day: ${tech.lastDayWorked || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
               department: 'NTAO',
               step: 'ntao_stop_replenishment_day0',
+              subtask: 'NTAO',
               workflowStep: 1,
               instructions: [
                 "Place a shipping hold to prevent future shipments",
@@ -236,6 +244,7 @@ export class SnowflakeSyncService {
               description: `IMMEDIATE TASK: Recover company equipment from ${tech.techName} (${tech.techRacfid}). Vehicle: ${vehicleNumber || 'TBD'}. Contact employee immediately to arrange pickup/return of all company devices and equipment. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
               department: 'Assets Management',
               step: 'equipment_recover_devices_day0',
+              subtask: 'Equipment',
               workflowStep: 2,
               instructions: [
                 "Contact employee immediately to arrange equipment return",
@@ -253,6 +262,7 @@ export class SnowflakeSyncService {
               description: `IMMEDIATE TASK: Begin initial coordination for vehicle ${vehicleNumber || 'TBD'}. Employee: ${tech.techName} (${tech.techRacfid}). Contact technician and begin preliminary arrangements. This is a Day 0 task - must be completed before Phase 2 (Day 1-5) Fleet tasks are triggered.`,
               department: 'FLEET',
               step: 'fleet_initial_coordination_day0',
+              subtask: 'Fleet',
               workflowStep: 3,
               instructions: [
                 "Contact technician immediately to notify of offboarding process",
@@ -269,6 +279,7 @@ export class SnowflakeSyncService {
               description: `IMMEDIATE TASK: Remove terminated technician's truck ${vehicleNumber || 'TBD'} from TPMS assignment and stop all inventory processes. Employee: ${tech.techName} (${tech.techRacfid}). This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
               department: 'Inventory Control',
               step: 'inventory_remove_tpms_day0',
+              subtask: 'Inventory',
               workflowStep: 4,
               instructions: [
                 "Access TPMS (Truck Parts Management System) immediately",
@@ -298,6 +309,7 @@ export class SnowflakeSyncService {
               data: JSON.stringify({
                 workflowType: 'offboarding_sequence',
                 step: task.step,
+                subtask: task.subtask,
                 workflowStep: task.workflowStep,
                 phase: 'day0',
                 isDay0Task: true,
