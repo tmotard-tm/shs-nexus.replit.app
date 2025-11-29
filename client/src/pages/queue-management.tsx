@@ -482,63 +482,45 @@ export default function UnifiedQueueManagement() {
           </div>
         </div>
 
-        {/* Queue Module Selection */}
+        {/* Filters and Search */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5" />
-              Queue Access
+              <Filter className="h-5 w-5" />
+              Filters & Search
             </CardTitle>
-            <CardDescription>
-              Select which department queues you want to access
-            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-              {(Object.keys(moduleLabels) as QueueModule[]).map((module) => {
-                // Only show modules the user has access to
-                const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
-                const userCanAccess = userAccessibleModules.includes(module);
-                if (!userCanAccess) return null;
-                
-                return (
-                  <div key={module} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={module}
-                      checked={selectedModules.includes(module)}
-                      onCheckedChange={(checked) => 
-                        handleModuleToggle(module, checked as boolean)
-                      }
-                      data-testid={`checkbox-queue-${module}`}
-                    />
-                    <label
-                      htmlFor={module}
-                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                    >
-                      {moduleLabels[module]}
-                    </label>
-                  </div>
-                );
-              })}
+          <CardContent className="space-y-4">
+            {/* Show Queues Selection */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Show Queues</Label>
+              <div className="flex flex-wrap gap-4">
+                {(Object.keys(moduleLabels) as QueueModule[]).map((module) => {
+                  const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
+                  const userCanAccess = userAccessibleModules.includes(module);
+                  if (!userCanAccess) return null;
+                  
+                  return (
+                    <div key={module} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={module}
+                        checked={selectedModules.includes(module)}
+                        onCheckedChange={(checked) => 
+                          handleModuleToggle(module, checked as boolean)
+                        }
+                        data-testid={`checkbox-queue-${module}`}
+                      />
+                      <label
+                        htmlFor={module}
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                      >
+                        {moduleLabels[module]}
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            {selectedModules.length === 0 && (
-              <p className="text-sm text-muted-foreground mt-4">
-                Please select at least one queue to view tasks
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Filters and Search */}
-        {selectedModules.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Filter className="h-5 w-5" />
-                Filters & Search
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
               {/* Status Filter Cards */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <Card 
@@ -682,7 +664,6 @@ export default function UnifiedQueueManagement() {
               </div>
             </CardContent>
           </Card>
-        )}
 
         {/* Queue Items - Grouped by Module */}
         {selectedModules.length > 0 && (
