@@ -278,9 +278,9 @@ export default function HolmanIntegration() {
       });
     };
 
-    const getUniqueValues = (column: string) => {
-      const values = new Set(data.items.map((item: any) => String(item[column] || '')));
-      return Array.from(values).sort();
+    const getUniqueValues = (column: string): string[] => {
+      const values = new Set<string>(data.items.map((item: any) => String(item[column] || '')));
+      return Array.from(values).sort() as string[];
     };
 
     const toggleFilter = (column: string, value: string) => {

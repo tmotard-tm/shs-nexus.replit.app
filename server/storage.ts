@@ -2763,6 +2763,86 @@ export class MemStorage implements IStorage {
         return [];
     }
   }
+
+  // Field Mapping Module - Stub implementations (use DatabaseStorage for full functionality)
+  async getIntegrationDataSources(): Promise<IntegrationDataSource[]> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async getIntegrationDataSource(_id: string): Promise<IntegrationDataSource | undefined> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async createIntegrationDataSource(_source: InsertIntegrationDataSource): Promise<IntegrationDataSource> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async updateIntegrationDataSource(_id: string, _updates: Partial<IntegrationDataSource>): Promise<IntegrationDataSource | undefined> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async deleteIntegrationDataSource(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async getDataSourceFields(_sourceId: string): Promise<DataSourceField[]> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async getDataSourceField(_id: string): Promise<DataSourceField | undefined> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async createDataSourceField(_field: InsertDataSourceField): Promise<DataSourceField> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async createDataSourceFieldsBulk(_fields: InsertDataSourceField[]): Promise<DataSourceField[]> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async updateDataSourceField(_id: string, _updates: Partial<DataSourceField>): Promise<DataSourceField | undefined> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async deleteDataSourceField(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async getMappingSets(): Promise<MappingSet[]> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async getMappingSet(_id: string): Promise<MappingSet | undefined> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async createMappingSet(_set: InsertMappingSet): Promise<MappingSet> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async updateMappingSet(_id: string, _updates: Partial<MappingSet>): Promise<MappingSet | undefined> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async deleteMappingSet(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async getMappingNodes(_mappingSetId: string): Promise<MappingNode[]> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async createMappingNode(_node: InsertMappingNode): Promise<MappingNode> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async updateMappingNode(_id: string, _updates: Partial<MappingNode>): Promise<MappingNode | undefined> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async deleteMappingNode(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async upsertMappingNodes(_mappingSetId: string, _nodes: InsertMappingNode[]): Promise<MappingNode[]> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async getFieldMappings(_mappingSetId: string): Promise<FieldMapping[]> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async createFieldMapping(_mapping: InsertFieldMapping): Promise<FieldMapping> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async updateFieldMapping(_id: string, _updates: Partial<FieldMapping>): Promise<FieldMapping | undefined> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async deleteFieldMapping(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
+  async upsertFieldMappings(_mappingSetId: string, _mappings: InsertFieldMapping[]): Promise<FieldMapping[]> {
+    throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -4010,7 +4090,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteIntegrationDataSource(id: string): Promise<boolean> {
     const result = await db.delete(integrationDataSources).where(eq(integrationDataSources.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getDataSourceFields(sourceId: string): Promise<DataSourceField[]> {
@@ -4055,7 +4135,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteDataSourceField(id: string): Promise<boolean> {
     const result = await db.delete(dataSourceFields).where(eq(dataSourceFields.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getMappingSets(): Promise<MappingSet[]> {
@@ -4087,7 +4167,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMappingSet(id: string): Promise<boolean> {
     const result = await db.delete(mappingSets).where(eq(mappingSets.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getMappingNodes(mappingSetId: string): Promise<MappingNode[]> {
@@ -4113,7 +4193,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMappingNode(id: string): Promise<boolean> {
     const result = await db.delete(mappingNodes).where(eq(mappingNodes.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async upsertMappingNodes(mappingSetId: string, nodes: InsertMappingNode[]): Promise<MappingNode[]> {
@@ -4156,7 +4236,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteFieldMapping(id: string): Promise<boolean> {
     const result = await db.delete(fieldMappings).where(eq(fieldMappings.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async upsertFieldMappings(mappingSetId: string, mappings: InsertFieldMapping[]): Promise<FieldMapping[]> {
