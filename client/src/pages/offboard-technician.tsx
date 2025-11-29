@@ -645,6 +645,9 @@ export default function OffboardTechnician() {
                         value={technicianOffboard.techName}
                         onSelect={async (tech) => {
                           if (tech) {
+                            const startTime = performance.now();
+                            console.log(`[TIMING] Tech selection started for: ${tech.techName}`);
+                            
                             // Clear previous technician's data first
                             setLocationOptions([]);
                             setSelectedLocationId('');
@@ -670,10 +673,12 @@ export default function OffboardTechnician() {
                             // Auto-lookup termed tech dates (effectiveDate, lastDayWorked)
                             if (tech.employeeId) {
                               try {
+                                const termedStart = performance.now();
                                 const termedResponse = await fetch(`/api/termed-techs/lookup/${encodeURIComponent(tech.employeeId)}`, {
                                   credentials: 'include'
                                 });
                                 const termedResult = await termedResponse.json();
+                                console.log(`[TIMING] Termed tech lookup: ${(performance.now() - termedStart).toFixed(0)}ms`);
                                 
                                 if (termedResult.found) {
                                   setTechnicianOffboard(prev => ({
@@ -697,10 +702,12 @@ export default function OffboardTechnician() {
                               
                               try {
                                 // Fetch TPMS addresses from Snowflake
+                                const tpmsStart = performance.now();
                                 const tpmsResponse = await fetch(`/api/snowflake/tech-addresses/${encodeURIComponent(tech.techRacfid)}`, {
                                   credentials: 'include'
                                 });
                                 const tpmsResult = await tpmsResponse.json();
+                                console.log(`[TIMING] TPMS/Snowflake lookup: ${(performance.now() - tpmsStart).toFixed(0)}ms`);
                                 setTpmsLookupResult(tpmsResult);
 
                                 // Build location options list
@@ -785,6 +792,7 @@ export default function OffboardTechnician() {
                                   const paddedVehicleNum = truckNo.padStart(6, '0');
                                   
                                   // Run both lookups in parallel for faster response
+                                  const parallelStart = performance.now();
                                   const [holmanResult, samsaraResult] = await Promise.all([
                                     fetch(`/api/holman/vehicle/${encodeURIComponent(paddedVehicleNum)}`, { credentials: 'include' })
                                       .then(res => res.json())
@@ -794,6 +802,8 @@ export default function OffboardTechnician() {
                                       .catch(err => { console.log('Samsara GPS lookup error:', err); return { found: false }; })
                                   ]);
 
+                                  console.log(`[TIMING] Holman + Samsara parallel: ${(performance.now() - parallelStart).toFixed(0)}ms`);
+                                  
                                   // Process Holman result
                                   if (holmanResult) {
                                     setHolmanLookupResult(holmanResult);
@@ -855,12 +865,15 @@ export default function OffboardTechnician() {
 
                                 // Update location options
                                 setLocationOptions(newLocationOptions);
+                                console.log(`[TIMING] ✅ TOTAL auto-fill time: ${(performance.now() - startTime).toFixed(0)}ms`);
                                 
                               } catch (tpmsError) {
                                 console.error('TPMS/Snowflake lookup error:', tpmsError);
                               } finally {
                                 setIsLookingUpTruck(false);
                               }
+                            } else {
+                              console.log(`[TIMING] ✅ TOTAL auto-fill time (no RACF ID): ${(performance.now() - startTime).toFixed(0)}ms`);
                             }
                           } else {
                             setTechnicianOffboard(prev => ({
