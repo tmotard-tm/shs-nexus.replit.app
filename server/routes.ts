@@ -1722,6 +1722,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
+  // Check for existing open offboarding tasks for an employee
+  app.get("/api/offboarding/check-existing", async (req, res) => {
+    try {
+      const { employeeId, techRacfId } = req.query;
+      
+      if (!employeeId && !techRacfId) {
+        return res.status(400).json({ message: "Either employeeId or techRacfId is required" });
+      }
+      
+      const result = await storage.findExistingOffboardingTasks(
+        employeeId as string || '',
+        techRacfId as string || ''
+      );
+      
+      res.json(result);
+    } catch (error) {
+      console.error('Error checking existing offboarding tasks:', error);
+      res.status(500).json({ message: "Failed to check existing offboarding tasks" });
+    }
+  });
+
   // General task endpoint - searches across all queues for a task by ID
   app.get("/api/tasks/:id", requireAuth, async (req, res) => {
     try {

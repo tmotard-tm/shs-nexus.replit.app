@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { TopBar } from "@/components/layout/top-bar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,10 +9,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
-import { AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar, Car, MapPin, Navigation } from "lucide-react";
+import { AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar, Car, MapPin, Navigation, ClipboardList } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
@@ -31,6 +42,16 @@ interface LocationOption {
 export default function OffboardTechnician() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const [, navigate] = useLocation();
+  
+  // State for existing offboarding tasks dialog
+  const [showExistingTasksDialog, setShowExistingTasksDialog] = useState(false);
+  const [existingTasksInfo, setExistingTasksInfo] = useState<{
+    employeeName: string;
+    taskCount: number;
+    tasks: Array<{ id: string; status: string; createdAt: string; module: string }>;
+  } | null>(null);
+  
   const [technicianOffboard, setTechnicianOffboard] = useState({
     vehicleId: "",
     techRacfId: "",
@@ -590,6 +611,38 @@ export default function OffboardTechnician() {
                               effectiveDate: '',
                               lastDayWorked: ''
                             }));
+
+                            // Check for existing open offboarding tasks
+                            try {
+                              const existingTasksResponse = await fetch(
+                                `/api/offboarding/check-existing?employeeId=${encodeURIComponent(tech.employeeId)}&techRacfId=${encodeURIComponent(tech.techRacfid)}`,
+                                { credentials: 'include' }
+                              );
+                              const existingTasksResult = await existingTasksResponse.json();
+                              
+                              if (existingTasksResult.hasExisting && existingTasksResult.existingTasks?.length > 0) {
+                                // Filter to only show open (pending/in_progress) tasks
+                                const openTasks = existingTasksResult.existingTasks.filter(
+                                  (task: any) => task.status === 'pending' || task.status === 'in_progress'
+                                );
+                                
+                                if (openTasks.length > 0) {
+                                  setExistingTasksInfo({
+                                    employeeName: tech.techName,
+                                    taskCount: openTasks.length,
+                                    tasks: openTasks.map((task: any) => ({
+                                      id: task.id,
+                                      status: task.status,
+                                      createdAt: task.createdAt,
+                                      module: task.module || 'fleet'
+                                    }))
+                                  });
+                                  setShowExistingTasksDialog(true);
+                                }
+                              }
+                            } catch (existingTasksError) {
+                              console.log('Error checking for existing offboarding tasks:', existingTasksError);
+                            }
 
                             // Auto-lookup termed tech dates (effectiveDate, lastDayWorked)
                             if (tech.employeeId) {
@@ -1169,6 +1222,54 @@ export default function OffboardTechnician() {
           </div>
         </div>
       </main>
+
+      {/* Alert Dialog for Existing Offboarding Tasks */}
+      <AlertDialog open={showExistingTasksDialog} onOpenChange={setShowExistingTasksDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-amber-500" />
+              Existing Offboarding Tasks Found
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  There {existingTasksInfo?.taskCount === 1 ? 'is' : 'are'} already{' '}
+                  <strong>{existingTasksInfo?.taskCount} open offboarding task{existingTasksInfo?.taskCount !== 1 ? 's' : ''}</strong>{' '}
+                  for <strong>{existingTasksInfo?.employeeName}</strong>.
+                </p>
+                <div className="bg-muted rounded-md p-3 text-sm">
+                  <p className="font-medium mb-2">Open Tasks:</p>
+                  <ul className="space-y-1">
+                    {existingTasksInfo?.tasks.map((task) => (
+                      <li key={task.id} className="flex items-center gap-2">
+                        <Badge variant={task.status === 'in_progress' ? 'default' : 'secondary'} className="text-xs">
+                          {task.status === 'in_progress' ? 'In Progress' : 'Pending'}
+                        </Badge>
+                        <span className="text-muted-foreground">
+                          {task.module.toUpperCase()} - Created {new Date(task.createdAt).toLocaleDateString()}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <p className="text-sm">
+                  Would you like to view and manage these tasks in the Queue Management dashboard?
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Stay Here</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => navigate('/queue-management')}
+              className="bg-primary"
+            >
+              Go to Queue Management
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
