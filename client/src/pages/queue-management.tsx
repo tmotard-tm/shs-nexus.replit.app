@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
@@ -90,6 +91,8 @@ function getUserAccessibleModules(user: UserType): QueueModule[] {
 export default function UnifiedQueueManagement() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
+  const searchString = useSearch();
   
   // Selected queue modules - start with empty array for security
   const [selectedModules, setSelectedModules] = useState<QueueModule[]>([]);
@@ -119,6 +122,34 @@ export default function UnifiedQueueManagement() {
       setSelectedModules([]);
     }
   }, [user]);
+
+  // Handle URL parameters for employee filter (e.g., from offboarding page redirect)
+  useEffect(() => {
+    if (searchString) {
+      const params = new URLSearchParams(searchString);
+      const employeeId = params.get('employeeId');
+      const techRacfId = params.get('techRacfId');
+      const techName = params.get('techName');
+      
+      if (employeeId || techRacfId || techName) {
+        // Set the employee filter from URL parameters
+        setSelectedEmployee({
+          id: employeeId || '',
+          employeeId: employeeId || '',
+          techRacfid: techRacfId || '',
+          techName: techName || '',
+        });
+        
+        // Clear URL parameters after setting filter (to avoid re-applying on refresh)
+        navigate('/queue-management', { replace: true });
+        
+        toast({
+          title: "Filter Applied",
+          description: `Showing tasks for ${techName || employeeId || techRacfId}`,
+        });
+      }
+    }
+  }, [searchString, navigate, toast]);
 
   // Fetch unified queue items
   const { data: queueItems = [], isLoading } = useQuery({

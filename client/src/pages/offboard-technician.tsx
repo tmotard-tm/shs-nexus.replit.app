@@ -1262,7 +1262,20 @@ export default function OffboardTechnician() {
           <AlertDialogFooter>
             <AlertDialogCancel>Stay Here</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => navigate('/queue-management')}
+              onClick={() => {
+                // Navigate with employee filter parameters
+                const params = new URLSearchParams();
+                if (technicianOffboard.employeeId) {
+                  params.set('employeeId', technicianOffboard.employeeId);
+                }
+                if (technicianOffboard.techRacfId) {
+                  params.set('techRacfId', technicianOffboard.techRacfId);
+                }
+                if (technicianOffboard.techName) {
+                  params.set('techName', technicianOffboard.techName);
+                }
+                navigate(`/queue-management?${params.toString()}`);
+              }}
               className="bg-primary"
             >
               Go to Queue Management
