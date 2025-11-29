@@ -30,6 +30,15 @@ interface SnowflakeAllTechRow {
   EMPLOYMENT_STATUS?: string;
 }
 
+interface SkippedEmployee {
+  employeeId: string;
+  enterpriseId: string;
+  name: string;
+  reason: string;
+  existingTaskCount: number;
+  openTaskCount: number;
+}
+
 interface SyncResult {
   success: boolean;
   syncLogId?: string;
@@ -37,6 +46,8 @@ interface SyncResult {
   recordsCreated: number;
   recordsUpdated: number;
   queueItemsCreated: number;
+  queueItemsSkipped: number;
+  skippedEmployees: SkippedEmployee[];
   errors: string[];
   duration: number;
 }
@@ -57,6 +68,8 @@ export class SnowflakeSyncService {
       recordsCreated: 0,
       recordsUpdated: 0,
       queueItemsCreated: 0,
+      queueItemsSkipped: 0,
+      skippedEmployees: [],
       errors: [],
       duration: 0,
     };
@@ -154,6 +167,40 @@ export class SnowflakeSyncService {
 
       for (const tech of techsNeedingOffboarding) {
         try {
+          // Check for existing offboarding tasks before creating new ones
+          // Skip if there are open tasks OR tasks created within the last 45 days
+          const existingTasksResult = await storage.findExistingOffboardingTasks(
+            tech.employeeId,
+            tech.techRacfid,
+            45 // 45 day window
+          );
+
+          if (existingTasksResult.hasExisting) {
+            const openCount = existingTasksResult.existingTasks.filter(
+              t => t.status === 'pending' || t.status === 'in_progress'
+            ).length;
+            
+            console.log(`[Sync] Skipping offboarding tasks for ${tech.techName} (${tech.employeeId}) - ${existingTasksResult.message}`);
+            
+            // Count this as 1 skipped employee (not 4 skipped queue items)
+            result.queueItemsSkipped++;
+            result.skippedEmployees.push({
+              employeeId: tech.employeeId,
+              enterpriseId: tech.techRacfid,
+              name: tech.techName,
+              reason: openCount > 0 
+                ? `${openCount} open task(s) exist for this employee` 
+                : `${existingTasksResult.existingTasks.length} task(s) created within the last 45 days`,
+              existingTaskCount: existingTasksResult.existingTasks.length,
+              openTaskCount: openCount
+            });
+            
+            // Do NOT mark as offboarding created - allow future syncs to re-check
+            // Once existing tasks are completed AND outside the 45-day window,
+            // the employee will be eligible for new tasks in a future sync
+            continue;
+          }
+
           // Attempt to look up truck from TPMS if configured
           let truckInfo: {
             truckNo?: string;
@@ -381,7 +428,7 @@ export class SnowflakeSyncService {
         errorMessage: result.errors.length > 0 ? result.errors.join('; ') : null,
       });
 
-      console.log(`[Sync] Sync completed: ${result.recordsProcessed} processed, ${result.recordsCreated} created, ${result.recordsUpdated} updated, ${result.queueItemsCreated} queue items`);
+      console.log(`[Sync] Sync completed: ${result.recordsProcessed} processed, ${result.recordsCreated} created, ${result.recordsUpdated} updated, ${result.queueItemsCreated} queue items created, ${result.queueItemsSkipped} skipped (duplicates)`);
     } catch (error: any) {
       result.errors.push(`Sync failed: ${error.message}`);
       result.duration = Date.now() - startTime;
@@ -408,6 +455,8 @@ export class SnowflakeSyncService {
       recordsCreated: 0,
       recordsUpdated: 0,
       queueItemsCreated: 0,
+      queueItemsSkipped: 0,
+      skippedEmployees: [],
       errors: [],
       duration: 0,
     };

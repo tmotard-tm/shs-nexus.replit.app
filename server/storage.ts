@@ -187,6 +187,7 @@ export interface IStorage {
   
   // Duplicate Detection Functions
   checkOffboardingTaskDuplicates(employeeId: string, techRacfId: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }>;
+  findExistingOffboardingTasks(employeeId: string, techRacfId: string, daysWindow?: number): Promise<{ hasExisting: boolean; existingTasks: QueueItem[]; message?: string }>;
   checkByovEnrollmentDuplicates(ldap: string, email: string, currentTruckNumber: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }>;
   getRecentQueueItemsByTimeWindow(modules: QueueModule[], timeWindowMs: number): Promise<{ module: QueueModule; items: QueueItem[] }[]>;
   findQueueItemsByDataMatch(modules: QueueModule[], searchFunction: (data: any) => boolean): Promise<{ module: QueueModule; items: QueueItem[] }[]>;
@@ -2561,6 +2562,67 @@ export class MemStorage implements IStorage {
       return { isDuplicate: false }; // Allow creation if duplicate check fails
     }
   }
+
+  async findExistingOffboardingTasks(
+    employeeId: string, 
+    techRacfId: string, 
+    daysWindow: number = 45
+  ): Promise<{ hasExisting: boolean; existingTasks: QueueItem[]; message?: string }> {
+    try {
+      const cutoffTime = new Date(Date.now() - (daysWindow * 24 * 60 * 60 * 1000));
+      const existingTasks: QueueItem[] = [];
+      const modules: QueueModule[] = ['ntao', 'assets', 'inventory', 'fleet'];
+      
+      for (const module of modules) {
+        const items = await this.getQueueItemsByModule(module);
+        
+        for (const item of items) {
+          if (item.workflowType !== 'offboarding') continue;
+          
+          try {
+            let itemData = item.data;
+            if (typeof itemData === 'string') {
+              itemData = JSON.parse(itemData);
+            }
+            
+            // Check if this task belongs to the employee
+            const techInfo = (itemData as any)?.technician || (itemData as any)?.employee;
+            const itemEmployeeId = techInfo?.employeeId || (itemData as any)?.employeeId;
+            const itemTechRacfId = techInfo?.techRacfid || techInfo?.enterpriseId || techInfo?.racfId || (itemData as any)?.techRacfId;
+            
+            const employeeIdMatch = employeeId && itemEmployeeId && employeeId === itemEmployeeId;
+            const techRacfIdMatch = techRacfId && itemTechRacfId && techRacfId.toLowerCase() === itemTechRacfId.toLowerCase();
+            
+            if (employeeIdMatch || techRacfIdMatch) {
+              const isOpen = item.status === 'pending' || item.status === 'in_progress';
+              const isRecent = item.createdAt && new Date(item.createdAt) >= cutoffTime;
+              
+              if (isOpen || isRecent) {
+                existingTasks.push(item);
+              }
+            }
+          } catch (parseError) {
+            console.error('Error parsing queue item data for existing task check:', parseError);
+            continue;
+          }
+        }
+      }
+      
+      if (existingTasks.length > 0) {
+        const openCount = existingTasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length;
+        return {
+          hasExisting: true,
+          existingTasks,
+          message: `Found ${existingTasks.length} existing offboarding task(s) for this employee (${openCount} open, created within last ${daysWindow} days).`
+        };
+      }
+      
+      return { hasExisting: false, existingTasks: [] };
+    } catch (error) {
+      console.error('Error finding existing offboarding tasks:', error);
+      return { hasExisting: false, existingTasks: [] };
+    }
+  }
   
   async checkByovEnrollmentDuplicates(
     ldap: string, 
@@ -3755,6 +3817,63 @@ export class DatabaseStorage implements IStorage {
     }
     
     return { isDuplicate: false };
+  }
+
+  async findExistingOffboardingTasks(employeeId: string, techRacfId: string, daysWindow: number = 45): Promise<{ 
+    hasExisting: boolean; 
+    existingTasks: QueueItem[]; 
+    message?: string;
+  }> {
+    const cutoffTime = new Date(Date.now() - (daysWindow * 24 * 60 * 60 * 1000));
+    const existingTasks: QueueItem[] = [];
+    
+    // Find all offboarding tasks that are either:
+    // 1. Open (pending or in_progress status), OR
+    // 2. Created within the last X days
+    const items = await db.select().from(queueItems)
+      .where(eq(queueItems.workflowType, 'offboarding'))
+      .orderBy(desc(queueItems.createdAt));
+    
+    for (const item of items) {
+      try {
+        let itemData = item.data;
+        if (typeof itemData === 'string') {
+          itemData = JSON.parse(itemData);
+        }
+        
+        // Check if this task belongs to the employee
+        const techInfo = (itemData as any)?.technician || (itemData as any)?.employee;
+        const itemEmployeeId = techInfo?.employeeId || (itemData as any)?.employeeId;
+        const itemTechRacfId = techInfo?.techRacfid || techInfo?.enterpriseId || techInfo?.racfId || (itemData as any)?.techRacfId;
+        
+        const employeeIdMatch = employeeId && itemEmployeeId && employeeId === itemEmployeeId;
+        const techRacfIdMatch = techRacfId && itemTechRacfId && techRacfId.toLowerCase() === itemTechRacfId.toLowerCase();
+        
+        if (employeeIdMatch || techRacfIdMatch) {
+          const isOpen = item.status === 'pending' || item.status === 'in_progress';
+          const isRecent = item.createdAt && new Date(item.createdAt) >= cutoffTime;
+          
+          if (isOpen || isRecent) {
+            existingTasks.push(item);
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing queue item data for existing task check:', parseError);
+        continue;
+      }
+    }
+    
+    if (existingTasks.length > 0) {
+      const openCount = existingTasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length;
+      const recentCount = existingTasks.length;
+      return {
+        hasExisting: true,
+        existingTasks,
+        message: `Found ${recentCount} existing offboarding task(s) for this employee (${openCount} open, created within last ${daysWindow} days).`
+      };
+    }
+    
+    return { hasExisting: false, existingTasks: [] };
   }
 
   async checkByovEnrollmentDuplicates(ldap: string, email: string, currentTruckNumber: string, timeWindowMs?: number): Promise<{ isDuplicate: boolean; message?: string; existingTask?: QueueItem }> {

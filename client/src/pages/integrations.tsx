@@ -166,10 +166,33 @@ export default function Integrations() {
       queryClient.invalidateQueries({ queryKey: ['/api/fleet-queue'] });
       queryClient.invalidateQueries({ queryKey: ['/api/inventory-queue'] });
       if (data.success) {
+        const skippedCount = data.queueItemsSkipped || 0;
+        const skippedEmployeeCount = data.skippedEmployees?.length || 0;
+        let description = `Processed ${data.recordsProcessed} employees. Created ${data.queueItemsCreated} queue items.`;
+        
+        if (skippedEmployeeCount > 0) {
+          description += ` Skipped ${skippedEmployeeCount} employee(s) with existing tasks.`;
+        }
+        
         toast({
           title: "Sync Completed",
-          description: `Processed ${data.recordsProcessed} employees. Created ${data.queueItemsCreated} queue items across NTAO, Assets, Fleet, and Inventory queues.`,
+          description,
         });
+        
+        // Show a separate toast for skipped employees if any
+        if (skippedEmployeeCount > 0 && data.skippedEmployees) {
+          const skippedNames = data.skippedEmployees
+            .slice(0, 3)
+            .map((e: any) => e.name)
+            .join(', ');
+          const moreCount = skippedEmployeeCount > 3 ? ` and ${skippedEmployeeCount - 3} more` : '';
+          
+          toast({
+            title: "Duplicate Prevention",
+            description: `Skipped: ${skippedNames}${moreCount}. These employees have open or recent tasks (within 45 days). They will be re-checked in future syncs.`,
+            variant: "default",
+          });
+        }
       } else {
         toast({
           title: "Sync Failed",
