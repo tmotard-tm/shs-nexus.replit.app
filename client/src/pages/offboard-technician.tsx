@@ -694,7 +694,14 @@ export default function OffboardTechnician() {
 
                                 // Build location options list
                                 const newLocationOptions: LocationOption[] = [];
-                                const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+                                const formatTimestamp = (date: Date) => {
+                                  const dateStr = date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+                                  const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                                  return `${dateStr} ${timeStr}`;
+                                };
+                                const todayMidnight = new Date();
+                                todayMidnight.setHours(0, 0, 0, 0);
+                                const today = formatTimestamp(todayMidnight);
 
                                 // Set truck number if found
                                 let truckNo = '';
@@ -711,10 +718,17 @@ export default function OffboardTechnician() {
                                   });
                                 }
 
-                                // Add TPMS addresses with file date
-                                const fileDate = tpmsResult.fileDate 
-                                  ? new Date(tpmsResult.fileDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
-                                  : today;
+                                // Add TPMS addresses with file date (default to midnight if no time)
+                                let fileDate = today;
+                                if (tpmsResult.fileDate) {
+                                  const fileDateObj = new Date(tpmsResult.fileDate);
+                                  // If the date has no time component (midnight), keep it as midnight
+                                  if (fileDateObj.getHours() === 0 && fileDateObj.getMinutes() === 0 && fileDateObj.getSeconds() === 0) {
+                                    fileDate = formatTimestamp(fileDateObj);
+                                  } else {
+                                    fileDate = formatTimestamp(fileDateObj);
+                                  }
+                                }
                                 
                                 if (tpmsResult.success && tpmsResult.primaryAddress && tpmsResult.primaryAddress.trim() !== ',') {
                                   newLocationOptions.push({
@@ -801,9 +815,11 @@ export default function OffboardTechnician() {
                                     const samsaraResult = await samsaraResponse.json();
 
                                     if (samsaraResult.found && samsaraResult.address) {
-                                      const samsaraDate = samsaraResult.lastUpdated 
-                                        ? new Date(samsaraResult.lastUpdated).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
-                                        : today;
+                                      let samsaraDate = today;
+                                      if (samsaraResult.lastUpdated) {
+                                        const samsaraDateObj = new Date(samsaraResult.lastUpdated);
+                                        samsaraDate = formatTimestamp(samsaraDateObj);
+                                      }
                                       
                                       newLocationOptions.unshift({
                                         id: 'samsara-gps',
