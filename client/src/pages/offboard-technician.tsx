@@ -8,15 +8,26 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { useQuery } from "@tanstack/react-query";
-import { ClipboardList, AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar, Car } from "lucide-react";
+import { ClipboardList, AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar, Car, MapPin, Navigation } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 import { TechCombobox, TechRosterEntry } from "@/components/ui/tech-combobox";
+
+interface LocationOption {
+  id: string;
+  source: 'tpms' | 'samsara' | 'holman' | 'other';
+  label: string;
+  address: string;
+  latitude?: number;
+  longitude?: number;
+  type?: string;
+}
 
 export default function OffboardTechnician() {
   const { toast } = useToast();
@@ -58,6 +69,16 @@ export default function OffboardTechnician() {
     };
     error?: string;
   } | null>(null);
+
+  // Location selection state
+  const [locationOptions, setLocationOptions] = useState<LocationOption[]>([]);
+  const [selectedLocationId, setSelectedLocationId] = useState<string>('');
+  const [customLocation, setCustomLocation] = useState({
+    type: 'address' as 'address' | 'coordinates',
+    address: '',
+    latitude: '',
+    longitude: ''
+  });
 
   // Fetch pending offboarding queue items
   const { data: offboardingQueue, isLoading: isLoadingQueue } = useQuery<any[]>({
@@ -544,6 +565,9 @@ export default function OffboardTechnician() {
       vehicleModel: ""
     });
     setHolmanLookupResult(null);
+    setLocationOptions([]);
+    setSelectedLocationId('');
+    setCustomLocation({ type: 'address', address: '', latitude: '', longitude: '' });
     
     setIsSubmitting(false);
   };
@@ -656,12 +680,47 @@ export default function OffboardTechnician() {
                             if (tech.techRacfid) {
                               setIsLookingUpTruck(true);
                               setTpmsLookupResult(null);
+                              setLocationOptions([]); // Reset location options
+                              setSelectedLocationId('');
+                              
                               try {
                                 const tpmsResponse = await fetch(`/api/tpms/truck/${encodeURIComponent(tech.techRacfid)}`, {
                                   credentials: 'include'
                                 });
                                 const tpmsResult = await tpmsResponse.json();
                                 setTpmsLookupResult(tpmsResult);
+
+                                // Collect TPMS addresses
+                                const newLocationOptions: LocationOption[] = [];
+                                if (tpmsResult.success && tpmsResult.techInfo?.addresses) {
+                                  tpmsResult.techInfo.addresses.forEach((addr: any, index: number) => {
+                                    if (addr.addrLine1 || addr.city) {
+                                      const addressParts = [
+                                        addr.addrLine1,
+                                        addr.addrLine2,
+                                        addr.city,
+                                        addr.stateCd,
+                                        addr.zipCd
+                                      ].filter(Boolean).join(', ');
+                                      
+                                      const addressTypeLabels: Record<string, string> = {
+                                        'PRIMARY': 'Primary Address',
+                                        'RE_ASSORTMENT': 'Re-Assortment Address',
+                                        'DROP_RETURN': 'Drop/Return Address',
+                                        'ALTERNATE': 'Alternate Address'
+                                      };
+                                      const typeLabel = addressTypeLabels[addr.addressType] || addr.addressType;
+                                      
+                                      newLocationOptions.push({
+                                        id: `tpms-${index}`,
+                                        source: 'tpms',
+                                        label: `TPMS: ${typeLabel}`,
+                                        address: addressParts,
+                                        type: addr.addressType
+                                      });
+                                    }
+                                  });
+                                }
 
                                 if (tpmsResult.success && tpmsResult.truckNo) {
                                   const truckNo = tpmsResult.truckNo.trim();
@@ -708,6 +767,17 @@ export default function OffboardTechnician() {
                                       const samsaraResult = await samsaraResponse.json();
 
                                       if (samsaraResult.found && samsaraResult.address) {
+                                        newLocationOptions.unshift({
+                                          id: 'samsara-gps',
+                                          source: 'samsara',
+                                          label: 'Samsara: Last Known GPS Location',
+                                          address: samsaraResult.address,
+                                          latitude: samsaraResult.latitude,
+                                          longitude: samsaraResult.longitude
+                                        });
+                                        
+                                        // Auto-select Samsara GPS as default since it's most current
+                                        setSelectedLocationId('samsara-gps');
                                         setTechnicianOffboard(prev => ({
                                           ...prev,
                                           vehicleLocation: samsaraResult.address
@@ -727,6 +797,10 @@ export default function OffboardTechnician() {
                                     description: `Auto-filled truck ${truckNo} for ${tech.techRacfid}`,
                                   });
                                 }
+
+                                // Update location options
+                                setLocationOptions(newLocationOptions);
+                                
                               } catch (tpmsError) {
                                 console.error('TPMS lookup error:', tpmsError);
                               } finally {
@@ -746,6 +820,9 @@ export default function OffboardTechnician() {
                             }));
                             setTpmsLookupResult(null);
                             setHolmanLookupResult(null);
+                            setLocationOptions([]);
+                            setSelectedLocationId('');
+                            setCustomLocation({ type: 'address', address: '', latitude: '', longitude: '' });
                           }
                         }}
                         searchField="techName"
@@ -945,16 +1022,198 @@ export default function OffboardTechnician() {
                       </p>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="vehicleLocation">Vehicle Location *</Label>
-                      <Input
-                        id="vehicleLocation"
-                        placeholder="Enter current location"
-                        value={technicianOffboard.vehicleLocation}
-                        onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleLocation: e.target.value })}
-                        required
-                        data-testid="input-vehicle-location"
-                      />
+                    <div className="space-y-3">
+                      <Label>Vehicle Location *</Label>
+                      
+                      {locationOptions.length > 0 ? (
+                        <div className="space-y-3">
+                          <RadioGroup
+                            value={selectedLocationId}
+                            onValueChange={(value) => {
+                              setSelectedLocationId(value);
+                              if (value === 'other') {
+                                setTechnicianOffboard(prev => ({
+                                  ...prev,
+                                  vehicleLocation: customLocation.type === 'address' 
+                                    ? customLocation.address 
+                                    : `${customLocation.latitude}, ${customLocation.longitude}`
+                                }));
+                              } else {
+                                const selected = locationOptions.find(opt => opt.id === value);
+                                if (selected) {
+                                  setTechnicianOffboard(prev => ({
+                                    ...prev,
+                                    vehicleLocation: selected.address
+                                  }));
+                                }
+                              }
+                            }}
+                            className="space-y-2"
+                          >
+                            {locationOptions.map((option) => (
+                              <div key={option.id} className="flex items-start space-x-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
+                                <RadioGroupItem value={option.id} id={option.id} className="mt-1" />
+                                <div className="flex-1 min-w-0">
+                                  <Label htmlFor={option.id} className="flex items-center gap-2 font-medium cursor-pointer">
+                                    {option.source === 'samsara' && <Navigation className="h-4 w-4 text-green-600" />}
+                                    {option.source === 'tpms' && <MapPin className="h-4 w-4 text-blue-600" />}
+                                    {option.label}
+                                  </Label>
+                                  <p className="text-sm text-muted-foreground mt-1 break-words">{option.address}</p>
+                                  {option.latitude && option.longitude && (
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      Coordinates: {option.latitude.toFixed(6)}, {option.longitude.toFixed(6)}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                            
+                            <div className={`p-3 rounded-lg border transition-colors ${selectedLocationId === 'other' ? 'bg-accent/50 border-primary' : 'bg-card hover:bg-accent/50'}`}>
+                              <div className="flex items-start space-x-3">
+                                <RadioGroupItem value="other" id="location-other" className="mt-1" />
+                                <div className="flex-1 space-y-3">
+                                  <Label htmlFor="location-other" className="flex items-center gap-2 font-medium cursor-pointer">
+                                    <MapPin className="h-4 w-4 text-gray-600" />
+                                    Other Location
+                                  </Label>
+                                  
+                                  {selectedLocationId === 'other' && (
+                                    <div className="space-y-3 pt-2">
+                                      <div className="flex gap-2">
+                                        <Button
+                                          type="button"
+                                          variant={customLocation.type === 'address' ? 'default' : 'outline'}
+                                          size="sm"
+                                          onClick={() => setCustomLocation(prev => ({ ...prev, type: 'address' }))}
+                                        >
+                                          Address
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant={customLocation.type === 'coordinates' ? 'default' : 'outline'}
+                                          size="sm"
+                                          onClick={() => setCustomLocation(prev => ({ ...prev, type: 'coordinates' }))}
+                                        >
+                                          Lat/Long
+                                        </Button>
+                                      </div>
+                                      
+                                      {customLocation.type === 'address' ? (
+                                        <Input
+                                          placeholder="Enter street address"
+                                          value={customLocation.address}
+                                          onChange={(e) => {
+                                            setCustomLocation(prev => ({ ...prev, address: e.target.value }));
+                                            setTechnicianOffboard(prev => ({
+                                              ...prev,
+                                              vehicleLocation: e.target.value
+                                            }));
+                                          }}
+                                          data-testid="input-custom-address"
+                                        />
+                                      ) : (
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <Input
+                                            placeholder="Latitude"
+                                            value={customLocation.latitude}
+                                            onChange={(e) => {
+                                              setCustomLocation(prev => ({ ...prev, latitude: e.target.value }));
+                                              setTechnicianOffboard(prev => ({
+                                                ...prev,
+                                                vehicleLocation: `${e.target.value}, ${customLocation.longitude}`
+                                              }));
+                                            }}
+                                            data-testid="input-latitude"
+                                          />
+                                          <Input
+                                            placeholder="Longitude"
+                                            value={customLocation.longitude}
+                                            onChange={(e) => {
+                                              setCustomLocation(prev => ({ ...prev, longitude: e.target.value }));
+                                              setTechnicianOffboard(prev => ({
+                                                ...prev,
+                                                vehicleLocation: `${customLocation.latitude}, ${e.target.value}`
+                                              }));
+                                            }}
+                                            data-testid="input-longitude"
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </RadioGroup>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-sm text-muted-foreground">No addresses found. Enter location manually:</p>
+                          <div className="flex gap-2 mb-2">
+                            <Button
+                              type="button"
+                              variant={customLocation.type === 'address' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setCustomLocation(prev => ({ ...prev, type: 'address' }))}
+                            >
+                              Address
+                            </Button>
+                            <Button
+                              type="button"
+                              variant={customLocation.type === 'coordinates' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setCustomLocation(prev => ({ ...prev, type: 'coordinates' }))}
+                            >
+                              Lat/Long
+                            </Button>
+                          </div>
+                          
+                          {customLocation.type === 'address' ? (
+                            <Input
+                              id="vehicleLocation"
+                              placeholder="Enter street address"
+                              value={technicianOffboard.vehicleLocation}
+                              onChange={(e) => setTechnicianOffboard({ ...technicianOffboard, vehicleLocation: e.target.value })}
+                              required
+                              data-testid="input-vehicle-location"
+                            />
+                          ) : (
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input
+                                placeholder="Latitude"
+                                value={customLocation.latitude}
+                                onChange={(e) => {
+                                  setCustomLocation(prev => ({ ...prev, latitude: e.target.value }));
+                                  setTechnicianOffboard(prev => ({
+                                    ...prev,
+                                    vehicleLocation: `${e.target.value}, ${customLocation.longitude}`
+                                  }));
+                                }}
+                                data-testid="input-latitude-manual"
+                              />
+                              <Input
+                                placeholder="Longitude"
+                                value={customLocation.longitude}
+                                onChange={(e) => {
+                                  setCustomLocation(prev => ({ ...prev, longitude: e.target.value }));
+                                  setTechnicianOffboard(prev => ({
+                                    ...prev,
+                                    vehicleLocation: `${customLocation.latitude}, ${e.target.value}`
+                                  }));
+                                }}
+                                data-testid="input-longitude-manual"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {technicianOffboard.vehicleLocation && (
+                        <div className="text-sm text-muted-foreground bg-muted p-2 rounded">
+                          <span className="font-medium">Selected:</span> {technicianOffboard.vehicleLocation}
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-2">
