@@ -494,28 +494,37 @@ export default function UnifiedQueueManagement() {
             {/* Show Queues Selection */}
             <div className="space-y-3">
               <Label className="text-sm font-medium">Show Queues ({queueStats?.pending || 0} - Open Tasks)</Label>
-              <div className="flex flex-wrap gap-4">
+              <div className="flex flex-wrap gap-6">
                 {(Object.keys(moduleLabels) as QueueModule[]).map((module) => {
                   const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
                   const userCanAccess = userAccessibleModules.includes(module);
                   if (!userCanAccess) return null;
                   
+                  const moduleOpenCount = queueItems.filter(
+                    item => item.module === module && item.status === 'pending'
+                  ).length;
+                  
                   return (
-                    <div key={module} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={module}
-                        checked={selectedModules.includes(module)}
-                        onCheckedChange={(checked) => 
-                          handleModuleToggle(module, checked as boolean)
-                        }
-                        data-testid={`checkbox-queue-${module}`}
-                      />
-                      <label
-                        htmlFor={module}
-                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                      >
-                        {moduleLabels[module]}
-                      </label>
+                    <div key={module} className="flex flex-col">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id={module}
+                          checked={selectedModules.includes(module)}
+                          onCheckedChange={(checked) => 
+                            handleModuleToggle(module, checked as boolean)
+                          }
+                          data-testid={`checkbox-queue-${module}`}
+                        />
+                        <label
+                          htmlFor={module}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                        >
+                          {moduleLabels[module]}
+                        </label>
+                      </div>
+                      <span className="text-xs text-muted-foreground ml-6">
+                        ({moduleOpenCount} - Open Tasks)
+                      </span>
                     </div>
                   );
                 })}
