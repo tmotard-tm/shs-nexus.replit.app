@@ -694,7 +694,7 @@ export default function OffboardTechnician() {
 
                                 // Build location options list
                                 const newLocationOptions: LocationOption[] = [];
-                                const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+                                const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 
                                 // Set truck number if found
                                 let truckNo = '';
@@ -713,7 +713,7 @@ export default function OffboardTechnician() {
 
                                 // Add TPMS addresses with file date
                                 const fileDate = tpmsResult.fileDate 
-                                  ? new Date(tpmsResult.fileDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })
+                                  ? new Date(tpmsResult.fileDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
                                   : today;
                                 
                                 if (tpmsResult.success && tpmsResult.primaryAddress && tpmsResult.primaryAddress.trim() !== ',') {
@@ -802,8 +802,7 @@ export default function OffboardTechnician() {
 
                                     if (samsaraResult.found && samsaraResult.address) {
                                       const samsaraDate = samsaraResult.lastUpdated 
-                                        ? new Date(samsaraResult.lastUpdated).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }) + ' ' + 
-                                          new Date(samsaraResult.lastUpdated).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                        ? new Date(samsaraResult.lastUpdated).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
                                         : today;
                                       
                                       newLocationOptions.unshift({
@@ -1077,7 +1076,7 @@ export default function OffboardTechnician() {
                               const tpmsAlternate = locationOptions.find(o => o.id === 'tpms-alternate');
                               const tpmsReturn = locationOptions.find(o => o.id === 'tpms-return');
                               const holmanOption = locationOptions.find(o => o.id === 'holman-address');
-                              const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+                              const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
                               
                               const rows = [
                                 { id: 'samsara-gps', label: 'Samsara GPS', address: samsaraOption?.address || '', asOf: samsaraOption?.lastUpdated || '', hasData: !!samsaraOption },
