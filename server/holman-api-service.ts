@@ -245,6 +245,7 @@ export class HolmanApiService {
       holmanVehicleNumber: string;
       vin?: string;
       status?: string;
+      garagingAddress?: string;
     };
     error?: string;
   }> {
@@ -292,6 +293,21 @@ export class HolmanApiService {
           console.log('[Holman] Found matching vehicle:', matchingVehicle.holmanVehicleNumber);
           // Use modelYear field (not year) for the vehicle year
           const vehicleYear = matchingVehicle.modelYear || matchingVehicle.year || '';
+          
+          // Build garaging address from available fields
+          const addressParts = [
+            matchingVehicle.garagingStreet1 || matchingVehicle.garagingAddress1 || '',
+            matchingVehicle.garagingStreet2 || matchingVehicle.garagingAddress2 || '',
+          ].filter(p => p && p.trim());
+          const cityStateZip = [
+            matchingVehicle.garagingCity || '',
+            matchingVehicle.garagingState || '',
+            matchingVehicle.garagingZip || matchingVehicle.garagingPostalCode || ''
+          ].filter(p => p && p.trim()).join(', ');
+          
+          const fullAddress = [...addressParts, cityStateZip].filter(p => p && p.trim()).join(', ');
+          console.log('[Holman] Vehicle garaging address:', fullAddress || '(none available)');
+          
           return {
             success: true,
             vehicle: {
@@ -300,7 +316,8 @@ export class HolmanApiService {
               model: matchingVehicle.modelVin || matchingVehicle.modelClient || '',
               holmanVehicleNumber: matchingVehicle.holmanVehicleNumber || '',
               vin: matchingVehicle.vin || '',
-              status: matchingVehicle.status || matchingVehicle.assignedStatus || ''
+              status: matchingVehicle.status || matchingVehicle.assignedStatus || '',
+              garagingAddress: fullAddress || undefined
             }
           };
         }

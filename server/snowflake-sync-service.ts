@@ -430,7 +430,9 @@ export class SnowflakeSyncService {
       const snowflake = getSnowflakeService();
       await snowflake.connect();
 
-      console.log(`[Samsara] Looking up GPS location for vehicle: ${vehicleName}`);
+      // Strip leading zeros from vehicle name (Samsara stores as "23680" not "023680")
+      const normalizedVehicleName = vehicleName.replace(/^0+/, '');
+      console.log(`[Samsara] Looking up GPS location for vehicle: ${vehicleName} (normalized: ${normalizedVehicleName})`);
       
       const query = `
         SELECT
@@ -451,7 +453,7 @@ export class SnowflakeSyncService {
             RECEIVED_AT DESC)=1) SS
       `;
 
-      const rows = await snowflake.executeQuery(query, [vehicleName]) as Array<{
+      const rows = await snowflake.executeQuery(query, [normalizedVehicleName]) as Array<{
         VEHICLE_NAME: string;
         LONGITUDE: number;
         LATITUDE: number;
@@ -461,7 +463,7 @@ export class SnowflakeSyncService {
 
       if (rows.length > 0) {
         const row = rows[0];
-        console.log(`[Samsara] Found location for ${vehicleName}: ${row.ADDRESS}`);
+        console.log(`[Samsara] Found location for ${normalizedVehicleName}: ${row.ADDRESS}`);
         return {
           found: true,
           vehicleName: row.VEHICLE_NAME,
