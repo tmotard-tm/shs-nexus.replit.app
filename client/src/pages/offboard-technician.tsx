@@ -720,7 +720,7 @@ export default function OffboardTechnician() {
                                   newLocationOptions.push({
                                     id: 'tpms-primary',
                                     source: 'tpms',
-                                    label: `TPMS Primary Address Last Known: ${fileDate}`,
+                                    label: `TPMS Last Known Primary Address: ${fileDate}`,
                                     address: tpmsResult.primaryAddress,
                                     lastUpdated: fileDate
                                   });
@@ -729,7 +729,7 @@ export default function OffboardTechnician() {
                                   newLocationOptions.push({
                                     id: 'tpms-reassort',
                                     source: 'tpms',
-                                    label: `TPMS Reassort Address Last Known: ${fileDate}`,
+                                    label: `TPMS Last Known Reassort Address: ${fileDate}`,
                                     address: tpmsResult.reassortAddress,
                                     lastUpdated: fileDate
                                   });
@@ -738,7 +738,7 @@ export default function OffboardTechnician() {
                                   newLocationOptions.push({
                                     id: 'tpms-alternate',
                                     source: 'tpms',
-                                    label: `TPMS Alternate Address Last Known: ${fileDate}`,
+                                    label: `TPMS Last Known Alternate Address: ${fileDate}`,
                                     address: tpmsResult.alternateAddress,
                                     lastUpdated: fileDate
                                   });
@@ -747,7 +747,7 @@ export default function OffboardTechnician() {
                                   newLocationOptions.push({
                                     id: 'tpms-return',
                                     source: 'tpms',
-                                    label: `TPMS Return Address Last Known: ${fileDate}`,
+                                    label: `TPMS Last Known Return Address: ${fileDate}`,
                                     address: tpmsResult.returnAddress,
                                     lastUpdated: fileDate
                                   });
@@ -1080,10 +1080,10 @@ export default function OffboardTechnician() {
                               
                               const rows = [
                                 { id: 'samsara-gps', label: samsaraOption?.label || `Samsara GPS Last Updated:`, address: samsaraOption?.address || '', hasData: !!samsaraOption },
-                                { id: 'tpms-primary', label: tpmsPrimary?.label || `TPMS Primary Address Last Known:`, address: tpmsPrimary?.address || '', hasData: !!tpmsPrimary },
-                                { id: 'tpms-reassort', label: tpmsReassort?.label || `TPMS Reassort Address Last Known:`, address: tpmsReassort?.address || '', hasData: !!tpmsReassort },
-                                { id: 'tpms-alternate', label: tpmsAlternate?.label || `TPMS Alternate Address Last Known:`, address: tpmsAlternate?.address || '', hasData: !!tpmsAlternate },
-                                { id: 'tpms-return', label: tpmsReturn?.label || `TPMS Return Address Last Known:`, address: tpmsReturn?.address || '', hasData: !!tpmsReturn },
+                                { id: 'tpms-primary', label: tpmsPrimary?.label || `TPMS Last Known Primary Address:`, address: tpmsPrimary?.address || '', hasData: !!tpmsPrimary },
+                                { id: 'tpms-reassort', label: tpmsReassort?.label || `TPMS Last Known Reassort Address:`, address: tpmsReassort?.address || '', hasData: !!tpmsReassort },
+                                { id: 'tpms-alternate', label: tpmsAlternate?.label || `TPMS Last Known Alternate Address:`, address: tpmsAlternate?.address || '', hasData: !!tpmsAlternate },
+                                { id: 'tpms-return', label: tpmsReturn?.label || `TPMS Last Known Return Address:`, address: tpmsReturn?.address || '', hasData: !!tpmsReturn },
                                 { id: 'holman-address', label: holmanOption?.label || `Holman Address: today()`, address: holmanOption?.address || '', hasData: !!holmanOption },
                               ];
                               
