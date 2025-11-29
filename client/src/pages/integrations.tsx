@@ -12,13 +12,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { ApiConfiguration } from "@shared/schema";
+import { ApiConfiguration, AllTech } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { 
   Plus, Settings, Trash2, TestTube, Database, ArrowRight, 
-  ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Play, Truck, RefreshCw, Users
+  ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Play, Truck, RefreshCw, Users,
+  Search, Clock, AlertCircle
 } from "lucide-react";
+import { format } from "date-fns";
 import { Link } from "wouter";
 import {
   Table,
@@ -42,6 +44,10 @@ export default function Integrations() {
   const [holmanEnabled, setHolmanEnabled] = useState(true);
   const [snowflakeEnabled, setSnowflakeEnabled] = useState(true);
   const [tpmsEnabled, setTpmsEnabled] = useState(true);
+  
+  // Employee Roster state
+  const [rosterSearch, setRosterSearch] = useState("");
+  const [rosterStatusFilter, setRosterStatusFilter] = useState("all");
 
   const [formData, setFormData] = useState({
     name: "",
@@ -60,6 +66,40 @@ export default function Integrations() {
 
   const { data: tpmsStatus, isLoading: tpmsStatusLoading } = useQuery<{ configured: boolean; message: string }>({
     queryKey: ["/api/tpms/status"],
+  });
+
+  // Employee Roster queries
+  const { data: allTechs = [], isLoading: techsLoading, refetch: refetchTechs } = useQuery<AllTech[]>({
+    queryKey: ['/api/all-techs'],
+  });
+
+  const { data: syncStatus } = useQuery<{
+    termedTechs: { lastSync: string | null; status: string; recordCount: number };
+    allTechs: { lastSync: string | null; status: string; recordCount: number };
+  }>({
+    queryKey: ['/api/snowflake/sync/status'],
+  });
+
+  const syncAllTechsMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest('POST', '/api/snowflake/sync/all-techs');
+    },
+    onSuccess: async (response) => {
+      const result = await response.json();
+      toast({
+        title: "Sync Complete",
+        description: `Processed ${result.recordsProcessed} Employees (${result.recordsCreated} new, ${result.recordsUpdated} updated)`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/all-techs'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/snowflake/sync/status'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to sync Employee data",
+        variant: "destructive",
+      });
+    },
   });
 
   const createConfigMutation = useMutation({
@@ -721,6 +761,159 @@ export default function Integrations() {
                     </CardContent>
                   </Card>
                 )}
+
+                {/* Employee Roster */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Users className="h-4 w-4" />
+                          Employee Roster
+                        </CardTitle>
+                        <CardDescription>
+                          Complete list of Employees synced from Snowflake ({allTechs.length} total)
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {syncStatus?.allTechs && (
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {syncStatus.allTechs.lastSync 
+                              ? (() => {
+                                  try {
+                                    const date = new Date(syncStatus.allTechs.lastSync);
+                                    return isNaN(date.getTime()) ? 'Invalid date' : format(date, 'MMM d, h:mm a');
+                                  } catch {
+                                    return 'Invalid date';
+                                  }
+                                })()
+                              : 'Never synced'}
+                          </div>
+                        )}
+                        <Button 
+                          onClick={() => syncAllTechsMutation.mutate()}
+                          disabled={syncAllTechsMutation.isPending || !snowflakeStatus?.configured}
+                          variant="outline"
+                          size="sm"
+                          data-testid="button-sync-all-techs"
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1 ${syncAllTechsMutation.isPending ? 'animate-spin' : ''}`} />
+                          {syncAllTechsMutation.isPending ? 'Syncing...' : 'Sync'}
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {/* Search and Filter */}
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                        <Input
+                          placeholder="Search by name, ID, or Enterprise ID..."
+                          value={rosterSearch}
+                          onChange={(e) => setRosterSearch(e.target.value)}
+                          className="pl-8 h-8 text-sm"
+                          data-testid="input-roster-search"
+                        />
+                      </div>
+                      <select
+                        value={rosterStatusFilter}
+                        onChange={(e) => setRosterStatusFilter(e.target.value)}
+                        className="h-8 px-2 text-sm border rounded-md bg-background"
+                        data-testid="select-roster-status"
+                      >
+                        <option value="all">All Status</option>
+                        <option value="A">Active</option>
+                        <option value="T">Terminated</option>
+                      </select>
+                    </div>
+
+                    {/* Employee Table */}
+                    <div className="rounded-md border overflow-auto max-h-[300px]">
+                      {techsLoading ? (
+                        <div className="flex items-center justify-center p-6">
+                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          <span className="ml-2 text-sm text-muted-foreground">Loading...</span>
+                        </div>
+                      ) : allTechs.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center p-6 text-center">
+                          <AlertCircle className="h-8 w-8 text-muted-foreground mb-2" />
+                          <p className="text-sm text-muted-foreground">
+                            No employees found. Click "Sync" to load data.
+                          </p>
+                        </div>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="font-semibold">Name</TableHead>
+                              <TableHead className="font-semibold">Employee ID</TableHead>
+                              <TableHead className="font-semibold">Enterprise ID</TableHead>
+                              <TableHead className="font-semibold">Job Title</TableHead>
+                              <TableHead className="font-semibold">District</TableHead>
+                              <TableHead className="font-semibold">Status</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {allTechs
+                              .filter(tech => {
+                                const matchesSearch = !rosterSearch || 
+                                  tech.techName?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
+                                  tech.employeeId?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
+                                  tech.techRacfid?.toLowerCase().includes(rosterSearch.toLowerCase());
+                                const matchesStatus = rosterStatusFilter === "all" || tech.employmentStatus === rosterStatusFilter;
+                                return matchesSearch && matchesStatus;
+                              })
+                              .slice(0, 50)
+                              .map((tech) => (
+                                <TableRow key={tech.id} data-testid={`row-roster-${tech.employeeId}`}>
+                                  <TableCell className="font-medium text-sm">{tech.techName}</TableCell>
+                                  <TableCell className="font-mono text-xs">{tech.employeeId}</TableCell>
+                                  <TableCell className="font-mono text-xs">{tech.techRacfid}</TableCell>
+                                  <TableCell className="text-xs">{tech.jobTitle || '-'}</TableCell>
+                                  <TableCell className="text-xs">{tech.districtNo || '-'}</TableCell>
+                                  <TableCell>
+                                    <Badge 
+                                      variant={tech.employmentStatus === 'A' ? 'default' : 'secondary'}
+                                      className={`text-xs ${tech.employmentStatus === 'A' ? 'bg-green-100 text-green-800' : ''}`}
+                                    >
+                                      {tech.employmentStatus === 'A' ? 'Active' : tech.employmentStatus || '?'}
+                                    </Badge>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+                    {allTechs.length > 0 && (
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>
+                          Showing {Math.min(50, allTechs.filter(tech => {
+                            const matchesSearch = !rosterSearch || 
+                              tech.techName?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
+                              tech.employeeId?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
+                              tech.techRacfid?.toLowerCase().includes(rosterSearch.toLowerCase());
+                            const matchesStatus = rosterStatusFilter === "all" || tech.employmentStatus === rosterStatusFilter;
+                            return matchesSearch && matchesStatus;
+                          }).length)} of {allTechs.filter(tech => {
+                            const matchesSearch = !rosterSearch || 
+                              tech.techName?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
+                              tech.employeeId?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
+                              tech.techRacfid?.toLowerCase().includes(rosterSearch.toLowerCase());
+                            const matchesStatus = rosterStatusFilter === "all" || tech.employmentStatus === rosterStatusFilter;
+                            return matchesSearch && matchesStatus;
+                          }).length} employees
+                        </span>
+                        <Link href="/tech-roster" className="text-primary hover:underline flex items-center gap-1">
+                          View full roster
+                          <ArrowRight className="h-3 w-3" />
+                        </Link>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </CollapsibleContent>
             </Collapsible>
 
