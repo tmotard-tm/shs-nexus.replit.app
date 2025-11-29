@@ -335,12 +335,25 @@ export class SnowflakeSyncService {
               }),
             };
 
-            const createdItem = await storage.createFleetQueueItem(queueItem);
+            // Route task to the correct queue based on department
+            let createdItem;
+            const deptUpper = task.department.toUpperCase();
+            if (deptUpper === 'NTAO') {
+              createdItem = await storage.createNTAOQueueItem(queueItem);
+            } else if (deptUpper === 'ASSETS MANAGEMENT' || deptUpper === 'ASSETS') {
+              createdItem = await storage.createAssetsQueueItem(queueItem);
+            } else if (deptUpper === 'INVENTORY CONTROL' || deptUpper === 'INVENTORY') {
+              createdItem = await storage.createInventoryQueueItem(queueItem);
+            } else {
+              // Default to Fleet for FLEET and any unknown departments
+              createdItem = await storage.createFleetQueueItem(queueItem);
+            }
+            
             if (!firstCreatedItemId) {
               firstCreatedItemId = createdItem.id;
             }
             result.queueItemsCreated++;
-            console.log(`[Sync] Created Day 0 task: ${task.step} for ${tech.techName}`);
+            console.log(`[Sync] Created Day 0 task: ${task.step} for ${tech.techName} in ${task.department} queue`);
           }
 
           // Mark the termed tech as having offboarding tasks created
