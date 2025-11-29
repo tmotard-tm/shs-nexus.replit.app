@@ -100,6 +100,7 @@ export default function UnifiedQueueManagement() {
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [expandedQueues, setExpandedQueues] = useState<Record<QueueModule, boolean>>({} as Record<QueueModule, boolean>);
+  const [expandedStatusSections, setExpandedStatusSections] = useState<Record<string, boolean>>({});
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [pickUpItem, setPickUpItem] = useState<CombinedQueueItem | null>(null);
@@ -463,6 +464,21 @@ export default function UnifiedQueueManagement() {
     }));
   };
 
+  // Toggle expanded state for status sections within queues
+  const toggleStatusSection = (module: QueueModule, status: string) => {
+    const key = `${module}-${status}`;
+    setExpandedStatusSections(prev => ({
+      ...prev,
+      [key]: prev[key] === undefined ? false : !prev[key]
+    }));
+  };
+
+  // Check if a status section is expanded (default to expanded)
+  const isStatusSectionExpanded = (module: QueueModule, status: string) => {
+    const key = `${module}-${status}`;
+    return expandedStatusSections[key] !== false;
+  };
+
   const filteredItems = getFilteredItems(queueItems);
 
   return (
@@ -771,16 +787,24 @@ export default function UnifiedQueueManagement() {
                               const statusItems = moduleItems.filter(item => item.status === status);
                               if (statusItems.length === 0) return null;
 
+                              const isSectionExpanded = isStatusSectionExpanded(module, status);
+                              
                               return (
                                 <div key={status} className="space-y-3">
-                                  <div className={`flex items-center gap-2 p-3 rounded-lg ${color} text-white`}>
+                                  <div 
+                                    className={`flex items-center gap-2 p-3 rounded-lg ${color} text-white cursor-pointer hover:opacity-90 transition-opacity`}
+                                    onClick={() => toggleStatusSection(module, status)}
+                                    data-testid={`status-header-${module}-${status}`}
+                                  >
                                     <Icon className="h-5 w-5" />
                                     <h4 className="font-semibold">{label}</h4>
                                     <Badge variant="secondary" className="bg-white/20 text-white ml-auto">
                                       {statusItems.length} items
                                     </Badge>
+                                    <span className="ml-2">{isSectionExpanded ? "▼" : "▶"}</span>
                                   </div>
                                   
+                                  {isSectionExpanded && (
                                   <div className="grid grid-cols-1 gap-4">
                                     {statusItems.map((item) => (
                                       <Card key={`${item.module}-${item.id}`} className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-transparent hover:border-l-blue-500">
@@ -919,6 +943,7 @@ export default function UnifiedQueueManagement() {
                                       </Card>
                                     ))}
                                   </div>
+                                  )}
                                 </div>
                               );
                             })}
