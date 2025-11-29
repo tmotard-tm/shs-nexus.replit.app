@@ -120,7 +120,7 @@ export class SnowflakeSyncService {
             districtNo: row.DISTRICT_NO ?? null,
             planningAreaName: row.PLANNING_AREA_NM ?? null,
             employmentStatus: row.EMPLOYMENT_STATUS ?? null,
-            effectiveDate: this.formatDateForDB(row.EFFDT),
+            effectiveDate: this.formatDateForDB(row.EFFDT ?? null),
             offboardingTaskCreated: existingTech?.offboardingTaskCreated ?? false,
             offboardingTaskId: existingTech?.offboardingTaskId ?? null,
           };
@@ -411,6 +411,73 @@ export class SnowflakeSyncService {
         recordCount: allTechsCount,
       },
     };
+  }
+
+  async getSamsaraVehicleLocation(vehicleName: string): Promise<{
+    found: boolean;
+    vehicleName?: string;
+    longitude?: number;
+    latitude?: number;
+    address?: string;
+    lastUpdated?: string;
+  }> {
+    if (!isSnowflakeConfigured()) {
+      console.log('[Samsara] Snowflake not configured');
+      return { found: false };
+    }
+
+    try {
+      const snowflake = getSnowflakeService();
+      await snowflake.connect();
+
+      console.log(`[Samsara] Looking up GPS location for vehicle: ${vehicleName}`);
+      
+      const query = `
+        SELECT
+          SS.VEHICLE_NAME,
+          SS.LONGITUDE,
+          SS.LATITUDE,
+          SS.REVERSE_GEO_FULL AS ADDRESS,
+          SS.TIME AS DATE_AND_TIME
+        FROM
+          (SELECT
+            *
+          FROM
+            BI_ANALYTICS.APP_SAMSARA.SAMSARA_STREAM
+          WHERE
+            VEHICLE_NAME = ?
+          QUALIFY
+            ROW_NUMBER() OVER (PARTITION BY VEHICLE_NAME ORDER BY "TIME" DESC, 
+            RECEIVED_AT DESC)=1) SS
+      `;
+
+      const rows = await snowflake.executeQuery(query, [vehicleName]) as Array<{
+        VEHICLE_NAME: string;
+        LONGITUDE: number;
+        LATITUDE: number;
+        ADDRESS: string;
+        DATE_AND_TIME: string;
+      }>;
+
+      if (rows.length > 0) {
+        const row = rows[0];
+        console.log(`[Samsara] Found location for ${vehicleName}: ${row.ADDRESS}`);
+        return {
+          found: true,
+          vehicleName: row.VEHICLE_NAME,
+          longitude: row.LONGITUDE,
+          latitude: row.LATITUDE,
+          address: row.ADDRESS,
+          lastUpdated: row.DATE_AND_TIME,
+        };
+      }
+
+      console.log(`[Samsara] No GPS data found for vehicle: ${vehicleName}`);
+      return { found: false };
+    } catch (error: any) {
+      console.error('[Samsara] Error looking up vehicle location:', error);
+      return { found: false };
+    }
   }
 }
 

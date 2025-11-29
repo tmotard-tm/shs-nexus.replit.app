@@ -137,13 +137,13 @@ export class SnowflakeService {
     });
   }
 
-  async executeQuery(sqlText: string): Promise<any[]> {
+  async executeQuery(sqlText: string, binds?: any[]): Promise<any[]> {
     if (!this.connection) {
       await this.connect();
     }
 
     return new Promise((resolve, reject) => {
-      this.connection.execute({
+      const options: any = {
         sqlText,
         complete: (err: any, stmt: any, rows: any[]) => {
           if (err) {
@@ -153,7 +153,13 @@ export class SnowflakeService {
             resolve(rows || []);
           }
         }
-      });
+      };
+      
+      if (binds && binds.length > 0) {
+        options.binds = binds;
+      }
+      
+      this.connection.execute(options);
     });
   }
 

@@ -5050,6 +5050,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Samsara GPS vehicle location lookup
+  app.get("/api/samsara/vehicle/:vehicleName", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleName } = req.params;
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.getSamsaraVehicleLocation(vehicleName);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error looking up Samsara vehicle location:", error);
+      res.status(500).json({ found: false, message: error.message });
+    }
+  });
+
   // Get termed techs list
   app.get("/api/termed-techs", requireAuth, async (req: any, res) => {
     try {

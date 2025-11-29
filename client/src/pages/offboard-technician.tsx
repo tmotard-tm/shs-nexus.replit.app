@@ -699,6 +699,27 @@ export default function OffboardTechnician() {
                                     } finally {
                                       setIsLookingUpHolman(false);
                                     }
+
+                                    // Auto-lookup Samsara GPS location for last known address
+                                    try {
+                                      const samsaraResponse = await fetch(`/api/samsara/vehicle/${encodeURIComponent(truckNo)}`, {
+                                        credentials: 'include'
+                                      });
+                                      const samsaraResult = await samsaraResponse.json();
+
+                                      if (samsaraResult.found && samsaraResult.address) {
+                                        setTechnicianOffboard(prev => ({
+                                          ...prev,
+                                          vehicleLocation: samsaraResult.address
+                                        }));
+                                        toast({
+                                          title: "GPS Location Found",
+                                          description: `Last known: ${samsaraResult.address.substring(0, 50)}...`,
+                                        });
+                                      }
+                                    } catch (samsaraError) {
+                                      console.log('Samsara GPS lookup - no data:', samsaraError);
+                                    }
                                   }
 
                                   toast({
