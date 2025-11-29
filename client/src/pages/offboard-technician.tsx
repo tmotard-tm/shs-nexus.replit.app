@@ -1436,6 +1436,34 @@ export default function OffboardTechnician() {
                             ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
                             : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
                           
+                          const getPhaseLabel = (phase: string) => {
+                            switch (phase) {
+                              case 'day0': return 'Day 0';
+                              case 'day1': return 'Day 1';
+                              case 'day2': return 'Day 2';
+                              case 'day3': return 'Day 3';
+                              case 'day7': return 'Day 7';
+                              case 'day14': return 'Day 14';
+                              case 'day30': return 'Day 30';
+                              default: return phase || 'Initial';
+                            }
+                          };
+                          
+                          const getPhaseColor = (phase: string) => {
+                            switch (phase) {
+                              case 'day0': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400';
+                              case 'day1': return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400';
+                              case 'day2': return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400';
+                              case 'day3': return 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400';
+                              case 'day7': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+                              case 'day14': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
+                              case 'day30': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
+                              default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400';
+                            }
+                          };
+                          
+                          const phase = data?.phase || '';
+                          
                           return (
                             <button
                               key={item.id}
@@ -1447,9 +1475,16 @@ export default function OffboardTechnician() {
                                 <span className="font-medium text-sm truncate flex-1">
                                   {technician.techName || 'Unknown Technician'}
                                 </span>
-                                <Badge className={`${statusColor} text-[10px] px-1.5 py-0`}>
-                                  {item.status}
-                                </Badge>
+                                <div className="flex items-center gap-1">
+                                  {phase && (
+                                    <Badge className={`${getPhaseColor(phase)} text-[10px] px-1.5 py-0`}>
+                                      {getPhaseLabel(phase)}
+                                    </Badge>
+                                  )}
+                                  <Badge className={`${statusColor} text-[10px] px-1.5 py-0`}>
+                                    {item.status}
+                                  </Badge>
+                                </div>
                               </div>
                               <div className="space-y-1">
                                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
