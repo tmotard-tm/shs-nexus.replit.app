@@ -767,18 +767,25 @@ export default function OffboardTechnician() {
                                   });
                                 }
 
-                                // Auto-lookup vehicle details from Holman and get address
+                                // Auto-lookup vehicle details from Holman and Samsara GPS in parallel
                                 if (truckNo) {
                                   setIsLookingUpHolman(true);
                                   setHolmanLookupResult(null);
-                                  try {
-                                    const paddedVehicleNum = truckNo.padStart(6, '0');
-                                    const holmanResponse = await fetch(`/api/holman/vehicle/${encodeURIComponent(paddedVehicleNum)}`, {
-                                      credentials: 'include'
-                                    });
-                                    const holmanResult = await holmanResponse.json();
-                                    setHolmanLookupResult(holmanResult);
+                                  const paddedVehicleNum = truckNo.padStart(6, '0');
+                                  
+                                  // Run both lookups in parallel for faster response
+                                  const [holmanResult, samsaraResult] = await Promise.all([
+                                    fetch(`/api/holman/vehicle/${encodeURIComponent(paddedVehicleNum)}`, { credentials: 'include' })
+                                      .then(res => res.json())
+                                      .catch(err => { console.error('Holman lookup error:', err); return null; }),
+                                    fetch(`/api/samsara/vehicle/${encodeURIComponent(truckNo)}`, { credentials: 'include' })
+                                      .then(res => res.json())
+                                      .catch(err => { console.log('Samsara GPS lookup error:', err); return { found: false }; })
+                                  ]);
 
+                                  // Process Holman result
+                                  if (holmanResult) {
+                                    setHolmanLookupResult(holmanResult);
                                     if (holmanResult.success && holmanResult.vehicle) {
                                       setTechnicianOffboard(prev => ({
                                         ...prev,
@@ -801,49 +808,37 @@ export default function OffboardTechnician() {
                                         description: `Auto-filled: ${holmanResult.vehicle.year} ${holmanResult.vehicle.make} ${holmanResult.vehicle.model}`,
                                       });
                                     }
-                                  } catch (holmanError) {
-                                    console.error('Holman lookup error:', holmanError);
-                                  } finally {
-                                    setIsLookingUpHolman(false);
                                   }
+                                  setIsLookingUpHolman(false);
 
-                                  // Auto-lookup Samsara GPS location for last known address
-                                  try {
-                                    const samsaraResponse = await fetch(`/api/samsara/vehicle/${encodeURIComponent(truckNo)}`, {
-                                      credentials: 'include'
-                                    });
-                                    const samsaraResult = await samsaraResponse.json();
-
-                                    if (samsaraResult.found && samsaraResult.address) {
-                                      let samsaraDate = today;
-                                      if (samsaraResult.lastUpdated) {
-                                        const samsaraDateObj = new Date(samsaraResult.lastUpdated);
-                                        samsaraDate = formatTimestamp(samsaraDateObj);
-                                      }
-                                      
-                                      newLocationOptions.unshift({
-                                        id: 'samsara-gps',
-                                        source: 'samsara',
-                                        label: 'Samsara GPS',
-                                        address: samsaraResult.address,
-                                        latitude: samsaraResult.latitude,
-                                        longitude: samsaraResult.longitude,
-                                        lastUpdated: samsaraDate
-                                      });
-                                      
-                                      // Auto-select Samsara GPS as default since it's most current
-                                      setSelectedLocationId('samsara-gps');
-                                      setTechnicianOffboard(prev => ({
-                                        ...prev,
-                                        vehicleLocation: samsaraResult.address
-                                      }));
-                                      toast({
-                                        title: "GPS Location Found",
-                                        description: `Last known: ${samsaraResult.address.substring(0, 50)}...`,
-                                      });
+                                  // Process Samsara result
+                                  if (samsaraResult && samsaraResult.found && samsaraResult.address) {
+                                    let samsaraDate = today;
+                                    if (samsaraResult.lastUpdated) {
+                                      const samsaraDateObj = new Date(samsaraResult.lastUpdated);
+                                      samsaraDate = formatTimestamp(samsaraDateObj);
                                     }
-                                  } catch (samsaraError) {
-                                    console.log('Samsara GPS lookup - no data:', samsaraError);
+                                    
+                                    newLocationOptions.unshift({
+                                      id: 'samsara-gps',
+                                      source: 'samsara',
+                                      label: 'Samsara GPS',
+                                      address: samsaraResult.address,
+                                      latitude: samsaraResult.latitude,
+                                      longitude: samsaraResult.longitude,
+                                      lastUpdated: samsaraDate
+                                    });
+                                    
+                                    // Auto-select Samsara GPS as default since it's most current
+                                    setSelectedLocationId('samsara-gps');
+                                    setTechnicianOffboard(prev => ({
+                                      ...prev,
+                                      vehicleLocation: samsaraResult.address
+                                    }));
+                                    toast({
+                                      title: "GPS Location Found",
+                                      description: `Last known: ${samsaraResult.address.substring(0, 50)}...`,
+                                    });
                                   }
                                 }
 

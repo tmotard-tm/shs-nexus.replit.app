@@ -536,7 +536,13 @@ export class SnowflakeSyncService {
 
       if (rows.length > 0) {
         const row = rows[0];
-        console.log(`[TPMS-Snowflake] Found addresses for ${enterpriseId}: Truck ${row.TRUCK_NO}`);
+        console.log(`[TPMS-Snowflake] Found data for ${enterpriseId}:`);
+        console.log(`  - Truck: ${row.TRUCK_NO}`);
+        console.log(`  - Primary: ${row.TPMS_PRIMARY_ADDRESS || '(empty)'}`);
+        console.log(`  - Reassort: ${row.TPMS_REASSORT_ADDRESS || '(empty)'}`);
+        console.log(`  - Alternate: ${row.TPMS_ALTERNATE_ADDRESS || '(empty)'}`);
+        console.log(`  - Return: ${row.TPMS_RETURN_ADDRESS || '(empty)'}`);
+        console.log(`  - File Date: ${row.FILE_DATE}`);
         return {
           success: true,
           truckNo: row.TRUCK_NO,
@@ -549,7 +555,7 @@ export class SnowflakeSyncService {
         };
       }
 
-      console.log(`[TPMS-Snowflake] No addresses found for enterprise ID: ${enterpriseId}`);
+      console.log(`[TPMS-Snowflake] No data found for enterprise ID: ${enterpriseId}`);
       return { success: false, message: 'No address data found' };
     } catch (error: any) {
       console.error('[TPMS-Snowflake] Error looking up tech addresses:', error);

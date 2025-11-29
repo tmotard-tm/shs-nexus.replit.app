@@ -5065,13 +5065,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Get tech addresses from Snowflake TPMS data
   app.get("/api/snowflake/tech-addresses/:enterpriseId", requireAuth, async (req: any, res) => {
+    const startTime = Date.now();
     try {
       const { enterpriseId } = req.params;
+      console.log(`[TPMS-Addresses] Starting lookup for: ${enterpriseId}`);
       const syncService = getSnowflakeSyncService();
       const result = await syncService.getTechAddressesFromSnowflake(enterpriseId.toUpperCase());
+      const duration = Date.now() - startTime;
+      console.log(`[TPMS-Addresses] Completed in ${duration}ms - success: ${result.success}, truck: ${result.truckNo || 'none'}`);
       res.json(result);
     } catch (error: any) {
-      console.error("Error looking up tech addresses from Snowflake:", error);
+      const duration = Date.now() - startTime;
+      console.error(`[TPMS-Addresses] Error after ${duration}ms:`, error);
       res.status(500).json({ success: false, message: error.message });
     }
   });
