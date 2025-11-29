@@ -186,57 +186,160 @@ export class SnowflakeSyncService {
             }
           }
 
-          const queueItem: InsertQueueItem = {
-            workflowType: 'offboarding',
-            title: `Offboard Technician - ${tech.techName}${truckInfo.truckNo ? ` (Truck ${truckInfo.truckNo})` : ''}`,
-            description: `Auto-generated offboarding task for terminated technician ${tech.techName} (${tech.techRacfid})${truckInfo.truckNo ? ` - Assigned Truck: ${truckInfo.truckNo}` : ''}`,
-            status: 'pending',
-            priority: 'high',
-            requesterId: 'system',
-            department: 'FLEET',
-            data: JSON.stringify({
-              source: 'snowflake_sync',
-              syncedAt: new Date().toISOString(),
-              technician: {
-                employeeId: tech.employeeId,
-                techRacfid: tech.techRacfid,
-                techName: tech.techName,
-                firstName: tech.firstName,
-                lastName: tech.lastName,
-                lastDayWorked: tech.lastDayWorked,
-                effectiveDate: tech.effectiveDate,
-                jobTitle: tech.jobTitle,
-                district: tech.districtNo,
-                planningArea: tech.planningAreaName,
-              },
-              vehicle: truckInfo.truckNo ? {
-                truckNo: truckInfo.truckNo,
-                districtNo: truckInfo.districtNo,
-                techManagerLdapId: truckInfo.techManagerLdapId,
-                source: 'tpms',
-                lookupTime: new Date().toISOString(),
-              } : null,
-              tpmsLookup: {
-                attempted: tpmsConfigured,
-                success: truckInfo.lookupSuccess,
-                error: truckInfo.lookupError || null,
-              },
-            }),
-            metadata: JSON.stringify({
-              createdVia: 'automated_sync',
-              snowflakeSyncId: result.syncLogId,
-              tpmsTruckNo: truckInfo.truckNo || null,
-            }),
+          // Generate unique workflow ID for this offboarding sequence
+          const workflowId = `offboard_sync_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+          const vehicleNumber = truckInfo.truckNo || '';
+          
+          // Shared data for all Day 0 tasks
+          const sharedTriggerData = {
+            workflowId,
+            vehicleType: 'cargo_van',
+            employee: {
+              name: tech.techName,
+              racfId: tech.techRacfid,
+              employeeId: tech.employeeId,
+              lastDayWorked: tech.lastDayWorked,
+              enterpriseId: tech.techRacfid,
+            },
+            vehicle: {
+              vehicleNumber: vehicleNumber,
+              vehicleName: vehicleNumber,
+              location: '',
+              condition: 'unknown',
+              type: 'cargo_van',
+            },
+            submitter: {
+              name: 'Snowflake Sync',
+              submittedAt: new Date().toISOString(),
+            },
           };
 
-          const createdItem = await storage.createFleetQueueItem(queueItem);
-          await storage.markTermedTechOffboardingCreated(tech.employeeId, createdItem.id);
+          // Create 4 Day 0 tasks for the offboarding workflow sequence
+          const day0Tasks = [
+            {
+              title: `Day 0: NTAO — National Truck Assortment - Stop Truck Stock Replenishment - ${tech.techName}`,
+              description: `IMMEDIATE TASK: Stop truck stock replenishment for ${tech.techName} (${tech.techRacfid}). Vehicle: ${vehicleNumber || 'TBD'}. Last day: ${tech.lastDayWorked || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+              department: 'NTAO',
+              step: 'ntao_stop_replenishment_day0',
+              workflowStep: 1,
+              instructions: [
+                "Place a shipping hold to prevent future shipments",
+                "Cancel any pending orders for this technician",
+                "Cancel all backorders associated with the vehicle",
+                "Remove technician from automatic replenishment system",
+                "Update truck status in NTAO — National Truck Assortment system",
+                "Complete Day 0 task - no follow-up tasks until all teams complete Day 0"
+              ],
+            },
+            {
+              title: `Day 0: Recover Company Equipment - ${tech.techName}`,
+              description: `IMMEDIATE TASK: Recover company equipment from ${tech.techName} (${tech.techRacfid}). Vehicle: ${vehicleNumber || 'TBD'}. Contact employee immediately to arrange pickup/return of all company devices and equipment. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+              department: 'Assets Management',
+              step: 'equipment_recover_devices_day0',
+              workflowStep: 2,
+              instructions: [
+                "Contact employee immediately to arrange equipment return",
+                "Recover company phone and verify it's company-issued",
+                "Collect any tablets, mobile hotspots, or other devices",
+                "Retrieve company credit cards (coordinate with OneCard Help Desk if needed)",
+                "Check for accessories (chargers, cases, cables)",
+                "Wipe all device data per security protocol",
+                "Update asset management system with returned items",
+                "Complete Day 0 task - mark complete once all equipment recovered"
+              ],
+            },
+            {
+              title: `Day 0: Initial Vehicle Coordination - ${vehicleNumber || tech.techName}`,
+              description: `IMMEDIATE TASK: Begin initial coordination for vehicle ${vehicleNumber || 'TBD'}. Employee: ${tech.techName} (${tech.techRacfid}). Contact technician and begin preliminary arrangements. This is a Day 0 task - must be completed before Phase 2 (Day 1-5) Fleet tasks are triggered.`,
+              department: 'FLEET',
+              step: 'fleet_initial_coordination_day0',
+              workflowStep: 3,
+              instructions: [
+                "Contact technician immediately to notify of offboarding process",
+                "Arrange preliminary meeting/call to discuss vehicle handover",
+                "Obtain current vehicle location and condition information",
+                "Begin coordination with technician for vehicle retrieval timing",
+                "Assess any immediate vehicle security or safety concerns",
+                "Document initial vehicle status and location",
+                "Complete Day 0 task - detailed Fleet work will follow in Phase 2"
+              ],
+            },
+            {
+              title: `Day 0: Remove from TPMS & Stop Orders - ${vehicleNumber || tech.techName}`,
+              description: `IMMEDIATE TASK: Remove terminated technician's truck ${vehicleNumber || 'TBD'} from TPMS assignment and stop all inventory processes. Employee: ${tech.techName} (${tech.techRacfid}). This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+              department: 'Inventory Control',
+              step: 'inventory_remove_tpms_day0',
+              workflowStep: 4,
+              instructions: [
+                "Access TPMS (Truck Parts Management System) immediately",
+                "Locate vehicle assignment for terminated technician",
+                `Remove vehicle ${vehicleNumber || 'TBD'} from TPMS assignment`,
+                "Update vehicle status to unassigned/pending-offboard",
+                "Clear and cancel any pending parts orders for this vehicle/technician",
+                "Update inventory system to stop automatic replenishment",
+                "Complete Day 0 task - detailed Inventory work will follow in Phase 2"
+              ],
+            },
+          ];
+
+          let firstCreatedItemId: string | null = null;
+
+          for (const task of day0Tasks) {
+            const queueItem: InsertQueueItem = {
+              workflowType: 'offboarding',
+              title: task.title,
+              description: task.description,
+              status: 'pending',
+              priority: 'high',
+              requesterId: 'system',
+              department: task.department,
+              workflowId: workflowId,
+              workflowStep: task.workflowStep,
+              data: JSON.stringify({
+                workflowType: 'offboarding_sequence',
+                step: task.step,
+                workflowStep: task.workflowStep,
+                phase: 'day0',
+                isDay0Task: true,
+                source: 'snowflake_sync',
+                syncedAt: new Date().toISOString(),
+                submitterInfo: {
+                  id: 'system',
+                  name: 'Snowflake Sync',
+                  email: null,
+                },
+                ...sharedTriggerData,
+                instructions: task.instructions,
+                tpmsLookup: {
+                  attempted: tpmsConfigured,
+                  success: truckInfo.lookupSuccess,
+                  error: truckInfo.lookupError || null,
+                },
+              }),
+              metadata: JSON.stringify({
+                createdVia: 'automated_sync',
+                snowflakeSyncId: result.syncLogId,
+                tpmsTruckNo: truckInfo.truckNo || null,
+              }),
+            };
+
+            const createdItem = await storage.createFleetQueueItem(queueItem);
+            if (!firstCreatedItemId) {
+              firstCreatedItemId = createdItem.id;
+            }
+            result.queueItemsCreated++;
+            console.log(`[Sync] Created Day 0 task: ${task.step} for ${tech.techName}`);
+          }
+
+          // Mark the termed tech as having offboarding tasks created
+          if (firstCreatedItemId) {
+            await storage.markTermedTechOffboardingCreated(tech.employeeId, firstCreatedItemId);
+          }
           
-          result.queueItemsCreated++;
-          console.log(`[Sync] Created offboarding task for ${tech.techName} (${tech.employeeId})${truckInfo.truckNo ? ` with truck ${truckInfo.truckNo}` : ''}`);
+          console.log(`[Sync] Created ${day0Tasks.length} Day 0 offboarding tasks for ${tech.techName} (${tech.employeeId})${truckInfo.truckNo ? ` with truck ${truckInfo.truckNo}` : ''}`);
         } catch (error: any) {
-          console.error(`[Sync] Error creating queue item for ${tech.employeeId}:`, error.message);
-          result.errors.push(`Error creating queue item for ${tech.employeeId}: ${error.message}`);
+          console.error(`[Sync] Error creating queue items for ${tech.employeeId}:`, error.message);
+          result.errors.push(`Error creating queue items for ${tech.employeeId}: ${error.message}`);
         }
       }
 
