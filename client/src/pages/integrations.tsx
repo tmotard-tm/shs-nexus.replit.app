@@ -17,7 +17,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { 
   Plus, Settings, Trash2, TestTube, Database, ArrowRight, 
-  ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Play, Truck
+  ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Play, Truck, RefreshCw, Users
 } from "lucide-react";
 import { Link } from "wouter";
 import {
@@ -148,6 +148,40 @@ export default function Integrations() {
       toast({
         title: "Connection Test Failed",
         description: error.message || "Failed to test Snowflake connection",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const syncTermedTechsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/snowflake/sync/termed-techs");
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/snowflake/sync/status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/termed-techs'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/ntao-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/assets-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fleet-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/inventory-queue'] });
+      if (data.success) {
+        toast({
+          title: "Sync Completed",
+          description: `Processed ${data.recordsProcessed} employees. Created ${data.queueItemsCreated} queue items across NTAO, Assets, Fleet, and Inventory queues.`,
+        });
+      } else {
+        toast({
+          title: "Sync Failed",
+          description: data.errors?.join(', ') || "Failed to sync termed employees",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to sync termed employees",
         variant: "destructive",
       });
     },
@@ -588,6 +622,41 @@ export default function Integrations() {
                         <>
                           <Play className="mr-2 h-4 w-4" />
                           Execute Query
+                        </>
+                      )}
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                {/* Sync Termed Employees */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      Sync Termed Employees
+                    </CardTitle>
+                    <CardDescription>
+                      Sync terminated employees from Snowflake and create offboarding queue items
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      Fetches terminated employee data from the DRIVELINE_TERMED_TECHS_LAST30 table and creates Day 0 offboarding tasks distributed across NTAO, Assets, Fleet, and Inventory queues.
+                    </p>
+                    <Button
+                      onClick={() => syncTermedTechsMutation.mutate()}
+                      disabled={!snowflakeStatus?.configured || syncTermedTechsMutation.isPending}
+                      data-testid="button-sync-termed-techs"
+                    >
+                      {syncTermedTechsMutation.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Syncing Employees...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Sync Termed Employees
                         </>
                       )}
                     </Button>
