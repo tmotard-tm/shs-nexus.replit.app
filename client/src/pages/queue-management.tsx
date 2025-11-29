@@ -494,7 +494,7 @@ export default function UnifiedQueueManagement() {
             {/* Show Queues Selection */}
             <div className="space-y-3">
               <Label className="text-sm font-medium">Show Queues</Label>
-              <div className="flex flex-wrap gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {(Object.keys(moduleLabels) as QueueModule[]).map((module) => {
                   const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
                   const userCanAccess = userAccessibleModules.includes(module);
