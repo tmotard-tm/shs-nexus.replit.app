@@ -397,8 +397,8 @@ export default function OffboardTechnician() {
     
     if (!enterpriseId) {
       toast({
-        title: "Missing Employee RACF ID",
-        description: "Please enter an Employee RACF ID before looking up truck info.",
+        title: "Missing Employee Enterprise ID",
+        description: "Please enter an Employee Enterprise ID before looking up truck info.",
         variant: "destructive"
       });
       return;
@@ -490,7 +490,7 @@ export default function OffboardTechnician() {
     if (!/^[a-zA-Z0-9]{7}$/.test(technicianOffboard.techRacfId)) {
       toast({
         title: "Validation Error",
-        description: "Employee RACF ID must be exactly 7 characters (letters and numbers only).",
+        description: "Employee Enterprise ID must be exactly 7 characters (letters and numbers only).",
         variant: "destructive"
       });
       return;
@@ -1048,7 +1048,7 @@ export default function OffboardTechnician() {
                           }
                         }}
                         searchField="techName"
-                        placeholder="Search by ID, RACF ID, or Name..."
+                        placeholder="Search by ID, Enterprise ID, or Name..."
                         data-testid="input-tech-search"
                       />
                       <p className="text-xs text-muted-foreground">
@@ -1069,7 +1069,7 @@ export default function OffboardTechnician() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="techRacfId">Employee RACF ID *</Label>
+                        <Label htmlFor="techRacfId">Employee Enterprise ID *</Label>
                         <Input
                           id="techRacfId"
                           placeholder="Auto-filled from search"
@@ -1134,7 +1134,7 @@ export default function OffboardTechnician() {
                           variant="outline"
                           onClick={handleTpmsLookup}
                           disabled={isLookingUpTruck || !technicianOffboard.techRacfId}
-                          title="Look up truck number from TPMS using Employee RACF ID"
+                          title="Look up truck number from TPMS using Employee Enterprise ID"
                           data-testid="button-tpms-lookup"
                         >
                           {isLookingUpTruck ? (
@@ -1145,7 +1145,7 @@ export default function OffboardTechnician() {
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Enter Employee RACF ID first, then click the truck icon to auto-fill from TPMS
+                        Enter Employee Enterprise ID first, then click the truck icon to auto-fill from TPMS
                       </p>
                       {tpmsLookupResult && (
                         <div className={`text-xs p-2 rounded ${tpmsLookupResult.success ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}>

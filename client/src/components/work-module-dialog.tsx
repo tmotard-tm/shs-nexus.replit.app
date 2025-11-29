@@ -449,7 +449,7 @@ export function WorkModuleDialog({
                   <p className="font-mono text-sm" data-testid="text-tech-id">{requestDetails.techId}</p>
                 </div>
                 <div>
-                  <Label className="text-sm font-medium text-muted-foreground">LDAP ID</Label>
+                  <Label className="text-sm font-medium text-muted-foreground">Enterprise ID</Label>
                   <p className="font-mono text-sm" data-testid="text-ldap-id">{requestDetails.ldapId}</p>
                 </div>
                 <div>
@@ -732,7 +732,7 @@ export function WorkModuleDialog({
                         </p>
                       </div>
                       <div>
-                        <Label className="text-sm font-medium text-muted-foreground">RACF ID</Label>
+                        <Label className="text-sm font-medium text-muted-foreground">Enterprise ID</Label>
                         <p className="font-mono text-sm" data-testid="text-racf-id">
                           {taskData.employee?.racfId || taskData.racfId || "N/A"}
                         </p>

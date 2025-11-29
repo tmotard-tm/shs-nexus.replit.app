@@ -45,7 +45,7 @@ Please deactivate the credit card for the following terminated employee:
 
 Employee Name: ${employeeData.name}
 Employee ID: ${employeeData.employeeId}
-RACF ID: ${employeeData.racfId}
+Enterprise ID: ${employeeData.racfId}
 Last Day Worked: ${employeeData.lastDayWorked}
 Termination Reason: ${employeeData.reason}
 
@@ -77,7 +77,7 @@ Sears IT Administration
       <td style="padding: 8px; border-bottom: 1px solid #ddd;">${employeeData.employeeId}</td>
     </tr>
     <tr>
-      <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">RACF ID:</td>
+      <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Enterprise ID:</td>
       <td style="padding: 8px; border-bottom: 1px solid #ddd;">${employeeData.racfId}</td>
     </tr>
     <tr>

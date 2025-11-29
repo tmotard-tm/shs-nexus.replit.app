@@ -128,7 +128,7 @@ export default function TechRoster() {
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search by name, employee ID, RACF ID, or job title..."
+                      placeholder="Search by name, employee ID, Enterprise ID, or job title..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-9"
@@ -219,7 +219,7 @@ export default function TechRoster() {
                         <tr className="border-b bg-muted/50">
                           <th className="text-left p-3 font-medium">Name</th>
                           <th className="text-left p-3 font-medium">Employee ID</th>
-                          <th className="text-left p-3 font-medium">RACF ID</th>
+                          <th className="text-left p-3 font-medium">Enterprise ID</th>
                           <th className="text-left p-3 font-medium">Job Title</th>
                           <th className="text-left p-3 font-medium">District</th>
                           <th className="text-left p-3 font-medium">Planning Area</th>

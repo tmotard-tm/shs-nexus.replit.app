@@ -337,8 +337,8 @@ export default function AssistanceSelection() {
                     <Input placeholder="Employee name..." disabled className="h-9" />
                   </div>
                   <div>
-                    <Label className="text-sm text-gray-700">RACF ID</Label>
-                    <Input placeholder="RACF123" disabled className="h-9" />
+                    <Label className="text-sm text-gray-700">Enterprise ID</Label>
+                    <Input placeholder="ENT123" disabled className="h-9" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">

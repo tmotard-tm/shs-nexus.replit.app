@@ -92,7 +92,7 @@ export function TechCombobox({
       case "employeeId":
         return "Employee ID";
       case "techRacfid":
-        return "RACF ID";
+        return "Enterprise ID";
       case "techName":
         return "Name";
       default:
@@ -131,7 +131,7 @@ export function TechCombobox({
       <PopoverContent className="w-[350px] p-0" align="start">
         <Command shouldFilter={false}>
           <CommandInput
-            placeholder={`Search by ID, RACF ID, or name...`}
+            placeholder={`Search by ID, Enterprise ID, or name...`}
             value={searchQuery}
             onValueChange={setSearchQuery}
           />
@@ -165,7 +165,7 @@ export function TechCombobox({
                       <div className="text-xs text-muted-foreground flex gap-2">
                         <span>ID: {tech.employeeId}</span>
                         <span>•</span>
-                        <span>RACF: {tech.techRacfid}</span>
+                        <span>Enterprise: {tech.techRacfid}</span>
                       </div>
                       {tech.jobTitle && (
                         <div className="text-xs text-muted-foreground truncate">

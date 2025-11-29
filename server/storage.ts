@@ -2542,7 +2542,7 @@ export class MemStorage implements IStorage {
                 if (employeeIdMatch || techRacfIdMatch) {
                   return {
                     isDuplicate: true,
-                    message: `Duplicate offboarding workflow detected. A recent offboarding task already exists for this employee (${employeeIdMatch ? `Employee ID: ${employeeId}` : `RACF ID: ${techRacfId}`}) in ${module.toUpperCase()} queue.`,
+                    message: `Duplicate offboarding workflow detected. A recent offboarding task already exists for this employee (${employeeIdMatch ? `Employee ID: ${employeeId}` : `Enterprise ID: ${techRacfId}`}) in ${module.toUpperCase()} queue.`,
                     existingTask: item
                   };
                 }

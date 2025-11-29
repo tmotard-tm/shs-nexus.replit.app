@@ -21,7 +21,7 @@ const enrollmentSchema = z.object({
   currentTruckNumber: z.string().min(1, "Current truck number is required"),
   techFirstName: z.string().min(1, "Employee first name is required"),
   techLastName: z.string().min(1, "Employee last name is required"),
-  ldap: z.string().min(1, "LDAP is required"),
+  ldap: z.string().min(1, "Enterprise ID is required"),
   techEmail: z.string().email("Valid email is required"),
   referredBy: z.string().min(1, "Referred by is required"),
   city: z.string().min(1, "City is required"),
@@ -292,9 +292,9 @@ export default function SearsDriveEnrollment() {
                       name="ldap"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>LDAP *</FormLabel>
+                          <FormLabel>Enterprise ID *</FormLabel>
                           <FormControl>
-                            <Input placeholder="Enter LDAP" {...field} data-testid="input-ldap" />
+                            <Input placeholder="Enter Enterprise ID" {...field} data-testid="input-ldap" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
