@@ -4,7 +4,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
 import { EMBEDDED_TEMPLATES } from "../shared/templates-embedded";
 import { TemplateLoader } from "../shared/template-loader";
-import type { InsertTemplate } from "../shared/schema";
+import type { InsertTemplateWithId } from "../shared/schema";
 
 const app = express();
 
@@ -73,8 +73,8 @@ async function seedTemplatesOnStartup() {
       
       for (const [templateId, template] of Object.entries(EMBEDDED_TEMPLATES)) {
         try {
-          // Convert to InsertTemplate format
-          const insertTemplate: InsertTemplate = {
+          // Convert to InsertTemplateWithId format for seeding
+          const insertTemplate: InsertTemplateWithId = {
             id: template.id,
             department: template.department,
             workflowType: template.workflowType,

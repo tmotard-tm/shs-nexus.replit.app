@@ -2,7 +2,7 @@
 // This file contains all template JSON data as TypeScript constants
 // Generated from 40 template files
 
-import type { InsertTemplate } from './schema';
+import type { InsertTemplateWithId } from './schema';
 
 // Registry data
 export const EMBEDDED_REGISTRY = 
@@ -213,7 +213,7 @@ export const EMBEDDED_REGISTRY =
 ;
 
 // Embedded template data for seeding (array format)
-const EMBEDDED_TEMPLATES_ARRAY: InsertTemplate[] = [
+const EMBEDDED_TEMPLATES_ARRAY: InsertTemplateWithId[] = [
   {
     "id": "assets_assign_vehicle_v1",
     "department": "ASSETS",
@@ -617,7 +617,7 @@ const EMBEDDED_TEMPLATES_ARRAY: InsertTemplate[] = [
 ];
 
 // Template lookup by ID for quick access - main export for production use
-export const EMBEDDED_TEMPLATES: Record<string, InsertTemplate> = {
+export const EMBEDDED_TEMPLATES: Record<string, InsertTemplateWithId> = {
   "assets_assign_vehicle_v1": EMBEDDED_TEMPLATES_ARRAY[0]
 ,
   "assets_byov_inspection_v1": EMBEDDED_TEMPLATES_ARRAY[1]

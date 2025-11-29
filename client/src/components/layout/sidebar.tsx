@@ -154,7 +154,8 @@ export function Sidebar() {
   
   // Normalize location by stripping query strings and hash for accurate matching
   const normalizedLocation = location.split(/[?#]/)[0];
-  const filteredNavItems = allNavItems.filter(item => item.href !== normalizedLocation);
+  // Filter out undefined items first, then exclude current location from navigation
+  const filteredNavItems = allNavItems.filter(item => item && item.href !== normalizedLocation);
 
   const organizeByCategory = (items: NavItem[]): { standalone: NavItem[], categories: NavCategory[] } => {
     const categoryMap: Record<string, NavItem[]> = {};

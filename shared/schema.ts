@@ -309,6 +309,12 @@ export const insertStorageSpotSchema = createInsertSchema(storageSpots).omit({
 });
 
 export const insertTemplateSchema = createInsertSchema(templates).omit({
+  id: true,
+  createdAt: true,
+});
+
+// Extended schema for template seeding that includes the id field
+export const insertTemplateWithIdSchema = createInsertSchema(templates).omit({
   createdAt: true,
 });
 
@@ -484,6 +490,7 @@ export type StorageSpot = typeof storageSpots.$inferSelect;
 export type InsertStorageSpot = z.infer<typeof insertStorageSpotSchema>;
 export type Template = typeof templates.$inferSelect;
 export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
+export type InsertTemplateWithId = z.infer<typeof insertTemplateWithIdSchema>;
 export type Session = typeof sessions.$inferSelect;
 export type InsertSession = z.infer<typeof insertSessionSchema>;
 export type TermedTech = typeof termedTechs.$inferSelect;

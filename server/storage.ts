@@ -17,6 +17,7 @@ import {
   type InsertVehicle,
   type Template,
   type InsertTemplate,
+  type InsertTemplateWithId,
   type Session,
   type InsertSession,
   type TermedTech,
@@ -166,7 +167,7 @@ export interface IStorage {
   getTemplatesByWorkflow(workflowType: string, department: string): Promise<Template[]>;
   getTemplatesByDepartment(department: string): Promise<Template[]>;
   resolveLatestTemplate(workflowType: string, department: string): Promise<Template | undefined>;
-  upsertTemplate(template: InsertTemplate): Promise<Template>;
+  upsertTemplate(template: InsertTemplateWithId): Promise<Template>;
   updateTemplate(id: string, updates: Partial<Template>): Promise<Template | undefined>;
   toggleTemplateStatus(id: string): Promise<Template | undefined>;
   deleteTemplate(id: string): Promise<boolean>;
@@ -2470,7 +2471,7 @@ export class MemStorage implements IStorage {
     return templates;
   }
 
-  async upsertTemplate(insertTemplate: InsertTemplate): Promise<Template> {
+  async upsertTemplate(insertTemplate: InsertTemplateWithId): Promise<Template> {
     const template: Template = {
       ...insertTemplate,
       isActive: insertTemplate.isActive ?? true,
@@ -3653,7 +3654,7 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(templates.createdAt));
   }
 
-  async upsertTemplate(insertTemplate: InsertTemplate): Promise<Template> {
+  async upsertTemplate(insertTemplate: InsertTemplateWithId): Promise<Template> {
     const result = await db.insert(templates)
       .values(insertTemplate)
       .onConflictDoUpdate({

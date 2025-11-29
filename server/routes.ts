@@ -4704,9 +4704,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       
       // Create strict partial schema that only allows whitelisted updateable fields
-      // Omit immutable fields (id, createdAt) and reject unknown keys
+      // id and createdAt are already omitted in insertTemplateSchema, just make it partial
       const updateTemplateSchema = insertTemplateSchema
-        .omit({ id: true })  // id is already omitted in insertTemplateSchema creation
         .partial()
         .strict(); // Reject unknown keys
       
