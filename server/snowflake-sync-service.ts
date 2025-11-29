@@ -479,6 +479,83 @@ export class SnowflakeSyncService {
       return { found: false };
     }
   }
+
+  async getTechAddressesFromSnowflake(enterpriseId: string): Promise<{
+    success: boolean;
+    truckNo?: string;
+    phoneNumber?: string;
+    primaryAddress?: string;
+    reassortAddress?: string;
+    returnAddress?: string;
+    alternateAddress?: string;
+    fileDate?: string;
+    message?: string;
+  }> {
+    if (!isSnowflakeConfigured()) {
+      console.log('[TPMS-Snowflake] Snowflake not configured');
+      return { success: false, message: 'Snowflake not configured' };
+    }
+
+    try {
+      const snowflake = getSnowflakeService();
+      await snowflake.connect();
+
+      console.log(`[TPMS-Snowflake] Looking up addresses for enterprise ID: ${enterpriseId}`);
+      
+      const query = `
+        SELECT DISTINCT
+          TRUCK.TRUCKNO AS TRUCK_NO,
+          UPPER(TECH.LDAPID) AS ENTERPRISE_ID,
+          TECH.MOBILEPHONENUMBER,
+          UPPER(TECH.PRIMARYADDR1||CASE WHEN TECH.PRIMARYADDR2 IS NULL THEN ', ' ELSE TECH.PRIMARYADDR2||', ' END||TECH.PRIMARYCITY||', '||TECH.PRIMARYSTATE||', '||LPAD(TECH.PRIMARYZIP,5,'0')) AS TPMS_PRIMARY_ADDRESS,
+          UPPER(TECH.REASSORTADDR1||CASE WHEN TECH.REASSORTADDR2 IS NULL THEN ', ' ELSE TECH.REASSORTADDR2||', ' END||TECH.REASSORTCITY||', '||TECH.REASSORTSTATE||', '||LPAD(TECH.REASSORTZIP,5,'0')) AS TPMS_REASSORT_ADDRESS,
+          UPPER(TECH.RETURNADDR1||CASE WHEN TECH.RETURNADDR2 IS NULL THEN ', ' ELSE TECH.RETURNADDR2||', ' END||TECH.RETURNCITY||', '||TECH.RETURNSTATE||', '||LPAD(TECH.RETURNZIP,5,'0')) AS TPMS_RETURN_ADDRESS,
+          UPPER(TECH.ALTERNATEADDR1||CASE WHEN TECH.ALTERNATEADDR2 IS NULL THEN ', ' ELSE TECH.ALTERNATEADDR2||', ' END||TECH.ALTERNATECITY||', '||TECH.ALTERNATESTATE||', '||LPAD(TECH.ALTERNATEZIP,5,'0')) AS TPMS_ALTERNATE_ADDRESS,
+          TECH.FILE_DATE                                                   
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.AIMS_TECH_INFO AS TECH   
+        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.AIMS_TRUCK_INFO AS TRUCK
+          ON UPPER(TRUCK.OWNERLDAPID) = UPPER(TECH.LDAPID) 
+          AND TECH.FILE_DATE = TRUCK.FILE_DATE
+          AND LPAD(TECH.DISTRICTNO,7,'0') = LPAD(TRUCK.DISTRICT,7,'0')
+        WHERE TRUCK.TRUCKNO IS NOT NULL 
+          AND UPPER(TECH.LDAPID) = ?
+          AND TECH.PRIMARYADDR1 IS NOT NULL
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY TRUCK.TRUCKNO, TECH.LDAPID ORDER BY TRUCK.FILE_DATE DESC) = 1
+      `;
+
+      const rows = await snowflake.executeQuery(query, [enterpriseId]) as Array<{
+        TRUCK_NO: string;
+        ENTERPRISE_ID: string;
+        MOBILEPHONENUMBER: string;
+        TPMS_PRIMARY_ADDRESS: string;
+        TPMS_REASSORT_ADDRESS: string;
+        TPMS_RETURN_ADDRESS: string;
+        TPMS_ALTERNATE_ADDRESS: string;
+        FILE_DATE: string;
+      }>;
+
+      if (rows.length > 0) {
+        const row = rows[0];
+        console.log(`[TPMS-Snowflake] Found addresses for ${enterpriseId}: Truck ${row.TRUCK_NO}`);
+        return {
+          success: true,
+          truckNo: row.TRUCK_NO,
+          phoneNumber: row.MOBILEPHONENUMBER,
+          primaryAddress: row.TPMS_PRIMARY_ADDRESS,
+          reassortAddress: row.TPMS_REASSORT_ADDRESS,
+          returnAddress: row.TPMS_RETURN_ADDRESS,
+          alternateAddress: row.TPMS_ALTERNATE_ADDRESS,
+          fileDate: row.FILE_DATE,
+        };
+      }
+
+      console.log(`[TPMS-Snowflake] No addresses found for enterprise ID: ${enterpriseId}`);
+      return { success: false, message: 'No address data found' };
+    } catch (error: any) {
+      console.error('[TPMS-Snowflake] Error looking up tech addresses:', error);
+      return { success: false, message: error.message };
+    }
+  }
 }
 
 let syncServiceInstance: SnowflakeSyncService | null = null;

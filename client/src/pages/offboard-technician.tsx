@@ -27,6 +27,7 @@ interface LocationOption {
   latitude?: number;
   longitude?: number;
   type?: string;
+  lastUpdated?: string;
 }
 
 export default function OffboardTechnician() {
@@ -676,7 +677,7 @@ export default function OffboardTechnician() {
                               }
                             }
 
-                            // Auto-lookup vehicle from TPMS using RACF ID
+                            // Auto-lookup vehicle and addresses from Snowflake TPMS data
                             if (tech.techRacfid) {
                               setIsLookingUpTruck(true);
                               setTpmsLookupResult(null);
@@ -684,125 +685,158 @@ export default function OffboardTechnician() {
                               setSelectedLocationId('');
                               
                               try {
-                                const tpmsResponse = await fetch(`/api/tpms/truck/${encodeURIComponent(tech.techRacfid)}`, {
+                                // Fetch TPMS addresses from Snowflake
+                                const tpmsResponse = await fetch(`/api/snowflake/tech-addresses/${encodeURIComponent(tech.techRacfid)}`, {
                                   credentials: 'include'
                                 });
                                 const tpmsResult = await tpmsResponse.json();
                                 setTpmsLookupResult(tpmsResult);
 
-                                // Collect TPMS addresses
+                                // Build location options list
                                 const newLocationOptions: LocationOption[] = [];
-                                if (tpmsResult.success && tpmsResult.techInfo?.addresses) {
-                                  tpmsResult.techInfo.addresses.forEach((addr: any, index: number) => {
-                                    if (addr.addrLine1 || addr.city) {
-                                      const addressParts = [
-                                        addr.addrLine1,
-                                        addr.addrLine2,
-                                        addr.city,
-                                        addr.stateCd,
-                                        addr.zipCd
-                                      ].filter(Boolean).join(', ');
-                                      
-                                      const addressTypeLabels: Record<string, string> = {
-                                        'PRIMARY': 'Primary Address',
-                                        'RE_ASSORTMENT': 'Re-Assortment Address',
-                                        'DROP_RETURN': 'Drop/Return Address',
-                                        'ALTERNATE': 'Alternate Address'
-                                      };
-                                      const typeLabel = addressTypeLabels[addr.addressType] || addr.addressType;
-                                      
-                                      newLocationOptions.push({
-                                        id: `tpms-${index}`,
-                                        source: 'tpms',
-                                        label: `TPMS: ${typeLabel}`,
-                                        address: addressParts,
-                                        type: addr.addressType
-                                      });
-                                    }
-                                  });
-                                }
+                                const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
 
+                                // Set truck number if found
+                                let truckNo = '';
                                 if (tpmsResult.success && tpmsResult.truckNo) {
-                                  const truckNo = tpmsResult.truckNo.trim();
+                                  truckNo = tpmsResult.truckNo.trim();
                                   setTechnicianOffboard(prev => ({
                                     ...prev,
                                     vehicleNumber: truckNo
                                   }));
-
-                                  // Auto-lookup vehicle details from Holman
-                                  if (truckNo) {
-                                    setIsLookingUpHolman(true);
-                                    setHolmanLookupResult(null);
-                                    try {
-                                      const paddedVehicleNum = truckNo.padStart(6, '0');
-                                      const holmanResponse = await fetch(`/api/holman/vehicle/${encodeURIComponent(paddedVehicleNum)}`, {
-                                        credentials: 'include'
-                                      });
-                                      const holmanResult = await holmanResponse.json();
-                                      setHolmanLookupResult(holmanResult);
-
-                                      if (holmanResult.success && holmanResult.vehicle) {
-                                        setTechnicianOffboard(prev => ({
-                                          ...prev,
-                                          vehicleYear: holmanResult.vehicle.year || '',
-                                          vehicleMake: holmanResult.vehicle.make || '',
-                                          vehicleModel: holmanResult.vehicle.model || ''
-                                        }));
-                                        toast({
-                                          title: "Vehicle Info Found",
-                                          description: `Auto-filled: ${holmanResult.vehicle.year} ${holmanResult.vehicle.make} ${holmanResult.vehicle.model}`,
-                                        });
-                                      }
-                                    } catch (holmanError) {
-                                      console.error('Holman lookup error:', holmanError);
-                                    } finally {
-                                      setIsLookingUpHolman(false);
-                                    }
-
-                                    // Auto-lookup Samsara GPS location for last known address
-                                    try {
-                                      const samsaraResponse = await fetch(`/api/samsara/vehicle/${encodeURIComponent(truckNo)}`, {
-                                        credentials: 'include'
-                                      });
-                                      const samsaraResult = await samsaraResponse.json();
-
-                                      if (samsaraResult.found && samsaraResult.address) {
-                                        newLocationOptions.unshift({
-                                          id: 'samsara-gps',
-                                          source: 'samsara',
-                                          label: 'Samsara: Last Known GPS Location',
-                                          address: samsaraResult.address,
-                                          latitude: samsaraResult.latitude,
-                                          longitude: samsaraResult.longitude
-                                        });
-                                        
-                                        // Auto-select Samsara GPS as default since it's most current
-                                        setSelectedLocationId('samsara-gps');
-                                        setTechnicianOffboard(prev => ({
-                                          ...prev,
-                                          vehicleLocation: samsaraResult.address
-                                        }));
-                                        toast({
-                                          title: "GPS Location Found",
-                                          description: `Last known: ${samsaraResult.address.substring(0, 50)}...`,
-                                        });
-                                      }
-                                    } catch (samsaraError) {
-                                      console.log('Samsara GPS lookup - no data:', samsaraError);
-                                    }
-                                  }
-
+                                  
                                   toast({
                                     title: "Truck Found",
                                     description: `Auto-filled truck ${truckNo} for ${tech.techRacfid}`,
                                   });
                                 }
 
+                                // Add TPMS addresses with file date
+                                const fileDate = tpmsResult.fileDate 
+                                  ? new Date(tpmsResult.fileDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })
+                                  : today;
+                                
+                                if (tpmsResult.success && tpmsResult.primaryAddress && tpmsResult.primaryAddress.trim() !== ',') {
+                                  newLocationOptions.push({
+                                    id: 'tpms-primary',
+                                    source: 'tpms',
+                                    label: `TPMS Primary Address Last Known: ${fileDate}`,
+                                    address: tpmsResult.primaryAddress,
+                                    lastUpdated: fileDate
+                                  });
+                                }
+                                if (tpmsResult.success && tpmsResult.reassortAddress && tpmsResult.reassortAddress.trim() !== ',') {
+                                  newLocationOptions.push({
+                                    id: 'tpms-reassort',
+                                    source: 'tpms',
+                                    label: `TPMS Reassort Address Last Known: ${fileDate}`,
+                                    address: tpmsResult.reassortAddress,
+                                    lastUpdated: fileDate
+                                  });
+                                }
+                                if (tpmsResult.success && tpmsResult.alternateAddress && tpmsResult.alternateAddress.trim() !== ',') {
+                                  newLocationOptions.push({
+                                    id: 'tpms-alternate',
+                                    source: 'tpms',
+                                    label: `TPMS Alternate Address Last Known: ${fileDate}`,
+                                    address: tpmsResult.alternateAddress,
+                                    lastUpdated: fileDate
+                                  });
+                                }
+                                if (tpmsResult.success && tpmsResult.returnAddress && tpmsResult.returnAddress.trim() !== ',') {
+                                  newLocationOptions.push({
+                                    id: 'tpms-return',
+                                    source: 'tpms',
+                                    label: `TPMS Return Address Last Known: ${fileDate}`,
+                                    address: tpmsResult.returnAddress,
+                                    lastUpdated: fileDate
+                                  });
+                                }
+
+                                // Auto-lookup vehicle details from Holman and get address
+                                if (truckNo) {
+                                  setIsLookingUpHolman(true);
+                                  setHolmanLookupResult(null);
+                                  try {
+                                    const paddedVehicleNum = truckNo.padStart(6, '0');
+                                    const holmanResponse = await fetch(`/api/holman/vehicle/${encodeURIComponent(paddedVehicleNum)}`, {
+                                      credentials: 'include'
+                                    });
+                                    const holmanResult = await holmanResponse.json();
+                                    setHolmanLookupResult(holmanResult);
+
+                                    if (holmanResult.success && holmanResult.vehicle) {
+                                      setTechnicianOffboard(prev => ({
+                                        ...prev,
+                                        vehicleYear: holmanResult.vehicle.year || '',
+                                        vehicleMake: holmanResult.vehicle.make || '',
+                                        vehicleModel: holmanResult.vehicle.model || ''
+                                      }));
+                                      
+                                      // Add Holman address row (address may come from vehicles API if available)
+                                      newLocationOptions.push({
+                                        id: 'holman-address',
+                                        source: 'holman',
+                                        label: `Holman Address: today()`,
+                                        address: holmanResult.vehicle.garagingAddress || '',
+                                        lastUpdated: today
+                                      });
+                                      
+                                      toast({
+                                        title: "Vehicle Info Found",
+                                        description: `Auto-filled: ${holmanResult.vehicle.year} ${holmanResult.vehicle.make} ${holmanResult.vehicle.model}`,
+                                      });
+                                    }
+                                  } catch (holmanError) {
+                                    console.error('Holman lookup error:', holmanError);
+                                  } finally {
+                                    setIsLookingUpHolman(false);
+                                  }
+
+                                  // Auto-lookup Samsara GPS location for last known address
+                                  try {
+                                    const samsaraResponse = await fetch(`/api/samsara/vehicle/${encodeURIComponent(truckNo)}`, {
+                                      credentials: 'include'
+                                    });
+                                    const samsaraResult = await samsaraResponse.json();
+
+                                    if (samsaraResult.found && samsaraResult.address) {
+                                      const samsaraDate = samsaraResult.lastUpdated 
+                                        ? new Date(samsaraResult.lastUpdated).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }) + ' ' + 
+                                          new Date(samsaraResult.lastUpdated).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                        : today;
+                                      
+                                      newLocationOptions.unshift({
+                                        id: 'samsara-gps',
+                                        source: 'samsara',
+                                        label: `Samsara GPS Last Updated: ${samsaraDate}`,
+                                        address: samsaraResult.address,
+                                        latitude: samsaraResult.latitude,
+                                        longitude: samsaraResult.longitude,
+                                        lastUpdated: samsaraDate
+                                      });
+                                      
+                                      // Auto-select Samsara GPS as default since it's most current
+                                      setSelectedLocationId('samsara-gps');
+                                      setTechnicianOffboard(prev => ({
+                                        ...prev,
+                                        vehicleLocation: samsaraResult.address
+                                      }));
+                                      toast({
+                                        title: "GPS Location Found",
+                                        description: `Last known: ${samsaraResult.address.substring(0, 50)}...`,
+                                      });
+                                    }
+                                  } catch (samsaraError) {
+                                    console.log('Samsara GPS lookup - no data:', samsaraError);
+                                  }
+                                }
+
                                 // Update location options
                                 setLocationOptions(newLocationOptions);
                                 
                               } catch (tpmsError) {
-                                console.error('TPMS lookup error:', tpmsError);
+                                console.error('TPMS/Snowflake lookup error:', tpmsError);
                               } finally {
                                 setIsLookingUpTruck(false);
                               }
@@ -1027,125 +1061,85 @@ export default function OffboardTechnician() {
                       
                       {locationOptions.length > 0 ? (
                         <div className="space-y-3">
-                          <RadioGroup
-                            value={selectedLocationId}
-                            onValueChange={(value) => {
-                              setSelectedLocationId(value);
-                              if (value === 'other') {
-                                setTechnicianOffboard(prev => ({
-                                  ...prev,
-                                  vehicleLocation: customLocation.type === 'address' 
-                                    ? customLocation.address 
-                                    : `${customLocation.latitude}, ${customLocation.longitude}`
-                                }));
-                              } else {
-                                const selected = locationOptions.find(opt => opt.id === value);
-                                if (selected) {
-                                  setTechnicianOffboard(prev => ({
-                                    ...prev,
-                                    vehicleLocation: selected.address
-                                  }));
-                                }
-                              }
-                            }}
-                            className="space-y-2"
-                          >
-                            {locationOptions.map((option) => (
-                              <div key={option.id} className="flex items-start space-x-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
-                                <RadioGroupItem value={option.id} id={option.id} className="mt-1" />
-                                <div className="flex-1 min-w-0">
-                                  <Label htmlFor={option.id} className="flex items-center gap-2 font-medium cursor-pointer">
-                                    {option.source === 'samsara' && <Navigation className="h-4 w-4 text-green-600" />}
-                                    {option.source === 'tpms' && <MapPin className="h-4 w-4 text-blue-600" />}
-                                    {option.label}
-                                  </Label>
-                                  <p className="text-sm text-muted-foreground mt-1 break-words">{option.address}</p>
-                                  {option.latitude && option.longitude && (
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                      Coordinates: {option.latitude.toFixed(6)}, {option.longitude.toFixed(6)}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                            
-                            <div className={`p-3 rounded-lg border transition-colors ${selectedLocationId === 'other' ? 'bg-accent/50 border-primary' : 'bg-card hover:bg-accent/50'}`}>
-                              <div className="flex items-start space-x-3">
-                                <RadioGroupItem value="other" id="location-other" className="mt-1" />
-                                <div className="flex-1 space-y-3">
-                                  <Label htmlFor="location-other" className="flex items-center gap-2 font-medium cursor-pointer">
-                                    <MapPin className="h-4 w-4 text-gray-600" />
-                                    Other Location
-                                  </Label>
-                                  
-                                  {selectedLocationId === 'other' && (
-                                    <div className="space-y-3 pt-2">
-                                      <div className="flex gap-2">
-                                        <Button
-                                          type="button"
-                                          variant={customLocation.type === 'address' ? 'default' : 'outline'}
-                                          size="sm"
-                                          onClick={() => setCustomLocation(prev => ({ ...prev, type: 'address' }))}
-                                        >
-                                          Address
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant={customLocation.type === 'coordinates' ? 'default' : 'outline'}
-                                          size="sm"
-                                          onClick={() => setCustomLocation(prev => ({ ...prev, type: 'coordinates' }))}
-                                        >
-                                          Lat/Long
-                                        </Button>
-                                      </div>
-                                      
-                                      {customLocation.type === 'address' ? (
-                                        <Input
-                                          placeholder="Enter street address"
-                                          value={customLocation.address}
-                                          onChange={(e) => {
-                                            setCustomLocation(prev => ({ ...prev, address: e.target.value }));
-                                            setTechnicianOffboard(prev => ({
-                                              ...prev,
-                                              vehicleLocation: e.target.value
-                                            }));
-                                          }}
-                                          data-testid="input-custom-address"
-                                        />
-                                      ) : (
-                                        <div className="grid grid-cols-2 gap-2">
-                                          <Input
-                                            placeholder="Latitude"
-                                            value={customLocation.latitude}
-                                            onChange={(e) => {
-                                              setCustomLocation(prev => ({ ...prev, latitude: e.target.value }));
-                                              setTechnicianOffboard(prev => ({
-                                                ...prev,
-                                                vehicleLocation: `${e.target.value}, ${customLocation.longitude}`
-                                              }));
-                                            }}
-                                            data-testid="input-latitude"
-                                          />
-                                          <Input
-                                            placeholder="Longitude"
-                                            value={customLocation.longitude}
-                                            onChange={(e) => {
-                                              setCustomLocation(prev => ({ ...prev, longitude: e.target.value }));
-                                              setTechnicianOffboard(prev => ({
-                                                ...prev,
-                                                vehicleLocation: `${customLocation.latitude}, ${e.target.value}`
-                                              }));
-                                            }}
-                                            data-testid="input-longitude"
-                                          />
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </RadioGroup>
+                          <div className="border rounded-lg overflow-hidden">
+                            <table className="w-full text-sm">
+                              <thead className="bg-muted/50">
+                                <tr>
+                                  <th className="w-10 px-3 py-2 text-left"></th>
+                                  <th className="px-3 py-2 text-left font-medium">Location Source</th>
+                                  <th className="px-3 py-2 text-left font-medium">Address</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y">
+                                {locationOptions.map((option) => (
+                                  <tr 
+                                    key={option.id} 
+                                    className={`hover:bg-accent/50 cursor-pointer transition-colors ${selectedLocationId === option.id ? 'bg-accent/30' : ''}`}
+                                    onClick={() => {
+                                      setSelectedLocationId(option.id);
+                                      setTechnicianOffboard(prev => ({
+                                        ...prev,
+                                        vehicleLocation: option.address
+                                      }));
+                                    }}
+                                  >
+                                    <td className="px-3 py-2">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={selectedLocationId === option.id}
+                                        onChange={() => {
+                                          setSelectedLocationId(option.id);
+                                          setTechnicianOffboard(prev => ({
+                                            ...prev,
+                                            vehicleLocation: option.address
+                                          }));
+                                        }}
+                                        className="h-4 w-4 rounded border-gray-300"
+                                        data-testid={`checkbox-location-${option.id}`}
+                                      />
+                                    </td>
+                                    <td className="px-3 py-2 whitespace-nowrap">{option.label}</td>
+                                    <td className="px-3 py-2">{option.address}</td>
+                                  </tr>
+                                ))}
+                                <tr 
+                                  className={`hover:bg-accent/50 cursor-pointer transition-colors ${selectedLocationId === 'other' ? 'bg-accent/30' : ''}`}
+                                  onClick={() => setSelectedLocationId('other')}
+                                >
+                                  <td className="px-3 py-2">
+                                    <input 
+                                      type="checkbox" 
+                                      checked={selectedLocationId === 'other'}
+                                      onChange={() => setSelectedLocationId('other')}
+                                      className="h-4 w-4 rounded border-gray-300"
+                                      data-testid="checkbox-location-other"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap">Other:</td>
+                                  <td className="px-3 py-2">
+                                    {selectedLocationId === 'other' ? (
+                                      <Input
+                                        placeholder="Enter address manually"
+                                        value={customLocation.address}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => {
+                                          setCustomLocation(prev => ({ ...prev, address: e.target.value }));
+                                          setTechnicianOffboard(prev => ({
+                                            ...prev,
+                                            vehicleLocation: e.target.value
+                                          }));
+                                        }}
+                                        className="h-8"
+                                        data-testid="input-custom-address"
+                                      />
+                                    ) : (
+                                      <span className="text-muted-foreground italic">Click to enter manually</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       ) : (
                         <div className="space-y-2">
