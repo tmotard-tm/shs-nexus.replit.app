@@ -236,6 +236,67 @@ export class HolmanApiService {
     );
   }
 
+  // Helper to process vehicle result and build garaging address
+  private processVehicleResult(matchingVehicle: any): {
+    success: boolean;
+    vehicle: {
+      year: string;
+      make: string;
+      model: string;
+      holmanVehicleNumber: string;
+      vin?: string;
+      status?: string;
+      garagingAddress?: string;
+    };
+  } {
+    // Log all available fields to debug garaging address
+    const addressFields = Object.keys(matchingVehicle).filter(k => 
+      k.toLowerCase().includes('address') || 
+      k.toLowerCase().includes('street') || 
+      k.toLowerCase().includes('city') || 
+      k.toLowerCase().includes('state') || 
+      k.toLowerCase().includes('zip') ||
+      k.toLowerCase().includes('garage') ||
+      k.toLowerCase().includes('location')
+    );
+    console.log('[Holman] Address-related fields:', addressFields);
+    if (addressFields.length > 0) {
+      const addressValues: Record<string, any> = {};
+      addressFields.forEach(f => { addressValues[f] = matchingVehicle[f]; });
+      console.log('[Holman] Address field values:', JSON.stringify(addressValues));
+    }
+    
+    // Use modelYear field (not year) for the vehicle year
+    const vehicleYear = matchingVehicle.modelYear || matchingVehicle.year || '';
+    
+    // Build garaging address from available fields
+    const addressParts = [
+      matchingVehicle.garagingStreet1 || matchingVehicle.garagingAddress1 || '',
+      matchingVehicle.garagingStreet2 || matchingVehicle.garagingAddress2 || '',
+    ].filter(p => p && p.trim());
+    const cityStateZip = [
+      matchingVehicle.garagingCity || '',
+      matchingVehicle.garagingState || '',
+      matchingVehicle.garagingZip || matchingVehicle.garagingPostalCode || ''
+    ].filter(p => p && p.trim()).join(', ');
+    
+    const fullAddress = [...addressParts, cityStateZip].filter(p => p && p.trim()).join(', ');
+    console.log('[Holman] Vehicle garaging address:', fullAddress || '(none available)');
+    
+    return {
+      success: true,
+      vehicle: {
+        year: String(vehicleYear),
+        make: matchingVehicle.makeVin || matchingVehicle.makeClient || '',
+        model: matchingVehicle.modelVin || matchingVehicle.modelClient || '',
+        holmanVehicleNumber: matchingVehicle.holmanVehicleNumber || '',
+        vin: matchingVehicle.vin || '',
+        status: matchingVehicle.status || matchingVehicle.assignedStatus || '',
+        garagingAddress: fullAddress || undefined
+      }
+    };
+  }
+
   async findVehicleByNumber(vehicleNumber: string): Promise<{
     success: boolean;
     vehicle?: {
@@ -255,13 +316,65 @@ export class HolmanApiService {
       // Left-pad vehicle number to 6 characters for Holman search
       const paddedVehicleNum = vehicleNumber.padStart(6, '0');
       
-      // Search all vehicles with lesseeCode 2B56
-      let allVehicles: any[] = [];
+      // Use custom-query to get garaging address fields
+      const token = await this.getAccessToken();
+      
+      // First try to find the vehicle using custom-query with specific properties
+      const customQueryUrl = `${this.apiEndpoint}/vehicles/custom-query`;
+      const customQueryBody = {
+        lesseeCode: '2B56',
+        properties: [
+          'holmanVehicleNumber',
+          'clientVehicleNumber',
+          'modelYear',
+          'makeVin',
+          'makeClient',
+          'modelVin',
+          'modelClient',
+          'vin',
+          'status',
+          'assignedStatus',
+          'garagingStreet1',
+          'garagingStreet2',
+          'garagingCity',
+          'garagingState',
+          'garagingZip',
+          'garagingCounty'
+        ],
+        filters: {
+          holmanVehicleNumber: paddedVehicleNum
+        },
+        pageNumber: 1,
+        pageSize: 10
+      };
+      
+      console.log('[Holman] Trying custom-query with filters for:', paddedVehicleNum);
+      
+      const customResponse = await fetch(customQueryUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(customQueryBody)
+      });
+      
+      if (customResponse.ok) {
+        const customData = await customResponse.json();
+        if (customData.items && customData.items.length > 0) {
+          const matchingVehicle = customData.items[0];
+          console.log('[Holman] Found via custom-query:', matchingVehicle.holmanVehicleNumber);
+          
+          return this.processVehicleResult(matchingVehicle);
+        }
+      }
+      
+      // If custom query didn't find it (might be clientVehicleNumber), fall back to paginated search
+      console.log('[Holman] Custom query returned no results, falling back to paginated search');
+      
       let pageNumber = 1;
       const pageSize = 200;
       const maxPages = 65; // ~12,369 vehicles / 200 = 62 pages
-      
-      const token = await this.getAccessToken();
       
       while (pageNumber <= maxPages) {
         const url = `${this.apiEndpoint}/vehicles/basic-query?lesseeCodes=2B56&pageSize=${pageSize}&pageNumber=${pageNumber}`;
@@ -290,36 +403,8 @@ export class HolmanApiService {
         });
         
         if (matchingVehicle) {
-          console.log('[Holman] Found matching vehicle:', matchingVehicle.holmanVehicleNumber);
-          // Use modelYear field (not year) for the vehicle year
-          const vehicleYear = matchingVehicle.modelYear || matchingVehicle.year || '';
-          
-          // Build garaging address from available fields
-          const addressParts = [
-            matchingVehicle.garagingStreet1 || matchingVehicle.garagingAddress1 || '',
-            matchingVehicle.garagingStreet2 || matchingVehicle.garagingAddress2 || '',
-          ].filter(p => p && p.trim());
-          const cityStateZip = [
-            matchingVehicle.garagingCity || '',
-            matchingVehicle.garagingState || '',
-            matchingVehicle.garagingZip || matchingVehicle.garagingPostalCode || ''
-          ].filter(p => p && p.trim()).join(', ');
-          
-          const fullAddress = [...addressParts, cityStateZip].filter(p => p && p.trim()).join(', ');
-          console.log('[Holman] Vehicle garaging address:', fullAddress || '(none available)');
-          
-          return {
-            success: true,
-            vehicle: {
-              year: String(vehicleYear),
-              make: matchingVehicle.makeVin || matchingVehicle.makeClient || '',
-              model: matchingVehicle.modelVin || matchingVehicle.modelClient || '',
-              holmanVehicleNumber: matchingVehicle.holmanVehicleNumber || '',
-              vin: matchingVehicle.vin || '',
-              status: matchingVehicle.status || matchingVehicle.assignedStatus || '',
-              garagingAddress: fullAddress || undefined
-            }
-          };
+          console.log('[Holman] Found via basic-query:', matchingVehicle.holmanVehicleNumber);
+          return this.processVehicleResult(matchingVehicle);
         }
         
         if (pageNumber >= data.pageInfo?.totalPages) break;
