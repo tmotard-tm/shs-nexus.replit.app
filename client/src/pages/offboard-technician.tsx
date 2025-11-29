@@ -645,12 +645,26 @@ export default function OffboardTechnician() {
                         value={technicianOffboard.techName}
                         onSelect={async (tech) => {
                           if (tech) {
-                            // Set basic tech info first
+                            // Clear previous technician's data first
+                            setLocationOptions([]);
+                            setSelectedLocationId('');
+                            setCustomLocation({ type: 'address', address: '', latitude: '', longitude: '' });
+                            setTpmsLookupResult(null);
+                            setHolmanLookupResult(null);
+                            
+                            // Set basic tech info and clear vehicle fields
                             setTechnicianOffboard(prev => ({
                               ...prev,
                               employeeId: tech.employeeId,
                               techRacfId: tech.techRacfid,
-                              techName: tech.techName
+                              techName: tech.techName,
+                              vehicleNumber: '',
+                              vehicleYear: '',
+                              vehicleMake: '',
+                              vehicleModel: '',
+                              vehicleLocation: '',
+                              effectiveDate: '',
+                              lastDayWorked: ''
                             }));
 
                             // Auto-lookup termed tech dates (effectiveDate, lastDayWorked)
@@ -680,9 +694,6 @@ export default function OffboardTechnician() {
                             // Auto-lookup vehicle and addresses from Snowflake TPMS data
                             if (tech.techRacfid) {
                               setIsLookingUpTruck(true);
-                              setTpmsLookupResult(null);
-                              setLocationOptions([]); // Reset location options
-                              setSelectedLocationId('');
                               
                               try {
                                 // Fetch TPMS addresses from Snowflake
