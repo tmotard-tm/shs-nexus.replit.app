@@ -107,7 +107,14 @@ export default function TechRoster() {
                       <div className="text-sm text-muted-foreground flex items-center gap-2">
                         <Clock className="h-4 w-4" />
                         {syncStatus.allTechs.lastSync 
-                          ? `Last synced: ${format(new Date(syncStatus.allTechs.lastSync), 'MMM d, yyyy h:mm a')}`
+                          ? (() => {
+                              try {
+                                const date = new Date(syncStatus.allTechs.lastSync);
+                                return isNaN(date.getTime()) ? 'Invalid date' : `Last synced: ${format(date, 'MMM d, yyyy h:mm a')}`;
+                              } catch {
+                                return 'Invalid date';
+                              }
+                            })()
                           : 'Never synced'}
                       </div>
                     )}
