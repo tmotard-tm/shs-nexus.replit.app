@@ -94,34 +94,26 @@ export default function OffboardTechnician() {
 
   // Function to load queue item data into the form
   const loadQueueItem = async (item: any) => {
+    const startTime = performance.now();
+    console.log(`[TIMING] Queue item load started`);
+    
     try {
       const data = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
       const technician = data?.technician || {};
       const vehicle = data?.vehicle || {};
       
+      // Clear previous data first
+      setLocationOptions([]);
+      setSelectedLocationId('');
+      setCustomLocation({ type: 'address', address: '', latitude: '', longitude: '' });
+      setTpmsLookupResult(null);
+      setHolmanLookupResult(null);
+      
       // Get truck number from vehicle data if available
       let truckNumber = vehicle?.truckNo || vehicle?.vehicleNumber || "";
-      
-      // If no truck number in data but we have a tech RACF ID, try TPMS lookup
       const techRacfId = technician.techRacfid || technician.enterpriseId || "";
-      if (!truckNumber && techRacfId) {
-        try {
-          const response = await fetch(`/api/tpms/truck/${encodeURIComponent(techRacfId)}`, {
-            credentials: 'include'
-          });
-          const result = await response.json();
-          if (result.success && result.truckNo) {
-            truckNumber = result.truckNo.trim();
-            toast({
-              title: "Truck Found",
-              description: `Found truck ${truckNumber} for ${techRacfId}`,
-            });
-          }
-        } catch (e) {
-          console.log('TPMS lookup during load failed:', e);
-        }
-      }
       
+      // Set basic technician info
       setTechnicianOffboard({
         vehicleId: "",
         techRacfId: techRacfId,
@@ -139,9 +131,171 @@ export default function OffboardTechnician() {
         vehicleModel: ""
       });
       
-      // If vehicle number is available, look up Holman info
-      if (truckNumber) {
-        handleHolmanLookup(truckNumber);
+      // If we have a tech RACF ID, fetch addresses from Snowflake
+      if (techRacfId) {
+        setIsLookingUpTruck(true);
+        
+        try {
+          // Fetch TPMS addresses from Snowflake
+          const tpmsStart = performance.now();
+          const tpmsResponse = await fetch(`/api/snowflake/tech-addresses/${encodeURIComponent(techRacfId)}`, {
+            credentials: 'include'
+          });
+          const tpmsResult = await tpmsResponse.json();
+          console.log(`[TIMING] TPMS/Snowflake lookup: ${(performance.now() - tpmsStart).toFixed(0)}ms`);
+          setTpmsLookupResult(tpmsResult);
+          
+          // Build location options list
+          const newLocationOptions: LocationOption[] = [];
+          const formatTimestamp = (date: Date) => {
+            const dateStr = date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+            const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+            return `${dateStr} ${timeStr}`;
+          };
+          const todayMidnight = new Date();
+          todayMidnight.setHours(0, 0, 0, 0);
+          const today = formatTimestamp(todayMidnight);
+          
+          // Get truck number from TPMS if not already available
+          if (!truckNumber && tpmsResult.success && tpmsResult.truckNo) {
+            truckNumber = tpmsResult.truckNo.trim();
+            setTechnicianOffboard(prev => ({
+              ...prev,
+              vehicleNumber: truckNumber
+            }));
+            toast({
+              title: "Truck Found",
+              description: `Auto-filled truck ${truckNumber} for ${techRacfId}`,
+            });
+          }
+          
+          // Add TPMS addresses with file date
+          let fileDate = today;
+          if (tpmsResult.fileDate) {
+            const fileDateObj = new Date(tpmsResult.fileDate);
+            fileDate = formatTimestamp(fileDateObj);
+          }
+          
+          if (tpmsResult.success && tpmsResult.primaryAddress && tpmsResult.primaryAddress.trim() !== ',') {
+            newLocationOptions.push({
+              id: 'tpms-primary',
+              source: 'tpms',
+              label: 'TPMS Primary Address',
+              address: tpmsResult.primaryAddress,
+              lastUpdated: fileDate
+            });
+          }
+          if (tpmsResult.success && tpmsResult.reassortAddress && tpmsResult.reassortAddress.trim() !== ',') {
+            newLocationOptions.push({
+              id: 'tpms-reassort',
+              source: 'tpms',
+              label: 'TPMS Reassort Address',
+              address: tpmsResult.reassortAddress,
+              lastUpdated: fileDate
+            });
+          }
+          if (tpmsResult.success && tpmsResult.alternateAddress && tpmsResult.alternateAddress.trim() !== ',') {
+            newLocationOptions.push({
+              id: 'tpms-alternate',
+              source: 'tpms',
+              label: 'TPMS Alternate Address',
+              address: tpmsResult.alternateAddress,
+              lastUpdated: fileDate
+            });
+          }
+          if (tpmsResult.success && tpmsResult.returnAddress && tpmsResult.returnAddress.trim() !== ',') {
+            newLocationOptions.push({
+              id: 'tpms-return',
+              source: 'tpms',
+              label: 'TPMS Return Address',
+              address: tpmsResult.returnAddress,
+              lastUpdated: fileDate
+            });
+          }
+          
+          // If we have a truck number, fetch Holman and Samsara data in parallel
+          if (truckNumber) {
+            setIsLookingUpHolman(true);
+            const paddedVehicleNum = truckNumber.padStart(6, '0');
+            
+            const parallelStart = performance.now();
+            const [holmanResult, samsaraResult] = await Promise.all([
+              fetch(`/api/holman/vehicle/${encodeURIComponent(paddedVehicleNum)}`, { credentials: 'include' })
+                .then(res => res.json())
+                .catch(err => { console.error('Holman lookup error:', err); return null; }),
+              fetch(`/api/samsara/vehicle/${encodeURIComponent(truckNumber)}`, { credentials: 'include' })
+                .then(res => res.json())
+                .catch(err => { console.log('Samsara GPS lookup error:', err); return { found: false }; })
+            ]);
+            console.log(`[TIMING] Holman + Samsara parallel: ${(performance.now() - parallelStart).toFixed(0)}ms`);
+            
+            // Process Holman result
+            if (holmanResult) {
+              setHolmanLookupResult(holmanResult);
+              if (holmanResult.success && holmanResult.vehicle) {
+                setTechnicianOffboard(prev => ({
+                  ...prev,
+                  vehicleYear: holmanResult.vehicle.year || '',
+                  vehicleMake: holmanResult.vehicle.make || '',
+                  vehicleModel: holmanResult.vehicle.model || ''
+                }));
+                
+                newLocationOptions.push({
+                  id: 'holman-address',
+                  source: 'holman',
+                  label: 'Holman Address',
+                  address: holmanResult.vehicle.garagingAddress || '',
+                  lastUpdated: today
+                });
+                
+                toast({
+                  title: "Vehicle Info Found",
+                  description: `Auto-filled: ${holmanResult.vehicle.year} ${holmanResult.vehicle.make} ${holmanResult.vehicle.model}`,
+                });
+              }
+            }
+            setIsLookingUpHolman(false);
+            
+            // Process Samsara result
+            if (samsaraResult && samsaraResult.found && samsaraResult.address) {
+              let samsaraDate = today;
+              if (samsaraResult.lastUpdated) {
+                const samsaraDateObj = new Date(samsaraResult.lastUpdated);
+                samsaraDate = formatTimestamp(samsaraDateObj);
+              }
+              
+              newLocationOptions.unshift({
+                id: 'samsara-gps',
+                source: 'samsara',
+                label: 'Samsara GPS',
+                address: samsaraResult.address,
+                latitude: samsaraResult.latitude,
+                longitude: samsaraResult.longitude,
+                lastUpdated: samsaraDate
+              });
+              
+              // Auto-select Samsara GPS as default
+              setSelectedLocationId('samsara-gps');
+              setTechnicianOffboard(prev => ({
+                ...prev,
+                vehicleLocation: samsaraResult.address
+              }));
+              toast({
+                title: "GPS Location Found",
+                description: `Last known: ${samsaraResult.address.substring(0, 50)}...`,
+              });
+            }
+          }
+          
+          // Update location options
+          setLocationOptions(newLocationOptions);
+          console.log(`[TIMING] ✅ TOTAL queue item load time: ${(performance.now() - startTime).toFixed(0)}ms`);
+          
+        } catch (tpmsError) {
+          console.error('TPMS/Snowflake lookup error:', tpmsError);
+        } finally {
+          setIsLookingUpTruck(false);
+        }
       }
 
       toast({
