@@ -135,23 +135,35 @@ async function initializeSnowflake() {
     const account = process.env.SNOWFLAKE_ACCOUNT;
     const username = process.env.SNOWFLAKE_USER;
     let privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+    const isProduction = process.env.NODE_ENV === 'production';
     
-    // Try to read from file if environment variable is not set or malformed
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const keyFilePath = path.join(__dirname, "snowflake-private-key.p8");
-    try {
-      const fileExists = await fs.access(keyFilePath).then(() => true).catch(() => false);
-      if (fileExists) {
-        privateKey = await fs.readFile(keyFilePath, 'utf-8');
-        log("📄 Using Snowflake private key from file");
+    // Log configuration status (without exposing sensitive values)
+    log(`🔍 Snowflake config check: account=${account ? 'set' : 'missing'}, user=${username ? 'set' : 'missing'}, key=${privateKey ? `set (${privateKey.length} chars)` : 'missing'}`);
+    
+    // In development, try to read from file first (file takes precedence)
+    if (!isProduction) {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      const keyFilePath = path.join(__dirname, "snowflake-private-key.p8");
+      try {
+        const fileExists = await fs.access(keyFilePath).then(() => true).catch(() => false);
+        if (fileExists) {
+          privateKey = await fs.readFile(keyFilePath, 'utf-8');
+          log("📄 Using Snowflake private key from file");
+        }
+      } catch (fileError) {
+        log("📝 Key file not found, using environment variable");
       }
-    } catch (fileError) {
-      // File doesn't exist or can't be read, continue with env var
+    } else {
+      log("🚀 Production mode: Using environment variable for private key");
     }
     
     if (!account || !username || !privateKey) {
-      log("⚠️ Snowflake credentials not configured. Snowflake integration will be unavailable.");
+      const missing = [];
+      if (!account) missing.push('SNOWFLAKE_ACCOUNT');
+      if (!username) missing.push('SNOWFLAKE_USER');
+      if (!privateKey) missing.push('SNOWFLAKE_PRIVATE_KEY');
+      log(`⚠️ Snowflake credentials not configured. Missing: ${missing.join(', ')}. Integration will be unavailable.`);
       return;
     }
     
