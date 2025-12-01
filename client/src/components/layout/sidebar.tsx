@@ -31,8 +31,7 @@ import {
   FileCode, 
   HelpCircle,
   Menu,
-  Database,
-  Layers
+  Database
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -85,7 +84,6 @@ export function Sidebar() {
       userManagement: { name: "User Management", href: "/users", icon: Users, category: "management" },
       templateManagement: { name: "Templates", href: "/templates", icon: FileCode, category: "management" },
       activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity, category: "activity" },
-      fieldMapping: { name: "Field Mapping", href: "/field-mapping", icon: Layers, category: "management" },
       changePassword: { name: "Change Password", href: "/change-password", icon: Key, category: "account" },
     };
 
@@ -133,7 +131,6 @@ export function Sidebar() {
           baseItems.apiManagement,
           baseItems.userManagement,
           baseItems.templateManagement,
-          baseItems.fieldMapping,
           baseItems.activityLogs,
           baseItems.changePassword,
         ];
