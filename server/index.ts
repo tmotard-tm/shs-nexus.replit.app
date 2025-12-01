@@ -138,7 +138,7 @@ async function initializeSnowflake() {
     const isProduction = process.env.NODE_ENV === 'production';
     
     // Log configuration status (without exposing sensitive values)
-    log(`🔍 Snowflake config check: account=${account ? 'set' : 'missing'}, user=${username ? 'set' : 'missing'}, key=${privateKey ? `set (${privateKey.length} chars)` : 'missing'}`);
+    log(`🔍 Snowflake config check: account=${account ? 'set' : 'missing'}, user=${username ? 'set' : 'missing'}, key=${privateKey ? `set (${privateKey.length} chars)` : 'missing'}, env=${isProduction ? 'production' : 'development'}`);
     
     // In development, try to read from file first (file takes precedence)
     if (!isProduction) {
@@ -156,6 +156,10 @@ async function initializeSnowflake() {
       }
     } else {
       log("🚀 Production mode: Using environment variable for private key");
+      // Log first few chars of key to verify it's loaded (safe - just shows format)
+      if (privateKey) {
+        log(`📋 Key format check: starts with "${privateKey.substring(0, 30)}..."`);
+      }
     }
     
     if (!account || !username || !privateKey) {
@@ -167,6 +171,7 @@ async function initializeSnowflake() {
       return;
     }
     
+    log("🔧 Attempting to initialize Snowflake service...");
     initializeSnowflakeService({
       account,
       username,
@@ -177,9 +182,10 @@ async function initializeSnowflake() {
       role: process.env.SNOWFLAKE_ROLE,
     });
     
-    log("✅ Snowflake service initialized");
-  } catch (error) {
+    log("✅ Snowflake service initialized successfully");
+  } catch (error: any) {
     console.error("❌ Failed to initialize Snowflake service:", error);
+    log(`⚠️ Snowflake initialization failed: ${error.message}`);
     log("⚠️ Snowflake integration will be unavailable");
   }
 }
