@@ -19,43 +19,85 @@ export class SnowflakeService {
   constructor(config: SnowflakeConfig) {
     this.config = config;
     
+    console.log('[Snowflake] Raw key length:', config.privateKey.length);
+    console.log('[Snowflake] Raw key first 100 chars:', config.privateKey.substring(0, 100).replace(/\n/g, '\\n'));
+    
     // Normalize PEM string for Snowflake SDK
-    // Handle escaped newlines that often appear in environment variables
+    // Step 1: Handle escaped newlines that often appear in environment variables
     let normalizedPem = config.privateKey.replace(/\\n/g, '\n');
     
-    // Fix broken headers where newlines appear within "-----BEGIN PRIVATE KEY-----"
-    // First, remove all line breaks from the headers and footers specifically
-    const beginMatch = normalizedPem.match(/-----BEGIN[^-]*-----/);
-    const endMatch = normalizedPem.match(/-----END[^-]*-----/);
+    // Step 2: Aggressively fix broken headers/footers
+    // The header might be split like: "-----BEGIN\nPRIVATE\nKEY-----"
+    // We need to find and reconstruct the proper format
     
-    if (beginMatch) {
-      const brokenBegin = beginMatch[0];
-      const fixedBegin = brokenBegin.replace(/\s+/g, ' ').trim().replace(/ /g, ' ');
-      // Normalize to standard PRIVATE KEY format
-      const cleanBegin = fixedBegin.replace(/BEGIN\s+PRIVATE\s+KEY/, 'BEGIN PRIVATE KEY')
-                                   .replace(/BEGIN\s+RSA\s+PRIVATE\s+KEY/, 'BEGIN RSA PRIVATE KEY');
-      normalizedPem = normalizedPem.replace(brokenBegin, cleanBegin);
-      console.log('[Snowflake] Fixed BEGIN header from:', brokenBegin.replace(/\n/g, '\\n'));
-      console.log('[Snowflake] Fixed BEGIN header to:', cleanBegin);
+    // First, check if we have the basic structure markers
+    const hasBeginMarker = normalizedPem.includes('-----BEGIN');
+    const hasEndMarker = normalizedPem.includes('-----END');
+    
+    if (hasBeginMarker && hasEndMarker) {
+      // Extract everything between -----BEGIN and the first -----
+      // This handles cases where the header is split across lines
+      const beginPattern = /-----BEGIN[\s\S]*?-----/;
+      const endPattern = /-----END[\s\S]*?-----/;
+      
+      const beginMatch = normalizedPem.match(beginPattern);
+      const endMatch = normalizedPem.match(endPattern);
+      
+      if (beginMatch) {
+        const brokenBegin = beginMatch[0];
+        // Collapse all whitespace and reconstruct
+        const collapsed = brokenBegin.replace(/\s+/g, ' ').trim();
+        // Extract the key type (PRIVATE KEY, RSA PRIVATE KEY, etc.)
+        const keyTypeMatch = collapsed.match(/BEGIN\s+(.*?)\s*-----$/);
+        if (keyTypeMatch) {
+          const keyType = keyTypeMatch[1].replace(/\s+/g, ' ').trim();
+          const fixedBegin = `-----BEGIN ${keyType}-----`;
+          normalizedPem = normalizedPem.replace(brokenBegin, fixedBegin);
+          console.log('[Snowflake] Fixed BEGIN header from:', brokenBegin.replace(/\n/g, '\\n'));
+          console.log('[Snowflake] Fixed BEGIN header to:', fixedBegin);
+        }
+      }
+      
+      if (endMatch) {
+        const brokenEnd = endMatch[0];
+        // Collapse all whitespace and reconstruct
+        const collapsed = brokenEnd.replace(/\s+/g, ' ').trim();
+        // Extract the key type
+        const keyTypeMatch = collapsed.match(/END\s+(.*?)\s*-----$/);
+        if (keyTypeMatch) {
+          const keyType = keyTypeMatch[1].replace(/\s+/g, ' ').trim();
+          const fixedEnd = `-----END ${keyType}-----`;
+          normalizedPem = normalizedPem.replace(brokenEnd, fixedEnd);
+          console.log('[Snowflake] Fixed END header from:', brokenEnd.replace(/\n/g, '\\n'));
+          console.log('[Snowflake] Fixed END header to:', fixedEnd);
+        }
+      }
     }
     
-    if (endMatch) {
-      const brokenEnd = endMatch[0];
-      const fixedEnd = brokenEnd.replace(/\s+/g, ' ').trim().replace(/ /g, ' ');
-      // Normalize to standard PRIVATE KEY format
-      const cleanEnd = fixedEnd.replace(/END\s+PRIVATE\s+KEY/, 'END PRIVATE KEY')
-                               .replace(/END\s+RSA\s+PRIVATE\s+KEY/, 'END RSA PRIVATE KEY');
-      normalizedPem = normalizedPem.replace(brokenEnd, cleanEnd);
-      console.log('[Snowflake] Fixed END header from:', brokenEnd.replace(/\n/g, '\\n'));
-      console.log('[Snowflake] Fixed END header to:', cleanEnd);
-    }
+    // Step 3: Ensure proper structure with newlines after header and before footer
+    // The key body should have proper line breaks (64 chars per line for base64)
+    normalizedPem = normalizedPem
+      .replace(/(-----BEGIN [^-]+-----)[\s]*/, '$1\n')  // Newline after header
+      .replace(/[\s]*(-----END [^-]+-----)/, '\n$1');   // Newline before footer
     
-    // Ensure the key has proper line breaks if it doesn't already
-    if (!normalizedPem.includes('\n') && normalizedPem.includes(' ')) {
-      // Space-separated format - replace spaces with newlines
-      normalizedPem = normalizedPem.replace(/-----BEGIN (.*?)-----\s*/,  '-----BEGIN $1-----\n');
-      normalizedPem = normalizedPem.replace(/\s*-----END (.*?)-----/, '\n-----END $1-----');
-      normalizedPem = normalizedPem.replace(/\s+/g, '\n');
+    // Step 4: Clean up any extra whitespace in the key body
+    // Split into header, body, footer and reconstruct
+    const headerMatch = normalizedPem.match(/^(-----BEGIN [^-]+-----)/);
+    const footerMatch = normalizedPem.match(/(-----END [^-]+-----)$/);
+    
+    if (headerMatch && footerMatch) {
+      const header = headerMatch[1];
+      const footer = footerMatch[1];
+      let body = normalizedPem
+        .replace(header, '')
+        .replace(footer, '')
+        .replace(/[\s\n\r]+/g, ''); // Remove all whitespace from body
+      
+      // Re-add line breaks every 64 characters (standard PEM format)
+      const bodyLines = body.match(/.{1,64}/g) || [];
+      normalizedPem = header + '\n' + bodyLines.join('\n') + '\n' + footer;
+      
+      console.log('[Snowflake] Normalized key structure: header + ' + bodyLines.length + ' body lines + footer');
     }
     
     // Validate the key by creating a KeyObject, but store the PEM string
@@ -68,7 +110,8 @@ export class SnowflakeService {
       console.log('[Snowflake] Private key successfully validated');
     } catch (error: any) {
       console.error('[Snowflake] Failed to parse private key:', error.message);
-      console.error('[Snowflake] Key starts with:', normalizedPem.substring(0, 50));
+      console.error('[Snowflake] Normalized key starts with:', normalizedPem.substring(0, 100).replace(/\n/g, '\\n'));
+      console.error('[Snowflake] Normalized key ends with:', normalizedPem.substring(normalizedPem.length - 50).replace(/\n/g, '\\n'));
       throw new Error(`Invalid private key format: ${error.message}. Please ensure you're using a PKCS#8 format private key.`);
     }
   }
