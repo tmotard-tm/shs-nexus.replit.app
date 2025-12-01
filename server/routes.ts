@@ -4996,6 +4996,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/snowflake/debug", requireAuth, async (req: any, res) => {
+    try {
+      const account = process.env.SNOWFLAKE_ACCOUNT;
+      const username = process.env.SNOWFLAKE_USER;
+      const privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+      const isProduction = process.env.NODE_ENV === 'production';
+      const configured = isSnowflakeConfigured();
+      
+      res.json({
+        configured,
+        environment: isProduction ? 'production' : 'development',
+        envVars: {
+          SNOWFLAKE_ACCOUNT: account ? `set (${account.length} chars)` : 'missing',
+          SNOWFLAKE_USER: username ? `set (${username.length} chars)` : 'missing',
+          SNOWFLAKE_PRIVATE_KEY: privateKey ? `set (${privateKey.length} chars, starts with "${privateKey.substring(0, 20)}...")` : 'missing',
+          SNOWFLAKE_DATABASE: process.env.SNOWFLAKE_DATABASE ? 'set' : 'missing',
+          SNOWFLAKE_WAREHOUSE: process.env.SNOWFLAKE_WAREHOUSE ? 'set' : 'missing',
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.post("/api/snowflake/test", requireAuth, async (req: any, res) => {
     try {
       const snowflakeService = getSnowflakeService();
