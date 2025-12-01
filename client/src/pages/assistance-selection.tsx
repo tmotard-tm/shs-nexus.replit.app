@@ -1,38 +1,28 @@
 import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
-import { MapPin, Truck, UserPlus, UserMinus, Settings, Map, ArrowRight, Plus, LayoutGrid } from "lucide-react";
+import { MapPin, Truck, UserPlus, UserMinus, Settings, Map, Plus, LayoutGrid } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
 import { FilteredMap } from "@/components/vehicle-map-filters";
 
-type WorkflowOption = "create-vehicle" | "assign-vehicle" | "onboarding" | "offboarding" | "task-queue";
-
 export default function AssistanceSelection() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
-  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowOption>("task-queue");
   const [isAssignUpdateDialogOpen, setIsAssignUpdateDialogOpen] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
 
   const workflowOptions = [
-    { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-500", iconColor: "text-gray-500" },
-    { value: "offboarding", label: "Offboarding", icon: UserMinus, color: "bg-red-500", iconColor: "text-red-500" },
-    { value: "onboarding", label: "Onboarding", icon: UserPlus, color: "bg-purple-500", iconColor: "text-purple-500" },
-    { value: "assign-vehicle", label: "Assign or Update Vehicle", icon: MapPin, color: "bg-green-500", iconColor: "text-green-500" },
-    { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-500", iconColor: "text-blue-500" },
+    { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-600 hover:bg-gray-700", action: () => setLocation("/queue-management") },
+    { value: "offboarding", label: "Offboarding", icon: UserMinus, color: "bg-red-600 hover:bg-red-700", action: () => setLocation("/offboard-technician") },
+    { value: "onboarding", label: "Onboarding", icon: UserPlus, color: "bg-purple-600 hover:bg-purple-700", action: () => setLocation("/onboard-hire") },
+    { value: "assign-vehicle", label: "Assign or Update Vehicle", icon: MapPin, color: "bg-green-600 hover:bg-green-700", action: () => setIsAssignUpdateDialogOpen(true) },
+    { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-600 hover:bg-blue-700", action: () => setLocation("/create-vehicle-location") },
   ];
-
-  const handleWorkflowChange = (value: string) => {
-    setSelectedWorkflow(value as WorkflowOption);
-  };
-
-  const getSelectedOption = () => workflowOptions.find(opt => opt.value === selectedWorkflow);
 
   return (
     <MainContent>
@@ -72,85 +62,25 @@ export default function AssistanceSelection() {
             </p>
           </div>
 
-          {/* Single Card with Dropdown */}
+          {/* Workflow Buttons Card */}
           <Card 
             className="backdrop-blur-sm border-white/20"
             style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
           >
-            <CardHeader className="pb-4">
-              <CardTitle className="text-xl text-gray-800">Select a Workflow</CardTitle>
-              <CardDescription className="text-gray-600">
-                Choose from the available workflows below
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Workflow Dropdown */}
-              <Select value={selectedWorkflow} onValueChange={handleWorkflowChange}>
-                <SelectTrigger className="w-full" data-testid="select-workflow">
-                  <SelectValue placeholder="Select a workflow" />
-                </SelectTrigger>
-                <SelectContent>
-                  {workflowOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value} data-testid={`option-${option.value}`}>
-                      <div className="flex items-center gap-2">
-                        <option.icon className={`h-4 w-4 ${option.iconColor}`} />
-                        <span>{option.label}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* Start Process Button */}
-              {selectedWorkflow === "create-vehicle" && (
-                <Button 
-                  onClick={() => setLocation("/create-vehicle-location")}
-                  className="w-full"
-                  data-testid="button-create-vehicle"
-                >
-                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              )}
-
-              {selectedWorkflow === "assign-vehicle" && (
-                <Button 
-                  onClick={() => setIsAssignUpdateDialogOpen(true)}
-                  className="w-full"
-                  data-testid="button-assign-vehicle"
-                >
-                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              )}
-
-              {selectedWorkflow === "onboarding" && (
-                <Button 
-                  onClick={() => setLocation("/onboard-hire")}
-                  className="w-full"
-                  data-testid="button-onboarding"
-                >
-                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              )}
-
-              {selectedWorkflow === "offboarding" && (
-                <Button 
-                  onClick={() => setLocation("/offboard-technician")}
-                  className="w-full"
-                  data-testid="button-offboarding"
-                >
-                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              )}
-
-              {selectedWorkflow === "task-queue" && (
-                <Button 
-                  onClick={() => setLocation("/queue-management")}
-                  className="w-full"
-                  data-testid="button-task-queue"
-                >
-                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              )}
+            <CardContent className="p-6">
+              <div className="space-y-3">
+                {workflowOptions.map((option) => (
+                  <Button
+                    key={option.value}
+                    onClick={option.action}
+                    className={`w-full justify-start h-14 text-lg text-white ${option.color}`}
+                    data-testid={`button-${option.value}`}
+                  >
+                    <option.icon className="mr-3 h-5 w-5" />
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
             </CardContent>
           </Card>
         </div>
