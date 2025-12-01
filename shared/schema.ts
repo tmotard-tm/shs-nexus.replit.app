@@ -837,3 +837,84 @@ export type MappingNode = typeof mappingNodes.$inferSelect;
 export type InsertMappingNode = z.infer<typeof insertMappingNodeSchema>;
 export type FieldMapping = typeof fieldMappings.$inferSelect;
 export type InsertFieldMapping = z.infer<typeof insertFieldMappingSchema>;
+
+// ============================================
+// Vehicle Assignment Aggregated DTOs
+// ============================================
+
+// Aggregated view combining data from Snowflake, TPMS, and Holman
+export const aggregatedVehicleAssignmentSchema = z.object({
+  // Core assignment data (from our database)
+  id: z.string().optional(),
+  assignmentStatus: z.enum(["active", "inactive", "pending"]).default("active"),
+  lastTpmsSync: z.string().datetime().nullable().optional(),
+  createdAt: z.string().datetime().optional(),
+  updatedAt: z.string().datetime().optional(),
+  
+  // Technician info (from Snowflake all_techs table)
+  techRacfid: z.string(), // Enterprise ID / LDAP ID
+  employeeId: z.string().nullable().optional(),
+  techName: z.string().nullable().optional(),
+  firstName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
+  districtNo: z.string().nullable().optional(),
+  managerName: z.string().nullable().optional(),
+  managerEnterpriseId: z.string().nullable().optional(),
+  employmentStatus: z.string().nullable().optional(),
+  terminationDate: z.string().nullable().optional(),
+  
+  // TPMS data (master for current truck assignment and contact info)
+  truckNo: z.string().nullable().optional(),
+  techId: z.string().nullable().optional(), // TPMS internal tech ID
+  contactNo: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  tpmsAddress: z.object({
+    addressLine1: z.string().nullable().optional(),
+    addressLine2: z.string().nullable().optional(),
+    city: z.string().nullable().optional(),
+    state: z.string().nullable().optional(),
+    zipCode: z.string().nullable().optional(),
+  }).nullable().optional(),
+  
+  // Holman vehicle data (master for vehicle details)
+  holmanVehicleNumber: z.string().nullable().optional(),
+  vehicleVin: z.string().nullable().optional(),
+  vehicleYear: z.string().nullable().optional(),
+  vehicleMake: z.string().nullable().optional(),
+  vehicleModel: z.string().nullable().optional(),
+  vehicleStatus: z.string().nullable().optional(),
+  garagingAddress: z.string().nullable().optional(),
+  
+  // Data source flags (which sources contributed data)
+  dataSources: z.object({
+    snowflake: z.boolean().default(false),
+    tpms: z.boolean().default(false),
+    holman: z.boolean().default(false),
+  }).optional(),
+});
+
+export type AggregatedVehicleAssignment = z.infer<typeof aggregatedVehicleAssignmentSchema>;
+
+// Schema for creating/updating vehicle assignments
+export const upsertVehicleAssignmentSchema = z.object({
+  techRacfid: z.string().min(1, "Enterprise ID is required"),
+  truckNo: z.string().nullable().optional(),
+  assignmentStatus: z.enum(["active", "inactive", "pending"]).default("active"),
+  notes: z.string().nullable().optional(),
+  changedBy: z.string().nullable().optional(),
+  changeSource: z.enum(["manual", "tpms_sync", "offboarding"]).default("manual"),
+});
+
+export type UpsertVehicleAssignment = z.infer<typeof upsertVehicleAssignmentSchema>;
+
+// Query filter for vehicle assignments
+export const vehicleAssignmentFilterSchema = z.object({
+  status: z.enum(["active", "inactive", "pending", "all"]).default("all"),
+  districtNo: z.string().nullable().optional(),
+  hasVehicle: z.boolean().nullable().optional(),
+  searchQuery: z.string().nullable().optional(),
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(100).default(25),
+});
+
+export type VehicleAssignmentFilter = z.infer<typeof vehicleAssignmentFilterSchema>;
