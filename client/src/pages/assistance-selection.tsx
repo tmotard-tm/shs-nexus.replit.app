@@ -63,23 +63,20 @@ export default function AssistanceSelection() {
           </div>
 
           {/* Workflow Buttons Card */}
-          <Card 
-            className="backdrop-blur-sm border-white/20"
-            style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
-          >
+          <Card className="backdrop-blur-sm border-white/20 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95">
             <CardContent className="p-6">
               <div className="grid grid-cols-5 gap-4">
                 {workflowOptions.map((option) => (
                   <button
                     key={option.value}
                     onClick={option.action}
-                    className="flex flex-col items-center gap-2 p-4 rounded-lg hover:bg-gray-100 transition-colors"
+                    className="flex flex-col items-center gap-2 p-4 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                     data-testid={`button-${option.value}`}
                   >
                     <div className={`w-12 h-12 rounded-lg ${option.color} flex items-center justify-center`}>
                       <option.icon className="h-6 w-6 text-white" />
                     </div>
-                    <span className="text-xs text-center text-gray-700 font-medium leading-tight">{option.label}</span>
+                    <span className="text-xs text-center text-gray-700 dark:text-gray-200 font-medium leading-tight">{option.label}</span>
                   </button>
                 ))}
               </div>
