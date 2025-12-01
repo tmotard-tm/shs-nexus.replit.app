@@ -3,10 +3,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
-import { Car, MapPin, Truck, UserPlus, UserMinus, Settings, Map, ArrowRight, Plus, FileText, LayoutGrid } from "lucide-react";
+import { MapPin, Truck, UserPlus, UserMinus, Settings, Map, ArrowRight, Plus, FileText, LayoutGrid } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
@@ -89,170 +88,73 @@ export default function AssistanceSelection() {
                 Choose from the available workflows below
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-4">
               {/* Workflow Dropdown */}
-              <div className="space-y-2">
-                <Label className="text-sm text-gray-700">Workflow Type</Label>
-                <Select value={selectedWorkflow} onValueChange={handleWorkflowChange}>
-                  <SelectTrigger className="w-full" data-testid="select-workflow">
-                    <SelectValue placeholder="Select a workflow" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {workflowOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value} data-testid={`option-${option.value}`}>
-                        <div className="flex items-center gap-2">
-                          <option.icon className={`h-4 w-4 ${option.iconColor}`} />
-                          <span>{option.label}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <Select value={selectedWorkflow} onValueChange={handleWorkflowChange}>
+                <SelectTrigger className="w-full" data-testid="select-workflow">
+                  <SelectValue placeholder="Select a workflow" />
+                </SelectTrigger>
+                <SelectContent>
+                  {workflowOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value} data-testid={`option-${option.value}`}>
+                      <div className="flex items-center gap-2">
+                        <option.icon className={`h-4 w-4 ${option.iconColor}`} />
+                        <span>{option.label}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-              {/* Create Vehicle Content */}
+              {/* Start Process Button */}
               {selectedWorkflow === "create-vehicle" && (
-                <div className="space-y-4 pt-4 border-t">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
-                      <Car className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-800">Create a New Vehicle</h3>
-                      <p className="text-sm text-gray-600">Add New Vehicles to the System</p>
-                    </div>
-                    <CopyLinkButton
-                      path="/forms/create-vehicle"
-                      preserveQuery={false}
-                      variant="icon"
-                      className="h-7 w-7"
-                      data-testid="button-copy-link-create-vehicle"
-                    />
-                  </div>
-                  <Button 
-                    onClick={() => setLocation("/create-vehicle-location")}
-                    className="w-full"
-                    data-testid="button-create-vehicle"
-                  >
-                    Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </div>
+                <Button 
+                  onClick={() => setLocation("/create-vehicle-location")}
+                  className="w-full"
+                  data-testid="button-create-vehicle"
+                >
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
               )}
 
-              {/* Assign Vehicle Content */}
               {selectedWorkflow === "assign-vehicle" && (
-                <div className="space-y-4 pt-4 border-t">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-green-500 flex items-center justify-center">
-                      <MapPin className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-800">Assign or Update a Vehicle</h3>
-                      <p className="text-sm text-gray-600">Assign Existing Vehicles to Users</p>
-                    </div>
-                    <CopyLinkButton
-                      path="/forms/assign-vehicle"
-                      preserveQuery={false}
-                      variant="icon"
-                      className="h-7 w-7"
-                      data-testid="button-copy-link-assign-vehicle"
-                    />
-                  </div>
-                  <Button 
-                    onClick={() => setIsAssignUpdateDialogOpen(true)}
-                    className="w-full"
-                    data-testid="button-assign-vehicle"
-                  >
-                    Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </div>
+                <Button 
+                  onClick={() => setIsAssignUpdateDialogOpen(true)}
+                  className="w-full"
+                  data-testid="button-assign-vehicle"
+                >
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
               )}
 
-              {/* Onboarding Content */}
               {selectedWorkflow === "onboarding" && (
-                <div className="space-y-4 pt-4 border-t">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-purple-500 flex items-center justify-center">
-                      <UserPlus className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-800">Onboarding</h3>
-                      <p className="text-sm text-gray-600">Process New Employee Onboarding</p>
-                    </div>
-                    <CopyLinkButton
-                      path="/forms/onboarding"
-                      preserveQuery={false}
-                      variant="icon"
-                      className="h-7 w-7"
-                      data-testid="button-copy-link-onboarding"
-                    />
-                  </div>
-                  <Button 
-                    onClick={() => setLocation("/onboard-hire")}
-                    className="w-full"
-                    data-testid="button-onboarding"
-                  >
-                    Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </div>
+                <Button 
+                  onClick={() => setLocation("/onboard-hire")}
+                  className="w-full"
+                  data-testid="button-onboarding"
+                >
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
               )}
 
-              {/* Offboarding Content */}
               {selectedWorkflow === "offboarding" && (
-                <div className="space-y-4 pt-4 border-t">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-red-500 flex items-center justify-center">
-                      <UserMinus className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-800">Offboard Employee</h3>
-                      <p className="text-sm text-gray-600">Process Employee Offboarding</p>
-                    </div>
-                    <CopyLinkButton
-                      path="/forms/offboarding"
-                      preserveQuery={false}
-                      variant="icon"
-                      className="h-7 w-7"
-                      data-testid="button-copy-link-offboarding"
-                    />
-                  </div>
-                  <Button 
-                    onClick={() => setLocation("/offboard-technician")}
-                    className="w-full"
-                    data-testid="button-offboarding"
-                  >
-                    Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </div>
+                <Button 
+                  onClick={() => setLocation("/offboard-technician")}
+                  className="w-full"
+                  data-testid="button-offboarding"
+                >
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
               )}
 
-              {/* Sears BYOV Content */}
               {selectedWorkflow === "sears-byov" && (
-                <div className="space-y-4 pt-4 border-t">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center">
-                      <FileText className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-800">Sears BYOV Program</h3>
-                      <p className="text-sm text-gray-600">Submit BYOV Program Enrollment</p>
-                    </div>
-                    <CopyLinkButton
-                      path="/forms/byov-enrollment"
-                      preserveQuery={false}
-                      variant="icon"
-                      className="h-7 w-7"
-                      data-testid="button-copy-link-byov-enrollment"
-                    />
-                  </div>
-                  <Button 
-                    onClick={() => setLocation("/sears-drive-enrollment")}
-                    className="w-full"
-                    data-testid="button-sears-drive"
-                  >
-                    Start Process <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </div>
+                <Button 
+                  onClick={() => setLocation("/sears-drive-enrollment")}
+                  className="w-full"
+                  data-testid="button-sears-drive"
+                >
+                  Start Process <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
               )}
             </CardContent>
           </Card>
