@@ -79,6 +79,14 @@ export class HolmanApiService {
       console.warn('[Holman] API credentials not fully configured');
     }
   }
+  
+  hasCredentials(): boolean {
+    return !!(this.apiEndpoint && this.clientId && this.clientSecret);
+  }
+  
+  isConfigured(): boolean {
+    return this.hasCredentials();
+  }
 
   private async authenticate(): Promise<string> {
     console.log('[Holman] Attempting authentication to:', this.authEndpoint);

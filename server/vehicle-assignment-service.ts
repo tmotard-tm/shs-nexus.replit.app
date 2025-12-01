@@ -35,14 +35,64 @@ interface EnrichedAssignment extends TechVehicleAssignment {
   };
 }
 
+interface AssignmentFilters {
+  status?: string;
+  districtNo?: string;
+  truckNo?: string;
+  search?: string;
+}
+
+interface PaginationOptions {
+  page?: number;
+  limit?: number;
+}
+
 export class VehicleAssignmentService {
   
-  async getAggregatedAssignments(status?: string): Promise<AggregatedVehicleAssignment[]> {
-    const assignments = await storage.getTechVehicleAssignments(status);
+  isFullyConfigured(): boolean {
+    const tpmsService = getTPMSService();
+    return isSnowflakeConfigured() && tpmsService.isConfigured() && holmanApiService.hasCredentials();
+  }
+  
+  async getAggregatedAssignments(
+    filters?: AssignmentFilters,
+    pagination?: PaginationOptions
+  ): Promise<AggregatedVehicleAssignment[]> {
+    const assignments = await storage.getTechVehicleAssignments(filters?.status);
+    
+    let filteredAssignments = assignments;
+    
+    if (filters?.districtNo) {
+      filteredAssignments = filteredAssignments.filter(a => a.districtNo === filters.districtNo);
+    }
+    
+    if (filters?.truckNo) {
+      const normalizedFilter = this.normalizeTruckNumber(filters.truckNo);
+      filteredAssignments = filteredAssignments.filter(a => 
+        a.truckNo && this.normalizeTruckNumber(a.truckNo).includes(normalizedFilter)
+      );
+    }
+    
+    if (filters?.search) {
+      const searchLower = filters.search.toLowerCase();
+      filteredAssignments = filteredAssignments.filter(a =>
+        (a.techName || '').toLowerCase().includes(searchLower) ||
+        (a.firstName || '').toLowerCase().includes(searchLower) ||
+        (a.lastName || '').toLowerCase().includes(searchLower) ||
+        (a.techRacfid || '').toLowerCase().includes(searchLower) ||
+        (a.employeeId || '').toLowerCase().includes(searchLower) ||
+        (a.truckNo || '').toLowerCase().includes(searchLower)
+      );
+    }
+    
+    const page = pagination?.page || 1;
+    const limit = pagination?.limit || 50;
+    const startIndex = (page - 1) * limit;
+    const paginatedAssignments = filteredAssignments.slice(startIndex, startIndex + limit);
     
     const enrichedAssignments: AggregatedVehicleAssignment[] = [];
     
-    for (const assignment of assignments) {
+    for (const assignment of paginatedAssignments) {
       const enriched = await this.enrichAssignmentData(assignment);
       enrichedAssignments.push(enriched);
     }

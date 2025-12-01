@@ -5809,6 +5809,201 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================================================
+  // Vehicle Assignment Routes - Aggregated Data from Snowflake, TPMS, Holman
+  // ==================================================
+  console.log("Registering Vehicle Assignment API routes...");
+  const { vehicleAssignmentService } = await import("./vehicle-assignment-service");
+
+  // Get all aggregated vehicle assignments with optional filters
+  app.get("/api/vehicle-assignments", requireAuth, async (req: any, res) => {
+    try {
+      const { status, districtNo, truckNo, search, page = '1', limit = '50' } = req.query;
+      
+      const filters = {
+        status: status as string,
+        districtNo: districtNo as string,
+        truckNo: truckNo as string,
+        search: search as string,
+      };
+      
+      const pageNum = parseInt(page as string, 10);
+      const limitNum = parseInt(limit as string, 10);
+      
+      const assignments = await vehicleAssignmentService.getAggregatedAssignments(filters, {
+        page: pageNum,
+        limit: limitNum,
+      });
+      
+      res.json({ success: true, data: assignments });
+    } catch (error: any) {
+      console.error("Error fetching vehicle assignments:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get a single assignment by tech enterprise ID (RACFID)
+  app.get("/api/vehicle-assignments/tech/:techRacfid", requireAuth, async (req: any, res) => {
+    try {
+      const { techRacfid } = req.params;
+      const assignment = await vehicleAssignmentService.getAggregatedAssignmentByTechRacfid(techRacfid);
+      
+      if (!assignment) {
+        return res.status(404).json({ success: false, message: 'Technician not found' });
+      }
+      
+      res.json({ success: true, data: assignment });
+    } catch (error: any) {
+      console.error("Error fetching assignment by tech:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get a single assignment by truck number
+  app.get("/api/vehicle-assignments/truck/:truckNo", requireAuth, async (req: any, res) => {
+    try {
+      const { truckNo } = req.params;
+      const assignment = await vehicleAssignmentService.getAggregatedAssignmentByTruckNo(truckNo);
+      
+      if (!assignment) {
+        return res.status(404).json({ success: false, message: 'Vehicle assignment not found' });
+      }
+      
+      res.json({ success: true, data: assignment });
+    } catch (error: any) {
+      console.error("Error fetching assignment by truck:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Search technicians from Snowflake for assignment lookups
+  app.get("/api/vehicle-assignments/search/technicians", requireAuth, async (req: any, res) => {
+    try {
+      const { q } = req.query;
+      
+      if (!q || (q as string).length < 2) {
+        return res.json({ success: true, data: [] });
+      }
+      
+      const technicians = await vehicleAssignmentService.searchTechnicians(q as string);
+      res.json({ success: true, data: technicians });
+    } catch (error: any) {
+      console.error("Error searching technicians:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Sync assignment from TPMS (pull latest data for a specific tech)
+  app.post("/api/vehicle-assignments/sync/tpms/:techRacfid", requireAuth, async (req: any, res) => {
+    try {
+      const { techRacfid } = req.params;
+      const currentUser = req.user.username;
+      
+      const assignment = await vehicleAssignmentService.syncFromTPMS(techRacfid, currentUser);
+      
+      if (!assignment) {
+        return res.status(404).json({ success: false, message: 'Could not sync from TPMS - technician not found' });
+      }
+      
+      res.json({ success: true, data: assignment });
+    } catch (error: any) {
+      console.error("Error syncing from TPMS:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Create or update a vehicle assignment manually
+  app.post("/api/vehicle-assignments", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !['superadmin', 'admin', 'agent'].includes(currentUser.role)) {
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      
+      const { techRacfid, truckNo, assignmentStatus, notes } = req.body;
+      
+      if (!techRacfid) {
+        return res.status(400).json({ message: "Tech RACFID is required" });
+      }
+      
+      const assignment = await vehicleAssignmentService.createOrUpdateAssignment(
+        techRacfid,
+        truckNo || null,
+        assignmentStatus || 'active',
+        req.user.username,
+        notes
+      );
+      
+      if (!assignment) {
+        return res.status(500).json({ success: false, message: 'Failed to create/update assignment' });
+      }
+      
+      res.json({ success: true, data: assignment });
+    } catch (error: any) {
+      console.error("Error creating/updating assignment:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Unassign a vehicle from a technician
+  app.delete("/api/vehicle-assignments/:techRacfid", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !['superadmin', 'admin', 'agent'].includes(currentUser.role)) {
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      
+      const { techRacfid } = req.params;
+      const { notes } = req.body || {};
+      
+      const assignment = await vehicleAssignmentService.unassignVehicle(
+        techRacfid,
+        req.user.username,
+        notes
+      );
+      
+      if (!assignment) {
+        return res.status(404).json({ success: false, message: 'Assignment not found' });
+      }
+      
+      res.json({ success: true, data: assignment });
+    } catch (error: any) {
+      console.error("Error unassigning vehicle:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get assignment history for a technician
+  app.get("/api/vehicle-assignments/history/:techRacfid", requireAuth, async (req: any, res) => {
+    try {
+      const { techRacfid } = req.params;
+      const history = await vehicleAssignmentService.getAssignmentHistory(techRacfid);
+      res.json({ success: true, data: history });
+    } catch (error: any) {
+      console.error("Error fetching assignment history:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get service status - check if all data sources are configured
+  app.get("/api/vehicle-assignments/status", requireAuth, async (req: any, res) => {
+    try {
+      const isConfigured = vehicleAssignmentService.isFullyConfigured();
+      const status = {
+        configured: isConfigured,
+        dataSources: {
+          snowflake: isSnowflakeConfigured(),
+          tpms: getTPMSService().isConfigured(),
+          holman: holmanApiService.isConfigured(),
+        }
+      };
+      res.json({ success: true, data: status });
+    } catch (error: any) {
+      console.error("Error fetching service status:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack
