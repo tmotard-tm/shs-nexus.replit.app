@@ -229,6 +229,19 @@ export interface IStorage {
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
   updateSyncLog(id: string, updates: Partial<SyncLog>): Promise<SyncLog | undefined>;
 
+  // Tech Vehicle Assignments Module
+  getTechVehicleAssignment(id: string): Promise<TechVehicleAssignment | undefined>;
+  getTechVehicleAssignmentByTechRacfid(techRacfid: string): Promise<TechVehicleAssignment | undefined>;
+  getTechVehicleAssignmentByTruckNo(truckNo: string): Promise<TechVehicleAssignment | undefined>;
+  getTechVehicleAssignments(status?: string): Promise<TechVehicleAssignment[]>;
+  createTechVehicleAssignment(assignment: InsertTechVehicleAssignment): Promise<TechVehicleAssignment>;
+  updateTechVehicleAssignment(id: string, updates: Partial<TechVehicleAssignment>): Promise<TechVehicleAssignment | undefined>;
+  deleteTechVehicleAssignment(id: string): Promise<boolean>;
+  
+  // Tech Vehicle Assignment History Module
+  getTechVehicleAssignmentHistory(techRacfid: string): Promise<TechVehicleAssignmentHistory[]>;
+  createTechVehicleAssignmentHistory(history: InsertTechVehicleAssignmentHistory): Promise<TechVehicleAssignmentHistory>;
+
   // Field Mapping Module
   getIntegrationDataSources(): Promise<IntegrationDataSource[]>;
   getIntegrationDataSource(id: string): Promise<IntegrationDataSource | undefined>;
@@ -1149,6 +1162,44 @@ export class MemStorage implements IStorage {
 
   async updateSyncLog(_id: string, _updates: Partial<SyncLog>): Promise<SyncLog | undefined> {
     return undefined; // Not implemented in memory storage
+  }
+
+  // Tech Vehicle Assignments Module - Stub implementation for MemStorage
+  async getTechVehicleAssignment(_id: string): Promise<TechVehicleAssignment | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getTechVehicleAssignmentByTechRacfid(_techRacfid: string): Promise<TechVehicleAssignment | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getTechVehicleAssignmentByTruckNo(_truckNo: string): Promise<TechVehicleAssignment | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getTechVehicleAssignments(_status?: string): Promise<TechVehicleAssignment[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async createTechVehicleAssignment(_assignment: InsertTechVehicleAssignment): Promise<TechVehicleAssignment> {
+    throw new Error("Tech vehicle assignments not implemented in memory storage - use database storage");
+  }
+
+  async updateTechVehicleAssignment(_id: string, _updates: Partial<TechVehicleAssignment>): Promise<TechVehicleAssignment | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async deleteTechVehicleAssignment(_id: string): Promise<boolean> {
+    return false; // Not implemented in memory storage
+  }
+
+  // Tech Vehicle Assignment History Module - Stub implementation for MemStorage
+  async getTechVehicleAssignmentHistory(_techRacfid: string): Promise<TechVehicleAssignmentHistory[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async createTechVehicleAssignmentHistory(_history: InsertTechVehicleAssignmentHistory): Promise<TechVehicleAssignmentHistory> {
+    throw new Error("Tech vehicle assignment history not implemented in memory storage - use database storage");
   }
 
   // Activity Logs
@@ -3061,6 +3112,75 @@ export class DatabaseStorage implements IStorage {
     const result = await db.update(syncLogs)
       .set(updates)
       .where(eq(syncLogs.id, id))
+      .returning();
+    return result[0];
+  }
+
+  // Tech Vehicle Assignments Module
+  async getTechVehicleAssignment(id: string): Promise<TechVehicleAssignment | undefined> {
+    const result = await db.select().from(techVehicleAssignments).where(eq(techVehicleAssignments.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getTechVehicleAssignmentByTechRacfid(techRacfid: string): Promise<TechVehicleAssignment | undefined> {
+    const result = await db.select().from(techVehicleAssignments)
+      .where(eq(techVehicleAssignments.techRacfid, techRacfid.toUpperCase()))
+      .limit(1);
+    return result[0];
+  }
+
+  async getTechVehicleAssignmentByTruckNo(truckNo: string): Promise<TechVehicleAssignment | undefined> {
+    const result = await db.select().from(techVehicleAssignments)
+      .where(eq(techVehicleAssignments.truckNo, truckNo))
+      .limit(1);
+    return result[0];
+  }
+
+  async getTechVehicleAssignments(status?: string): Promise<TechVehicleAssignment[]> {
+    if (status && status !== 'all') {
+      return await db.select().from(techVehicleAssignments)
+        .where(eq(techVehicleAssignments.assignmentStatus, status))
+        .orderBy(techVehicleAssignments.techName);
+    }
+    return await db.select().from(techVehicleAssignments).orderBy(techVehicleAssignments.techName);
+  }
+
+  async createTechVehicleAssignment(assignment: InsertTechVehicleAssignment): Promise<TechVehicleAssignment> {
+    const result = await db.insert(techVehicleAssignments)
+      .values({
+        ...assignment,
+        techRacfid: assignment.techRacfid.toUpperCase(),
+      })
+      .returning();
+    return result[0];
+  }
+
+  async updateTechVehicleAssignment(id: string, updates: Partial<TechVehicleAssignment>): Promise<TechVehicleAssignment | undefined> {
+    const result = await db.update(techVehicleAssignments)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(techVehicleAssignments.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteTechVehicleAssignment(id: string): Promise<boolean> {
+    const result = await db.delete(techVehicleAssignments).where(eq(techVehicleAssignments.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // Tech Vehicle Assignment History Module
+  async getTechVehicleAssignmentHistory(techRacfid: string): Promise<TechVehicleAssignmentHistory[]> {
+    return await db.select().from(techVehicleAssignmentHistory)
+      .where(eq(techVehicleAssignmentHistory.techRacfid, techRacfid.toUpperCase()))
+      .orderBy(desc(techVehicleAssignmentHistory.createdAt));
+  }
+
+  async createTechVehicleAssignmentHistory(history: InsertTechVehicleAssignmentHistory): Promise<TechVehicleAssignmentHistory> {
+    const result = await db.insert(techVehicleAssignmentHistory)
+      .values({
+        ...history,
+        techRacfid: history.techRacfid.toUpperCase(),
+      })
       .returning();
     return result[0];
   }
