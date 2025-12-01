@@ -191,7 +191,7 @@ export const termedTechs = pgTable("termed_techs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   // Core fields from Snowflake (mapped per user requirements)
   employeeId: varchar("employee_id", { length: 11 }).notNull().unique(), // EMPL_ID
-  techRacfid: varchar("tech_racfid", { length: 20 }).notNull(), // ENTERPRISE_ID
+  techRacfid: varchar("tech_racfid", { length: 7 }).notNull(), // ENTERPRISE_ID
   techName: text("tech_name").notNull(), // FULL_NAME
   lastDayWorked: date("last_day_worked"), // DATE_LAST_WORKED
   // Additional useful fields from Snowflake
@@ -223,7 +223,7 @@ export const allTechs = pgTable("all_techs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   // Core fields
   employeeId: varchar("employee_id", { length: 11 }).notNull().unique(), // EMPL_ID
-  techRacfid: varchar("tech_racfid", { length: 20 }).notNull(), // ENTERPRISE_ID
+  techRacfid: varchar("tech_racfid", { length: 7 }).notNull(), // ENTERPRISE_ID
   techName: text("tech_name").notNull(), // FULL_NAME
   // Additional fields from Snowflake
   firstName: text("first_name"),
