@@ -124,35 +124,43 @@ async function seedTemplatesOnStartup() {
 
 /**
  * Initialize Snowflake service with environment variables
+ * NOTE: In production, we ONLY use environment variables.
+ * The file-based key loading is ONLY for development and uses conditional require
+ * to avoid bundler issues with Node.js core modules.
  */
 async function initializeSnowflake() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  
   try {
     const { initializeSnowflakeService } = await import("./snowflake-service");
-    const fs = await import("fs/promises");
-    const path = await import("path");
-    const { fileURLToPath } = await import("url");
     
     const account = process.env.SNOWFLAKE_ACCOUNT;
     const username = process.env.SNOWFLAKE_USER;
     let privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
-    const isProduction = process.env.NODE_ENV === 'production';
     
     // Log configuration status (without exposing sensitive values)
     log(`🔍 Snowflake config check: account=${account ? 'set' : 'missing'}, user=${username ? 'set' : 'missing'}, key=${privateKey ? `set (${privateKey.length} chars)` : 'missing'}, env=${isProduction ? 'production' : 'development'}`);
     
-    // In development, try to read from file first (file takes precedence)
+    // In development ONLY, try to read from file (file takes precedence)
     if (!isProduction) {
-      const __filename = fileURLToPath(import.meta.url);
-      const __dirname = path.dirname(__filename);
-      const keyFilePath = path.join(__dirname, "snowflake-private-key.p8");
       try {
-        const fileExists = await fs.access(keyFilePath).then(() => true).catch(() => false);
-        if (fileExists) {
-          privateKey = await fs.readFile(keyFilePath, 'utf-8');
+        // Dynamic import for Node.js core modules in development
+        const fs = await import("fs");
+        const path = await import("path");
+        const { fileURLToPath } = await import("url");
+        
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+        const keyFilePath = path.join(__dirname, "snowflake-private-key.p8");
+        
+        if (fs.existsSync(keyFilePath)) {
+          privateKey = fs.readFileSync(keyFilePath, 'utf-8');
           log("📄 Using Snowflake private key from file");
+        } else {
+          log("📝 Key file not found, using environment variable");
         }
-      } catch (fileError) {
-        log("📝 Key file not found, using environment variable");
+      } catch (fileError: any) {
+        log(`📝 File-based key loading skipped: ${fileError.message}`);
       }
     } else {
       log("🚀 Production mode: Using environment variable for private key");
