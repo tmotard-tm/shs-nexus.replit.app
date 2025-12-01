@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
-import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User } from "lucide-react";
+import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User, Database, Loader2, RefreshCw, CheckCircle } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
@@ -62,6 +62,10 @@ export default function AssignVehicleLocation() {
     rentalVanNumber: "",
     assignmentReason: ""
   });
+  
+  const [techLookupQuery, setTechLookupQuery] = useState("");
+  const [isLookingUpTech, setIsLookingUpTech] = useState(false);
+  const [techLookupResult, setTechLookupResult] = useState<any>(null);
 
   // Real data from CSV
   const employees = [
@@ -318,6 +322,60 @@ export default function AssignVehicleLocation() {
     setSelectedVehicle(vehicle || null);
     setVehicleAssignment(prev => ({ ...prev, vehicleId: vehicleVin }));
     setIsAssignmentDialogOpen(true);
+  };
+
+  const handleTechLookup = async () => {
+    if (!techLookupQuery.trim()) return;
+    
+    setIsLookingUpTech(true);
+    setTechLookupResult(null);
+    
+    try {
+      const response = await fetch(`/api/vehicle-assignments/tech/${techLookupQuery.trim().toUpperCase()}`);
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          toast({
+            title: "Technician Not Found",
+            description: `No technician found with Enterprise ID: ${techLookupQuery}`,
+            variant: "destructive",
+          });
+        } else {
+          throw new Error('Failed to lookup technician');
+        }
+        return;
+      }
+      
+      const result = await response.json();
+      if (result.success && result.data) {
+        setTechLookupResult(result.data);
+        
+        setEmployeeData(prev => ({
+          ...prev,
+          firstName: result.data.firstName || prev.firstName,
+          lastName: result.data.lastName || prev.lastName,
+          enterpriseId: result.data.techRacfid || prev.enterpriseId,
+          techId: result.data.techId || prev.techId,
+          email: result.data.email || prev.email,
+          phone: result.data.contactNo || prev.phone,
+          district: result.data.districtNo || prev.district,
+        }));
+        
+        toast({
+          title: "Technician Data Loaded",
+          description: `Loaded data for ${result.data.techName || result.data.techRacfid}`,
+        });
+      }
+    } catch (error: any) {
+      console.error('Tech lookup error:', error);
+      toast({
+        title: "Lookup Failed",
+        description: error.message || "Failed to lookup technician data",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLookingUpTech(false);
+    }
   };
 
 
@@ -606,6 +664,78 @@ export default function AssignVehicleLocation() {
                 {/* Employee Information Section */}
                 <div className="border-t pt-6">
                   <h4 className="font-semibold mb-4 text-lg">Employee Information</h4>
+                  
+                  {/* Tech Lookup Section */}
+                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Database className="h-5 w-5 text-blue-600" />
+                      <span className="font-medium text-blue-900 dark:text-blue-100">Lookup Employee from System</span>
+                    </div>
+                    <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
+                      Enter an Enterprise ID to auto-populate employee data from Snowflake, TPMS, and Holman
+                    </p>
+                    <div className="flex gap-2">
+                      <div className="flex-1 relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Enter Enterprise ID (e.g., JSMITH01)..."
+                          value={techLookupQuery}
+                          onChange={(e) => setTechLookupQuery(e.target.value.toUpperCase())}
+                          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleTechLookup())}
+                          className="pl-9"
+                          data-testid="input-tech-lookup"
+                        />
+                      </div>
+                      <Button 
+                        type="button" 
+                        onClick={handleTechLookup} 
+                        disabled={isLookingUpTech || !techLookupQuery.trim()}
+                        data-testid="button-tech-lookup"
+                      >
+                        {isLookingUpTech ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Search className="h-4 w-4" />
+                        )}
+                        <span className="ml-2">{isLookingUpTech ? 'Looking up...' : 'Lookup'}</span>
+                      </Button>
+                    </div>
+                    
+                    {techLookupResult && (
+                      <div className="mt-3 p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
+                        <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                          <CheckCircle className="h-4 w-4" />
+                          <span className="text-sm font-medium">Data loaded from system</span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Name:</span>{' '}
+                            <span className="font-medium">{techLookupResult.techName || '-'}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Enterprise ID:</span>{' '}
+                            <span className="font-mono">{techLookupResult.techRacfid || '-'}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Current Truck:</span>{' '}
+                            <span className="font-mono">{techLookupResult.truckNo || 'None assigned'}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">District:</span>{' '}
+                            <span>{techLookupResult.districtNo || '-'}</span>
+                          </div>
+                        </div>
+                        {techLookupResult.dataSources && (
+                          <div className="mt-2 flex gap-1 items-center text-xs text-muted-foreground">
+                            <span>Data from:</span>
+                            {techLookupResult.dataSources.snowflake && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded">Snowflake</span>}
+                            {techLookupResult.dataSources.tpms && <span className="px-1.5 py-0.5 bg-green-100 text-green-800 rounded">TPMS</span>}
+                            {techLookupResult.dataSources.holman && <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded">Holman</span>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div className="space-y-2">
