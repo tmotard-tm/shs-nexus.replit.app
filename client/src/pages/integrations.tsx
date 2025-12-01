@@ -16,7 +16,7 @@ import { ApiConfiguration, AllTech } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { 
-  Plus, Settings, Trash2, TestTube, Database, ArrowRight, 
+  Plus, Settings, TestTube, Database, ArrowRight, 
   ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Play, Truck, RefreshCw, Users,
   Search, Clock, AlertCircle
 } from "lucide-react";
@@ -569,15 +569,6 @@ export default function Integrations() {
                   onCheckedChange={setHolmanEnabled}
                   data-testid="switch-holman-enabled"
                 />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground hover:text-destructive"
-                  onClick={() => toast({ title: "Delete", description: "Integration deletion not yet implemented", variant: "destructive" })}
-                  data-testid="button-delete-holman"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
               </div>
             </div>
             
@@ -640,15 +631,6 @@ export default function Integrations() {
                     onCheckedChange={setSnowflakeEnabled}
                     data-testid="switch-snowflake-enabled"
                   />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-destructive"
-                    onClick={() => toast({ title: "Delete", description: "Integration deletion not yet implemented", variant: "destructive" })}
-                    data-testid="button-delete-snowflake"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
                 </div>
               </div>
               <CollapsibleContent className="mt-2 ml-4 border-l-2 border-blue-500/20 pl-4 space-y-4">
@@ -976,15 +958,6 @@ export default function Integrations() {
                     onCheckedChange={setTpmsEnabled}
                     data-testid="switch-tpms-enabled"
                   />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-destructive"
-                    onClick={() => toast({ title: "Delete", description: "Integration deletion not yet implemented", variant: "destructive" })}
-                    data-testid="button-delete-tpms"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
                 </div>
               </div>
               <CollapsibleContent className="mt-2 ml-4 border-l-2 border-orange-500/20 pl-4 space-y-4">
