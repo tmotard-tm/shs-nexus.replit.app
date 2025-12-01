@@ -125,8 +125,7 @@ async function seedTemplatesOnStartup() {
 /**
  * Initialize Snowflake service with environment variables
  * NOTE: In production, we ONLY use environment variables.
- * The file-based key loading is ONLY for development and uses conditional require
- * to avoid bundler issues with Node.js core modules.
+ * The file-based key loading is ONLY for development.
  */
 async function initializeSnowflake() {
   const isProduction = process.env.NODE_ENV === 'production';
@@ -142,19 +141,13 @@ async function initializeSnowflake() {
     log(`🔍 Snowflake config check: account=${account ? 'set' : 'missing'}, user=${username ? 'set' : 'missing'}, key=${privateKey ? `set (${privateKey.length} chars)` : 'missing'}, env=${isProduction ? 'production' : 'development'}`);
     
     // In development ONLY, try to read from file (file takes precedence)
+    // We dynamically import a separate module to avoid bundler issues
     if (!isProduction) {
       try {
-        // Dynamic import for Node.js core modules in development
-        const fs = await import("fs");
-        const path = await import("path");
-        const { fileURLToPath } = await import("url");
-        
-        const __filename = fileURLToPath(import.meta.url);
-        const __dirname = path.dirname(__filename);
-        const keyFilePath = path.join(__dirname, "snowflake-private-key.p8");
-        
-        if (fs.existsSync(keyFilePath)) {
-          privateKey = fs.readFileSync(keyFilePath, 'utf-8');
+        const { loadKeyFromFile } = await import("./snowflake-key-loader");
+        const fileKey = loadKeyFromFile();
+        if (fileKey) {
+          privateKey = fileKey;
           log("📄 Using Snowflake private key from file");
         } else {
           log("📝 Key file not found, using environment variable");
