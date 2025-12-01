@@ -191,7 +191,7 @@ export const termedTechs = pgTable("termed_techs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   // Core fields from Snowflake (mapped per user requirements)
   employeeId: varchar("employee_id", { length: 11 }).notNull().unique(), // EMPL_ID
-  techRacfid: varchar("tech_racfid", { length: 7 }).notNull(), // ENTERPRISE_ID
+  techRacfid: varchar("tech_racfid", { length: 20 }).notNull(), // ENTERPRISE_ID
   techName: text("tech_name").notNull(), // FULL_NAME
   lastDayWorked: date("last_day_worked"), // DATE_LAST_WORKED
   // Additional useful fields from Snowflake
@@ -223,7 +223,7 @@ export const allTechs = pgTable("all_techs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   // Core fields
   employeeId: varchar("employee_id", { length: 11 }).notNull().unique(), // EMPL_ID
-  techRacfid: varchar("tech_racfid", { length: 7 }).notNull(), // ENTERPRISE_ID
+  techRacfid: varchar("tech_racfid", { length: 20 }).notNull(), // ENTERPRISE_ID
   techName: text("tech_name").notNull(), // FULL_NAME
   // Additional fields from Snowflake
   firstName: text("first_name"),
@@ -257,6 +257,57 @@ export const syncLogs = pgTable("sync_logs", {
   queueItemsCreated: integer("queue_items_created").default(0),
   errorMessage: text("error_message"),
   triggeredBy: text("triggered_by"), // scheduler, manual, api
+});
+
+// Tech-Vehicle Assignments from TPMS (links technicians to their assigned trucks)
+export const techVehicleAssignments = pgTable("tech_vehicle_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Technician info (from all_techs/TPMS)
+  techRacfid: varchar("tech_racfid", { length: 20 }).notNull(), // Enterprise ID / LDAP ID
+  employeeId: varchar("employee_id", { length: 11 }), // Optional link to all_techs
+  techName: text("tech_name"),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  districtNo: varchar("district_no"),
+  // Vehicle info (from TPMS)
+  truckNo: varchar("truck_no", { length: 20 }), // TPMS truck number
+  vehicleId: varchar("vehicle_id"), // Optional link to vehicles table
+  // TPMS additional data
+  techId: varchar("tech_id", { length: 20 }), // TPMS internal tech ID
+  contactNo: varchar("contact_no", { length: 20 }),
+  email: text("email"),
+  // Assignment status
+  assignmentStatus: text("assignment_status").notNull().default("active"), // active, inactive, pending
+  lastTpmsSync: timestamp("last_tpms_sync"),
+  tpmsDataRaw: text("tpms_data_raw"), // JSON string of full TPMS response for debugging
+  // Tracking
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    techRacfidIdx: index("tva_tech_racfid_idx").on(table.techRacfid),
+    truckNoIdx: index("tva_truck_no_idx").on(table.truckNo),
+    districtNoIdx: index("tva_district_no_idx").on(table.districtNo),
+    assignmentStatusIdx: index("tva_assignment_status_idx").on(table.assignmentStatus),
+  };
+});
+
+// Tech-Vehicle Assignment History (for tracking changes over time)
+export const techVehicleAssignmentHistory = pgTable("tech_vehicle_assignment_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  techRacfid: varchar("tech_racfid", { length: 20 }).notNull(),
+  truckNo: varchar("truck_no", { length: 20 }),
+  previousTruckNo: varchar("previous_truck_no", { length: 20 }),
+  changeType: text("change_type").notNull(), // assigned, unassigned, changed
+  changeSource: text("change_source").notNull(), // tpms_sync, manual, offboarding
+  changedBy: text("changed_by"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    techRacfidIdx: index("tvah_tech_racfid_idx").on(table.techRacfid),
+    createdAtIdx: index("tvah_created_at_idx").on(table.createdAt),
+  };
 });
 
 // Password validation schema
@@ -339,6 +390,17 @@ export const insertAllTechSchema = createInsertSchema(allTechs).omit({
 export const insertSyncLogSchema = createInsertSchema(syncLogs).omit({
   id: true,
   startedAt: true,
+});
+
+export const insertTechVehicleAssignmentSchema = createInsertSchema(techVehicleAssignments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertTechVehicleAssignmentHistorySchema = createInsertSchema(techVehicleAssignmentHistory).omit({
+  id: true,
+  createdAt: true,
 });
 
 // API endpoint validation schemas
@@ -499,6 +561,10 @@ export type AllTech = typeof allTechs.$inferSelect;
 export type InsertAllTech = z.infer<typeof insertAllTechSchema>;
 export type SyncLog = typeof syncLogs.$inferSelect;
 export type InsertSyncLog = z.infer<typeof insertSyncLogSchema>;
+export type TechVehicleAssignment = typeof techVehicleAssignments.$inferSelect;
+export type InsertTechVehicleAssignment = z.infer<typeof insertTechVehicleAssignmentSchema>;
+export type TechVehicleAssignmentHistory = typeof techVehicleAssignmentHistory.$inferSelect;
+export type InsertTechVehicleAssignmentHistory = z.infer<typeof insertTechVehicleAssignmentHistorySchema>;
 
 // Combined queue item with module information for unified queue access
 export type CombinedQueueItem = QueueItem & {
