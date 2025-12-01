@@ -5,36 +5,31 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
-import { MapPin, Truck, UserPlus, UserMinus, Settings, Map, ArrowRight, Plus, FileText, LayoutGrid } from "lucide-react";
+import { MapPin, Truck, UserPlus, UserMinus, Settings, Map, ArrowRight, Plus, LayoutGrid } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
 import { FilteredMap } from "@/components/vehicle-map-filters";
 
-type WorkflowOption = "create-vehicle" | "assign-vehicle" | "onboarding" | "offboarding" | "sears-byov" | "queue-management";
+type WorkflowOption = "create-vehicle" | "assign-vehicle" | "onboarding" | "offboarding" | "task-queue";
 
 export default function AssistanceSelection() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
-  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowOption>("create-vehicle");
+  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowOption>("task-queue");
   const [isAssignUpdateDialogOpen, setIsAssignUpdateDialogOpen] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
 
   const workflowOptions = [
-    { value: "create-vehicle", label: "Create a New Vehicle", icon: Plus, color: "bg-blue-500", iconColor: "text-blue-500" },
-    { value: "assign-vehicle", label: "Assign or Update a Vehicle", icon: MapPin, color: "bg-green-500", iconColor: "text-green-500" },
+    { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-500", iconColor: "text-gray-500" },
+    { value: "offboarding", label: "Offboarding", icon: UserMinus, color: "bg-red-500", iconColor: "text-red-500" },
     { value: "onboarding", label: "Onboarding", icon: UserPlus, color: "bg-purple-500", iconColor: "text-purple-500" },
-    { value: "offboarding", label: "Offboard Employee", icon: UserMinus, color: "bg-red-500", iconColor: "text-red-500" },
-    { value: "sears-byov", label: "Sears BYOV Program", icon: FileText, color: "bg-orange-500", iconColor: "text-orange-500" },
-    { value: "queue-management", label: "Queue Management", icon: LayoutGrid, color: "bg-gray-500", iconColor: "text-gray-500" },
+    { value: "assign-vehicle", label: "Assign or Update Vehicle", icon: MapPin, color: "bg-green-500", iconColor: "text-green-500" },
+    { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-500", iconColor: "text-blue-500" },
   ];
 
   const handleWorkflowChange = (value: string) => {
-    if (value === "queue-management") {
-      setLocation("/queue-management");
-    } else {
-      setSelectedWorkflow(value as WorkflowOption);
-    }
+    setSelectedWorkflow(value as WorkflowOption);
   };
 
   const getSelectedOption = () => workflowOptions.find(opt => opt.value === selectedWorkflow);
@@ -147,11 +142,11 @@ export default function AssistanceSelection() {
                 </Button>
               )}
 
-              {selectedWorkflow === "sears-byov" && (
+              {selectedWorkflow === "task-queue" && (
                 <Button 
-                  onClick={() => setLocation("/sears-drive-enrollment")}
+                  onClick={() => setLocation("/queue-management")}
                   className="w-full"
-                  data-testid="button-sears-drive"
+                  data-testid="button-task-queue"
                 >
                   Start Process <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
