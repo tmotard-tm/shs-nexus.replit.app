@@ -4990,7 +4990,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/snowflake/status", requireAuth, async (req: any, res) => {
     try {
       const configured = isSnowflakeConfigured();
-      res.json({ configured });
+      const account = process.env.SNOWFLAKE_ACCOUNT;
+      const username = process.env.SNOWFLAKE_USER;
+      const privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+      const isProduction = process.env.NODE_ENV === 'production';
+      
+      // Include diagnostic info for troubleshooting
+      const diagnostics = {
+        environment: isProduction ? 'production' : 'development',
+        envVars: {
+          SNOWFLAKE_ACCOUNT: account ? 'set' : 'missing',
+          SNOWFLAKE_USER: username ? 'set' : 'missing',
+          SNOWFLAKE_PRIVATE_KEY: privateKey ? `set (${privateKey.length} chars)` : 'missing',
+          SNOWFLAKE_DATABASE: process.env.SNOWFLAKE_DATABASE ? 'set' : 'missing',
+          SNOWFLAKE_WAREHOUSE: process.env.SNOWFLAKE_WAREHOUSE ? 'set' : 'missing',
+        }
+      };
+      
+      res.json({ configured, diagnostics });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

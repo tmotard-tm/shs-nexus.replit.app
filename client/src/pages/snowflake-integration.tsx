@@ -24,7 +24,19 @@ export default function SnowflakeIntegration() {
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
 
-  const { data: status, isLoading: statusLoading } = useQuery<{ configured: boolean }>({
+  const { data: status, isLoading: statusLoading } = useQuery<{ 
+    configured: boolean;
+    diagnostics?: {
+      environment: string;
+      envVars: {
+        SNOWFLAKE_ACCOUNT: string;
+        SNOWFLAKE_USER: string;
+        SNOWFLAKE_PRIVATE_KEY: string;
+        SNOWFLAKE_DATABASE: string;
+        SNOWFLAKE_WAREHOUSE: string;
+      };
+    };
+  }>({
     queryKey: ["/api/snowflake/status"],
   });
 
@@ -190,7 +202,7 @@ export default function SnowflakeIntegration() {
               Test your Snowflake connection using key pair authentication
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <Button
               onClick={() => testConnectionMutation.mutate()}
               disabled={!status?.configured || testConnectionMutation.isPending}
@@ -208,6 +220,33 @@ export default function SnowflakeIntegration() {
                 </>
               )}
             </Button>
+            
+            {status?.diagnostics && (
+              <div className="mt-4 p-4 bg-muted rounded-lg text-sm">
+                <h4 className="font-semibold mb-2">Configuration Diagnostics</h4>
+                <div className="space-y-1">
+                  <div><span className="font-medium">Environment:</span> {status.diagnostics.environment}</div>
+                  <div className="mt-2 font-medium">Environment Variables:</div>
+                  <ul className="list-disc list-inside pl-2 space-y-1">
+                    <li className={status.diagnostics.envVars.SNOWFLAKE_ACCOUNT === 'missing' ? 'text-destructive' : ''}>
+                      SNOWFLAKE_ACCOUNT: {status.diagnostics.envVars.SNOWFLAKE_ACCOUNT}
+                    </li>
+                    <li className={status.diagnostics.envVars.SNOWFLAKE_USER === 'missing' ? 'text-destructive' : ''}>
+                      SNOWFLAKE_USER: {status.diagnostics.envVars.SNOWFLAKE_USER}
+                    </li>
+                    <li className={status.diagnostics.envVars.SNOWFLAKE_PRIVATE_KEY === 'missing' ? 'text-destructive' : ''}>
+                      SNOWFLAKE_PRIVATE_KEY: {status.diagnostics.envVars.SNOWFLAKE_PRIVATE_KEY}
+                    </li>
+                    <li className={status.diagnostics.envVars.SNOWFLAKE_DATABASE === 'missing' ? 'text-destructive' : ''}>
+                      SNOWFLAKE_DATABASE: {status.diagnostics.envVars.SNOWFLAKE_DATABASE}
+                    </li>
+                    <li className={status.diagnostics.envVars.SNOWFLAKE_WAREHOUSE === 'missing' ? 'text-destructive' : ''}>
+                      SNOWFLAKE_WAREHOUSE: {status.diagnostics.envVars.SNOWFLAKE_WAREHOUSE}
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
