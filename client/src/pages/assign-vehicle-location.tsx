@@ -225,10 +225,16 @@ export default function AssignVehicleLocation() {
 
   const handleVehicleAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
-    const employee = employees.find(emp => emp.id === vehicleAssignment.employeeId);
     const vehicle = unassignedVehicles.find(veh => veh.vin === vehicleAssignment.vehicleId);
     
-    if (!employee || !vehicle) {
+    const isLookupEmployee = vehicleAssignment.employeeId.startsWith('lookup-');
+    const staticEmployee = !isLookupEmployee ? employees.find(emp => emp.id === vehicleAssignment.employeeId) : null;
+    
+    const employeeName = isLookupEmployee 
+      ? `${employeeData.firstName} ${employeeData.lastName}`.trim() || employeeData.enterpriseId || 'Unknown'
+      : staticEmployee?.name;
+    
+    if ((!isLookupEmployee && !staticEmployee) || !vehicle) {
       toast({
         title: "Error",
         description: "Please select both an employee and a vehicle",
@@ -246,15 +252,35 @@ export default function AssignVehicleLocation() {
     }
     
     const description = orderMessages.length > 0 
-      ? `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) assigned to ${employee.name}. ${orderMessages.join(". ")}.`
-      : `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) has been assigned to ${employee.name}`;
+      ? `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) assigned to ${employeeName}. ${orderMessages.join(". ")}.`
+      : `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) has been assigned to ${employeeName}`;
     
-    // Create queue item for vehicle assignment
+    const employeePayload = isLookupEmployee 
+      ? {
+          id: vehicleAssignment.employeeId,
+          name: employeeName,
+          department: employeeData.department || 'Field Service',
+          region: employeeData.region,
+          enterpriseId: employeeData.enterpriseId,
+          techId: employeeData.techId,
+          district: employeeData.district,
+          specialties: employeeData.specialties,
+          dataSource: 'system_lookup'
+        }
+      : {
+          id: staticEmployee!.id,
+          name: staticEmployee!.name,
+          department: staticEmployee!.department,
+          region: staticEmployee!.region,
+          enterpriseId: employeeData.enterpriseId,
+          specialties: employeeData.specialties
+        };
+    
     try {
       await apiRequest("POST", "/api/queue", {
         workflowType: "vehicle_assignment",
-        title: `Assign Vehicle to ${employee.name}`,
-        description: `Assign ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) to ${employee.name}. ${orderMessages.length > 0 ? `Orders: ${orderMessages.join(", ")}.` : ""}`,
+        title: `Assign Vehicle to ${employeeName}`,
+        description: `Assign ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (${vehicle.licensePlate}) to ${employeeName}. ${orderMessages.length > 0 ? `Orders: ${orderMessages.join(", ")}.` : ""}`,
         priority: "medium",
         requesterId: user?.id || "anonymous",
         submitterInfo: user ? {
@@ -267,14 +293,7 @@ export default function AssignVehicleLocation() {
           email: null
         },
         data: JSON.stringify({
-          employee: {
-            id: employee.id,
-            name: employee.name,
-            department: employee.department,
-            region: employee.region,
-            enterpriseId: employeeData.enterpriseId,
-            specialties: employeeData.specialties
-          },
+          employee: employeePayload,
           vehicle: {
             vin: vehicle.vin,
             year: vehicle.modelYear,
@@ -315,6 +334,8 @@ export default function AssignVehicleLocation() {
     setIsAssignmentDialogOpen(false);
     setSupplyOrders({ assetsSupplies: false, ntaoPartsStock: false });
     setRentalInfo({ isRental: false, rentalVanNumber: "", assignmentReason: "" });
+    setTechLookupQuery("");
+    setTechLookupResult(null);
   };
 
   const handleVehicleSelect = (vehicleVin: string) => {
@@ -331,46 +352,79 @@ export default function AssignVehicleLocation() {
     setTechLookupResult(null);
     
     try {
-      const response = await fetch(`/api/vehicle-assignments/tech/${techLookupQuery.trim().toUpperCase()}`);
+      const response = await fetch(`/api/vehicle-assignments/tech/${techLookupQuery.trim().toUpperCase()}`, {
+        credentials: 'include',
+      });
       
       if (!response.ok) {
+        setTechLookupResult(null);
         if (response.status === 404) {
           toast({
             title: "Technician Not Found",
             description: `No technician found with Enterprise ID: ${techLookupQuery}`,
             variant: "destructive",
           });
+        } else if (response.status === 401) {
+          toast({
+            title: "Authentication Required",
+            description: "Please log in to search for technicians",
+            variant: "destructive",
+          });
         } else {
-          throw new Error('Failed to lookup technician');
+          toast({
+            title: "Lookup Failed",
+            description: `Server error (${response.status}). Please try again.`,
+            variant: "destructive",
+          });
         }
         return;
       }
       
       const result = await response.json();
       if (result.success && result.data) {
-        setTechLookupResult(result.data);
+        const data = result.data;
+        const snowflake = data.snowflakeData || {};
+        const tpms = data.tpmsAssignment || {};
+        
+        setTechLookupResult({
+          ...data,
+          dataSources: {
+            snowflake: !!data.snowflakeData,
+            tpms: !!data.tpmsAssignment,
+            holman: !!data.holmanVehicle,
+          }
+        });
+        
+        const nameParts = (snowflake.techName || data.techName || '').split(' ');
+        const firstName = nameParts[0] || '';
+        const lastName = nameParts.slice(1).join(' ') || '';
         
         setEmployeeData(prev => ({
           ...prev,
-          firstName: result.data.firstName || prev.firstName,
-          lastName: result.data.lastName || prev.lastName,
-          enterpriseId: result.data.techRacfid || prev.enterpriseId,
-          techId: result.data.techId || prev.techId,
-          email: result.data.email || prev.email,
-          phone: result.data.contactNo || prev.phone,
-          district: result.data.districtNo || prev.district,
+          firstName: firstName || prev.firstName,
+          lastName: lastName || prev.lastName,
+          enterpriseId: snowflake.techRacfid || tpms.enterpriseId || data.techRacfid || prev.enterpriseId,
+          techId: snowflake.techId || tpms.techId || prev.techId,
+          email: snowflake.email || prev.email,
+          phone: snowflake.contactNo || prev.phone,
+          district: snowflake.districtNo || tpms.districtNo || prev.district,
+          region: snowflake.region || tpms.region || prev.region,
         }));
+        
+        const dynamicEmployeeId = `lookup-${snowflake.techRacfid || tpms.enterpriseId || data.techRacfid}`;
+        setVehicleAssignment(prev => ({ ...prev, employeeId: dynamicEmployeeId }));
         
         toast({
           title: "Technician Data Loaded",
-          description: `Loaded data for ${result.data.techName || result.data.techRacfid}`,
+          description: `Loaded data for ${snowflake.techName || data.techName || data.techRacfid}`,
         });
       }
     } catch (error: any) {
       console.error('Tech lookup error:', error);
+      setTechLookupResult(null);
       toast({
         title: "Lookup Failed",
-        description: error.message || "Failed to lookup technician data",
+        description: error.message || "Failed to lookup technician data. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -605,9 +659,22 @@ export default function AssignVehicleLocation() {
                       data-testid="dialog-select-employee"
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select employee" />
+                        <SelectValue placeholder="Select employee or use lookup below" />
                       </SelectTrigger>
                       <SelectContent>
+                        {techLookupResult && (
+                          <SelectItem 
+                            key={`lookup-${techLookupResult.techRacfid || techLookupResult.snowflakeData?.techRacfid}`} 
+                            value={`lookup-${techLookupResult.techRacfid || techLookupResult.snowflakeData?.techRacfid}`}
+                            data-testid="dialog-option-employee-lookup"
+                          >
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+                              <span>{techLookupResult.snowflakeData?.techName || techLookupResult.techName || techLookupResult.techRacfid}</span>
+                              <span className="text-xs text-green-600">(from system lookup)</span>
+                            </div>
+                          </SelectItem>
+                        )}
                         {employees.map(employee => (
                           <SelectItem key={employee.id} value={employee.id} data-testid={`dialog-option-employee-${employee.id}`}>
                             {employee.name}
@@ -616,6 +683,12 @@ export default function AssignVehicleLocation() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {techLookupResult && vehicleAssignment.employeeId.startsWith('lookup-') && (
+                      <p className="text-xs text-green-600 flex items-center gap-1">
+                        <CheckCircle className="h-3 w-3" />
+                        Using data from system lookup
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="dialog-purpose">Assignment Purpose</Label>

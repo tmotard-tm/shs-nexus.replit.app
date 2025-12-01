@@ -12,11 +12,22 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
 - Database tables: `termed_techs`, `all_techs`, `sync_logs` track sync status and offboarding task creation
 - Manual sync available via superadmin UI at /snowflake-integration or /tech-roster pages
 
-**TPMS API Integration** (Planned): Future integration with TPMS (Tire Pressure Monitoring System) API to link technicians to their assigned vehicles. This will enhance the offboarding process by:
-- Automatically identifying vehicles assigned to termed technicians
-- Pre-populating vehicle information in offboarding queue items
-- Enabling vehicle recovery tracking during the offboarding workflow
-- API documentation pending from fleet management team
+**TPMS API Integration** (November 2025): Live integration with TPMS (Tire Pressure Monitoring System) API for technician-vehicle assignments:
+- Fetches real-time truck assignments by Enterprise ID via `/api/tpms/truck/:enterpriseId`
+- Links to Holman fleet data for vehicle details
+- API endpoints available at `/api/tpms/techinfo/:enterpriseId` and `/api/tpms/lookup/truck/:truckNumber`
+
+**Vehicle Assignment System** (December 2025): Unified vehicle assignment management that aggregates data from three sources:
+- **Snowflake**: Master source for employee roster and HR data (via all_techs table)
+- **TPMS**: Master source for technician-to-truck assignments
+- **Holman**: Master source for vehicle fleet details and specifications
+- Features:
+  - Technician lookup by Enterprise ID with auto-population of employee data
+  - Vehicle Assignment Dashboard at `/vehicle-assignments` with search and filters
+  - Assignment form at `/assign-vehicle` with integrated tech lookup
+  - Full assignment history tracking with audit trail
+  - REST API at `/api/vehicle-assignments/*` for CRUD operations
+- Key field mappings: TPMS truckNo ↔ Holman vehicleNumber (leading zeros ignored)
 
 # User Preferences
 
