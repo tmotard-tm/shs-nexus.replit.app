@@ -40,6 +40,7 @@ import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
+import VehicleAssignments from "@/pages/vehicle-assignments";
 import FieldMapping from "@/pages/field-mapping";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
@@ -294,6 +295,12 @@ function Router() {
       <Route path="/tech-roster">
         <ProtectedRoute>
           <TechRoster />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/vehicle-assignments">
+        <ProtectedRoute>
+          <VehicleAssignments />
         </ProtectedRoute>
       </Route>
 

@@ -31,7 +31,8 @@ import {
   FileCode, 
   HelpCircle,
   Menu,
-  Database
+  Database,
+  Truck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -83,6 +84,7 @@ export function Sidebar() {
       apiManagement: { name: "Integrations", href: "/integrations", icon: Settings, category: "management" },
       userManagement: { name: "User Management", href: "/users", icon: Users, category: "management" },
       templateManagement: { name: "Templates", href: "/templates", icon: FileCode, category: "management" },
+      vehicleAssignments: { name: "Vehicle Assignments", href: "/vehicle-assignments", icon: Truck, category: "management" },
       activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity, category: "activity" },
       changePassword: { name: "Change Password", href: "/change-password", icon: Key, category: "account" },
     };
@@ -93,7 +95,7 @@ export function Sidebar() {
         case 'assets':
           return [baseItems.home, baseItems.assetsQueue, baseItems.changePassword];
         case 'fleet':
-          return [baseItems.home, baseItems.fleetQueue, baseItems.changePassword];
+          return [baseItems.home, baseItems.fleetQueue, baseItems.vehicleAssignments, baseItems.changePassword];
         case 'inventory':
           return [baseItems.home, baseItems.inventoryQueue, baseItems.changePassword];
         case 'ntao':
@@ -108,7 +110,7 @@ export function Sidebar() {
         return [baseItems.home, baseItems.assetsQueue, baseItems.changePassword];
       
       case 'fleet':
-        return [baseItems.home, baseItems.fleetQueue, baseItems.changePassword];
+        return [baseItems.home, baseItems.fleetQueue, baseItems.vehicleAssignments, baseItems.changePassword];
       
       case 'inventory':
         return [baseItems.home, baseItems.inventoryQueue, baseItems.changePassword];
@@ -131,6 +133,7 @@ export function Sidebar() {
           baseItems.apiManagement,
           baseItems.userManagement,
           baseItems.templateManagement,
+          baseItems.vehicleAssignments,
           baseItems.activityLogs,
           baseItems.changePassword,
         ];
