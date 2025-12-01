@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { ApiConfiguration, AllTech } from "@shared/schema";
@@ -17,11 +17,11 @@ import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { 
   Plus, Settings, Trash2, TestTube, Database, ArrowRight, 
-  CheckCircle, XCircle, Loader2, Play, Truck, RefreshCw, Users,
-  Search, Clock, AlertCircle, LayoutGrid
+  ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Play, Truck, RefreshCw, Users,
+  Search, Clock, AlertCircle
 } from "lucide-react";
 import { format } from "date-fns";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import {
   Table,
   TableBody,
@@ -30,15 +30,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
-type IntegrationOption = "holman" | "snowflake" | "tpms" | "queue-management";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function Integrations() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [, setLocation] = useLocation();
-  const [selectedIntegration, setSelectedIntegration] = useState<IntegrationOption>("holman");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [snowflakeExpanded, setSnowflakeExpanded] = useState(false);
+  const [tpmsExpanded, setTpmsExpanded] = useState(false);
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
   const [tpmsTestId, setTpmsTestId] = useState("");
@@ -46,6 +45,7 @@ export default function Integrations() {
   const [snowflakeEnabled, setSnowflakeEnabled] = useState(true);
   const [tpmsEnabled, setTpmsEnabled] = useState(true);
   
+  // Employee Roster state
   const [rosterSearch, setRosterSearch] = useState("");
   const [rosterStatusFilter, setRosterStatusFilter] = useState("all");
 
@@ -68,6 +68,7 @@ export default function Integrations() {
     queryKey: ["/api/tpms/status"],
   });
 
+  // Employee Roster queries
   const { data: allTechs = [], isLoading: techsLoading, refetch: refetchTechs } = useQuery<AllTech[]>({
     queryKey: ['/api/all-techs'],
   });
@@ -130,7 +131,7 @@ export default function Integrations() {
   });
 
   const updateConfigMutation = useMutation({
-    mutationFn: async ({ id, updates }: { id: string; updates: Partial<ApiConfiguration> }) => {
+    mutationFn: async ({ id, updates }: { id: string; updates: any }) => {
       const response = await apiRequest("PATCH", `/api/configurations/${id}`, updates);
       return response.json();
     },
@@ -139,13 +140,6 @@ export default function Integrations() {
       toast({
         title: "Success",
         description: "API configuration updated successfully",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to update API configuration",
-        variant: "destructive",
       });
     },
   });
@@ -161,32 +155,19 @@ export default function Integrations() {
         description: "API configuration deleted successfully",
       });
     },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to delete API configuration",
-        variant: "destructive",
-      });
-    },
   });
 
   const testApiMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const response = await apiRequest("POST", "/api/integrations/test", { id });
+    mutationFn: async (apiId: string) => {
+      const response = await apiRequest("POST", "/api/integrations/test", { apiId });
       return response.json();
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/configurations"] });
       toast({
         title: data.success ? "Connection Successful" : "Connection Failed",
         description: data.message,
         variant: data.success ? "default" : "destructive",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Test Failed",
-        description: "Could not test the API connection",
-        variant: "destructive",
       });
     },
   });
@@ -198,15 +179,15 @@ export default function Integrations() {
     },
     onSuccess: (data: any) => {
       toast({
-        title: data.success ? "Snowflake Connection Successful" : "Snowflake Connection Failed",
+        title: data.success ? "Connection Successful" : "Connection Failed",
         description: data.message,
         variant: data.success ? "default" : "destructive",
       });
     },
     onError: (error: Error) => {
       toast({
-        title: "Snowflake Test Failed",
-        description: error.message,
+        title: "Connection Test Failed",
+        description: error.message || "Failed to test Snowflake connection",
         variant: "destructive",
       });
     },
@@ -218,38 +199,74 @@ export default function Integrations() {
       return response.json();
     },
     onSuccess: (data: any) => {
-      toast({
-        title: "Sync Complete",
-        description: data.message || `Synced ${data.recordCount || 0} termed employees`,
-      });
       queryClient.invalidateQueries({ queryKey: ['/api/snowflake/sync/status'] });
       queryClient.invalidateQueries({ queryKey: ['/api/termed-techs'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/ntao-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/assets-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fleet-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/inventory-queue'] });
+      if (data.success) {
+        const skippedCount = data.queueItemsSkipped || 0;
+        const skippedEmployeeCount = data.skippedEmployees?.length || 0;
+        let description = `Processed ${data.recordsProcessed} employees. Created ${data.queueItemsCreated} queue items.`;
+        
+        if (skippedEmployeeCount > 0) {
+          description += ` Skipped ${skippedEmployeeCount} employee(s) with existing tasks.`;
+        }
+        
+        toast({
+          title: "Sync Completed",
+          description,
+        });
+        
+        // Show a separate toast for skipped employees if any
+        if (skippedEmployeeCount > 0 && data.skippedEmployees) {
+          const skippedNames = data.skippedEmployees
+            .slice(0, 3)
+            .map((e: any) => e.name)
+            .join(', ');
+          const moreCount = skippedEmployeeCount > 3 ? ` and ${skippedEmployeeCount - 3} more` : '';
+          
+          toast({
+            title: "Duplicate Prevention",
+            description: `Skipped: ${skippedNames}${moreCount}. These employees have open or recent tasks (within 45 days). They will be re-checked in future syncs.`,
+            variant: "default",
+          });
+        }
+      } else {
+        toast({
+          title: "Sync Failed",
+          description: data.errors?.join(', ') || "Failed to sync termed employees",
+          variant: "destructive",
+        });
+      }
     },
     onError: (error: Error) => {
       toast({
         title: "Sync Failed",
-        description: error.message,
+        description: error.message || "Failed to sync termed employees",
         variant: "destructive",
       });
     },
   });
 
   const executeQueryMutation = useMutation({
-    mutationFn: async (query: string) => {
-      const response = await apiRequest("POST", "/api/snowflake/query", { query });
+    mutationFn: async (sql: string) => {
+      const response = await apiRequest("POST", "/api/snowflake/query", { sql });
       return response.json();
     },
     onSuccess: (data: any) => {
       if (data.success) {
-        setQueryResults(data.data || []);
+        setQueryResults(data.data);
         toast({
-          title: "Query Executed",
-          description: `Returned ${data.data?.length || 0} row(s)`,
+          title: "Query Executed Successfully",
+          description: `Returned ${data.data.length} row(s).`,
         });
       } else {
+        setQueryResults(null);
         toast({
           title: "Query Failed",
-          description: data.message || "Query execution failed",
+          description: data.message,
           variant: "destructive",
         });
       }
@@ -295,7 +312,7 @@ export default function Integrations() {
     onSuccess: (data: any) => {
       if (data.success) {
         toast({
-          title: "Employee Found",
+          title: "Tech Found",
           description: `${data.data.firstName} ${data.data.lastName} - Truck: ${data.data.truckNo || 'N/A'}`,
         });
       } else {
@@ -332,6 +349,23 @@ export default function Integrations() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const toggleApiStatus = (id: string, currentStatus: boolean) => {
+    updateConfigMutation.mutate({
+      id,
+      updates: { isActive: !currentStatus }
+    });
+  };
+
+  const testApiConnection = (apiId: string) => {
+    testApiMutation.mutate(apiId);
+  };
+
+  const deleteApi = (id: string) => {
+    if (confirm("Are you sure you want to delete this API configuration?")) {
+      deleteConfigMutation.mutate(id);
+    }
+  };
+
   const handleExecuteQuery = () => {
     if (!sqlQuery.trim()) {
       toast({
@@ -359,22 +393,21 @@ export default function Integrations() {
     }
   };
 
-  const handleIntegrationChange = (value: string) => {
-    if (value === "queue-management") {
-      setLocation("/queue-management");
-    } else {
-      setSelectedIntegration(value as IntegrationOption);
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "healthy": return "bg-[hsl(var(--chart-2))]/10 text-[hsl(var(--chart-2))]";
+      case "warning": return "bg-[hsl(var(--chart-1))]/10 text-[hsl(var(--chart-1))]";
+      case "error": return "bg-destructive/10 text-destructive";
+      default: return "bg-secondary text-secondary-foreground";
     }
   };
 
-  const integrationOptions = [
-    { value: "holman", label: "Holman Fleet Integration", icon: Database, color: "text-primary" },
-    { value: "snowflake", label: "Snowflake Data Warehouse", icon: Database, color: "text-blue-500" },
-    { value: "tpms", label: "TPMS Integration", icon: Truck, color: "text-orange-500" },
-    { value: "queue-management", label: "Queue Management", icon: LayoutGrid, color: "text-purple-500" },
-  ];
-
-  const getSelectedOption = () => integrationOptions.find(opt => opt.value === selectedIntegration);
+  const integrationStats = {
+    total: 3,
+    active: [holmanEnabled, snowflakeEnabled, tpmsEnabled].filter(Boolean).length,
+    healthy: [true, snowflakeStatus?.configured, tpmsStatus?.configured].filter(Boolean).length,
+    errors: [false, !snowflakeStatus?.configured, !tpmsStatus?.configured].filter(Boolean).length,
+  };
 
   return (
     <MainContent>
@@ -386,22 +419,24 @@ export default function Integrations() {
       <main className="p-6">
         <BackButton href="/" />
 
-        <Card>
+        {/* Data Integrations */}
+        <Card className="mb-6">
           <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle data-testid="text-fleet-integrations-title">Data Integrations</CardTitle>
-                <CardDescription>
-                  Access fleet management systems, data warehouses, and third-party integrations
-                </CardDescription>
-              </div>
-              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button data-testid="button-add-api">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add API
-                  </Button>
-                </DialogTrigger>
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle data-testid="text-fleet-integrations-title">Data Integrations</CardTitle>
+                  <CardDescription>
+                    Access fleet management systems, data warehouses, and third-party integrations
+                  </CardDescription>
+                </div>
+                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button data-testid="button-add-api">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add API
+                    </Button>
+                  </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle data-testid="text-add-api-title">Add API Configuration</DialogTitle>
@@ -456,90 +491,109 @@ export default function Integrations() {
                   </form>
                 </DialogContent>
               </Dialog>
+              </div>
+              
+              {/* Inline Stats */}
+              <div className="flex items-center gap-6 pt-2 border-t border-border">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-primary/10 rounded flex items-center justify-center">
+                    <Settings className="h-3 w-3 text-primary" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Total:</span>
+                  <span className="text-sm font-semibold" data-testid="text-total-apis">{integrationStats.total}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-[hsl(var(--chart-2))]/10 rounded flex items-center justify-center">
+                    <CheckCircle className="h-3 w-3 text-[hsl(var(--chart-2))]" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Active:</span>
+                  <span className="text-sm font-semibold" data-testid="text-active-apis">{integrationStats.active}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-[hsl(var(--chart-2))]/10 rounded flex items-center justify-center">
+                    <CheckCircle className="h-3 w-3 text-[hsl(var(--chart-2))]" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">Healthy:</span>
+                  <span className="text-sm font-semibold" data-testid="text-healthy-apis">{integrationStats.healthy}</span>
+                </div>
+                {integrationStats.errors > 0 && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 bg-destructive/10 rounded flex items-center justify-center">
+                      <XCircle className="h-3 w-3 text-destructive" />
+                    </div>
+                    <span className="text-sm text-muted-foreground">Errors:</span>
+                    <span className="text-sm font-semibold text-destructive" data-testid="text-error-apis">{integrationStats.errors}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label>Select Integration</Label>
-              <Select value={selectedIntegration} onValueChange={handleIntegrationChange}>
-                <SelectTrigger className="w-full" data-testid="select-integration">
-                  <SelectValue placeholder="Select an integration" />
-                </SelectTrigger>
-                <SelectContent>
-                  {integrationOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value} data-testid={`option-${option.value}`}>
-                      <div className="flex items-center gap-2">
-                        <option.icon className={`h-4 w-4 ${option.color}`} />
-                        <span>{option.label}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {selectedIntegration === "holman" && (
-              <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <Database className="h-6 w-6 text-primary" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-lg">Holman Fleet Integration</h3>
-                        <Badge variant="default" className="flex items-center gap-1 text-xs">
-                          <CheckCircle className="h-3 w-3" />
-                          Connected
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Manage vehicles, contacts, maintenance records, and odometer data
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm text-green-500 font-medium">healthy</span>
-                    <Badge variant={holmanEnabled ? "default" : "secondary"} className="text-xs">
-                      {holmanEnabled ? "Active" : "Inactive"}
+          <CardContent className="space-y-3">
+            {/* Holman Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/holman-integration" data-testid="link-holman-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <Database className="h-6 w-6 text-primary" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
+                      Holman Fleet Integration
+                    </h3>
+                    <Badge variant="default" className="flex items-center gap-1 text-xs">
+                      <CheckCircle className="h-3 w-3" />
+                      Connected
                     </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => toast({ title: "Holman Test", description: "Connection test not yet implemented" })}
-                      data-testid="button-test-holman"
-                    >
-                      <TestTube className="h-4 w-4 mr-1" />
-                      Test
-                    </Button>
-                    <Switch
-                      checked={holmanEnabled}
-                      onCheckedChange={setHolmanEnabled}
-                      data-testid="switch-holman-enabled"
-                    />
                   </div>
+                  <p className="text-sm text-muted-foreground">
+                    Manage vehicles, contacts, maintenance records, and odometer data
+                  </p>
                 </div>
-                <div className="pt-4">
-                  <Link href="/holman-integration">
-                    <Button className="w-full" data-testid="button-open-holman">
-                      Open Holman Integration
-                      <ArrowRight className="ml-2 h-4 w-4" />
-                    </Button>
-                  </Link>
-                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className="text-sm text-green-500 font-medium">healthy</span>
+                <Badge variant={holmanEnabled ? "default" : "secondary"} className="text-xs">
+                  {holmanEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toast({ title: "Holman Test", description: "Connection test not yet implemented" })}
+                  data-testid="button-test-holman"
+                >
+                  <TestTube className="h-4 w-4 mr-1" />
+                  Test
+                </Button>
+                <Switch
+                  checked={holmanEnabled}
+                  onCheckedChange={setHolmanEnabled}
+                  data-testid="switch-holman-enabled"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => toast({ title: "Delete", description: "Integration deletion not yet implemented", variant: "destructive" })}
+                  data-testid="button-delete-holman"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </div>
-            )}
-
-            {selectedIntegration === "snowflake" && (
-              <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
+            </div>
+            
+            {/* Snowflake Integration - Expandable inline */}
+            <Collapsible open={snowflakeExpanded} onOpenChange={setSnowflakeExpanded}>
+              <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+                <CollapsibleTrigger asChild>
+                  <div className="flex items-center gap-4 flex-1 cursor-pointer group">
                     <div className="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center">
                       <Database className="h-6 w-6 text-blue-500" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-lg">Snowflake Data Warehouse</h3>
+                        <h3 className="font-semibold text-lg group-hover:text-blue-500 transition-colors">
+                          Snowflake Data Warehouse
+                        </h3>
                         {snowflakeStatusLoading ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : snowflakeStatus?.configured ? (
@@ -559,35 +613,46 @@ export default function Integrations() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className={`text-sm font-medium ${snowflakeStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
-                      {snowflakeStatus?.configured ? 'healthy' : 'not configured'}
-                    </span>
-                    <Badge variant={snowflakeEnabled ? "default" : "secondary"} className="text-xs">
-                      {snowflakeEnabled ? "Active" : "Inactive"}
-                    </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => testSnowflakeMutation.mutate()}
-                      disabled={!snowflakeStatus?.configured || testSnowflakeMutation.isPending}
-                      data-testid="button-test-snowflake"
-                    >
-                      {testSnowflakeMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                      ) : (
-                        <TestTube className="h-4 w-4 mr-1" />
-                      )}
-                      Test
-                    </Button>
-                    <Switch
-                      checked={snowflakeEnabled}
-                      onCheckedChange={setSnowflakeEnabled}
-                      data-testid="switch-snowflake-enabled"
-                    />
-                  </div>
+                </CollapsibleTrigger>
+                <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                  <span className={`text-sm font-medium ${snowflakeStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                    {snowflakeStatus?.configured ? 'healthy' : 'not configured'}
+                  </span>
+                  <Badge variant={snowflakeEnabled ? "default" : "secondary"} className="text-xs">
+                    {snowflakeEnabled ? "Active" : "Inactive"}
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testSnowflakeMutation.mutate()}
+                    disabled={!snowflakeStatus?.configured || testSnowflakeMutation.isPending}
+                    data-testid="button-test-snowflake-inline"
+                  >
+                    {testSnowflakeMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <TestTube className="h-4 w-4 mr-1" />
+                    )}
+                    Test
+                  </Button>
+                  <Switch
+                    checked={snowflakeEnabled}
+                    onCheckedChange={setSnowflakeEnabled}
+                    data-testid="switch-snowflake-enabled"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => toast({ title: "Delete", description: "Integration deletion not yet implemented", variant: "destructive" })}
+                    data-testid="button-delete-snowflake"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
-
+              </div>
+              <CollapsibleContent className="mt-2 ml-4 border-l-2 border-blue-500/20 pl-4 space-y-4">
+                {/* SQL Query */}
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">SQL Query</CardTitle>
@@ -626,6 +691,7 @@ export default function Integrations() {
                   </CardContent>
                 </Card>
 
+                {/* Sync Termed Employees */}
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -660,6 +726,7 @@ export default function Integrations() {
                   </CardContent>
                 </Card>
 
+                {/* Query Results */}
                 {queryResults && queryResults.length > 0 && (
                   <Card>
                     <CardHeader className="pb-3">
@@ -695,6 +762,7 @@ export default function Integrations() {
                   </Card>
                 )}
 
+                {/* Employee Roster */}
                 <Card>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
@@ -737,6 +805,7 @@ export default function Integrations() {
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    {/* Search and Filter */}
                     <div className="flex gap-2">
                       <div className="relative flex-1">
                         <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -760,6 +829,7 @@ export default function Integrations() {
                       </select>
                     </div>
 
+                    {/* Employee Table */}
                     <div className="rounded-md border overflow-auto max-h-[300px]">
                       {techsLoading ? (
                         <div className="flex items-center justify-center p-6">
@@ -844,19 +914,22 @@ export default function Integrations() {
                     )}
                   </CardContent>
                 </Card>
-              </div>
-            )}
+              </CollapsibleContent>
+            </Collapsible>
 
-            {selectedIntegration === "tpms" && (
-              <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
+            {/* TPMS Integration - Expandable inline */}
+            <Collapsible open={tpmsExpanded} onOpenChange={setTpmsExpanded}>
+              <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+                <CollapsibleTrigger asChild>
+                  <div className="flex items-center gap-4 flex-1 cursor-pointer group">
                     <div className="w-12 h-12 bg-orange-500/10 rounded-lg flex items-center justify-center">
                       <Truck className="h-6 w-6 text-orange-500" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-lg">TPMS Integration</h3>
+                        <h3 className="font-semibold text-lg group-hover:text-orange-500 transition-colors">
+                          TPMS Integration
+                        </h3>
                         {tpmsStatusLoading ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : tpmsStatus?.configured ? (
@@ -876,35 +949,47 @@ export default function Integrations() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className={`text-sm font-medium ${tpmsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
-                      {tpmsStatus?.configured ? 'healthy' : 'not configured'}
-                    </span>
-                    <Badge variant={tpmsEnabled ? "default" : "secondary"} className="text-xs">
-                      {tpmsEnabled ? "Active" : "Inactive"}
-                    </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => testTpmsMutation.mutate()}
-                      disabled={!tpmsStatus?.configured || testTpmsMutation.isPending}
-                      data-testid="button-test-tpms"
-                    >
-                      {testTpmsMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                      ) : (
-                        <TestTube className="h-4 w-4 mr-1" />
-                      )}
-                      Test
-                    </Button>
-                    <Switch
-                      checked={tpmsEnabled}
-                      onCheckedChange={setTpmsEnabled}
-                      data-testid="switch-tpms-enabled"
-                    />
-                  </div>
+                </CollapsibleTrigger>
+                <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                  <span className={`text-sm font-medium ${tpmsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                    {tpmsStatus?.configured ? 'healthy' : 'not configured'}
+                  </span>
+                  <Badge variant={tpmsEnabled ? "default" : "secondary"} className="text-xs">
+                    {tpmsEnabled ? "Active" : "Inactive"}
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testTpmsMutation.mutate()}
+                    disabled={!tpmsStatus?.configured || testTpmsMutation.isPending}
+                    data-testid="button-test-tpms-inline"
+                  >
+                    {testTpmsMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <TestTube className="h-4 w-4 mr-1" />
+                    )}
+                    Test
+                  </Button>
+                  <Switch
+                    checked={tpmsEnabled}
+                    onCheckedChange={setTpmsEnabled}
+                    data-testid="switch-tpms-enabled"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => toast({ title: "Delete", description: "Integration deletion not yet implemented", variant: "destructive" })}
+                    data-testid="button-delete-tpms"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
+              </div>
+              <CollapsibleContent className="mt-2 ml-4 border-l-2 border-orange-500/20 pl-4 space-y-4">
 
+                {/* TPMS Lookup */}
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">TPMS Lookup</CardTitle>
@@ -947,10 +1032,11 @@ export default function Integrations() {
                     )}
                   </CardContent>
                 </Card>
-              </div>
-            )}
+              </CollapsibleContent>
+            </Collapsible>
           </CardContent>
         </Card>
+
       </main>
     </MainContent>
   );
