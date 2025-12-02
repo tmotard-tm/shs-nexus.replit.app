@@ -472,18 +472,31 @@ export default function UnifiedQueueManagement() {
     }
 
     // Apply employee filter - search through the data JSON field
+    // Supports both Snowflake sync format (data.technician) and offboarding form format (data.employee)
     if (selectedEmployee) {
       filtered = filtered.filter(item => {
         if (!item.data) return false;
         try {
           const data = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
-          const technician = data?.technician || data;
           
-          // Match by employeeId, techRacfid/enterpriseId, or name
-          const employeeIdMatch = technician?.employeeId === selectedEmployee.employeeId;
-          const racfIdMatch = (technician?.techRacfid || technician?.enterpriseId) === selectedEmployee.techRacfid;
-          const nameMatch = technician?.techName === selectedEmployee.techName || 
-                           technician?.name === selectedEmployee.techName;
+          // Get employee data from either technician (Snowflake sync) or employee (offboarding form) or root
+          const technician = data?.technician || data?.employee || data;
+          
+          // Match by employeeId - check multiple possible field locations
+          const employeeIdMatch = 
+            technician?.employeeId === selectedEmployee.employeeId ||
+            data?.employee?.employeeId === selectedEmployee.employeeId;
+          
+          // Match by techRacfid/enterpriseId/racfId - check multiple possible field locations
+          const racfIdMatch = 
+            (technician?.techRacfid || technician?.enterpriseId || technician?.racfId) === selectedEmployee.techRacfid ||
+            (data?.employee?.racfId || data?.employee?.enterpriseId) === selectedEmployee.techRacfid;
+          
+          // Match by name - check techName and name fields
+          const nameMatch = 
+            technician?.techName === selectedEmployee.techName || 
+            technician?.name === selectedEmployee.techName ||
+            data?.employee?.name === selectedEmployee.techName;
           
           return employeeIdMatch || racfIdMatch || nameMatch;
         } catch {
