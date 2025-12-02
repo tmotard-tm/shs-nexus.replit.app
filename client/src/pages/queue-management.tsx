@@ -104,6 +104,7 @@ export default function UnifiedQueueManagement() {
   const [selectedEmployee, setSelectedEmployee] = useState<TechRosterEntry | null>(null);
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const [expandedQueues, setExpandedQueues] = useState<Record<QueueModule, boolean>>({} as Record<QueueModule, boolean>);
   const [expandedStatusSections, setExpandedStatusSections] = useState<Record<string, boolean>>({});
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
@@ -586,6 +587,13 @@ export default function UnifiedQueueManagement() {
       });
     }
 
+    // Apply sort order
+    filtered = [...filtered].sort((a, b) => {
+      const dateA = new Date(a.createdAt).getTime();
+      const dateB = new Date(b.createdAt).getTime();
+      return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
+    });
+
     return filtered;
   };
 
@@ -793,7 +801,7 @@ export default function UnifiedQueueManagement() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div>
                   <Label htmlFor="workflow-type">Workflow Type</Label>
                   <Select value={selectedWorkflowType} onValueChange={setSelectedWorkflowType}>
@@ -851,6 +859,19 @@ export default function UnifiedQueueManagement() {
                     onChange={(e) => setDateTo(e.target.value)}
                     data-testid="input-date-to"
                   />
+                </div>
+
+                <div>
+                  <Label htmlFor="sort-order">Sort By Date</Label>
+                  <Select value={sortOrder} onValueChange={(value: "newest" | "oldest") => setSortOrder(value)}>
+                    <SelectTrigger data-testid="select-sort-order">
+                      <SelectValue placeholder="Sort order" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="newest">Newest First</SelectItem>
+                      <SelectItem value="oldest">Oldest First</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </CardContent>
