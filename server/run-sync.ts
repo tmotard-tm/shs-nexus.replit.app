@@ -1,0 +1,78 @@
+#!/usr/bin/env npx tsx
+/**
+ * Standalone Snowflake Sync Script
+ * 
+ * This script is designed to be run as a Replit Scheduled Deployment task.
+ * It performs the daily Snowflake sync for technician rosters and exits.
+ * 
+ * Usage: npx tsx server/run-sync.ts
+ * 
+ * Schedule this in Replit's Scheduled Deployments:
+ * - Schedule: "Every day at 5:00 AM EST" or cron "0 10 * * *" (10:00 UTC = 5:00 AM EST)
+ * - Run command: npx tsx server/run-sync.ts
+ */
+
+async function runSync(): Promise<void> {
+  const startTime = Date.now();
+  console.log('='.repeat(60));
+  console.log(`[Scheduled Sync] Starting at ${new Date().toISOString()}`);
+  console.log('='.repeat(60));
+
+  try {
+    const { isSnowflakeConfigured } = await import('./snowflake-service');
+    
+    if (!isSnowflakeConfigured()) {
+      console.error('[Scheduled Sync] ERROR: Snowflake is not configured');
+      console.error('[Scheduled Sync] Please ensure SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, and SNOWFLAKE_PRIVATE_KEY are set');
+      process.exit(1);
+    }
+
+    console.log('[Scheduled Sync] Snowflake configuration verified');
+
+    const { getSnowflakeSyncService } = await import('./snowflake-sync-service');
+    const syncService = getSnowflakeSyncService();
+
+    console.log('\n--- Syncing Termed Techs ---');
+    console.log('[Scheduled Sync] Fetching terminated technicians from Snowflake...');
+    
+    const termedResult = await syncService.syncTermedTechs('scheduled_task');
+    console.log(`[Scheduled Sync] Termed techs sync complete:`);
+    console.log(`  - Records processed: ${termedResult.recordsProcessed}`);
+    console.log(`  - Queue items created: ${termedResult.queueItemsCreated}`);
+    if (termedResult.errors && termedResult.errors.length > 0) {
+      console.log(`  - Errors: ${termedResult.errors.length}`);
+      termedResult.errors.slice(0, 5).forEach((err: string) => console.log(`    - ${err}`));
+    }
+
+    console.log('\n--- Syncing All Techs Roster ---');
+    console.log('[Scheduled Sync] Fetching complete technician roster from Snowflake...');
+    
+    const allTechsResult = await syncService.syncAllTechs('scheduled_task');
+    console.log(`[Scheduled Sync] All techs sync complete:`);
+    console.log(`  - Records processed: ${allTechsResult.recordsProcessed}`);
+    if (allTechsResult.errors && allTechsResult.errors.length > 0) {
+      console.log(`  - Errors: ${allTechsResult.errors.length}`);
+      allTechsResult.errors.slice(0, 5).forEach((err: string) => console.log(`    - ${err}`));
+    }
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log('\n' + '='.repeat(60));
+    console.log(`[Scheduled Sync] COMPLETED SUCCESSFULLY`);
+    console.log(`[Scheduled Sync] Total duration: ${duration} seconds`);
+    console.log(`[Scheduled Sync] Finished at ${new Date().toISOString()}`);
+    console.log('='.repeat(60));
+
+    process.exit(0);
+
+  } catch (error) {
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.error('\n' + '='.repeat(60));
+    console.error(`[Scheduled Sync] FAILED after ${duration} seconds`);
+    console.error(`[Scheduled Sync] Error:`, error);
+    console.error('='.repeat(60));
+    
+    process.exit(1);
+  }
+}
+
+runSync();

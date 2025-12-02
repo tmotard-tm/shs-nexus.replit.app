@@ -6,11 +6,13 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
 
 **Template Management System**: Added comprehensive template management system for superadmin users (September 2025). Provides full CRUD operations for workflow templates across all departments with security-first implementation including server-side ID generation, field whitelisting, and multi-layer access control.
 
-**Snowflake Sync System** (November 2025): Automated daily sync at 5am EST from Snowflake data warehouse for technician management:
+**Snowflake Sync System** (November 2025, updated December 2025): Automated daily sync at 5am EST from Snowflake data warehouse for technician management:
 - `DRIVELINE_TERMED_TECHS_LAST30`: Tracks terminated technicians from the last 30 days, automatically creates offboarding queue items in the Fleet department
 - `DRIVELINE_ALL_TECHS`: Complete technician roster for lookup and reference
 - Database tables: `termed_techs`, `all_techs`, `sync_logs` track sync status and offboarding task creation
 - Manual sync available via superadmin UI at /snowflake-integration or /tech-roster pages
+- **Production Scheduling**: Uses Replit Scheduled Deployments (see Production Configuration below)
+- **Development Scheduling**: Uses setInterval (only when NODE_ENV=development)
 
 **TPMS API Integration** (November 2025): Live integration with TPMS (Tire Pressure Monitoring System) API for technician-vehicle assignments:
 - Fetches real-time truck assignments by Enterprise ID via `/api/tpms/truck/:enterpriseId`
@@ -98,3 +100,37 @@ Preferred communication style: Simple, everyday language.
 - **date-fns**: Date manipulation and formatting
 - **clsx & tailwind-merge**: Conditional CSS class management
 - **cmdk**: Command palette component
+
+# Production Configuration
+
+## Scheduled Snowflake Sync (Required for Production)
+
+The daily Snowflake sync for technician rosters must be configured as a Replit Scheduled Deployment to run reliably in production. The in-memory setInterval approach only works in development because production apps sleep when idle.
+
+### Setup Instructions
+
+1. Go to **Publishing** in the Replit workspace
+2. Select the **Scheduled** deployment type
+3. Configure:
+   - **Schedule**: `Every day at 5:00 AM EST` (or use cron: `0 10 * * *` for 10:00 UTC = 5:00 AM EST)
+   - **Run command**: `npx tsx server/run-sync.ts`
+   - **Job timeout**: 10 minutes (sync typically takes 1-2 minutes)
+4. Ensure all required secrets are configured in Deployment Secrets:
+   - `SNOWFLAKE_ACCOUNT`
+   - `SNOWFLAKE_USER`
+   - `SNOWFLAKE_PRIVATE_KEY`
+   - `SNOWFLAKE_DATABASE`
+   - `SNOWFLAKE_WAREHOUSE`
+   - `DATABASE_URL` (for storing sync results)
+
+### Sync Script Details
+
+The standalone sync script (`server/run-sync.ts`) performs:
+1. **Termed Techs Sync**: Fetches terminated technicians and creates offboarding queue items
+2. **All Techs Sync**: Updates the complete technician roster for lookup
+
+### Manual Sync
+
+Manual syncs can still be triggered via the superadmin UI at `/snowflake-integration` or `/tech-roster` pages, or via API:
+- POST `/api/snowflake/sync/termed-techs`
+- POST `/api/snowflake/sync/all-techs`

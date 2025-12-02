@@ -6,6 +6,9 @@ const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
 
 let lastSyncDate: string | null = null;
 let schedulerRunning = false;
+let intervalId: NodeJS.Timeout | null = null;
+
+const isDevelopment = process.env.NODE_ENV !== 'production';
 
 function getESTDate(): Date {
   const now = new Date();
@@ -59,16 +62,31 @@ export function startSyncScheduler(): void {
   }
 
   schedulerRunning = true;
-  console.log('[Scheduler] Starting Snowflake sync scheduler (runs at 5am EST daily)');
   
-  // Run check every minute
-  setInterval(checkAndRunSync, CHECK_INTERVAL_MS);
-  
-  // Also run an immediate check in case we're starting at the sync time
-  checkAndRunSync();
+  // In production, we use Replit Scheduled Deployments instead of setInterval
+  // The setInterval approach only works when the server is continuously running,
+  // which is true in development but NOT in production where the app sleeps.
+  if (isDevelopment) {
+    console.log('[Scheduler] Starting Snowflake sync scheduler (development mode - uses setInterval)');
+    console.log('[Scheduler] Note: In production, use Replit Scheduled Deployments with: npx tsx server/run-sync.ts');
+    
+    // Run check every minute (development only)
+    intervalId = setInterval(checkAndRunSync, CHECK_INTERVAL_MS);
+    
+    // Also run an immediate check in case we're starting at the sync time
+    checkAndRunSync();
+  } else {
+    console.log('[Scheduler] Production mode detected - setInterval scheduler disabled');
+    console.log('[Scheduler] Syncs should be triggered via Replit Scheduled Deployments');
+    console.log('[Scheduler] Configure a scheduled task with: npx tsx server/run-sync.ts');
+  }
 }
 
 export function stopSyncScheduler(): void {
+  if (intervalId) {
+    clearInterval(intervalId);
+    intervalId = null;
+  }
   schedulerRunning = false;
   console.log('[Scheduler] Sync scheduler stopped');
 }
