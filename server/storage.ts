@@ -218,6 +218,7 @@ export interface IStorage {
   // All Techs Module (Snowflake sync - complete roster)
   getAllTech(id: string): Promise<AllTech | undefined>;
   getAllTechByEmployeeId(employeeId: string): Promise<AllTech | undefined>;
+  getAllTechByTechRacfid(techRacfid: string): Promise<AllTech | undefined>;
   getAllTechs(): Promise<AllTech[]>;
   upsertAllTech(tech: InsertAllTech): Promise<AllTech>;
   updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined>;
@@ -1128,6 +1129,10 @@ export class MemStorage implements IStorage {
   }
 
   async getAllTechByEmployeeId(_employeeId: string): Promise<AllTech | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getAllTechByTechRacfid(_techRacfid: string): Promise<AllTech | undefined> {
     return undefined; // Not implemented in memory storage
   }
 
@@ -3048,6 +3053,13 @@ export class DatabaseStorage implements IStorage {
 
   async getAllTechByEmployeeId(employeeId: string): Promise<AllTech | undefined> {
     const result = await db.select().from(allTechs).where(eq(allTechs.employeeId, employeeId)).limit(1);
+    return result[0];
+  }
+
+  async getAllTechByTechRacfid(techRacfid: string): Promise<AllTech | undefined> {
+    const result = await db.select().from(allTechs)
+      .where(eq(allTechs.techRacfid, techRacfid.toUpperCase()))
+      .limit(1);
     return result[0];
   }
 

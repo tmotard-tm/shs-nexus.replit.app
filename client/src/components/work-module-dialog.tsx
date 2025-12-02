@@ -92,6 +92,44 @@ export function WorkModuleDialog({
   const taskData = currentQueueItem?.data ? JSON.parse(currentQueueItem.data) : {};
   const assignedUser = users.find(u => u.id === currentQueueItem?.assignedTo);
 
+  // Get employee/technician identifiers from task data
+  const techData = taskData.technician || taskData.employee || {};
+  const employeeLookupId = techData.employeeId || techData.techRacfid || techData.enterpriseId || '';
+
+  // Fetch employee roster data from all_techs to get district and other HR info
+  const { data: rosterData } = useQuery<{ 
+    found: boolean;
+    employeeId?: string;
+    techRacfid?: string;
+    techName?: string;
+    firstName?: string;
+    lastName?: string;
+    jobTitle?: string;
+    districtNo?: string;
+    planningAreaName?: string;
+    employmentStatus?: string;
+  }>({
+    queryKey: ['/api/all-techs/lookup', employeeLookupId],
+    queryFn: async () => {
+      if (!employeeLookupId) return { found: false };
+      const response = await apiRequest("GET", `/api/all-techs/lookup/${employeeLookupId}`);
+      return response.json();
+    },
+    enabled: !!employeeLookupId && isOpen,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+
+  // Merge roster data with task data for complete employee info
+  const enrichedEmployeeData = {
+    ...techData,
+    // Override with roster data if available
+    district: rosterData?.found ? rosterData.districtNo : techData.district,
+    districtNo: rosterData?.found ? rosterData.districtNo : techData.districtNo,
+    planningArea: rosterData?.found ? rosterData.planningAreaName : techData.planningArea,
+    jobTitle: rosterData?.found ? rosterData.jobTitle : techData.jobTitle,
+    employmentStatus: rosterData?.found ? rosterData.employmentStatus : techData.employmentStatus,
+  };
+
   // Load work template for this task
   const {
     template,
@@ -395,15 +433,13 @@ export function WorkModuleDialog({
     };
   };
 
-  // Extract request details
+  // Extract request details - uses enrichedEmployeeData which includes roster data
   const getRequestDetails = () => {
-    // Employee data may be under 'employee' or 'technician' key depending on task type
-    const employee = taskData.employee || taskData.technician || {};
     return {
       requestId: currentQueueItem?.id?.slice(-8) || "N/A",
-      employeeId: employee.employeeId || "N/A",
-      enterpriseId: employee.techRacfid || employee.enterpriseId || employee.racfId || "N/A",
-      district: employee.district || taskData.district || "N/A",
+      employeeId: enrichedEmployeeData.employeeId || "N/A",
+      enterpriseId: enrichedEmployeeData.techRacfid || enrichedEmployeeData.enterpriseId || enrichedEmployeeData.racfId || "N/A",
+      district: enrichedEmployeeData.district || enrichedEmployeeData.districtNo || taskData.district || "N/A",
       serviceOrder: taskData.serviceOrder || taskData.workflowId || currentQueueItem?.id?.slice(-6) || "N/A",
       status: currentQueueItem?.status || "pending"
     };
@@ -606,184 +642,163 @@ export function WorkModuleDialog({
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {/* Personal Information - Always Show */}
-                  {(() => {
-                    // Employee data may be under 'employee' or 'technician' key depending on task type
-                    const emp = taskData.employee || taskData.technician || {};
-                    return (
+                  {/* Personal Information - Uses enrichedEmployeeData with roster lookup */}
+                  <div>
+                    <Label className="text-sm font-medium text-primary">Personal Information</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
                       <div>
-                        <Label className="text-sm font-medium text-primary">Personal Information</Label>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Full Name</Label>
-                            <p className="text-sm font-medium" data-testid="text-tech-name">
-                              {emp.firstName && emp.lastName 
-                                ? `${emp.firstName} ${emp.lastName}`
-                                : taskData.firstName && taskData.lastName
-                                ? `${taskData.firstName} ${taskData.lastName}`
-                                : emp.techName || emp.name || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Employee ID</Label>
-                            <p className="font-mono text-sm" data-testid="text-emp-employee-id">
-                              {emp.employeeId || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Enterprise ID</Label>
-                            <p className="font-mono text-sm" data-testid="text-emp-enterprise-id">
-                              {emp.techRacfid || emp.enterpriseId || emp.racfId || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">District</Label>
-                            <p className="text-sm" data-testid="text-emp-district">
-                              {emp.district || taskData.district || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Job Title</Label>
-                            <p className="text-sm" data-testid="text-emp-job-title">
-                              {emp.jobTitle || emp.position || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Planning Area</Label>
-                            <p className="text-sm" data-testid="text-emp-planning-area">
-                              {emp.planningArea || "N/A"}
-                            </p>
-                          </div>
-                        </div>
+                        <Label className="text-sm font-medium text-muted-foreground">Full Name</Label>
+                        <p className="text-sm font-medium" data-testid="text-tech-name">
+                          {enrichedEmployeeData.firstName && enrichedEmployeeData.lastName 
+                            ? `${enrichedEmployeeData.firstName} ${enrichedEmployeeData.lastName}`
+                            : taskData.firstName && taskData.lastName
+                            ? `${taskData.firstName} ${taskData.lastName}`
+                            : enrichedEmployeeData.techName || enrichedEmployeeData.name || "N/A"}
+                        </p>
                       </div>
-                    );
-                  })()}
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Employee ID</Label>
+                        <p className="font-mono text-sm" data-testid="text-emp-employee-id">
+                          {enrichedEmployeeData.employeeId || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Enterprise ID</Label>
+                        <p className="font-mono text-sm" data-testid="text-emp-enterprise-id">
+                          {enrichedEmployeeData.techRacfid || enrichedEmployeeData.enterpriseId || enrichedEmployeeData.racfId || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">District</Label>
+                        <p className="text-sm" data-testid="text-emp-district">
+                          {enrichedEmployeeData.district || enrichedEmployeeData.districtNo || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Job Title</Label>
+                        <p className="text-sm" data-testid="text-emp-job-title">
+                          {enrichedEmployeeData.jobTitle || enrichedEmployeeData.position || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Planning Area</Label>
+                        <p className="text-sm" data-testid="text-emp-planning-area">
+                          {enrichedEmployeeData.planningArea || "N/A"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 
 
                   {/* Contact Information - Always Show */}
-                  {(() => {
-                    const emp = taskData.employee || taskData.technician || {};
-                    return (
-                      <div>
-                        <div>
-                          <Label className="text-sm font-medium text-primary">Contact Information</Label>
-                          <div className="grid grid-cols-1 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
-                            {(emp.address || taskData.address || emp.street || taskData.street) && (
-                              <div>
-                                <Label className="text-sm font-medium text-muted-foreground">Full Address</Label>
-                                <div className="text-sm space-y-1" data-testid="text-address">
-                                  {(emp.address || taskData.address) ? (
-                                    <p>{emp.address || taskData.address}</p>
-                                  ) : (
-                                    <div>
-                                      {(emp.street || taskData.street) && (
-                                        <p>{emp.street || taskData.street}</p>
-                                      )}
-                                      <p>
-                                        {[
-                                          emp.city || taskData.city,
-                                          emp.state || taskData.state,
-                                          emp.zip || taskData.zipCode || taskData.zip
-                                        ].filter(Boolean).join(", ")}
-                                      </p>
-                                    </div>
+                  <div>
+                    <div>
+                      <Label className="text-sm font-medium text-primary">Contact Information</Label>
+                      <div className="grid grid-cols-1 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                        {(enrichedEmployeeData.address || taskData.address || enrichedEmployeeData.street || taskData.street) && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Full Address</Label>
+                            <div className="text-sm space-y-1" data-testid="text-address">
+                              {(enrichedEmployeeData.address || taskData.address) ? (
+                                <p>{enrichedEmployeeData.address || taskData.address}</p>
+                              ) : (
+                                <div>
+                                  {(enrichedEmployeeData.street || taskData.street) && (
+                                    <p>{enrichedEmployeeData.street || taskData.street}</p>
                                   )}
+                                  <p>
+                                    {[
+                                      enrichedEmployeeData.city || taskData.city,
+                                      enrichedEmployeeData.state || taskData.state,
+                                      enrichedEmployeeData.zip || taskData.zipCode || taskData.zip
+                                    ].filter(Boolean).join(", ")}
+                                  </p>
                                 </div>
-                              </div>
-                            )}
-                            {(emp.phone || taskData.phone) && (
-                              <div>
-                                <Label className="text-sm font-medium text-muted-foreground">Phone Number</Label>
-                                <p className="text-sm" data-testid="text-phone">
-                                  {emp.phone || taskData.phone || "N/A"}
-                                </p>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        )}
+                        {(enrichedEmployeeData.phone || taskData.phone) && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Phone Number</Label>
+                            <p className="text-sm" data-testid="text-phone">
+                              {enrichedEmployeeData.phone || taskData.phone || "N/A"}
+                            </p>
+                          </div>
+                        )}
                       </div>
-                    );
-                  })()}
+                    </div>
+                  </div>
 
                   {/* Employment Information */}
-                  {(() => {
-                    const emp = taskData.employee || taskData.technician || {};
-                    return (
+                  <div>
+                    <Label className="text-sm font-medium text-primary">Employment Information</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
                       <div>
-                        <Label className="text-sm font-medium text-primary">Employment Information</Label>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Last Day Worked</Label>
-                            <p className="text-sm" data-testid="text-last-day-worked">
-                              {emp.lastDayWorked || taskData.lastDayWorked || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Effective Date</Label>
-                            <p className="text-sm" data-testid="text-effective-date">
-                              {emp.effectiveDate || taskData.effectiveDate || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Department</Label>
-                            <p className="text-sm" data-testid="text-department">
-                              {emp.department || taskData.department || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Position</Label>
-                            <p className="text-sm" data-testid="text-position">
-                              {emp.jobTitle || emp.position || taskData.position || "Employee"}
-                            </p>
-                          </div>
-                        </div>
+                        <Label className="text-sm font-medium text-muted-foreground">Last Day Worked</Label>
+                        <p className="text-sm" data-testid="text-last-day-worked">
+                          {enrichedEmployeeData.lastDayWorked || taskData.lastDayWorked || "N/A"}
+                        </p>
                       </div>
-                    );
-                  })()}
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Effective Date</Label>
+                        <p className="text-sm" data-testid="text-effective-date">
+                          {enrichedEmployeeData.effectiveDate || taskData.effectiveDate || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Department</Label>
+                        <p className="text-sm" data-testid="text-department">
+                          {enrichedEmployeeData.department || taskData.department || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Position</Label>
+                        <p className="text-sm" data-testid="text-position">
+                          {enrichedEmployeeData.jobTitle || enrichedEmployeeData.position || taskData.position || "Employee"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
 
                   {/* Technical Information - Always Show */}
-                  {(() => {
-                    const emp = taskData.employee || taskData.technician || {};
-                    return (
-                      <div>
-                        <Label className="text-sm font-medium text-primary">Technical Information</Label>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
-                          <div className="md:col-span-2">
-                            <Label className="text-sm font-medium text-primary">Parts to Ship - Employee Specialties</Label>
-                            {(emp.specialties || taskData.specialties) ? (
-                              <div className="flex flex-wrap gap-2 mt-2" data-testid="specialties-badges">
-                                {(Array.isArray(emp.specialties || taskData.specialties)
-                                  ? (emp.specialties || taskData.specialties)
-                                  : [emp.specialties || taskData.specialties]
-                                ).filter(Boolean).map((specialty: string, index: number) => (
-                                  <span 
-                                    key={specialty || index} 
-                                    className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-700"
-                                  >
-                                    {specialty}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-sm text-muted-foreground mt-2">No specialties specified</p>
-                            )}
+                  <div>
+                    <Label className="text-sm font-medium text-primary">Technical Information</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                      <div className="md:col-span-2">
+                        <Label className="text-sm font-medium text-primary">Parts to Ship - Employee Specialties</Label>
+                        {(enrichedEmployeeData.specialties || taskData.specialties) ? (
+                          <div className="flex flex-wrap gap-2 mt-2" data-testid="specialties-badges">
+                            {(Array.isArray(enrichedEmployeeData.specialties || taskData.specialties)
+                              ? (enrichedEmployeeData.specialties || taskData.specialties)
+                              : [enrichedEmployeeData.specialties || taskData.specialties]
+                            ).filter(Boolean).map((specialty: string, index: number) => (
+                              <span 
+                                key={specialty || index} 
+                                className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-700"
+                              >
+                                {specialty}
+                              </span>
+                            ))}
                           </div>
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">FSSL Status</Label>
-                            {(emp.isFSSLTech || taskData.isFSSLTech) ? (
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium">
-                                  FSSL (Field Service Support Lead)
-                                </span>
-                              </div>
-                            ) : (
-                              <p className="text-sm text-muted-foreground mt-1">Standard Employee</p>
-                            )}
-                          </div>
-                        </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground mt-2">No specialties specified</p>
+                        )}
                       </div>
-                    );
-                  })()}
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">FSSL Status</Label>
+                        {(enrichedEmployeeData.isFSSLTech || taskData.isFSSLTech) ? (
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 font-medium">
+                              FSSL (Field Service Support Lead)
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground mt-1">Standard Employee</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
                   {/* Additional Notes */}
                   {(taskData.description || taskData.notes) && (

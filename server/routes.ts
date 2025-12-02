@@ -5253,6 +5253,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Look up an employee from the all_techs roster by employeeId or techRacfid (for enriching task data)
+  app.get("/api/all-techs/lookup/:identifier", requireAuth, async (req: any, res) => {
+    try {
+      const { identifier } = req.params;
+      
+      // Try to find by employeeId first (numeric), then by techRacfid (alphanumeric)
+      let tech = await storage.getAllTechByEmployeeId(identifier);
+      
+      if (!tech) {
+        tech = await storage.getAllTechByTechRacfid(identifier);
+      }
+      
+      if (tech) {
+        res.json({
+          found: true,
+          employeeId: tech.employeeId,
+          techRacfid: tech.techRacfid,
+          techName: tech.techName,
+          firstName: tech.firstName,
+          lastName: tech.lastName,
+          jobTitle: tech.jobTitle,
+          districtNo: tech.districtNo,
+          planningAreaName: tech.planningAreaName,
+          employmentStatus: tech.employmentStatus,
+        });
+      } else {
+        res.json({ found: false });
+      }
+    } catch (error: any) {
+      console.error("Error looking up all tech:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get sync logs
   app.get("/api/sync-logs", requireAuth, async (req: any, res) => {
     try {
