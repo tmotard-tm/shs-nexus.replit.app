@@ -584,6 +584,15 @@ export type AnonymousOffboardingPayload = z.infer<typeof anonymousOffboardingSch
 export type AnonymousByovEnrollmentPayload = z.infer<typeof anonymousByovEnrollmentSchema>;
 
 // Work Module Template Schema and Types
+// Link schema for multiple links per step/substep
+export const templateLinkSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().min(1),
+  url: z.string().url()
+});
+
+export type TemplateLink = z.infer<typeof templateLinkSchema>;
+
 export const workTemplateSubstepSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -597,8 +606,9 @@ export const workTemplateSubstepSchema = z.object({
     condition: z.enum(["equals", "not_equals", "contains", "completed"]).optional(),
     value: z.string().optional()
   }).optional(),
-  linkText: z.string().optional(), // Custom text for the link
-  linkUrl: z.string().url().optional() // URL to navigate to when clicked
+  linkText: z.string().optional(), // Legacy: single link text (use links[] instead)
+  linkUrl: z.string().url().optional(), // Legacy: single link URL (use links[] instead)
+  links: z.array(templateLinkSchema).optional() // Multiple links per substep
 });
 
 export const workTemplateStepSchema = z.object({
@@ -619,8 +629,9 @@ export const workTemplateStepSchema = z.object({
   }).optional(),
   attachmentRequired: z.boolean().default(false),
   attachmentTypes: z.array(z.string()).optional(), // ["image", "document", "signature"]
-  linkText: z.string().optional(), // Custom text for the link
-  linkUrl: z.string().url().optional() // URL to navigate to when clicked
+  linkText: z.string().optional(), // Legacy: single link text (use links[] instead)
+  linkUrl: z.string().url().optional(), // Legacy: single link URL (use links[] instead)
+  links: z.array(templateLinkSchema).optional() // Multiple links per step
 });
 
 export const workTemplateSchema = z.object({
