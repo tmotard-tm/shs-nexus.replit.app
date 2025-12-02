@@ -418,10 +418,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
     try {
       const { enterpriseId, password } = req.body;
+      const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
       
       const user = await storage.getUserByUsername(enterpriseId);
       
       if (!user) {
+        // Log failed login attempt - user not found
+        await storage.createActivityLog({
+          userId: 'system',
+          action: 'login_failed',
+          entityType: 'auth',
+          entityId: null,
+          details: `Failed login attempt for unknown user "${enterpriseId}" from IP: ${ipAddress}`,
+        });
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
@@ -429,6 +438,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isPasswordValid = await bcrypt.compare(password, user.password);
       
       if (!isPasswordValid) {
+        // Log failed login attempt - wrong password
+        await storage.createActivityLog({
+          userId: user.id,
+          action: 'login_failed',
+          entityType: 'auth',
+          entityId: user.id,
+          details: `Failed login attempt for user "${enterpriseId}" (wrong password) from IP: ${ipAddress}`,
+        });
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
@@ -450,6 +467,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sameSite: 'lax', // Changed from 'strict' for better cross-origin compatibility
         expires: expiresAt,
         path: '/' // Ensure cookie is available for all paths
+      });
+
+      // Log successful login
+      await storage.createActivityLog({
+        userId: user.id,
+        action: 'login_success',
+        entityType: 'auth',
+        entityId: user.id,
+        details: `User "${user.username}" logged in successfully from IP: ${ipAddress}`,
       });
 
       res.json({ user: { ...user, password: undefined } });
@@ -1871,8 +1897,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Common queue operations (cancel works across all modules)
-  app.patch("/api/queue/:id/cancel", async (req, res) => {
+  app.patch("/api/queue/:id/cancel", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      
       const { reason } = req.body;
       if (!reason) {
         return res.status(400).json({ message: "Cancellation reason is required" });
@@ -1883,6 +1914,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!queueItem) {
         return res.status(404).json({ message: "Queue item not found" });
       }
+
+      // Log queue cancellation action
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: 'queue_item_cancelled',
+        entityType: 'queue',
+        entityId: req.params.id,
+        details: `Queue item "${queueItem.title}" cancelled by ${currentUser.username}. Reason: ${reason}`,
+      });
 
       res.json(queueItem);
     } catch (error) {
@@ -2328,6 +2368,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Queue item not found" });
       }
       
+      // Log queue assignment action
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: 'queue_item_assigned',
+        entityType: 'queue',
+        entityId: id,
+        details: `${module.toUpperCase()} queue item "${updatedItem.title}" assigned to ${assigneeId} by ${currentUser.username}`,
+      });
+      
       res.json({ ...updatedItem, module });
     } catch (error) {
       console.error('Error assigning unified queue item:', error);
@@ -2361,6 +2410,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!updatedItem) {
         return res.status(404).json({ message: "Queue item not found or not eligible to start work" });
       }
+      
+      // Log queue start work action
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: 'queue_item_started',
+        entityType: 'queue',
+        entityId: id,
+        details: `${module.toUpperCase()} queue item "${updatedItem.title}" work started by ${currentUser.username}`,
+      });
       
       res.json({ ...updatedItem, module });
     } catch (error) {
@@ -2433,6 +2491,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       }
+      
+      // Log queue completion action
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: 'queue_item_completed',
+        entityType: 'queue',
+        entityId: id,
+        details: `${module.toUpperCase()} queue item "${updatedItem.title}" completed by ${currentUser.username}${decisionType ? ` (decision: ${decisionType})` : ''}`,
+      });
       
       res.json({ ...updatedItem, module });
     } catch (error) {
