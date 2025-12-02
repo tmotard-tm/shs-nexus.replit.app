@@ -596,7 +596,9 @@ export const workTemplateSubstepSchema = z.object({
     dependsOn: z.string().optional(), // ID of step/substep this depends on
     condition: z.enum(["equals", "not_equals", "contains", "completed"]).optional(),
     value: z.string().optional()
-  }).optional()
+  }).optional(),
+  linkText: z.string().optional(), // Custom text for the link
+  linkUrl: z.string().url().optional() // URL to navigate to when clicked
 });
 
 export const workTemplateStepSchema = z.object({
@@ -616,7 +618,9 @@ export const workTemplateStepSchema = z.object({
     value: z.string().optional()
   }).optional(),
   attachmentRequired: z.boolean().default(false),
-  attachmentTypes: z.array(z.string()).optional() // ["image", "document", "signature"]
+  attachmentTypes: z.array(z.string()).optional(), // ["image", "document", "signature"]
+  linkText: z.string().optional(), // Custom text for the link
+  linkUrl: z.string().url().optional() // URL to navigate to when clicked
 });
 
 export const workTemplateSchema = z.object({

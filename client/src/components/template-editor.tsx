@@ -48,6 +48,7 @@ import {
   ChevronRight,
   AlertTriangle,
   Info,
+  Link,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -86,6 +87,10 @@ const templateEditorSchema = z.object({
       value: z.string().optional()
     }).optional(),
     
+    // Link for step
+    linkText: z.string().optional(),
+    linkUrl: z.string().optional(),
+    
     // Enhanced substeps with all fields
     substeps: z.array(z.object({
       id: z.string().min(1),
@@ -100,6 +105,8 @@ const templateEditorSchema = z.object({
         condition: z.enum(["equals", "not_equals", "contains", "completed"]).optional(),
         value: z.string().optional()
       }).optional(),
+      linkText: z.string().optional(),
+      linkUrl: z.string().optional(),
     })).optional(),
   })),
   
@@ -1073,6 +1080,52 @@ function StepEditor({
               />
             </div>
 
+            {/* Step Link Section */}
+            <div className="border rounded-lg p-4 bg-muted/30">
+              <div className="flex items-center gap-2 mb-3">
+                <Link className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Step Link (Optional)</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name={`steps.${stepIndex}.linkText`}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Link Text</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          placeholder="e.g., View Documentation"
+                          className="h-8 text-sm"
+                          data-testid={`input-step-link-text-${stepIndex}`}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name={`steps.${stepIndex}.linkUrl`}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Link URL</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          placeholder="https://example.com/docs"
+                          className="h-8 text-sm"
+                          data-testid={`input-step-link-url-${stepIndex}`}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
+
             <Separator />
 
             <div className="flex items-center justify-between">
@@ -1183,6 +1236,47 @@ function StepEditor({
                         </FormItem>
                       )}
                     />
+                    {/* Substep Link Section */}
+                    <div className="border rounded p-3 mt-3 bg-background/50">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Link className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-xs font-medium text-muted-foreground">Link (Optional)</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <FormField
+                          control={form.control}
+                          name={`steps.${stepIndex}.substeps.${substepIndex}.linkText`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  placeholder="Link text"
+                                  className="h-7 text-xs"
+                                  data-testid={`input-substep-link-text-${stepIndex}-${substepIndex}`}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`steps.${stepIndex}.substeps.${substepIndex}.linkUrl`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  placeholder="https://..."
+                                  className="h-7 text-xs"
+                                  data-testid={`input-substep-link-url-${stepIndex}-${substepIndex}`}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    </div>
                   </Card>
                 ))}
               </div>

@@ -17,7 +17,8 @@ import {
   AlertTriangle,
   FileText,
   User,
-  Timer
+  Timer,
+  ExternalLink
 } from "lucide-react";
 import type { WorkTemplate, WorkTemplateStep, WorkTemplateSubstep } from "@shared/schema";
 
@@ -225,6 +226,20 @@ export function TemplateChecklist({
                     {step.description && (
                       <p className="text-sm text-muted-foreground">{step.description}</p>
                     )}
+                    
+                    {/* Step Link */}
+                    {step.linkUrl && (
+                      <a
+                        href={step.linkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
+                        data-testid={`link-step-${step.id}`}
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        {step.linkText || step.linkUrl}
+                      </a>
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -259,6 +274,20 @@ export function TemplateChecklist({
                                 
                                 {substep.description && (
                                   <p className="text-xs text-muted-foreground">{substep.description}</p>
+                                )}
+                                
+                                {/* Substep Link */}
+                                {substep.linkUrl && (
+                                  <a
+                                    href={substep.linkUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
+                                    data-testid={`link-substep-${step.id}-${substep.id}`}
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                    {substep.linkText || substep.linkUrl}
+                                  </a>
                                 )}
                               </div>
                             </div>
