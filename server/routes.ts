@@ -2384,6 +2384,128 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Release (unassign) queue item - Superadmin only
+  app.patch("/api/queues/:module/:id/release", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      
+      // Only superadmins can release tasks assigned to others
+      if (currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmins can release tasks" });
+      }
+      
+      const { module, id } = req.params;
+      
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
+      if (!validModules.includes(module)) {
+        return res.status(400).json({ 
+          message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 
+        });
+      }
+      
+      // Get current item to log who it was assigned to
+      const existingItem = await storage.getUnifiedQueueItem(module as any, id);
+      if (!existingItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+      
+      const previousAssignee = existingItem.assignedTo;
+      
+      // Release the task by clearing assignment and resetting status
+      const updatedItem = await storage.updateUnifiedQueueItem(module as any, id, {
+        assignedTo: null,
+        status: 'pending'
+      });
+      
+      if (!updatedItem) {
+        return res.status(404).json({ message: "Failed to release queue item" });
+      }
+      
+      // Log the release action
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: 'queue_item_released',
+        entityType: 'queue',
+        entityId: id,
+        details: `${module.toUpperCase()} queue item "${updatedItem.title}" released by ${currentUser.username} (was assigned to ${previousAssignee || 'no one'})`,
+      });
+      
+      res.json({ ...updatedItem, module });
+    } catch (error) {
+      console.error('Error releasing queue item:', error);
+      res.status(500).json({ message: "Failed to release queue item" });
+    }
+  });
+
+  // Reassign queue item to different user - Superadmin only
+  app.patch("/api/queues/:module/:id/reassign", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      
+      // Only superadmins can reassign tasks
+      if (currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmins can reassign tasks" });
+      }
+      
+      const { module, id } = req.params;
+      const { assigneeId } = req.body;
+      
+      if (!assigneeId) {
+        return res.status(400).json({ message: "assigneeId is required" });
+      }
+      
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
+      if (!validModules.includes(module)) {
+        return res.status(400).json({ 
+          message: `Invalid module: ${module}. Valid modules: ${validModules.join(', ')}` 
+        });
+      }
+      
+      // Get current item to log who it was assigned to
+      const existingItem = await storage.getUnifiedQueueItem(module as any, id);
+      if (!existingItem) {
+        return res.status(404).json({ message: "Queue item not found" });
+      }
+      
+      // Verify the new assignee exists
+      const newAssignee = await storage.getUser(assigneeId);
+      if (!newAssignee) {
+        return res.status(400).json({ message: "Invalid assignee - user not found" });
+      }
+      
+      const previousAssignee = existingItem.assignedTo;
+      
+      // Reassign the task
+      const updatedItem = await storage.updateUnifiedQueueItem(module as any, id, {
+        assignedTo: assigneeId
+      });
+      
+      if (!updatedItem) {
+        return res.status(404).json({ message: "Failed to reassign queue item" });
+      }
+      
+      // Log the reassignment action
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: 'queue_item_reassigned',
+        entityType: 'queue',
+        entityId: id,
+        details: `${module.toUpperCase()} queue item "${updatedItem.title}" reassigned from ${previousAssignee || 'unassigned'} to ${newAssignee.username} by ${currentUser.username}`,
+      });
+      
+      res.json({ ...updatedItem, module });
+    } catch (error) {
+      console.error('Error reassigning queue item:', error);
+      res.status(500).json({ message: "Failed to reassign queue item" });
+    }
+  });
+
   // Start work on unified queue item
   app.patch("/api/queues/:module/:id/start-work", requireAuth, async (req: any, res) => {
     try {

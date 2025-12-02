@@ -111,6 +111,8 @@ export default function UnifiedQueueManagement() {
   const [pickUpItem, setPickUpItem] = useState<CombinedQueueItem | null>(null);
   const [workModuleItem, setWorkModuleItem] = useState<CombinedQueueItem | null>(null);
   const [isWorkModuleOpen, setIsWorkModuleOpen] = useState(false);
+  const [reassignItem, setReassignItem] = useState<CombinedQueueItem | null>(null);
+  const [selectedReassignee, setSelectedReassignee] = useState<string>("");
 
   // Auto-populate module selection based on user's department access
   useEffect(() => {
@@ -329,6 +331,70 @@ export default function UnifiedQueueManagement() {
       toast({
         title: "Error",
         description: "Failed to complete task",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Release queue item mutation (superadmin only)
+  const releaseMutation = useMutation({
+    mutationFn: async ({ module, id }: { module: QueueModule; id: string }) => {
+      const response = await apiRequest("PATCH", `/api/queues/${module}/${id}/release`);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues/stats"],
+        exact: false
+      });
+      setViewQueueItem(null);
+      toast({
+        title: "Task Released",
+        description: "Task has been released and is now available for pickup",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to release task",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Reassign queue item mutation (superadmin only)
+  const reassignMutation = useMutation({
+    mutationFn: async ({ module, id, assigneeId }: { module: QueueModule; id: string; assigneeId: string }) => {
+      const response = await apiRequest("PATCH", `/api/queues/${module}/${id}/reassign`, {
+        assigneeId,
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues"],
+        exact: false
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/queues/stats"],
+        exact: false
+      });
+      setReassignItem(null);
+      setSelectedReassignee("");
+      setViewQueueItem(null);
+      toast({
+        title: "Task Reassigned",
+        description: "Task has been reassigned successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to reassign task",
         variant: "destructive",
       });
     },
@@ -1139,6 +1205,46 @@ export default function UnifiedQueueManagement() {
                     <p className="text-sm mt-1">{viewQueueItem.notes}</p>
                   </div>
                 )}
+
+                {/* Superadmin Actions - Release and Reassign */}
+                {user?.role === 'superadmin' && viewQueueItem.assignedTo && viewQueueItem.status !== 'completed' && (
+                  <div className="border-t pt-4 mt-4">
+                    <Label className="text-base font-semibold mb-3 block">Admin Actions</Label>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      This task is currently assigned to{' '}
+                      <span className="font-medium">
+                        {users.find((u: UserType) => u.id === viewQueueItem.assignedTo)?.username || 'Unknown User'}
+                      </span>
+                    </p>
+                    <div className="flex gap-3">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          releaseMutation.mutate({ 
+                            module: viewQueueItem.module, 
+                            id: viewQueueItem.id 
+                          });
+                        }}
+                        disabled={releaseMutation.isPending}
+                        data-testid="button-release-task"
+                      >
+                        <XCircle className="h-4 w-4 mr-2" />
+                        {releaseMutation.isPending ? "Releasing..." : "Release Task"}
+                      </Button>
+                      <Button
+                        variant="default"
+                        onClick={() => {
+                          setReassignItem(viewQueueItem);
+                          setSelectedReassignee("");
+                        }}
+                        data-testid="button-reassign-task"
+                      >
+                        <Users className="h-4 w-4 mr-2" />
+                        Reassign Task
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </DialogContent>
@@ -1178,6 +1284,81 @@ export default function UnifiedQueueManagement() {
             queryClient.invalidateQueries({ queryKey: ["/api/queues/stats"] });
           }}
         />
+
+        {/* Reassign Task Dialog */}
+        <Dialog open={!!reassignItem} onOpenChange={() => {
+          setReassignItem(null);
+          setSelectedReassignee("");
+        }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Reassign Task</DialogTitle>
+              <DialogDescription>
+                Select a new agent to assign this task to.
+              </DialogDescription>
+            </DialogHeader>
+            {reassignItem && (
+              <div className="space-y-4">
+                <div className="p-3 bg-muted rounded-lg">
+                  <p className="text-sm font-medium">{reassignItem.title}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Currently assigned to:{' '}
+                    <span className="font-medium">
+                      {users.find((u: UserType) => u.id === reassignItem.assignedTo)?.username || 'Unknown'}
+                    </span>
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="reassignee">New Assignee</Label>
+                  <Select value={selectedReassignee} onValueChange={setSelectedReassignee}>
+                    <SelectTrigger data-testid="select-reassignee">
+                      <SelectValue placeholder="Select an agent" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {users
+                        .filter((u: UserType) => u.id !== reassignItem.assignedTo)
+                        .map((u: UserType) => (
+                          <SelectItem key={u.id} value={u.id} data-testid={`option-reassign-${u.id}`}>
+                            {u.username} ({u.role})
+                          </SelectItem>
+                        ))
+                      }
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setReassignItem(null);
+                      setSelectedReassignee("");
+                    }}
+                    data-testid="button-cancel-reassign"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (selectedReassignee && reassignItem) {
+                        reassignMutation.mutate({
+                          module: reassignItem.module,
+                          id: reassignItem.id,
+                          assigneeId: selectedReassignee
+                        });
+                      }
+                    }}
+                    disabled={!selectedReassignee || reassignMutation.isPending}
+                    data-testid="button-confirm-reassign"
+                  >
+                    {reassignMutation.isPending ? "Reassigning..." : "Confirm Reassign"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </MainContent>
   );
