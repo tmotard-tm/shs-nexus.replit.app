@@ -227,8 +227,24 @@ export function TemplateChecklist({
                       <p className="text-sm text-muted-foreground">{step.description}</p>
                     )}
                     
-                    {/* Step Link */}
-                    {step.linkUrl && (
+                    {/* Step Links - Support both legacy single link and new multiple links */}
+                    {(step.links && step.links.length > 0) ? (
+                      <div className="flex flex-wrap gap-3">
+                        {step.links.map((link: any, linkIndex: number) => (
+                          <a
+                            key={link.id || linkIndex}
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
+                            data-testid={`link-step-${step.id}-${linkIndex}`}
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            {link.text}
+                          </a>
+                        ))}
+                      </div>
+                    ) : step.linkUrl && (
                       <a
                         href={step.linkUrl}
                         target="_blank"
@@ -276,8 +292,24 @@ export function TemplateChecklist({
                                   <p className="text-xs text-muted-foreground">{substep.description}</p>
                                 )}
                                 
-                                {/* Substep Link */}
-                                {substep.linkUrl && (
+                                {/* Substep Links - Support both legacy single link and new multiple links */}
+                                {(substep.links && substep.links.length > 0) ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {substep.links.map((link: any, linkIndex: number) => (
+                                      <a
+                                        key={link.id || linkIndex}
+                                        href={link.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
+                                        data-testid={`link-substep-${step.id}-${substep.id}-${linkIndex}`}
+                                      >
+                                        <ExternalLink className="h-3 w-3" />
+                                        {link.text}
+                                      </a>
+                                    ))}
+                                  </div>
+                                ) : substep.linkUrl && (
                                   <a
                                     href={substep.linkUrl}
                                     target="_blank"
