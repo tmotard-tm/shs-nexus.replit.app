@@ -509,11 +509,11 @@ export function WorkModuleDialog({
           {/* Template Checklist Section */}
           <Tabs defaultValue="checklist" className="w-full">
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="checklist" className="flex items-center gap-2">
+              <TabsTrigger value="checklist" className="flex items-center gap-2" data-testid="tab-task-checklist">
                 <ListTodo className="h-4 w-4" />
                 Task Checklist
               </TabsTrigger>
-              <TabsTrigger value="instructions" className="flex items-center gap-2">
+              <TabsTrigger value="instructions" className="flex items-center gap-2" data-testid="tab-employee-details">
                 <User className="h-4 w-4" />
                 Employee Details
               </TabsTrigger>
