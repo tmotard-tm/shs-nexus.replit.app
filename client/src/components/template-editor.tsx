@@ -904,6 +904,42 @@ function StepEditor({
 }: StepEditorProps) {
   const [isOpen, setIsOpen] = useState(true);
   const substeps = form.watch(`steps.${stepIndex}.substeps`) || [];
+  
+  // Track which steps/substeps have their link section visible
+  const existingLinkUrl = form.watch(`steps.${stepIndex}.linkUrl`);
+  const [showStepLink, setShowStepLink] = useState(!!existingLinkUrl);
+  const [visibleSubstepLinks, setVisibleSubstepLinks] = useState<Set<number>>(() => {
+    // Initialize with substeps that already have links
+    const initialSet = new Set<number>();
+    substeps.forEach((substep: any, idx: number) => {
+      if (substep?.linkUrl) {
+        initialSet.add(idx);
+      }
+    });
+    return initialSet;
+  });
+  
+  const toggleSubstepLink = (substepIndex: number) => {
+    setVisibleSubstepLinks(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(substepIndex)) {
+        // Clear the link fields when hiding
+        form.setValue(`steps.${stepIndex}.substeps.${substepIndex}.linkText`, "");
+        form.setValue(`steps.${stepIndex}.substeps.${substepIndex}.linkUrl`, "");
+        newSet.delete(substepIndex);
+      } else {
+        newSet.add(substepIndex);
+      }
+      return newSet;
+    });
+  };
+  
+  const hideStepLink = () => {
+    // Clear the link fields when hiding
+    form.setValue(`steps.${stepIndex}.linkText`, "");
+    form.setValue(`steps.${stepIndex}.linkUrl`, "");
+    setShowStepLink(false);
+  };
 
   return (
     <Card>
@@ -1080,51 +1116,77 @@ function StepEditor({
               />
             </div>
 
-            {/* Step Link Section */}
-            <div className="border rounded-lg p-4 bg-muted/30">
-              <div className="flex items-center gap-2 mb-3">
-                <Link className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Step Link (Optional)</span>
+            {/* Step Link Section - Toggle */}
+            {!showStepLink ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowStepLink(true)}
+                className="w-fit"
+                data-testid={`button-add-step-link-${stepIndex}`}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                URL
+              </Button>
+            ) : (
+              <div className="border rounded-lg p-4 bg-muted/30">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Link className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">Step Link</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={hideStepLink}
+                    className="h-6 w-6 p-0"
+                    data-testid={`button-remove-step-link-${stepIndex}`}
+                  >
+                    <Minus className="h-3 w-3" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name={`steps.${stepIndex}.linkText`}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs">Link Text</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="e.g., View Documentation"
+                            className="h-8 text-sm"
+                            data-testid={`input-step-link-text-${stepIndex}`}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name={`steps.${stepIndex}.linkUrl`}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs">Link URL</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="https://example.com/docs"
+                            className="h-8 text-sm"
+                            data-testid={`input-step-link-url-${stepIndex}`}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name={`steps.${stepIndex}.linkText`}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-xs">Link Text</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          placeholder="e.g., View Documentation"
-                          className="h-8 text-sm"
-                          data-testid={`input-step-link-text-${stepIndex}`}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name={`steps.${stepIndex}.linkUrl`}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-xs">Link URL</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          placeholder="https://example.com/docs"
-                          className="h-8 text-sm"
-                          data-testid={`input-step-link-url-${stepIndex}`}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-            </div>
+            )}
 
             <Separator />
 
@@ -1236,47 +1298,73 @@ function StepEditor({
                         </FormItem>
                       )}
                     />
-                    {/* Substep Link Section */}
-                    <div className="border rounded p-3 mt-3 bg-background/50">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Link className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-xs font-medium text-muted-foreground">Link (Optional)</span>
+                    {/* Substep Link Section - Toggle */}
+                    {!visibleSubstepLinks.has(substepIndex) ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => toggleSubstepLink(substepIndex)}
+                        className="w-fit mt-2 h-7"
+                        data-testid={`button-add-substep-link-${stepIndex}-${substepIndex}`}
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        URL
+                      </Button>
+                    ) : (
+                      <div className="border rounded p-3 mt-3 bg-background/50">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Link className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-xs font-medium text-muted-foreground">Link</span>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => toggleSubstepLink(substepIndex)}
+                            className="h-5 w-5 p-0"
+                            data-testid={`button-remove-substep-link-${stepIndex}-${substepIndex}`}
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <FormField
+                            control={form.control}
+                            name={`steps.${stepIndex}.substeps.${substepIndex}.linkText`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormControl>
+                                  <Input
+                                    {...field}
+                                    placeholder="Link text"
+                                    className="h-7 text-xs"
+                                    data-testid={`input-substep-link-text-${stepIndex}-${substepIndex}`}
+                                  />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name={`steps.${stepIndex}.substeps.${substepIndex}.linkUrl`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormControl>
+                                  <Input
+                                    {...field}
+                                    placeholder="https://..."
+                                    className="h-7 text-xs"
+                                    data-testid={`input-substep-link-url-${stepIndex}-${substepIndex}`}
+                                  />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <FormField
-                          control={form.control}
-                          name={`steps.${stepIndex}.substeps.${substepIndex}.linkText`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormControl>
-                                <Input
-                                  {...field}
-                                  placeholder="Link text"
-                                  className="h-7 text-xs"
-                                  data-testid={`input-substep-link-text-${stepIndex}-${substepIndex}`}
-                                />
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name={`steps.${stepIndex}.substeps.${substepIndex}.linkUrl`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormControl>
-                                <Input
-                                  {...field}
-                                  placeholder="https://..."
-                                  className="h-7 text-xs"
-                                  data-testid={`input-substep-link-url-${stepIndex}-${substepIndex}`}
-                                />
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                    </div>
+                    )}
                   </Card>
                 ))}
               </div>
