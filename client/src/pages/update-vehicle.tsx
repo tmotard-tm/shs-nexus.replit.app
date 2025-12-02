@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User, AlertCircle, Loader2, RefreshCw, Truck } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
@@ -32,6 +34,69 @@ import {
   getCityOptions,
   type FleetVehicle 
 } from "@/data/fleetData";
+
+interface HolmanVehicle {
+  lesseeCode: string;
+  holmanVehicleNumber?: string;
+  clientVehicleNumber?: string;
+  vin: string;
+  modelYear?: number;
+  year?: number;
+  makeVin?: string;
+  makeClient?: string;
+  make?: string;
+  modelVin?: string;
+  modelClient?: string;
+  model?: string;
+  status?: string;
+  assignedStatus?: string;
+  licensePlate?: string;
+  licenseState?: string;
+  color?: string;
+  garagingCity?: string;
+  garagingState?: string;
+  garagingZip?: string;
+  garagingStreet1?: string;
+  clientData2?: string;
+  [key: string]: any;
+}
+
+interface HolmanVehiclesResponse {
+  totalCount: number;
+  pageInfo: {
+    pageNumber: number;
+    pageSize: number;
+    totalPages: number;
+  };
+  data: HolmanVehicle[];
+}
+
+const getHolmanStatusInfo = (status: string | undefined): { label: string; color: string; icon: 'active' | 'inactive' | 'pending' | 'unknown' } => {
+  const statusCode = status?.toString().toUpperCase() || '';
+  
+  switch (statusCode) {
+    case '1':
+    case 'ACTIVE':
+    case 'A':
+      return { label: 'Active', color: 'text-green-600 bg-green-50 border-green-200', icon: 'active' };
+    case '2':
+    case 'PENDING':
+    case 'ON ORDER':
+    case 'P':
+      return { label: 'Pending/On Order', color: 'text-yellow-600 bg-yellow-50 border-yellow-200', icon: 'pending' };
+    case '3':
+    case 'SOLD':
+    case 'TERMINATED':
+    case 'S':
+      return { label: 'Sold/Terminated', color: 'text-red-600 bg-red-50 border-red-200', icon: 'inactive' };
+    case '4':
+    case 'MAINTENANCE':
+    case 'M':
+      return { label: 'In Maintenance', color: 'text-orange-600 bg-orange-50 border-orange-200', icon: 'pending' };
+    default:
+      return { label: status || 'Unknown', color: 'text-gray-600 bg-gray-50 border-gray-200', icon: 'unknown' };
+  }
+};
 
 export default function UpdateVehicle() {
   const { toast } = useToast();
@@ -102,6 +167,52 @@ export default function UpdateVehicle() {
     "Refrigerator",
     "HA PM Check"
   ];
+  
+  const [dataSource, setDataSource] = useState<'holman' | 'local'>('holman');
+
+  const { data: holmanResponse, isLoading: isLoadingHolman, error: holmanError, refetch: refetchHolman } = useQuery<HolmanVehiclesResponse>({
+    queryKey: ['/api/holman/vehicles'],
+    queryFn: async () => {
+      const response = await fetch('/api/holman/vehicles?statusCodes=1,2&pageSize=500', {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch Holman vehicles');
+      }
+      return response.json();
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 2,
+  });
+
+  const holmanVehicles: (FleetVehicle & { holmanStatus?: string })[] = (holmanResponse?.data || []).map((hv: HolmanVehicle) => ({
+    vin: hv.vin || '',
+    vehicleNumber: hv.holmanVehicleNumber || hv.clientVehicleNumber || '',
+    modelYear: hv.modelYear || hv.year || 0,
+    makeName: hv.makeVin || hv.makeClient || hv.make || '',
+    modelName: hv.modelVin || hv.modelClient || hv.model || '',
+    licensePlate: hv.licensePlate || '',
+    licenseState: hv.licenseState || '',
+    color: hv.color || 'Unknown',
+    branding: 'N/A',
+    interior: 'N/A',
+    tuneStatus: 'N/A',
+    city: hv.garagingCity || '',
+    state: hv.garagingState || '',
+    zip: hv.garagingZip || '',
+    region: '',
+    district: '',
+    deliveryAddress: hv.garagingStreet1 || '',
+    deliveryDate: '',
+    odometerDelivery: 0,
+    outOfServiceDate: '',
+    saleDate: '',
+    regRenewalDate: '',
+    mis: '',
+    remainingBookValue: 0,
+    leaseEndDate: '',
+    holmanStatus: hv.status || hv.assignedStatus || '',
+  }));
 
   const regions = [
     "Northeast",
@@ -194,7 +305,9 @@ export default function UpdateVehicle() {
     yearFilter, cityFilter
   ].filter(filter => filter !== "all").length;
 
-  const baseVehicles = activeVehicles;
+  const baseVehicles = dataSource === 'holman' && holmanVehicles.length > 0 
+    ? holmanVehicles 
+    : activeVehicles.map(v => ({ ...v, holmanStatus: undefined }));
   const filteredVehicles = baseVehicles.filter(vehicle => {
     const matchesSearch = !searchQuery || 
       vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -426,9 +539,106 @@ export default function UpdateVehicle() {
 
             {/* Vehicle List */}
             <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">All Vehicles ({baseVehicles.length})</h3>
+              <div className="flex justify-between items-center flex-wrap gap-4">
+                <div className="flex items-center gap-4">
+                  <h3 className="text-lg font-semibold">
+                    {dataSource === 'holman' ? 'Holman Fleet Vehicles' : 'Local Vehicles'} 
+                    ({isLoadingHolman && dataSource === 'holman' ? '...' : baseVehicles.length})
+                  </h3>
+                  {dataSource === 'holman' && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => refetchHolman()}
+                      disabled={isLoadingHolman}
+                      className="h-8"
+                      data-testid="button-refresh-holman"
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-1 ${isLoadingHolman ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Data Source:</span>
+                  <div className="flex rounded-lg border overflow-hidden">
+                    <button
+                      onClick={() => setDataSource('holman')}
+                      className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                        dataSource === 'holman' 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'bg-background hover:bg-muted'
+                      }`}
+                      data-testid="button-source-holman"
+                    >
+                      <Truck className="h-4 w-4 inline mr-1" />
+                      Holman
+                    </button>
+                    <button
+                      onClick={() => setDataSource('local')}
+                      className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                        dataSource === 'local' 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'bg-background hover:bg-muted'
+                      }`}
+                      data-testid="button-source-local"
+                    >
+                      <Car className="h-4 w-4 inline mr-1" />
+                      Local
+                    </button>
+                  </div>
+                </div>
               </div>
+              
+              {holmanError && dataSource === 'holman' && (
+                <Card className="border-red-200 bg-red-50">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <AlertCircle className="h-5 w-5 text-red-500" />
+                    <div>
+                      <p className="text-sm font-medium text-red-800">Failed to load Holman vehicles</p>
+                      <p className="text-xs text-red-600">Using cached data or try refreshing. You may also switch to Local data.</p>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => refetchHolman()}
+                      className="ml-auto"
+                    >
+                      Retry
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+              
+              {isLoadingHolman && dataSource === 'holman' && holmanVehicles.length === 0 && (
+                <div className="grid gap-4">
+                  {[1, 2, 3].map((i) => (
+                    <Card key={i}>
+                      <CardContent className="p-4">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                          <div className="space-y-2">
+                            <Skeleton className="h-5 w-40" />
+                            <Skeleton className="h-4 w-24" />
+                            <Skeleton className="h-4 w-32" />
+                          </div>
+                          <div className="space-y-2">
+                            <Skeleton className="h-5 w-28" />
+                            <Skeleton className="h-4 w-16" />
+                          </div>
+                          <div className="space-y-2">
+                            <Skeleton className="h-5 w-20" />
+                            <Skeleton className="h-4 w-24" />
+                          </div>
+                          <div className="space-y-2">
+                            <Skeleton className="h-5 w-36" />
+                            <Skeleton className="h-4 w-20" />
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
               
               <div className="grid gap-4">
                 {filteredVehicles.map((vehicle) => (
@@ -447,19 +657,35 @@ export default function UpdateVehicle() {
                           </div>
                           <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
-                          <div className="flex items-center gap-2 mt-2">
-                            {!vehicle.outOfServiceDate ? (
-                              <>
-                                <CheckCircle className="h-4 w-4 text-green-500" />
-                                <span className="text-sm font-medium text-green-600" data-testid="status-assigned">Assigned</span>
-                              </>
-                            ) : (
-                              <>
-                                <XCircle className="h-4 w-4 text-red-500" />
-                                <span className="text-sm font-medium text-red-600" data-testid="status-unassigned">Unassigned</span>
-                              </>
-                            )}
-                          </div>
+                          
+                          {(vehicle as any).holmanStatus && dataSource === 'holman' ? (
+                            <div className="mt-2">
+                              <div 
+                                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium border ${getHolmanStatusInfo((vehicle as any).holmanStatus).color}`}
+                                data-testid="holman-status-badge"
+                              >
+                                {getHolmanStatusInfo((vehicle as any).holmanStatus).icon === 'active' && <CheckCircle className="h-3.5 w-3.5" />}
+                                {getHolmanStatusInfo((vehicle as any).holmanStatus).icon === 'inactive' && <XCircle className="h-3.5 w-3.5" />}
+                                {getHolmanStatusInfo((vehicle as any).holmanStatus).icon === 'pending' && <Loader2 className="h-3.5 w-3.5" />}
+                                {getHolmanStatusInfo((vehicle as any).holmanStatus).icon === 'unknown' && <AlertCircle className="h-3.5 w-3.5" />}
+                                <span>Holman: {getHolmanStatusInfo((vehicle as any).holmanStatus).label}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 mt-2">
+                              {!vehicle.outOfServiceDate ? (
+                                <>
+                                  <CheckCircle className="h-4 w-4 text-green-500" />
+                                  <span className="text-sm font-medium text-green-600" data-testid="status-assigned">Assigned</span>
+                                </>
+                              ) : (
+                                <>
+                                  <XCircle className="h-4 w-4 text-red-500" />
+                                  <span className="text-sm font-medium text-red-600" data-testid="status-unassigned">Unassigned</span>
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
                         
                         <div className="space-y-1">
