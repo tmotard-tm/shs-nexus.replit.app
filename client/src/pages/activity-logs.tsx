@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { format } from "date-fns";
@@ -113,8 +113,14 @@ export default function ActivityLogs() {
   const [userFilter, setUserFilter] = useState("all");
 
   // Redirect non-superadmin users
-  if (user?.role !== "superadmin") {
-    setLocation("/");
+  useEffect(() => {
+    if (user && user.role !== "superadmin") {
+      setLocation("/");
+    }
+  }, [user, setLocation]);
+
+  // Show nothing while checking auth or redirecting
+  if (!user || user.role !== "superadmin") {
     return null;
   }
 
