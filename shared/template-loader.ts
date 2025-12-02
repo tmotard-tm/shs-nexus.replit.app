@@ -205,7 +205,9 @@ export class TemplateLoader {
       }
       const embeddedTemplate = EMBEDDED_TEMPLATES[templateId];
       if (embeddedTemplate) {
-        const validationResult = workTemplateSchema.safeParse(embeddedTemplate);
+        // Convert embedded template (InsertTemplate format) to WorkTemplate format
+        const workTemplate = this.convertTemplateToWorkTemplate(embeddedTemplate as any);
+        const validationResult = workTemplateSchema.safeParse(workTemplate);
         if (validationResult.success) {
           this.templateCache.set(templateId, validationResult.data);
           if (this.isDebugEnabled()) {
@@ -361,7 +363,9 @@ export class TemplateLoader {
 
       if (matchingEmbeddedTemplates.length > 0) {
         const template = matchingEmbeddedTemplates[0]; // Use the first match
-        const validationResult = workTemplateSchema.safeParse(template);
+        // Convert embedded template (InsertTemplate format) to WorkTemplate format
+        const workTemplate = this.convertTemplateToWorkTemplate(template as any);
+        const validationResult = workTemplateSchema.safeParse(workTemplate);
         if (validationResult.success) {
           this.templateCache.set(template.id, validationResult.data);
           if (this.isDebugEnabled()) {
@@ -618,7 +622,9 @@ export class TemplateLoader {
       );
 
       for (const template of embeddedTemplates) {
-        const validationResult = workTemplateSchema.safeParse(template);
+        // Convert embedded template (InsertTemplate format) to WorkTemplate format
+        const workTemplate = this.convertTemplateToWorkTemplate(template as any);
+        const validationResult = workTemplateSchema.safeParse(workTemplate);
         if (validationResult.success) {
           templates.push(validationResult.data);
           this.templateCache.set(template.id, validationResult.data);
