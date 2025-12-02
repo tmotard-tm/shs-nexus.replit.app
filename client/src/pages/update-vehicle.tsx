@@ -305,7 +305,7 @@ export default function UpdateVehicle() {
     yearFilter, cityFilter
   ].filter(filter => filter !== "all").length;
 
-  const baseVehicles = dataSource === 'holman' && holmanVehicles.length > 0 
+  const baseVehicles = dataSource === 'holman' && holmanVehicles.length > 0 && !holmanError
     ? holmanVehicles 
     : activeVehicles.map(v => ({ ...v, holmanStatus: undefined }));
   const filteredVehicles = baseVehicles.filter(vehicle => {
@@ -591,21 +591,31 @@ export default function UpdateVehicle() {
               </div>
               
               {holmanError && dataSource === 'holman' && (
-                <Card className="border-red-200 bg-red-50">
+                <Card className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20">
                   <CardContent className="p-4 flex items-center gap-3">
-                    <AlertCircle className="h-5 w-5 text-red-500" />
-                    <div>
-                      <p className="text-sm font-medium text-red-800">Failed to load Holman vehicles</p>
-                      <p className="text-xs text-red-600">Using cached data or try refreshing. You may also switch to Local data.</p>
+                    <AlertCircle className="h-5 w-5 text-amber-500" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Holman API temporarily unavailable</p>
+                      <p className="text-xs text-amber-600 dark:text-amber-400">
+                        Showing local fleet data instead. The Holman API connection will retry automatically.
+                      </p>
                     </div>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => refetchHolman()}
-                      className="ml-auto"
-                    >
-                      Retry
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => refetchHolman()}
+                      >
+                        Retry
+                      </Button>
+                      <Button 
+                        variant="default" 
+                        size="sm" 
+                        onClick={() => setDataSource('local')}
+                      >
+                        Use Local Data
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               )}
