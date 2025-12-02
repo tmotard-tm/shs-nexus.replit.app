@@ -173,7 +173,7 @@ export default function UpdateVehicle() {
   const { data: holmanResponse, isLoading: isLoadingHolman, error: holmanError, refetch: refetchHolman } = useQuery<HolmanVehiclesResponse>({
     queryKey: ['/api/holman/vehicles'],
     queryFn: async () => {
-      const response = await fetch('/api/holman/vehicles?statusCodes=1,2&pageSize=500', {
+      const response = await fetch('/api/holman/vehicles?lesseeCode=2B56&statusCodes=1,2&pageSize=500', {
         credentials: 'include',
       });
       if (!response.ok) {
