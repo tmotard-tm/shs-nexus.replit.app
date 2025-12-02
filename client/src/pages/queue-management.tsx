@@ -104,7 +104,7 @@ export default function UnifiedQueueManagement() {
   const [selectedEmployee, setSelectedEmployee] = useState<TechRosterEntry | null>(null);
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("oldest");
   const [expandedQueues, setExpandedQueues] = useState<Record<QueueModule, boolean>>({} as Record<QueueModule, boolean>);
   const [expandedStatusSections, setExpandedStatusSections] = useState<Record<string, boolean>>({});
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
