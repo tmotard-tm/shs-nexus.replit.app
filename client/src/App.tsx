@@ -42,6 +42,7 @@ import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
 import VehicleAssignments from "@/pages/vehicle-assignments";
 import FieldMapping from "@/pages/field-mapping";
+import ActivityLogs from "@/pages/activity-logs";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
@@ -330,10 +331,8 @@ function Router() {
       
       <Route path="/activity">
         <ProtectedRoute>
-          <MainContent className="p-6">
-            <BackButton href="/" />
-            <h1 className="text-2xl font-bold">Activity Logs</h1>
-            <p className="text-muted-foreground mt-2">Coming soon...</p>
+          <MainContent>
+            <ActivityLogs />
           </MainContent>
         </ProtectedRoute>
       </Route>
