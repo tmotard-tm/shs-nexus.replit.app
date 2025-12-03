@@ -619,7 +619,24 @@ export const workTemplateStepSchema = z.object({
   completed: z.boolean().default(false),
   notes: z.string().optional(),
   estimatedTime: z.number().optional(), // In minutes
-  category: z.enum(["verification", "documentation", "system_action", "communication", "inspection", "approval"]).optional(),
+  category: z.enum([
+    "verification", 
+    "documentation", 
+    "system_action", 
+    "communication", 
+    "inspection", 
+    "approval",
+    "assessment",
+    "coordination",
+    "vehicle_management",
+    "vehicle_processing",
+    "equipment",
+    "planning",
+    "inventory_processing",
+    "reconciliation",
+    "operational_stop",
+    "operational_setup"
+  ]).optional(),
   substeps: z.array(workTemplateSubstepSchema).optional(),
   validationRule: z.string().optional(),
   conditionalLogic: z.object({
