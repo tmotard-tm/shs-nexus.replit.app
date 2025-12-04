@@ -3,6 +3,14 @@ import { User, UserRole, RolePermissionSettings } from "@shared/schema";
 // Default permission settings for each role
 export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
   homePage: true,
+  quickActions: {
+    enabled: true,
+    taskQueue: true,
+    offboarding: true,
+    onboarding: true,
+    assignVehicle: true,
+    createVehicle: true,
+  },
   sidebar: {
     enabled: true,
     dashboards: {
@@ -48,6 +56,14 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
 
 export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
   homePage: true,
+  quickActions: {
+    enabled: true,
+    taskQueue: true,
+    offboarding: true,
+    onboarding: true,
+    assignVehicle: false,
+    createVehicle: false,
+  },
   sidebar: {
     enabled: true,
     dashboards: {

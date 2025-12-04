@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permissions";
 import { MapPin, Truck, UserPlus, UserMinus, Settings, Map, Plus, LayoutGrid } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
@@ -12,17 +13,27 @@ import { FilteredMap } from "@/components/vehicle-map-filters";
 
 export default function AssistanceSelection() {
   const { user } = useAuth();
+  const { permissions } = usePermissions();
   const [, setLocation] = useLocation();
   const [isAssignUpdateDialogOpen, setIsAssignUpdateDialogOpen] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
 
-  const workflowOptions = [
-    { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-600 hover:bg-gray-700", action: () => setLocation("/queue-management") },
-    { value: "offboarding", label: "Offboarding", icon: UserMinus, color: "bg-red-600 hover:bg-red-700", action: () => setLocation("/offboard-technician") },
-    { value: "onboarding", label: "Onboarding", icon: UserPlus, color: "bg-purple-600 hover:bg-purple-700", action: () => setLocation("/onboard-hire") },
-    { value: "assign-vehicle", label: "Assign or Update Vehicle", icon: MapPin, color: "bg-green-600 hover:bg-green-700", action: () => setIsAssignUpdateDialogOpen(true) },
-    { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-600 hover:bg-blue-700", action: () => setLocation("/create-vehicle-location") },
+  const allWorkflowOptions = [
+    { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-600 hover:bg-gray-700", action: () => setLocation("/queue-management"), permissionKey: "taskQueue" as const },
+    { value: "offboarding", label: "Offboarding", icon: UserMinus, color: "bg-red-600 hover:bg-red-700", action: () => setLocation("/offboard-technician"), permissionKey: "offboarding" as const },
+    { value: "onboarding", label: "Onboarding", icon: UserPlus, color: "bg-purple-600 hover:bg-purple-700", action: () => setLocation("/onboard-hire"), permissionKey: "onboarding" as const },
+    { value: "assign-vehicle", label: "Assign or Update Vehicle", icon: MapPin, color: "bg-green-600 hover:bg-green-700", action: () => setIsAssignUpdateDialogOpen(true), permissionKey: "assignVehicle" as const },
+    { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-600 hover:bg-blue-700", action: () => setLocation("/create-vehicle-location"), permissionKey: "createVehicle" as const },
   ];
+
+  const workflowOptions = useMemo(() => {
+    if (!permissions?.quickActions?.enabled) {
+      return [];
+    }
+    return allWorkflowOptions.filter(option => 
+      permissions.quickActions[option.permissionKey] === true
+    );
+  }, [permissions]);
 
   return (
     <MainContent>
@@ -63,9 +74,10 @@ export default function AssistanceSelection() {
           </div>
 
           {/* Workflow Buttons Card */}
+          {workflowOptions.length > 0 && (
           <Card className="backdrop-blur-sm border-white/20 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95">
             <CardContent className="p-6">
-              <div className="grid grid-cols-5 gap-4">
+              <div className={`grid gap-4 ${workflowOptions.length >= 5 ? 'grid-cols-5' : workflowOptions.length >= 3 ? 'grid-cols-3' : 'grid-cols-' + workflowOptions.length}`} style={{ gridTemplateColumns: `repeat(${Math.min(workflowOptions.length, 5)}, minmax(0, 1fr))` }}>
                 {workflowOptions.map((option) => (
                   <button
                     key={option.value}
@@ -82,6 +94,7 @@ export default function AssistanceSelection() {
               </div>
             </CardContent>
           </Card>
+          )}
         </div>
       </main>
 

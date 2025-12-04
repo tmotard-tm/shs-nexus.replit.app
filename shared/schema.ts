@@ -37,6 +37,14 @@ export const rolePermissions = pgTable("role_permissions", {
 // Permission structure type for the jsonb column
 export interface RolePermissionSettings {
   homePage: boolean;
+  quickActions: {
+    enabled: boolean;
+    taskQueue: boolean;
+    offboarding: boolean;
+    onboarding: boolean;
+    assignVehicle: boolean;
+    createVehicle: boolean;
+  };
   sidebar: {
     enabled: boolean;
     dashboards: {

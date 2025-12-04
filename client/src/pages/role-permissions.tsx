@@ -38,6 +38,18 @@ const PERMISSION_TREE: PermissionNode[] = [
     description: "Access to the main home page",
   },
   {
+    key: "quickActions",
+    label: "Quick Action Icons",
+    description: "Control visibility of quick action buttons on home page",
+    children: [
+      { key: "taskQueue", label: "Task Queue", description: "Access to Task Queue quick action" },
+      { key: "offboarding", label: "Offboarding", description: "Access to Offboarding quick action" },
+      { key: "onboarding", label: "Onboarding", description: "Access to Onboarding quick action" },
+      { key: "assignVehicle", label: "Assign or Update Vehicle", description: "Access to Vehicle Assignment quick action" },
+      { key: "createVehicle", label: "Create New Vehicle", description: "Access to Create Vehicle quick action" },
+    ],
+  },
+  {
     key: "sidebar",
     label: "Sidebar Navigation",
     description: "Control visibility of sidebar sections",
