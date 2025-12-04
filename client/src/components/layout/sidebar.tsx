@@ -109,24 +109,28 @@ export function Sidebar() {
     
     if (sidebarPerms?.queues?.enabled) {
       if (sidebarPerms.queues.queueManagement) result.push(baseItems.queueManagement);
+      if (sidebarPerms.queues.ntaoQueue) result.push(baseItems.ntaoQueue);
+      if (sidebarPerms.queues.assetsQueue) result.push(baseItems.assetsQueue);
+      if (sidebarPerms.queues.inventoryQueue) result.push(baseItems.inventoryQueue);
+      if (sidebarPerms.queues.fleetQueue) result.push(baseItems.fleetQueue);
     }
     
-    if (sidebarPerms?.management) {
-      result.push(baseItems.storageSpots);
-      result.push(baseItems.approvals);
-      result.push(baseItems.apiManagement);
-      result.push(baseItems.userManagement);
-      result.push(baseItems.templateManagement);
-      result.push(baseItems.rolePermissions);
-      result.push(baseItems.vehicleAssignments);
+    if (sidebarPerms?.management?.enabled) {
+      if (sidebarPerms.management.storageSpots) result.push(baseItems.storageSpots);
+      if (sidebarPerms.management.approvals) result.push(baseItems.approvals);
+      if (sidebarPerms.management.integrations) result.push(baseItems.apiManagement);
+      if (sidebarPerms.management.userManagement) result.push(baseItems.userManagement);
+      if (sidebarPerms.management.templateManagement) result.push(baseItems.templateManagement);
+      if (sidebarPerms.management.rolePermissions) result.push(baseItems.rolePermissions);
+      if (sidebarPerms.management.vehicleAssignments) result.push(baseItems.vehicleAssignments);
     }
     
-    if (sidebarPerms?.activities) {
-      result.push(baseItems.activityLogs);
+    if (sidebarPerms?.activities?.enabled) {
+      if (sidebarPerms.activities.activityLogs) result.push(baseItems.activityLogs);
     }
     
-    if (sidebarPerms?.account) {
-      result.push(baseItems.changePassword);
+    if (sidebarPerms?.account?.enabled) {
+      if (sidebarPerms.account.changePassword) result.push(baseItems.changePassword);
     }
     
     return result;

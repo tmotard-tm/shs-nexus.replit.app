@@ -58,12 +58,52 @@ const PERMISSION_TREE: PermissionNode[] = [
         description: "Queue management navigation group",
         children: [
           { key: "queueManagement", label: "Queue Management", description: "Unified queue management interface" },
+          { key: "ntaoQueue", label: "NTAO Queue", description: "NTAO department queue" },
+          { key: "assetsQueue", label: "Assets Queue", description: "Assets department queue" },
+          { key: "inventoryQueue", label: "Inventory Queue", description: "Inventory department queue" },
+          { key: "fleetQueue", label: "Fleet Queue", description: "Fleet department queue" },
         ],
       },
-      { key: "management", label: "Management", description: "User management, templates, and system settings" },
-      { key: "activities", label: "Activities", description: "Activity logs and audit trail" },
-      { key: "account", label: "Account", description: "Account settings and password change" },
-      { key: "helpAndTutorial", label: "Help & Tutorial", description: "Help documentation and onboarding tutorials" },
+      {
+        key: "management",
+        label: "Management Section",
+        description: "User management, templates, and system settings",
+        children: [
+          { key: "storageSpots", label: "Storage Spots", description: "Manage storage spot locations" },
+          { key: "approvals", label: "Approvals", description: "Request approvals and reviews" },
+          { key: "integrations", label: "Integrations", description: "API integrations and connections" },
+          { key: "userManagement", label: "User Management", description: "Create and manage user accounts" },
+          { key: "templateManagement", label: "Template Management", description: "Manage workflow templates" },
+          { key: "rolePermissions", label: "Role Permissions", description: "Configure role-based access control" },
+          { key: "vehicleAssignments", label: "Vehicle Assignments", description: "Manage vehicle assignments to technicians" },
+          { key: "snowflakeIntegration", label: "Snowflake Integration", description: "Snowflake data warehouse settings" },
+          { key: "techRoster", label: "Tech Roster", description: "View technician roster from Snowflake" },
+        ],
+      },
+      {
+        key: "activities",
+        label: "Activities Section",
+        description: "Activity logs and audit trail",
+        children: [
+          { key: "activityLogs", label: "Activity Logs", description: "View user activity and audit logs" },
+        ],
+      },
+      {
+        key: "account",
+        label: "Account Section",
+        description: "Account settings and preferences",
+        children: [
+          { key: "changePassword", label: "Change Password", description: "Allow users to change their password" },
+        ],
+      },
+      {
+        key: "helpAndTutorial",
+        label: "Help & Tutorial Section",
+        description: "Help documentation and onboarding",
+        children: [
+          { key: "tutorial", label: "Tutorial", description: "Interactive onboarding tutorial" },
+        ],
+      },
     ],
   },
 ];
@@ -325,12 +365,60 @@ export default function RolePermissions() {
     );
   }
 
+  const setAllBooleans = (obj: any, value: boolean): any => {
+    if (typeof obj === 'boolean') {
+      return value;
+    }
+    if (typeof obj !== 'object' || obj === null) {
+      return obj;
+    }
+    const result: any = {};
+    for (const key of Object.keys(obj)) {
+      result[key] = setAllBooleans(obj[key], value);
+    }
+    return result;
+  };
+
+  const deepMerge = (defaults: any, stored: any, inheritedEnabled?: boolean): any => {
+    if (typeof defaults !== 'object' || defaults === null) {
+      if (stored !== undefined) return stored;
+      if (inheritedEnabled !== undefined) return inheritedEnabled;
+      return defaults;
+    }
+    if (typeof stored === 'boolean') {
+      return setAllBooleans(defaults, stored);
+    }
+    if (typeof stored !== 'object' || stored === null) {
+      if (inheritedEnabled !== undefined) {
+        return setAllBooleans(defaults, inheritedEnabled);
+      }
+      return defaults;
+    }
+    const parentEnabled = typeof stored.enabled === 'boolean' ? stored.enabled : inheritedEnabled;
+    const result: any = {};
+    for (const key of Object.keys(defaults)) {
+      if (key in stored) {
+        result[key] = deepMerge(defaults[key], stored[key], parentEnabled);
+      } else {
+        if (parentEnabled !== undefined && typeof defaults[key] === 'boolean') {
+          result[key] = parentEnabled;
+        } else if (parentEnabled !== undefined && typeof defaults[key] === 'object') {
+          result[key] = setAllBooleans(defaults[key], parentEnabled);
+        } else {
+          result[key] = defaults[key];
+        }
+      }
+    }
+    return result;
+  };
+
   const getPermissionsForRole = (role: string): RolePermissionSettings => {
+    const defaults = role === 'superadmin' ? DEFAULT_SUPERADMIN_PERMISSIONS : DEFAULT_AGENT_PERMISSIONS;
     const rolePermission = permissions?.find(p => p.role === role);
     if (rolePermission) {
-      return rolePermission.permissions as RolePermissionSettings;
+      return deepMerge(defaults, rolePermission.permissions) as RolePermissionSettings;
     }
-    return role === 'superadmin' ? DEFAULT_SUPERADMIN_PERMISSIONS : DEFAULT_AGENT_PERMISSIONS;
+    return defaults;
   };
 
   const hasPermissionsInDb = permissions && permissions.length > 0;

@@ -4,6 +4,53 @@ import { useAuth } from "@/hooks/use-auth";
 import { getDefaultPermissions } from "@/lib/role-permissions";
 import type { RolePermissionSettings, UserRole } from "@shared/schema";
 
+function setAllBooleans(obj: any, value: boolean): any {
+  if (typeof obj === 'boolean') {
+    return value;
+  }
+  if (typeof obj !== 'object' || obj === null) {
+    return obj;
+  }
+  const result: any = {};
+  for (const key of Object.keys(obj)) {
+    result[key] = setAllBooleans(obj[key], value);
+  }
+  return result;
+}
+
+function deepMergePermissions(defaults: any, stored: any, inheritedEnabled?: boolean): any {
+  if (typeof defaults !== 'object' || defaults === null) {
+    if (stored !== undefined) return stored;
+    if (inheritedEnabled !== undefined) return inheritedEnabled;
+    return defaults;
+  }
+  if (typeof stored === 'boolean') {
+    return setAllBooleans(defaults, stored);
+  }
+  if (typeof stored !== 'object' || stored === null) {
+    if (inheritedEnabled !== undefined) {
+      return setAllBooleans(defaults, inheritedEnabled);
+    }
+    return defaults;
+  }
+  const parentEnabled = typeof stored.enabled === 'boolean' ? stored.enabled : inheritedEnabled;
+  const result: any = {};
+  for (const key of Object.keys(defaults)) {
+    if (key in stored) {
+      result[key] = deepMergePermissions(defaults[key], stored[key], parentEnabled);
+    } else {
+      if (parentEnabled !== undefined && typeof defaults[key] === 'boolean') {
+        result[key] = parentEnabled;
+      } else if (parentEnabled !== undefined && typeof defaults[key] === 'object') {
+        result[key] = setAllBooleans(defaults[key], parentEnabled);
+      } else {
+        result[key] = defaults[key];
+      }
+    }
+  }
+  return result;
+}
+
 interface RolePermission {
   id: string;
   role: string;
@@ -43,19 +90,20 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }
 
     const userRole = user.role as UserRole;
+    const defaults = getDefaultPermissions(userRole);
 
     if (userRole === 'superadmin' && allPermissions) {
       const found = allPermissions.find(p => p.role === 'superadmin');
       if (found) {
-        return found.permissions;
+        return deepMergePermissions(defaults, found.permissions);
       }
     }
 
     if (userRole !== 'superadmin' && rolePermission) {
-      return rolePermission.permissions;
+      return deepMergePermissions(defaults, rolePermission.permissions);
     }
 
-    return getDefaultPermissions(userRole);
+    return defaults;
   };
 
   return (

@@ -10,6 +10,17 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
 - Users are now assigned to one or more departments via a `departments` array field: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET']
 - Deprecated: Old `department` (single) and `departmentAccess` fields have been migrated to unified `departments` array
 
+**Role Permissions System** (December 2025): Granular UI visibility control per role:
+- **Role Permissions Page** (`/role-permissions`): Superadmin-only management interface with hierarchical checkbox tree
+- **Permission Structure**: Controls visibility of every page, section, and feature:
+  - Home Page
+  - Sidebar Navigation (Dashboards, Queues, Management, Activities, Account, Help sections)
+  - Individual pages within each section (e.g., NTAO Queue, Assets Queue, User Management, etc.)
+- **Database Storage**: `role_permissions` table with JSONB permissions column
+- **API Endpoints**: GET/PATCH `/api/role-permissions/:role`, POST `/api/role-permissions/seed`
+- **Deep Merge**: New permission fields automatically inherit from defaults when not in stored data
+- **Real-time Updates**: Changes take effect immediately for all users with that role
+
 **Template Management System**: Added comprehensive template management system for superadmin users (September 2025). Provides full CRUD operations for workflow templates across all departments with security-first implementation including server-side ID generation, field whitelisting, and multi-layer access control.
 
 **Snowflake Sync System** (November 2025, updated December 2025): Automated daily sync at 5am EST from Snowflake data warehouse for technician management:

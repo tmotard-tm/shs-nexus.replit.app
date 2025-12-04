@@ -48,11 +48,35 @@ export interface RolePermissionSettings {
     queues: {
       enabled: boolean;
       queueManagement: boolean;
+      ntaoQueue: boolean;
+      assetsQueue: boolean;
+      inventoryQueue: boolean;
+      fleetQueue: boolean;
     };
-    management: boolean;
-    activities: boolean;
-    account: boolean;
-    helpAndTutorial: boolean;
+    management: {
+      enabled: boolean;
+      storageSpots: boolean;
+      approvals: boolean;
+      integrations: boolean;
+      userManagement: boolean;
+      templateManagement: boolean;
+      rolePermissions: boolean;
+      vehicleAssignments: boolean;
+      snowflakeIntegration: boolean;
+      techRoster: boolean;
+    };
+    activities: {
+      enabled: boolean;
+      activityLogs: boolean;
+    };
+    account: {
+      enabled: boolean;
+      changePassword: boolean;
+    };
+    helpAndTutorial: {
+      enabled: boolean;
+      tutorial: boolean;
+    };
   };
 }
 
