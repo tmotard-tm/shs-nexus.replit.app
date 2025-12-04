@@ -4993,6 +4993,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Role Permissions API Routes
+  console.log("Registering Role Permissions API routes...");
+
+  // Get all role permissions
+  app.get("/api/role-permissions", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      }
+
+      const permissions = await storage.getAllRolePermissions();
+      res.json(permissions);
+    } catch (error) {
+      console.error("Error fetching role permissions:", error);
+      res.status(500).json({ message: "Failed to fetch role permissions" });
+    }
+  });
+
+  // Get role permission by role
+  app.get("/api/role-permissions/:role", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      }
+
+      const { role } = req.params;
+      const permission = await storage.getRolePermission(role);
+      
+      if (!permission) {
+        return res.status(404).json({ message: `Role permission for '${role}' not found` });
+      }
+      
+      res.json(permission);
+    } catch (error) {
+      console.error("Error fetching role permission:", error);
+      res.status(500).json({ message: "Failed to fetch role permission" });
+    }
+  });
+
+  // Update role permission
+  app.patch("/api/role-permissions/:role", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      }
+
+      const { role } = req.params;
+      const permissions = req.body;
+
+      const updated = await storage.upsertRolePermission(role, permissions);
+      
+      // Log activity
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "role_permission_updated",
+        entityType: "role_permission",
+        entityId: role,
+        details: `Role permissions for '${role}' updated`,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating role permission:", error);
+      res.status(500).json({ message: "Failed to update role permission" });
+    }
+  });
+
+  // Seed default role permissions (for initial setup)
+  app.post("/api/role-permissions/seed", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      }
+
+      // Import default permissions from client lib
+      const { DEFAULT_SUPERADMIN_PERMISSIONS, DEFAULT_AGENT_PERMISSIONS } = await import('../client/src/lib/role-permissions');
+
+      const superadminPermission = await storage.upsertRolePermission('superadmin', DEFAULT_SUPERADMIN_PERMISSIONS);
+      const agentPermission = await storage.upsertRolePermission('agent', DEFAULT_AGENT_PERMISSIONS);
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "role_permissions_seeded",
+        entityType: "role_permission",
+        entityId: "all",
+        details: "Default role permissions seeded for superadmin and agent roles",
+      });
+
+      res.json({
+        message: "Default role permissions seeded successfully",
+        permissions: [superadminPermission, agentPermission]
+      });
+    } catch (error) {
+      console.error("Error seeding role permissions:", error);
+      res.status(500).json({ message: "Failed to seed role permissions" });
+    }
+  });
+
   // Holman API Integration Routes
   console.log("Registering Holman API routes...");
 

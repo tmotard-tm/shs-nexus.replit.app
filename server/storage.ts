@@ -40,6 +40,9 @@ import {
   type InsertMappingNode,
   type FieldMapping,
   type InsertFieldMapping,
+  type RolePermission,
+  type InsertRolePermission,
+  type RolePermissionSettings,
   users,
   requests,
   apiConfigurations,
@@ -59,6 +62,7 @@ import {
   mappingSets,
   mappingNodes,
   fieldMappings,
+  rolePermissions,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -274,6 +278,12 @@ export interface IStorage {
   updateFieldMapping(id: string, updates: Partial<FieldMapping>): Promise<FieldMapping | undefined>;
   deleteFieldMapping(id: string): Promise<boolean>;
   upsertFieldMappings(mappingSetId: string, mappings: InsertFieldMapping[]): Promise<FieldMapping[]>;
+
+  // Role Permissions Module
+  getRolePermission(role: string): Promise<RolePermission | undefined>;
+  getAllRolePermissions(): Promise<RolePermission[]>;
+  upsertRolePermission(role: string, permissions: RolePermissionSettings): Promise<RolePermission>;
+  updateRolePermission(role: string, permissions: RolePermissionSettings): Promise<RolePermission | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -2873,6 +2883,20 @@ export class MemStorage implements IStorage {
   async upsertFieldMappings(_mappingSetId: string, _mappings: InsertFieldMapping[]): Promise<FieldMapping[]> {
     throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
   }
+
+  // Role Permissions Module
+  async getRolePermission(_role: string): Promise<RolePermission | undefined> {
+    throw new Error("MemStorage does not support role permissions. Use DatabaseStorage.");
+  }
+  async getAllRolePermissions(): Promise<RolePermission[]> {
+    throw new Error("MemStorage does not support role permissions. Use DatabaseStorage.");
+  }
+  async upsertRolePermission(_role: string, _permissions: RolePermissionSettings): Promise<RolePermission> {
+    throw new Error("MemStorage does not support role permissions. Use DatabaseStorage.");
+  }
+  async updateRolePermission(_role: string, _permissions: RolePermissionSettings): Promise<RolePermission | undefined> {
+    throw new Error("MemStorage does not support role permissions. Use DatabaseStorage.");
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -4360,6 +4384,52 @@ export class DatabaseStorage implements IStorage {
       }))
     ).returning();
     return created;
+  }
+
+  // Role Permissions Module
+  async getRolePermission(role: string): Promise<RolePermission | undefined> {
+    const result = await db.select().from(rolePermissions).where(eq(rolePermissions.role, role)).limit(1);
+    return result[0];
+  }
+
+  async getAllRolePermissions(): Promise<RolePermission[]> {
+    return await db.select().from(rolePermissions);
+  }
+
+  async upsertRolePermission(role: string, permissions: RolePermissionSettings): Promise<RolePermission> {
+    const existing = await this.getRolePermission(role);
+    
+    if (existing) {
+      const [updated] = await db.update(rolePermissions)
+        .set({
+          permissions,
+          updatedAt: new Date(),
+        })
+        .where(eq(rolePermissions.role, role))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(rolePermissions)
+        .values({
+          role,
+          permissions,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+      return created;
+    }
+  }
+
+  async updateRolePermission(role: string, permissions: RolePermissionSettings): Promise<RolePermission | undefined> {
+    const [updated] = await db.update(rolePermissions)
+      .set({
+        permissions,
+        updatedAt: new Date(),
+      })
+      .where(eq(rolePermissions.role, role))
+      .returning();
+    return updated;
   }
 
   // Migration method to bulk-insert data from MemStorage
