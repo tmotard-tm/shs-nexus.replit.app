@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { SidebarProvider } from "@/hooks/use-sidebar";
+import { PermissionsProvider } from "@/hooks/use-permissions";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { OnboardingProvider } from "@/hooks/use-onboarding";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -33,6 +34,7 @@ import FleetQueuePage from "@/pages/fleet-queue";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
 import TemplateManagement from "@/pages/template-management";
+import RolePermissions from "@/pages/role-permissions";
 import ChangePassword from "@/pages/change-password";
 import AnalyticsBoard from "@/pages/analytics-board";
 import OperationsDashboard from "@/pages/operations-dashboard";
@@ -328,6 +330,14 @@ function Router() {
           </MainContent>
         </PermissionProtectedRoute>
       </Route>
+
+      <Route path="/role-permissions">
+        <ProtectedRoute>
+          <MainContent>
+            <RolePermissions />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
       
       <Route path="/activity">
         <ProtectedRoute>
@@ -368,13 +378,15 @@ function App() {
       <TooltipProvider>
         <ThemeProvider>
           <AuthProvider>
-            <SidebarProvider>
-              <OnboardingProvider>
-                <Toaster />
-                <OnboardingOverlay />
-                <Router />
-              </OnboardingProvider>
-            </SidebarProvider>
+            <PermissionsProvider>
+              <SidebarProvider>
+                <OnboardingProvider>
+                  <Toaster />
+                  <OnboardingOverlay />
+                  <Router />
+                </OnboardingProvider>
+              </SidebarProvider>
+            </PermissionsProvider>
           </AuthProvider>
         </ThemeProvider>
       </TooltipProvider>

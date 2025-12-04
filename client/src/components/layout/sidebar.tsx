@@ -1,8 +1,10 @@
 import { Link, useLocation } from "wouter";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { RoleSelector } from "@/components/role-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useOnboarding } from "@/hooks/use-onboarding";
+import { usePermissions } from "@/hooks/use-permissions";
+import type { RolePermissionSettings } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import {
@@ -32,7 +34,8 @@ import {
   HelpCircle,
   Menu,
   Database,
-  Truck
+  Truck,
+  Shield
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +56,7 @@ export function Sidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
   const { startOnboarding, resetOnboarding } = useOnboarding();
+  const { permissions } = usePermissions();
   const [isOpen, setIsOpen] = useState(false);
   
   const handleStartTutorial = () => {
@@ -67,7 +71,7 @@ export function Sidebar() {
 
   if (!user) return null;
 
-  const getNavigationForRole = (userRole: string, userDepartments?: string[]) => {
+  const getNavigationForRole = (userRole: string, perms: RolePermissionSettings) => {
     const baseItems = {
       home: { name: "Home", href: "/", icon: Home, category: "main" },
       dashboard: { name: "Dashboard", href: "/dashboard", icon: BarChart3, category: "dashboards" },
@@ -84,48 +88,51 @@ export function Sidebar() {
       apiManagement: { name: "Integrations", href: "/integrations", icon: Settings, category: "management" },
       userManagement: { name: "User Management", href: "/users", icon: Users, category: "management" },
       templateManagement: { name: "Templates", href: "/templates", icon: FileCode, category: "management" },
+      rolePermissions: { name: "Role Permissions", href: "/role-permissions", icon: Shield, category: "management" },
       vehicleAssignments: { name: "Vehicle Assignments", href: "/vehicle-assignments", icon: Truck, category: "management" },
       activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity, category: "activity" },
       changePassword: { name: "Change Password", href: "/change-password", icon: Key, category: "account" },
     };
 
-    // Superadmin has full access
-    if (userRole === 'superadmin') {
-      return [
-        baseItems.home,
-        baseItems.dashboard,
-        baseItems.analytics,
-        baseItems.operations,
-        baseItems.queueManagement,
-        baseItems.storageSpots,
-        baseItems.approvals,
-        baseItems.apiManagement,
-        baseItems.userManagement,
-        baseItems.templateManagement,
-        baseItems.vehicleAssignments,
-        baseItems.activityLogs,
-        baseItems.changePassword,
-      ];
+    const sidebarPerms = perms?.sidebar;
+    const result: NavItem[] = [];
+    
+    if (perms?.homePage) {
+      result.push(baseItems.home);
     }
-
-    // Agent users get queue management plus their department-specific items
-    if (userRole === 'agent') {
-      // All agents can access queue management
-      return [
-        baseItems.home,
-        baseItems.queueManagement,
-        baseItems.changePassword,
-      ];
+    
+    if (sidebarPerms?.dashboards?.enabled) {
+      if (sidebarPerms.dashboards.dashboard) result.push(baseItems.dashboard);
+      if (sidebarPerms.dashboards.vehicleAssignmentDash) result.push(baseItems.analytics);
+      if (sidebarPerms.dashboards.operationsDash) result.push(baseItems.operations);
     }
-
-    // Default fallback
-    return [
-      baseItems.home,
-      baseItems.changePassword,
-    ];
+    
+    if (sidebarPerms?.queues?.enabled) {
+      if (sidebarPerms.queues.queueManagement) result.push(baseItems.queueManagement);
+    }
+    
+    if (sidebarPerms?.management) {
+      result.push(baseItems.storageSpots);
+      result.push(baseItems.approvals);
+      result.push(baseItems.apiManagement);
+      result.push(baseItems.userManagement);
+      result.push(baseItems.templateManagement);
+      result.push(baseItems.rolePermissions);
+      result.push(baseItems.vehicleAssignments);
+    }
+    
+    if (sidebarPerms?.activities) {
+      result.push(baseItems.activityLogs);
+    }
+    
+    if (sidebarPerms?.account) {
+      result.push(baseItems.changePassword);
+    }
+    
+    return result;
   };
 
-  const allNavItems = getNavigationForRole(user.role, user.departments ?? undefined);
+  const allNavItems = useMemo(() => getNavigationForRole(user.role, permissions), [user.role, permissions]);
   
   // Normalize location by stripping query strings and hash for accurate matching
   const normalizedLocation = location.split(/[?#]/)[0];

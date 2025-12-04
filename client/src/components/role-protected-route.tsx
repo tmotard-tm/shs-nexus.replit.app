@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/hooks/use-permissions";
 import { checkRouteAccess, getRoleAccessDeniedMessage, getRoleDisplayName } from "@/lib/role-permissions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,13 +18,14 @@ export function RoleProtectedRoute({
   redirectOnDenied = false 
 }: RoleProtectedRouteProps) {
   const { user, isLoading } = useAuth();
+  const { permissions, isLoading: permissionsLoading } = usePermissions();
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
   const [redirected, setRedirected] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && !redirected && !accessChecked) {
+    if (!isLoading && !permissionsLoading && !redirected && !accessChecked) {
       // First check if user is authenticated
       if (!user) {
         const path = window.location.pathname;
@@ -34,8 +36,8 @@ export function RoleProtectedRoute({
         return;
       }
 
-      // Then check role-based route access permissions
-      const hasAccess = checkRouteAccess(user, location);
+      // Then check role-based route access permissions using stored permissions
+      const hasAccess = checkRouteAccess(user, location, permissions);
       if (!hasAccess) {
         if (redirectOnDenied) {
           // Redirect to home with toast notification
@@ -52,10 +54,10 @@ export function RoleProtectedRoute({
       
       setAccessChecked(true);
     }
-  }, [isLoading, user, location, redirectOnDenied, redirected, accessChecked, setLocation, toast]);
+  }, [isLoading, permissionsLoading, user, location, redirectOnDenied, redirected, accessChecked, setLocation, toast, permissions]);
 
   // Loading state
-  if (isLoading || !accessChecked) {
+  if (isLoading || permissionsLoading || !accessChecked) {
     return (
       <>
         <div className="dev-banner">
@@ -76,8 +78,8 @@ export function RoleProtectedRoute({
     return null; // Redirect handling is in useEffect
   }
 
-  // Check permissions
-  const hasAccess = checkRouteAccess(user, location);
+  // Check permissions using stored permissions
+  const hasAccess = checkRouteAccess(user, location, permissions);
   
   // Access denied - show inline message
   if (!hasAccess && !redirectOnDenied) {
