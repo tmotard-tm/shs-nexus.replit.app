@@ -29,11 +29,11 @@ const OnboardingContext = createContext<OnboardingContextType | undefined>(undef
 
 const ONBOARDING_STORAGE_KEY = "admin_platform_onboarding_completed";
 
-const getStepsForRole = (role: string, departmentAccess?: string[]): OnboardingStep[] => {
+const getStepsForRole = (role: string, departments?: string[]): OnboardingStep[] => {
   const commonSteps: OnboardingStep[] = [
     {
       id: "welcome",
-      title: "Welcome to Admin Platform!",
+      title: "Welcome to Operations Portal!",
       description: "This quick tutorial will help you get started with the platform. We'll walk you through the main features and how to navigate around.",
       position: "center",
       action: "info",
@@ -56,25 +56,13 @@ const getStepsForRole = (role: string, departmentAccess?: string[]): OnboardingS
     },
   ];
 
-  const getAgentQueueSelector = (deptAccess?: string[]): string => {
-    if (!deptAccess?.length) return '[data-testid="link-nav-home"]';
-    const primaryDept = deptAccess[0].toLowerCase();
-    const deptQueueMap: Record<string, string> = {
-      'assets': 'link-nav-assets-queue',
-      'fleet': 'link-nav-fleet-queue',
-      'inventory': 'link-nav-inventory-queue',
-      'ntao': 'link-nav-ntao-—-national-truck-assortment-queue',
-    };
-    return `[data-testid="${deptQueueMap[primaryDept] || 'link-nav-home'}"]`;
-  };
-
   const agentSteps: OnboardingStep[] = [
     ...commonSteps,
     {
       id: "queue",
-      title: "Your Work Queue",
-      description: "This is where you'll find tasks assigned to you. New tasks appear here automatically, and you can pick them up to start working.",
-      targetSelector: getAgentQueueSelector(departmentAccess),
+      title: "Queue Management",
+      description: "This is where you'll find tasks in your assigned departments. New tasks appear here automatically, and you can pick them up to start working.",
+      targetSelector: '[data-testid="link-nav-queue-management"]',
       position: "right",
       action: "info",
     },
@@ -183,7 +171,7 @@ const getStepsForRole = (role: string, departmentAccess?: string[]): OnboardingS
     return superadminSteps;
   }
 
-  if (role === 'agent' || ['assets', 'fleet', 'inventory', 'ntao'].includes(role)) {
+  if (role === 'agent') {
     return agentSteps;
   }
 
@@ -202,7 +190,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       const storageKey = `${ONBOARDING_STORAGE_KEY}_${user.id}`;
       const completed = localStorage.getItem(storageKey) === "true";
       setHasCompletedOnboarding(completed);
-      setSteps(getStepsForRole(user.role, user.departmentAccess ?? undefined));
+      setSteps(getStepsForRole(user.role, user.departments ?? undefined));
       
       if (!completed) {
         const timer = setTimeout(() => {
@@ -215,7 +203,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
   const startOnboarding = useCallback(() => {
     if (user) {
-      setSteps(getStepsForRole(user.role, user.departmentAccess ?? undefined));
+      setSteps(getStepsForRole(user.role, user.departments ?? undefined));
       setCurrentStep(0);
       setIsActive(true);
     }

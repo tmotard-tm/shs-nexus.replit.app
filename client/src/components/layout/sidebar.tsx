@@ -67,7 +67,7 @@ export function Sidebar() {
 
   if (!user) return null;
 
-  const getNavigationForRole = (userRole: string, userDepartmentAccess?: string[]) => {
+  const getNavigationForRole = (userRole: string, userDepartments?: string[]) => {
     const baseItems = {
       home: { name: "Home", href: "/", icon: Home, category: "main" },
       dashboard: { name: "Dashboard", href: "/dashboard", icon: BarChart3, category: "dashboards" },
@@ -89,68 +89,43 @@ export function Sidebar() {
       changePassword: { name: "Change Password", href: "/change-password", icon: Key, category: "account" },
     };
 
-    if (userRole === 'agent' && userDepartmentAccess?.length) {
-      const primaryDept = userDepartmentAccess[0].toLowerCase();
-      switch (primaryDept) {
-        case 'assets':
-          return [baseItems.home, baseItems.assetsQueue, baseItems.changePassword];
-        case 'fleet':
-          return [baseItems.home, baseItems.fleetQueue, baseItems.vehicleAssignments, baseItems.changePassword];
-        case 'inventory':
-          return [baseItems.home, baseItems.inventoryQueue, baseItems.changePassword];
-        case 'ntao':
-          return [baseItems.home, baseItems.ntaoQueue, baseItems.changePassword];
-        default:
-          return [baseItems.home, baseItems.changePassword];
-      }
+    // Superadmin has full access
+    if (userRole === 'superadmin') {
+      return [
+        baseItems.home,
+        baseItems.dashboard,
+        baseItems.analytics,
+        baseItems.operations,
+        baseItems.queueManagement,
+        baseItems.storageSpots,
+        baseItems.approvals,
+        baseItems.apiManagement,
+        baseItems.userManagement,
+        baseItems.templateManagement,
+        baseItems.vehicleAssignments,
+        baseItems.activityLogs,
+        baseItems.changePassword,
+      ];
     }
 
-    switch (userRole) {
-      case 'assets':
-        return [baseItems.home, baseItems.assetsQueue, baseItems.changePassword];
-      
-      case 'fleet':
-        return [baseItems.home, baseItems.fleetQueue, baseItems.vehicleAssignments, baseItems.changePassword];
-      
-      case 'inventory':
-        return [baseItems.home, baseItems.inventoryQueue, baseItems.changePassword];
-      
-      case 'ntao':
-        return [baseItems.home, baseItems.ntaoQueue, baseItems.changePassword];
-      
-      case 'field':
-        return [baseItems.home, baseItems.changePassword];
-      
-      case 'superadmin':
-        return [
-          baseItems.home,
-          baseItems.dashboard,
-          baseItems.analytics,
-          baseItems.operations,
-          baseItems.queueManagement,
-          baseItems.storageSpots,
-          baseItems.approvals,
-          baseItems.apiManagement,
-          baseItems.userManagement,
-          baseItems.templateManagement,
-          baseItems.vehicleAssignments,
-          baseItems.activityLogs,
-          baseItems.changePassword,
-        ];
-      
-      default:
-        return [
-          baseItems.home,
-          baseItems.dashboard,
-          baseItems.analytics,
-          baseItems.queueManagement,
-          baseItems.storageSpots,
-          baseItems.approvals,
-        ];
+    // Agent users get queue management plus their department-specific items
+    if (userRole === 'agent') {
+      // All agents can access queue management
+      return [
+        baseItems.home,
+        baseItems.queueManagement,
+        baseItems.changePassword,
+      ];
     }
+
+    // Default fallback
+    return [
+      baseItems.home,
+      baseItems.changePassword,
+    ];
   };
 
-  const allNavItems = getNavigationForRole(user.role, user.departmentAccess ?? undefined);
+  const allNavItems = getNavigationForRole(user.role, user.departments ?? undefined);
   
   // Normalize location by stripping query strings and hash for accurate matching
   const normalizedLocation = location.split(/[?#]/)[0];

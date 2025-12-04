@@ -38,11 +38,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 
-// Form validation schema
+// Form validation schema - simplified for superadmin/agent roles only
 const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 const createUserSchema = insertUserSchema.extend({
   confirmPassword: z.string().min(6),
-  departmentAccess: z.array(z.string()).optional(),
+  departments: z.array(z.string()).optional(),
 }).refine(data => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ["confirmPassword"],
@@ -177,7 +177,7 @@ export default function UserManagement() {
 
   // Admin role management mutation
   const roleUpdateMutation = useMutation({
-    mutationFn: ({ userId, updates }: { userId: string; updates: { role?: string; department?: string; departmentAccess?: string[] } }) =>
+    mutationFn: ({ userId, updates }: { userId: string; updates: { role?: string; departments?: string[] } }) =>
       apiRequest("POST", `/api/users/${userId}/update-role`, updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
@@ -196,7 +196,7 @@ export default function UserManagement() {
     },
   });
 
-  // Form setup
+  // Form setup - simplified for superadmin/agent roles only
   const form = useForm<CreateUserFormData>({
     resolver: zodResolver(createUserSchema),
     defaultValues: {
@@ -204,8 +204,8 @@ export default function UserManagement() {
       email: "",
       password: "",
       confirmPassword: "",
-      role: "field",
-      departmentAccess: [],
+      role: "agent",
+      departments: [],
     },
   });
 
@@ -223,11 +223,10 @@ export default function UserManagement() {
     })),
   });
 
-  const roleManagementForm = useForm<{ role: string; department: string | null; departmentAccess: string[] }>({
+  const roleManagementForm = useForm<{ role: string; departments: string[] }>({
     resolver: zodResolver(z.object({
-      role: z.enum(["superadmin", "agent", "field", "approver", "requester"]),
-      department: z.string().nullable(),
-      departmentAccess: z.array(z.string())
+      role: z.enum(["superadmin", "agent"]),
+      departments: z.array(z.string())
     })),
   });
 
@@ -248,14 +247,11 @@ export default function UserManagement() {
     }
   };
 
-  const onRoleManagementSubmit = (data: { role: string; department: string | null; departmentAccess: string[] }) => {
+  const onRoleManagementSubmit = (data: { role: string; departments: string[] }) => {
     if (roleManagementUser) {
       roleUpdateMutation.mutate({ 
         userId: roleManagementUser.id, 
-        updates: {
-          ...data,
-          department: data.department || undefined
-        }
+        updates: data
       });
     }
   };
@@ -294,25 +290,23 @@ export default function UserManagement() {
   const filteredUsers = departmentFilter === "all" 
     ? allUsers 
     : departmentFilter === "no-department"
-    ? allUsers.filter((u: User) => !u.department)
-    : allUsers.filter((u: User) => u.department === departmentFilter);
+    ? allUsers.filter((u: User) => !u.departments || u.departments.length === 0)
+    : allUsers.filter((u: User) => u.departments?.includes(departmentFilter));
 
   // Statistics
   const userStats = {
     total: allUsers.length,
     superadmin: allUsers.filter((u: User) => u.role === 'superadmin').length,
     agent: allUsers.filter((u: User) => u.role === 'agent').length,
-    field: allUsers.filter((u: User) => u.role === 'field').length,
   };
 
-  // Department statistics
+  // Department statistics (based on departments array)
   const departmentStats = {
-    ntao: allUsers.filter((u: User) => u.department === 'NTAO').length,
-    assets: allUsers.filter((u: User) => u.department === 'Assets Management').length,
-    inventory: allUsers.filter((u: User) => u.department === 'Inventory Control').length,
-    fleet: allUsers.filter((u: User) => u.department === 'Fleet Management').length,
-    decommissions: allUsers.filter((u: User) => u.department === 'Decommissions').length,
-    noDepartment: allUsers.filter((u: User) => !u.department).length,
+    ntao: allUsers.filter((u: User) => u.departments?.includes('NTAO')).length,
+    assets: allUsers.filter((u: User) => u.departments?.includes('ASSETS')).length,
+    inventory: allUsers.filter((u: User) => u.departments?.includes('INVENTORY')).length,
+    fleet: allUsers.filter((u: User) => u.departments?.includes('FLEET')).length,
+    noDepartment: allUsers.filter((u: User) => !u.departments || u.departments.length === 0).length,
   };
 
   // Initialize role management form when user is selected
@@ -320,8 +314,7 @@ export default function UserManagement() {
     setRoleManagementUser(user);
     roleManagementForm.reset({
       role: user.role as any,
-      department: user.department,
-      departmentAccess: user.departmentAccess || []
+      departments: user.departments || []
     });
   };
 
@@ -390,14 +383,13 @@ export default function UserManagement() {
               </div>
               <div>
                 <Label htmlFor="role">Role</Label>
-                <Select value={form.watch("role") || "agent"} onValueChange={(value) => form.setValue("role", value as "superadmin" | "agent" | "field")}>
+                <Select value={form.watch("role") || "agent"} onValueChange={(value) => form.setValue("role", value as "superadmin" | "agent")}>
                   <SelectTrigger data-testid="select-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="superadmin">Super Admin</SelectItem>
                     <SelectItem value="agent">Agent</SelectItem>
-                    <SelectItem value="field">Field User</SelectItem>
                   </SelectContent>
                 </Select>
                 {form.formState.errors.role && (
@@ -405,44 +397,25 @@ export default function UserManagement() {
                 )}
               </div>
               <div>
-                <Label htmlFor="department">Department</Label>
-                <Select value={form.watch("department") || "forms-only"} onValueChange={(value) => form.setValue("department", value === "forms-only" ? null : value)}>
-                  <SelectTrigger data-testid="select-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
-                    <SelectValue placeholder="Select department (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="forms-only">Forms Only</SelectItem>
-                    <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
-                    <SelectItem value="Assets Management">Assets Management</SelectItem>
-                    <SelectItem value="Inventory Control">Inventory Control</SelectItem>
-                    <SelectItem value="Fleet Management">Fleet Management</SelectItem>
-                    <SelectItem value="Decommissions">Decommissions</SelectItem>
-                  </SelectContent>
-                </Select>
-                {form.formState.errors.department && (
-                  <p className="text-sm text-red-500">{form.formState.errors.department.message}</p>
-                )}
-              </div>
-              <div>
-                <Label>Department Access Permissions</Label>
+                <Label>Department Access</Label>
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   {[
-                    { code: 'NTAO', label: 'NTAO — National Truck Assortment' },
-                    { code: 'ASSETS', label: 'Assets Management' },
-                    { code: 'INVENTORY', label: 'Inventory Control' },
-                    { code: 'FLEET', label: 'Fleet Management' }
+                    { code: 'NTAO', label: 'NTAO' },
+                    { code: 'ASSETS', label: 'Assets' },
+                    { code: 'INVENTORY', label: 'Inventory' },
+                    { code: 'FLEET', label: 'Fleet' }
                   ].map(dept => (
                     <div key={dept.code} className="flex items-center space-x-2">
                       <input
                         type="checkbox"
                         id={`dept-${dept.code}`}
-                        checked={form.watch("departmentAccess")?.includes(dept.code) || false}
+                        checked={form.watch("departments")?.includes(dept.code) || false}
                         onChange={(e) => {
-                          const currentAccess = form.watch("departmentAccess") || [];
+                          const currentDepts = form.watch("departments") || [];
                           if (e.target.checked) {
-                            form.setValue("departmentAccess", [...currentAccess, dept.code]);
+                            form.setValue("departments", [...currentDepts, dept.code]);
                           } else {
-                            form.setValue("departmentAccess", currentAccess.filter(d => d !== dept.code));
+                            form.setValue("departments", currentDepts.filter(d => d !== dept.code));
                           }
                         }}
                         className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
@@ -455,8 +428,11 @@ export default function UserManagement() {
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Select which queue departments this user can access
+                  Select which department queues this user can access
                 </p>
+                {form.formState.errors.departments && (
+                  <p className="text-sm text-red-500">{form.formState.errors.departments.message}</p>
+                )}
               </div>
               <div>
                 <Label htmlFor="password">Password</Label>
@@ -657,8 +633,7 @@ export default function UserManagement() {
                   <TableHead>Username</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead>Department</TableHead>
-                  <TableHead>Queue Access</TableHead>
+                  <TableHead>Departments</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -671,22 +646,13 @@ export default function UserManagement() {
                     <TableCell>
                       <Badge variant={getRoleBadgeVariant(user.role)} className="flex items-center gap-1 w-fit" data-testid={`badge-role-${user.id}`}>
                         {getRoleIcon(user.role)}
-                        {user.role === 'superadmin' ? 'Super Admin' : user.role === 'agent' ? 'Agent' : 'Field User'}
+                        {user.role === 'superadmin' ? 'Super Admin' : 'Agent'}
                       </Badge>
                     </TableCell>
-                    <TableCell data-testid={`text-department-${user.id}`}>
-                      {user.department ? (
-                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900 dark:text-blue-100">
-                          {user.department}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">Forms Only</span>
-                      )}
-                    </TableCell>
-                    <TableCell data-testid={`text-queue-access-${user.id}`}>
-                      {user.departmentAccess && user.departmentAccess.length > 0 ? (
+                    <TableCell data-testid={`text-departments-${user.id}`}>
+                      {user.departments && user.departments.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
-                          {user.departmentAccess.map((dept: string) => (
+                          {user.departments.map((dept: string) => (
                             <Badge key={dept} variant="secondary" className="text-xs">
                               {dept}
                             </Badge>
@@ -717,7 +683,7 @@ export default function UserManagement() {
                               size="sm"
                               onClick={() => handleRoleManagementOpen(user)}
                               data-testid={`button-manage-role-${user.id}`}
-                              title="Manage Role & Access"
+                              title="Manage Role & Departments"
                             >
                               <Settings className="h-4 w-4" />
                             </Button>
@@ -732,7 +698,7 @@ export default function UserManagement() {
                               username: user.username,
                               email: user.email,
                               role: user.role,
-                              department: user.department,
+                              departments: user.departments || [],
                             });
                           }}
                           data-testid={`button-edit-${user.id}`}
@@ -788,7 +754,7 @@ export default function UserManagement() {
               <Label htmlFor="edit-role">Role</Label>
               <Select 
                 value={editForm.watch("role")} 
-                onValueChange={(value) => editForm.setValue("role", value as "superadmin" | "agent" | "field")}
+                onValueChange={(value) => editForm.setValue("role", value as "superadmin" | "agent")}
               >
                 <SelectTrigger data-testid="select-edit-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                   <SelectValue />
@@ -796,49 +762,29 @@ export default function UserManagement() {
                 <SelectContent>
                   <SelectItem value="superadmin">Super Admin</SelectItem>
                   <SelectItem value="agent">Agent</SelectItem>
-                  <SelectItem value="field">Field User</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label htmlFor="edit-department">Department</Label>
-              <Select 
-                value={editForm.watch("department") || "forms-only"} 
-                onValueChange={(value) => editForm.setValue("department", value === "forms-only" ? null : value)}
-              >
-                <SelectTrigger data-testid="select-edit-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
-                  <SelectValue placeholder="Select department (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="forms-only">Forms Only</SelectItem>
-                  <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
-                  <SelectItem value="Assets Management">Assets Management</SelectItem>
-                  <SelectItem value="Inventory Control">Inventory Control</SelectItem>
-                  <SelectItem value="Fleet Management">Fleet Management</SelectItem>
-                  <SelectItem value="Decommissions">Decommissions</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Department Access Permissions</Label>
+              <Label>Department Access</Label>
               <div className="grid grid-cols-2 gap-2 mt-2">
                 {[
                   { code: 'NTAO', label: 'NTAO' },
-                  { code: 'ASSETS', label: 'Assets Management' },
-                  { code: 'INVENTORY', label: 'Inventory Control' },
-                  { code: 'FLEET', label: 'Fleet Management' }
+                  { code: 'ASSETS', label: 'Assets' },
+                  { code: 'INVENTORY', label: 'Inventory' },
+                  { code: 'FLEET', label: 'Fleet' }
                 ].map(dept => (
                   <div key={dept.code} className="flex items-center space-x-2">
                     <input
                       type="checkbox"
                       id={`edit-dept-${dept.code}`}
-                      checked={editForm.watch("departmentAccess")?.includes(dept.code) || false}
+                      checked={(editForm.watch("departments") as string[] | undefined)?.includes(dept.code) || false}
                       onChange={(e) => {
-                        const currentAccess = editForm.watch("departmentAccess") || [];
+                        const currentDepts = (editForm.watch("departments") as string[] | undefined) || [];
                         if (e.target.checked) {
-                          editForm.setValue("departmentAccess", [...currentAccess, dept.code]);
+                          editForm.setValue("departments", [...currentDepts, dept.code]);
                         } else {
-                          editForm.setValue("departmentAccess", currentAccess.filter(d => d !== dept.code));
+                          editForm.setValue("departments", currentDepts.filter(d => d !== dept.code));
                         }
                       }}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
@@ -851,7 +797,7 @@ export default function UserManagement() {
                 ))}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Select which queue departments this user can access
+                Select which department queues this user can access
               </p>
             </div>
             <div className="flex justify-end space-x-2">
@@ -963,7 +909,7 @@ export default function UserManagement() {
       <Dialog open={!!roleManagementUser} onOpenChange={() => setRoleManagementUser(null)}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Manage User Role & Access</DialogTitle>
+            <DialogTitle>Manage User Role & Departments</DialogTitle>
             <p className="text-sm text-muted-foreground">
               Update role and department access for {roleManagementUser?.username}
             </p>
@@ -981,9 +927,6 @@ export default function UserManagement() {
                 <SelectContent>
                   <SelectItem value="superadmin">Super Admin</SelectItem>
                   <SelectItem value="agent">Agent</SelectItem>
-                  <SelectItem value="field">Field User</SelectItem>
-                  <SelectItem value="approver">Approver</SelectItem>
-                  <SelectItem value="requester">Requester</SelectItem>
                 </SelectContent>
               </Select>
               {roleManagementForm.formState.errors.role && (
@@ -991,47 +934,28 @@ export default function UserManagement() {
               )}
             </div>
             <div>
-              <Label htmlFor="department">Primary Department</Label>
-              <Select 
-                value={roleManagementForm.watch("department") || "forms-only"} 
-                onValueChange={(value) => roleManagementForm.setValue("department", value === "forms-only" ? null : value)}
-              >
-                <SelectTrigger data-testid="select-manage-department" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
-                  <SelectValue placeholder="Select primary department" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="forms-only">Forms Only</SelectItem>
-                  <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
-                  <SelectItem value="Assets Management">Assets Management</SelectItem>
-                  <SelectItem value="Inventory Control">Inventory Control</SelectItem>
-                  <SelectItem value="Fleet Management">Fleet Management</SelectItem>
-                  <SelectItem value="Decommissions">Decommissions</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Queue Access Permissions</Label>
+              <Label>Department Access</Label>
               <p className="text-xs text-muted-foreground mb-2">
-                Select which queues this user can access and work on
+                Select which department queues this user can access
               </p>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { code: 'NTAO', label: 'NTAO' },
-                  { code: 'ASSETS', label: 'Assets Management' },
-                  { code: 'INVENTORY', label: 'Inventory Control' },
-                  { code: 'FLEET', label: 'Fleet Management' }
+                  { code: 'ASSETS', label: 'Assets' },
+                  { code: 'INVENTORY', label: 'Inventory' },
+                  { code: 'FLEET', label: 'Fleet' }
                 ].map(dept => (
                   <div key={dept.code} className="flex items-center space-x-2">
                     <input
                       type="checkbox"
                       id={`manage-dept-${dept.code}`}
-                      checked={roleManagementForm.watch("departmentAccess")?.includes(dept.code) || false}
+                      checked={roleManagementForm.watch("departments")?.includes(dept.code) || false}
                       onChange={(e) => {
-                        const currentAccess = roleManagementForm.watch("departmentAccess") || [];
+                        const currentDepts = roleManagementForm.watch("departments") || [];
                         if (e.target.checked) {
-                          roleManagementForm.setValue("departmentAccess", [...currentAccess, dept.code]);
+                          roleManagementForm.setValue("departments", [...currentDepts, dept.code]);
                         } else {
-                          roleManagementForm.setValue("departmentAccess", currentAccess.filter(d => d !== dept.code));
+                          roleManagementForm.setValue("departments", currentDepts.filter(d => d !== dept.code));
                         }
                       }}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"

@@ -317,7 +317,7 @@ export class MemStorage implements IStorage {
       return;
     }
     
-    // Create Enterprise ID users with new role system
+    // Create Enterprise ID users with simplified role system (superadmin/agent only)
     const enterpriseUsers: User[] = [
       // EMERGENCY LOGIN - Use this account if other users can't login due to password requirements
       {
@@ -326,19 +326,17 @@ export class MemStorage implements IStorage {
         email: "emergency@sears.com",
         password: bcrypt.hashSync("emergency-admin-2025-login!", 10),
         role: "superadmin",
-        department: null,
-        departmentAccess: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
+        departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
         createdAt: new Date(),
       },
-      // Demo users matching login page credentials
+      // Demo users - all converted to agent role with department access
       {
         id: randomUUID(),
         username: "ENT1234",
         email: "requester@sears.com",
         password: bcrypt.hashSync("passwords", 10),
-        role: "requester",
-        department: "NTAO",
-        departmentAccess: ['NTAO'],
+        role: "agent",
+        departments: ['NTAO'],
         createdAt: new Date(),
       },
       {
@@ -346,9 +344,8 @@ export class MemStorage implements IStorage {
         username: "ENT1235",
         email: "approver@sears.com",
         password: bcrypt.hashSync("passwords", 10),
-        role: "approver",
-        department: "Assets Management",
-        departmentAccess: ['ASSETS', 'FLEET'],
+        role: "agent",
+        departments: ['ASSETS', 'FLEET'],
         createdAt: new Date(),
       },
       {
@@ -357,19 +354,7 @@ export class MemStorage implements IStorage {
         email: "admin@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "superadmin",
-        department: null,
-        departmentAccess: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
-        createdAt: new Date(),
-      },
-      // Additional role-specific users
-      {
-        id: randomUUID(),
-        username: "FIELD001",
-        email: "field@sears.com",
-        password: bcrypt.hashSync("passwords", 10),
-        role: "field",
-        department: "NTAO",
-        departmentAccess: ['NTAO'],
+        departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
         createdAt: new Date(),
       },
       {
@@ -378,8 +363,7 @@ export class MemStorage implements IStorage {
         email: "agent@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Assets Management",
-        departmentAccess: ['ASSETS'],
+        departments: ['ASSETS'],
         createdAt: new Date(),
       },
       {
@@ -387,9 +371,8 @@ export class MemStorage implements IStorage {
         username: "INVENTORY001",
         email: "inventory@sears.com",
         password: bcrypt.hashSync("passwords", 10),
-        role: "approver",
-        department: "Inventory Control",
-        departmentAccess: ['INVENTORY'],
+        role: "agent",
+        departments: ['INVENTORY'],
         createdAt: new Date(),
       },
       {
@@ -397,9 +380,8 @@ export class MemStorage implements IStorage {
         username: "FLEET001",
         email: "fleet@sears.com",
         password: bcrypt.hashSync("passwords", 10),
-        role: "approver",
-        department: "Fleet Management",
-        departmentAccess: ['FLEET'],
+        role: "agent",
+        departments: ['FLEET'],
         createdAt: new Date(),
       },
       {
@@ -408,8 +390,7 @@ export class MemStorage implements IStorage {
         email: "superadmin@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "superadmin",
-        department: null,
-        departmentAccess: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
+        departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
         createdAt: new Date(),
       },
       // Assets department employees
@@ -419,8 +400,7 @@ export class MemStorage implements IStorage {
         email: "bob.banfill@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Assets Management",
-        departmentAccess: ['ASSETS'],
+        departments: ['ASSETS'],
         createdAt: new Date(),
       },
       {
@@ -429,8 +409,7 @@ export class MemStorage implements IStorage {
         email: "claudia.dominguez@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Assets Management",
-        departmentAccess: ['ASSETS'],
+        departments: ['ASSETS'],
         createdAt: new Date(),
       },
       {
@@ -439,8 +418,7 @@ export class MemStorage implements IStorage {
         email: "monica.jenkins@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Assets Management",
-        departmentAccess: ['ASSETS'],
+        departments: ['ASSETS'],
         createdAt: new Date(),
       },
       // Inventory department employees
@@ -450,8 +428,7 @@ export class MemStorage implements IStorage {
         email: "jennifer.dyer@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Inventory Control",
-        departmentAccess: ['INVENTORY'],
+        departments: ['INVENTORY'],
         createdAt: new Date(),
       },
       {
@@ -460,8 +437,7 @@ export class MemStorage implements IStorage {
         email: "andrea.catapano@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Inventory Control",
-        departmentAccess: ['INVENTORY'],
+        departments: ['INVENTORY'],
         createdAt: new Date(),
       },
       {
@@ -470,8 +446,7 @@ export class MemStorage implements IStorage {
         email: "tashsa.corenevsky@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Inventory Control",
-        departmentAccess: ['INVENTORY'],
+        departments: ['INVENTORY'],
         createdAt: new Date(),
       },
       // Fleet department employees
@@ -481,8 +456,7 @@ export class MemStorage implements IStorage {
         email: "cheryl.groce@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Fleet Management",
-        departmentAccess: ['FLEET'],
+        departments: ['FLEET'],
         createdAt: new Date(),
       },
       {
@@ -491,8 +465,7 @@ export class MemStorage implements IStorage {
         email: "robert.delgaldo@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Fleet Management",
-        departmentAccess: ['FLEET'],
+        departments: ['FLEET'],
         createdAt: new Date(),
       },
       {
@@ -501,8 +474,7 @@ export class MemStorage implements IStorage {
         email: "carol.collins@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "Fleet Management",
-        departmentAccess: ['FLEET'],
+        departments: ['FLEET'],
         createdAt: new Date(),
       },
       // NTAO department employees
@@ -512,8 +484,7 @@ export class MemStorage implements IStorage {
         email: "goutami.walsang@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "NTAO",
-        departmentAccess: ['NTAO'],
+        departments: ['NTAO'],
         createdAt: new Date(),
       },
       {
@@ -522,8 +493,7 @@ export class MemStorage implements IStorage {
         email: "oscar.santana@sears.com",
         password: bcrypt.hashSync("passwords", 10),
         role: "agent",
-        department: "NTAO",
-        departmentAccess: ['NTAO'],
+        departments: ['NTAO'],
         createdAt: new Date(),
       },
     ];
@@ -534,9 +504,8 @@ export class MemStorage implements IStorage {
       username: "anonymous",
       email: "anonymous@system.com",
       password: "no-password", // Cannot be used for login
-      role: "field", // Minimal permissions
-      department: null,
-      departmentAccess: [], // No queue access for anonymous user
+      role: "agent", // Minimal permissions
+      departments: [], // No queue access for anonymous user
       createdAt: new Date(),
     };
     enterpriseUsers.push(anonymousUser);
@@ -551,8 +520,7 @@ export class MemStorage implements IStorage {
             email: user.email,
             password: user.password,
             role: user.role,
-            department: user.department,
-            departmentAccess: user.departmentAccess,
+            departments: user.departments,
           });
         }
       } catch (error) {
@@ -926,9 +894,8 @@ export class MemStorage implements IStorage {
     try {
       const userToInsert = {
         ...insertUser,
-        role: insertUser.role || "field",
-        department: insertUser.department || null,
-        departmentAccess: insertUser.departmentAccess || null,
+        role: insertUser.role || "agent",
+        departments: insertUser.departments || [],
       };
       const result = await db.insert(users).values(userToInsert).returning();
       return result[0];

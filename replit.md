@@ -1,8 +1,14 @@
 # Overview
 
-This is a full-stack admin platform built with React, TypeScript, and Express.js that manages access requests and API configurations. The application provides role-based interfaces for different user types (admin, requester, approver) to handle various types of requests including API access, Snowflake queries, system configurations, and user permissions. The platform features a modern UI built with shadcn/ui components and Tailwind CSS, with comprehensive request tracking and activity logging capabilities.
+This is a full-stack admin platform built with React, TypeScript, and Express.js that manages access requests and API configurations. The application provides role-based interfaces for different user types (superadmin, agent) to handle various types of requests including API access, Snowflake queries, system configurations, and user permissions. The platform features a modern UI built with shadcn/ui components and Tailwind CSS, with comprehensive request tracking and activity logging capabilities.
 
 **Migration Status**: Successfully migrated from JSON file-based authentication to PostgreSQL database authentication (September 2025). All user credentials, session management, and authentication flows now use the database backend.
+
+**Role Simplification** (December 2025): Simplified role system from 9 roles to 2:
+- **superadmin**: Full access to all features, dashboards, user management, and system configuration
+- **agent**: Access to queue management for their assigned departments
+- Users are now assigned to one or more departments via a `departments` array field: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET']
+- Deprecated: Old `department` (single) and `departmentAccess` fields have been migrated to unified `departments` array
 
 **Template Management System**: Added comprehensive template management system for superadmin users (September 2025). Provides full CRUD operations for workflow templates across all departments with security-first implementation including server-side ID generation, field whitelisting, and multi-layer access control.
 
@@ -61,8 +67,9 @@ Preferred communication style: Simple, everyday language.
 - **Storage Interface**: Abstract storage layer with in-memory implementation for development
 
 ## Authentication & Authorization
-- **Authentication**: Username/password with simple session management
-- **Authorization**: Role-based access control (admin, requester, approver)
+- **Authentication**: Username/password with simple session management via cookies
+- **Authorization**: Simplified role-based access control (superadmin, agent)
+- **Department Access**: Users assigned to one or more departments via `departments` array
 - **Security**: Basic credential validation (suitable for development/demo)
 
 ## Key Features

@@ -1,168 +1,58 @@
-import { User } from "@shared/schema";
+import { User, UserRole, RolePermissionSettings } from "@shared/schema";
 
-// Role-based access control system
-export type UserRole = 'assets' | 'fleet' | 'inventory' | 'ntao' | 'superadmin' | 'field' | 'agent' | 'approver' | 'requester';
-
-// Define what routes each role can access
-export const ROLE_ROUTES: Record<UserRole, string[]> = {
-  assets: [
-    '/',
-    '/assets-queue',
-    '/change-password', // All users can change their password
-    // Form routes - all users can submit forms
-    '/forms/create-vehicle',
-    '/forms/assign-vehicle', 
-    '/forms/onboarding',
-    '/forms/offboarding',
-    '/forms/byov-enrollment',
-    // Legacy form routes
-    '/create-vehicle-location',
-    '/assign-vehicle-location',
-    '/onboard-hire',
-    '/offboard-technician',
-    '/sears-drive-enrollment',
-  ],
-  fleet: [
-    '/',
-    '/fleet-queue',
-    '/change-password', // All users can change their password
-    // Form routes - all users can submit forms
-    '/forms/create-vehicle',
-    '/forms/assign-vehicle',
-    '/forms/onboarding', 
-    '/forms/offboarding',
-    '/forms/byov-enrollment',
-    // Legacy form routes
-    '/create-vehicle-location',
-    '/assign-vehicle-location',
-    '/onboard-hire',
-    '/offboard-technician',
-    '/sears-drive-enrollment',
-  ],
-  inventory: [
-    '/',
-    '/inventory-queue',
-    '/change-password', // All users can change their password
-    // Form routes - all users can submit forms
-    '/forms/create-vehicle',
-    '/forms/assign-vehicle',
-    '/forms/onboarding',
-    '/forms/offboarding', 
-    '/forms/byov-enrollment',
-    // Legacy form routes
-    '/create-vehicle-location',
-    '/assign-vehicle-location',
-    '/onboard-hire',
-    '/offboard-technician',
-    '/sears-drive-enrollment',
-  ],
-  ntao: [
-    '/',
-    '/ntao-queue',
-    '/change-password', // All users can change their password
-    // Form routes - all users can submit forms
-    '/forms/create-vehicle',
-    '/forms/assign-vehicle',
-    '/forms/onboarding',
-    '/forms/offboarding',
-    '/forms/byov-enrollment',
-    // Legacy form routes  
-    '/create-vehicle-location',
-    '/assign-vehicle-location',
-    '/onboard-hire',
-    '/offboard-technician',
-    '/sears-drive-enrollment',
-  ],
-  field: [
-    '/',
-    // Form routes - all users can submit forms
-    '/forms/create-vehicle',
-    '/forms/assign-vehicle',
-    '/forms/onboarding',
-    '/forms/offboarding',
-    '/forms/byov-enrollment',
-    // Legacy form routes
-    '/create-vehicle-location',
-    '/assign-vehicle-location', 
-    '/onboard-hire',
-    '/offboard-technician',
-    '/sears-drive-enrollment',
-    '/change-password', // All users can change their password
-  ],
-  superadmin: [
-    '*', // Superadmin can access everything
-  ],
-  agent: [
-    // Agent access is handled dynamically based on department_access array
-    // Base routes all agents can access
-    '/',
-    '/change-password',
-    // Form routes - all users can submit forms
-    '/forms/create-vehicle',
-    '/forms/assign-vehicle',
-    '/forms/onboarding',
-    '/forms/offboarding',
-    '/forms/byov-enrollment',
-    // Legacy form routes
-    '/create-vehicle-location',
-    '/assign-vehicle-location',
-    '/onboard-hire',
-    '/offboard-technician',
-    '/sears-drive-enrollment',
-  ],
-  approver: [
-    // Approver access includes all agent routes plus approval-specific routes
-    '/',
-    '/change-password',
-    '/approver', // Approval dashboard
-    // Form routes - all users can submit forms
-    '/forms/create-vehicle',
-    '/forms/assign-vehicle',
-    '/forms/onboarding',
-    '/forms/offboarding',
-    '/forms/byov-enrollment',
-    // Legacy form routes
-    '/create-vehicle-location',
-    '/assign-vehicle-location',
-    '/onboard-hire',
-    '/offboard-technician',
-    '/sears-drive-enrollment',
-  ],
-  requester: [
-    // Requester has basic form submission access
-    '/',
-    '/change-password',
-    '/requester', // Requester dashboard
-    // Form routes - all users can submit forms
-    '/forms/create-vehicle',
-    '/forms/assign-vehicle',
-    '/forms/onboarding',
-    '/forms/offboarding',
-    '/forms/byov-enrollment',
-    // Legacy form routes
-    '/create-vehicle-location',
-    '/assign-vehicle-location',
-    '/onboard-hire',
-    '/offboard-technician',
-    '/sears-drive-enrollment',
-  ],
+// Default permission settings for each role
+export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
+  homePage: true,
+  sidebar: {
+    enabled: true,
+    dashboards: {
+      enabled: true,
+      dashboard: true,
+      vehicleAssignmentDash: true,
+      operationsDash: true,
+    },
+    queues: {
+      enabled: true,
+      queueManagement: true,
+    },
+    management: true,
+    activities: true,
+    account: true,
+    helpAndTutorial: true,
+  },
 };
 
-// Define which queue modules each role can access
-export const ROLE_QUEUE_ACCESS: Record<UserRole, string[]> = {
-  assets: ['assets'],
-  fleet: ['fleet'],
-  inventory: ['inventory'],
-  ntao: ['ntao'],
-  field: [], // Field users don't access queues directly
-  superadmin: ['ntao', 'assets', 'inventory', 'fleet'], // All queues
-  agent: [], // Agent queue access is determined by department_access array
-  approver: [], // Approver queue access is determined by department_access array
-  requester: [], // Requesters have limited queue access
+export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
+  homePage: true,
+  sidebar: {
+    enabled: true,
+    dashboards: {
+      enabled: false,
+      dashboard: false,
+      vehicleAssignmentDash: false,
+      operationsDash: false,
+    },
+    queues: {
+      enabled: true,
+      queueManagement: true,
+    },
+    management: false,
+    activities: false,
+    account: true,
+    helpAndTutorial: true,
+  },
 };
+
+// Get default permissions for a role
+export function getDefaultPermissions(role: UserRole): RolePermissionSettings {
+  if (role === 'superadmin') {
+    return DEFAULT_SUPERADMIN_PERMISSIONS;
+  }
+  return DEFAULT_AGENT_PERMISSIONS;
+}
 
 // Check if a user's role can access a specific route
-export function checkRouteAccess(user: User | null, route: string): boolean {
+export function checkRouteAccess(user: User | null, route: string, permissions?: RolePermissionSettings): boolean {
   if (!user || !user.role) {
     // Unauthenticated users can only access public routes
     const publicRoutes = ['/login', '/forms/*'];
@@ -174,55 +64,52 @@ export function checkRouteAccess(user: User | null, route: string): boolean {
   }
 
   const userRole = user.role as UserRole;
-  const allowedRoutes = ROLE_ROUTES[userRole] || [];
-
+  
   // Superadmin can access everything
-  if (allowedRoutes.includes('*')) {
+  if (userRole === 'superadmin') {
     return true;
   }
 
-  // For agents and approvers, check department-specific routes based on department_access
-  if ((userRole === 'agent' || userRole === 'approver') && user.departmentAccess && Array.isArray(user.departmentAccess)) {
-    // First check base routes defined in ROLE_ROUTES
-    const hasBaseAccess = allowedRoutes.some(allowedRoute => {
-      if (allowedRoute === route) {
-        return true;
-      }
-      // Handle wildcard patterns like /forms/*
-      if (allowedRoute.endsWith('*')) {
-        return route.startsWith(allowedRoute.slice(0, -1));
-      }
-      return false;
-    });
+  // Use provided permissions or fall back to defaults
+  const perms = permissions || getDefaultPermissions(userRole);
 
-    if (hasBaseAccess) {
-      return true;
-    }
+  // Route permission mapping
+  const routePermissions: Record<string, () => boolean> = {
+    '/': () => perms.homePage,
+    '/dashboard': () => perms.sidebar.dashboards.dashboard,
+    '/vehicle-assignments': () => perms.sidebar.dashboards.vehicleAssignmentDash,
+    '/operations-dashboard': () => perms.sidebar.dashboards.operationsDash,
+    '/queue-management': () => perms.sidebar.queues.queueManagement,
+    '/ntao-queue': () => perms.sidebar.queues.queueManagement,
+    '/fleet-queue': () => perms.sidebar.queues.queueManagement,
+    '/assets-queue': () => perms.sidebar.queues.queueManagement,
+    '/inventory-queue': () => perms.sidebar.queues.queueManagement,
+    '/user-management': () => perms.sidebar.management,
+    '/templates': () => perms.sidebar.management,
+    '/template-management': () => perms.sidebar.management,
+    '/snowflake-integration': () => perms.sidebar.management,
+    '/tech-roster': () => perms.sidebar.management,
+    '/role-permissions': () => perms.sidebar.management,
+    '/activity-logs': () => perms.sidebar.activities,
+    '/change-password': () => perms.sidebar.account,
+    '/help': () => perms.sidebar.helpAndTutorial,
+  };
 
-    // Check department-specific queue routes
-    for (const dept of user.departmentAccess) {
-      const deptLower = dept.toLowerCase();
-      if (deptLower === 'assets' && route === '/assets-queue') return true;
-      if (deptLower === 'fleet' && route === '/fleet-queue') return true;
-      if (deptLower === 'inventory' && route === '/inventory-queue') return true;
-      if (deptLower === 'ntao' && route === '/ntao-queue') return true;
-    }
+  // Check exact route match
+  if (routePermissions[route]) {
+    return routePermissions[route]();
   }
 
-  // Check exact match or wildcard match for regular roles
-  return allowedRoutes.some(allowedRoute => {
-    if (allowedRoute === route) {
-      return true;
-    }
-    // Handle wildcard patterns like /forms/*
-    if (allowedRoute.endsWith('*')) {
-      return route.startsWith(allowedRoute.slice(0, -1));
-    }
-    return false;
-  });
+  // Handle wildcard patterns for forms - all authenticated users can access forms
+  if (route.startsWith('/forms/')) {
+    return true;
+  }
+
+  // Default deny for unknown routes
+  return false;
 }
 
-// Get accessible queue modules for a user
+// Get accessible queue modules for a user based on their departments array
 export function getAccessibleQueueModules(user: User | null): string[] {
   if (!user || !user.role) {
     return [];
@@ -230,9 +117,14 @@ export function getAccessibleQueueModules(user: User | null): string[] {
 
   const userRole = user.role as UserRole;
   
-  // For agents and approvers, determine access based on department_access array
-  if ((userRole === 'agent' || userRole === 'approver') && user.departmentAccess && Array.isArray(user.departmentAccess)) {
-    return user.departmentAccess.map(dept => {
+  // Superadmin gets all queues
+  if (userRole === 'superadmin') {
+    return ['ntao', 'assets', 'inventory', 'fleet'];
+  }
+
+  // For agents, determine access based on departments array
+  if (user.departments && Array.isArray(user.departments)) {
+    return user.departments.map(dept => {
       const deptLower = dept.toLowerCase();
       if (deptLower === 'assets') return 'assets';
       if (deptLower === 'fleet') return 'fleet';
@@ -242,7 +134,7 @@ export function getAccessibleQueueModules(user: User | null): string[] {
     }).filter(Boolean) as string[];
   }
   
-  return ROLE_QUEUE_ACCESS[userRole] || [];
+  return [];
 }
 
 // Check if user can access a specific queue module
@@ -253,45 +145,28 @@ export function checkQueueModuleAccess(user: User | null, module: string): boole
 
 // Get user-friendly role display name
 export function getRoleDisplayName(role: string, user?: User): string {
-  // For agent users, show their department instead of generic "Agent"
-  if (role === 'agent' && user?.departmentAccess?.length) {
-    const primaryDept = user.departmentAccess[0];
+  if (role === 'superadmin') {
+    return 'Super Admin';
+  }
+  
+  // For agent users, show their primary department if available
+  if (role === 'agent' && user?.departments?.length) {
+    const primaryDept = user.departments[0];
     switch (primaryDept.toLowerCase()) {
       case 'assets':
-        return 'Assets Management';
+        return 'Assets Agent';
       case 'fleet':
-        return 'Fleet Management';
+        return 'Fleet Agent';
       case 'inventory':
-        return 'Inventory Control';
+        return 'Inventory Agent';
       case 'ntao':
-        return 'NTAO';
+        return 'NTAO Agent';
       default:
         return `${primaryDept} Agent`;
     }
   }
   
-  switch (role) {
-    case 'assets':
-      return 'Assets Management';
-    case 'fleet':
-      return 'Fleet Management';
-    case 'inventory':
-      return 'Inventory Control';
-    case 'ntao':
-      return 'NTAO';
-    case 'superadmin':
-      return 'Super Admin';
-    case 'field':
-      return 'Field Worker';
-    case 'agent':
-      return 'Agent';
-    case 'approver':
-      return 'Approver';
-    case 'requester':
-      return 'Requester';
-    default:
-      return role.charAt(0).toUpperCase() + role.slice(1);
-  }
+  return 'Agent';
 }
 
 // Get appropriate landing page for user based on role and department access
@@ -302,51 +177,47 @@ export function getUserLandingPage(user: User | null): string {
 
   const userRole = user.role as UserRole;
 
-  // Superadmin gets the assistance selection (admin interface)
+  // Superadmin gets the home/dashboard
   if (userRole === 'superadmin') {
     return '/';
   }
 
-  // For agent users, redirect to their primary department queue
-  if (userRole === 'agent' && user.departmentAccess?.length) {
-    const primaryDept = user.departmentAccess[0].toLowerCase();
-    switch (primaryDept) {
-      case 'assets':
-        return '/assets-queue';
-      case 'fleet':
-        return '/fleet-queue';
-      case 'inventory':
-        return '/inventory-queue';
-      case 'ntao':
-        return '/ntao-queue';
-      default:
-        return '/'; // Fallback to assistance selection
-    }
+  // For agent users, redirect to queue management
+  if (userRole === 'agent') {
+    return '/queue-management';
   }
 
-  // For direct role assignments
-  switch (userRole) {
-    case 'assets':
-      return '/assets-queue';
-    case 'fleet':
-      return '/fleet-queue';
-    case 'inventory':
-      return '/inventory-queue';
-    case 'ntao':
-      return '/ntao-queue';
-    case 'approver':
-      return '/approver';
-    case 'requester':
-      return '/requester';
-    case 'field':
-      return '/'; // Field workers get assistance selection for form access
-    default:
-      return '/'; // Fallback to assistance selection
-  }
+  return '/';
 }
 
 // Get role-specific error messages
 export function getRoleAccessDeniedMessage(role: string, attemptedRoute: string): string {
   const roleName = getRoleDisplayName(role);
-  return `Your role (${roleName}) doesn't have permission to access this page. Contact your administrator if you need access to ${attemptedRoute}.`;
+  return `Your role (${roleName}) doesn't have permission to access this page. Contact your administrator if you need access.`;
+}
+
+// Get the appropriate app title based on user role
+export function getAppTitle(user: User | null): string {
+  if (!user) {
+    return 'Operations Portal';
+  }
+  
+  if (user.role === 'superadmin') {
+    return 'Admin Platform';
+  }
+  
+  return 'Operations Portal';
+}
+
+// Get the appropriate tutorial title based on user role
+export function getTutorialTitle(user: User | null): string {
+  if (!user) {
+    return 'Portal Tutorial';
+  }
+  
+  if (user.role === 'superadmin') {
+    return 'Admin Tutorial';
+  }
+  
+  return 'Agent Tutorial';
 }

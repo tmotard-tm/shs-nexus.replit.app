@@ -72,17 +72,11 @@ function getUserAccessibleModules(user: UserType): QueueModule[] {
     return ['ntao', 'assets', 'inventory', 'fleet'];
   }
   
-  // Use departmentAccess array to determine accessible modules
-  if (user.departmentAccess && Array.isArray(user.departmentAccess)) {
-    return user.departmentAccess
+  // Use departments array to determine accessible modules
+  if (user.departments && Array.isArray(user.departments)) {
+    return user.departments
       .map(dept => departmentToQueueModule(dept))
       .filter((module: QueueModule | null) => module !== null) as QueueModule[];
-  }
-  
-  // Fallback to single department for backwards compatibility
-  if (user.department) {
-    const module = departmentToQueueModule(user.department);
-    return module ? [module] : [];
   }
   
   return [];
@@ -115,10 +109,10 @@ export default function UnifiedQueueManagement() {
   const [reassignItem, setReassignItem] = useState<CombinedQueueItem | null>(null);
   const [selectedReassignee, setSelectedReassignee] = useState<string>("");
 
-  // Auto-populate module selection based on user's department access
+  // Auto-populate module selection based on user's departments
   useEffect(() => {
     if (user) {
-      // Get accessible modules using the new departmentAccess system
+      // Get accessible modules using the departments array
       const accessibleModules = getUserAccessibleModules(user);
       setSelectedModules(accessibleModules);
     } else {
@@ -426,7 +420,7 @@ export default function UnifiedQueueManagement() {
     console.log("Picking up task for current user:", {
       taskId: item.id,
       userId: user.id,
-      userDept: user.department
+      userDepts: user.departments
     });
     
     // Directly assign to current user and set pickup item for work module

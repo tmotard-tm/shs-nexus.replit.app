@@ -1,14 +1,15 @@
 import { User } from "@shared/schema";
 
-// Form access mapping - defines which roles can access which forms (preserved for backward compatibility)
+// Form access mapping - defines which roles can access which forms
+// Simplified to just superadmin and agent roles
 export const FORM_ACCESS_MAP = {
-  'create-vehicle': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao', 'agent', 'approver'], // Vehicle creation requires admin or department privileges
-  'assign-vehicle': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao', 'agent', 'approver'], // Vehicle assignment requires admin or department privileges
-  'onboarding': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao', 'agent', 'approver'], // Employee onboarding requires admin or department privileges
-  'offboarding': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao', 'agent', 'approver'], // Employee offboarding requires admin or department privileges
-  'byov-enrollment': ['superadmin', 'assets', 'fleet', 'inventory', 'ntao', 'field', 'agent', 'approver', 'requester'], // BYOV enrollment can be done by department staff, field workers, and requesters
-  'user-management': ['superadmin'], // User management restricted to superadmin only
-  'template-management': ['superadmin'], // Template management restricted to superadmin only
+  'create-vehicle': ['superadmin', 'agent'],
+  'assign-vehicle': ['superadmin', 'agent'],
+  'onboarding': ['superadmin', 'agent'],
+  'offboarding': ['superadmin', 'agent'],
+  'byov-enrollment': ['superadmin', 'agent'],
+  'user-management': ['superadmin'],
+  'template-management': ['superadmin'],
 } as const;
 
 export type FormKey = keyof typeof FORM_ACCESS_MAP;
@@ -30,28 +31,10 @@ export function checkFormAccess(user: User | null, formKey: string): boolean {
 
   const allowedRoles = FORM_ACCESS_MAP[formKey as FormKey];
   if (!allowedRoles) {
-    // If form key doesn't exist, deny access by default
     return false;
   }
 
-  // For agents and approvers, check if they have department access that matches form requirements
-  if ((user.role === 'agent' || user.role === 'approver') && user.departmentAccess && Array.isArray(user.departmentAccess)) {
-    // If the role is explicitly allowed, grant access
-    if (allowedRoles.includes(user.role as any)) {
-      return true;
-    }
-    
-    // Check if user has department access that corresponds to allowed roles
-    const hasMatchingDepartment = user.departmentAccess.some(dept => {
-      const deptLower = dept.toLowerCase();
-      return allowedRoles.includes(deptLower as any);
-    });
-    
-    if (hasMatchingDepartment) {
-      return true;
-    }
-  }
-
+  // Check if user's role is allowed
   return allowedRoles.includes(user.role as any);
 }
 
@@ -76,27 +59,12 @@ export function getAccessibleForms(user: User | null): FormKey[] {
     return publicForms;
   }
 
-  // Add role-based forms that aren't already public (avoid duplicates)
+  // Add role-based forms that aren't already public
   const roleBased = Object.entries(FORM_ACCESS_MAP)
     .filter(([formKey, roles]) => {
       if (PUBLIC_FORMS.has(formKey as FormKey)) {
-        return false; // Skip public forms
+        return false;
       }
-      
-      // For agents and approvers, check both role and department access
-      if ((user.role === 'agent' || user.role === 'approver') && user.departmentAccess && Array.isArray(user.departmentAccess)) {
-        // Check if role is explicitly allowed
-        if (roles.includes(user.role as any)) {
-          return true;
-        }
-        
-        // Check if user has department access that corresponds to allowed roles
-        return user.departmentAccess.some(dept => {
-          const deptLower = dept.toLowerCase();
-          return roles.includes(deptLower as any);
-        });
-      }
-      
       return roles.includes(user.role as any);
     })
     .map(([formKey]) => formKey as FormKey);

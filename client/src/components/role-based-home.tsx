@@ -14,7 +14,7 @@ export function RoleBasedHome() {
       
       // Only redirect if it's not the current page (to avoid redirect loops)
       if (landingPage !== '/') {
-        console.log(`Redirecting ${user.username} (role: ${user.role}, dept: ${user.departmentAccess}) to ${landingPage}`);
+        console.log(`Redirecting ${user.username} (role: ${user.role}, depts: ${user.departments}) to ${landingPage}`);
         setLocation(landingPage);
       }
     }

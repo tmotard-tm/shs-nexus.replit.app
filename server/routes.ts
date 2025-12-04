@@ -349,10 +349,10 @@ function hasQueueAccess(user: any, module: QueueModule): boolean {
     return true;
   }
   
-  // Check departmentAccess array
-  if (user.departmentAccess && Array.isArray(user.departmentAccess)) {
+  // Check departments array for queue access
+  if (user.departments && Array.isArray(user.departments)) {
     const requiredDepartment = module.toUpperCase();
-    return user.departmentAccess.includes(requiredDepartment);
+    return user.departments.includes(requiredDepartment);
   }
   
   return false;
@@ -364,8 +364,8 @@ function getAccessibleQueueModules(user: any): QueueModule[] {
     return ['ntao', 'assets', 'inventory', 'fleet'];
   }
   
-  if (user.departmentAccess && Array.isArray(user.departmentAccess)) {
-    return user.departmentAccess
+  if (user.departments && Array.isArray(user.departments)) {
+    return user.departments
       .map((dept: string) => departmentToQueueModule(dept))
       .filter((module: QueueModule | null) => module !== null) as QueueModule[];
   }
@@ -732,7 +732,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updates = req.body;
       
       // Strict field validation - only allow safe fields to be updated
-      const allowedFields = ['email', 'fullName', 'department', 'role', 'departmentAccess', 'isActive', 'username'];
+      const allowedFields = ['email', 'fullName', 'role', 'departments', 'isActive', 'username'];
       const sanitizedUpdates: any = {};
       
       for (const [key, value] of Object.entries(updates)) {
@@ -765,23 +765,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sanitizedUpdates.username = usernameStr;
       }
       
-      // Validate role if being updated
+      // Validate role if being updated (simplified to just superadmin and agent)
       if (sanitizedUpdates.role) {
-        const validRoles = ['superadmin', 'admin', 'agent', 'field', 'approver', 'requester'];
+        const validRoles = ['superadmin', 'agent'];
         if (!validRoles.includes(sanitizedUpdates.role)) {
-          return res.status(400).json({ message: "Invalid role specified" });
+          return res.status(400).json({ message: "Invalid role specified. Must be 'superadmin' or 'agent'" });
         }
       }
       
-      // Validate department access if being updated
-      if (sanitizedUpdates.departmentAccess) {
+      // Validate departments if being updated
+      if (sanitizedUpdates.departments) {
         const validDepartments = ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'];
-        if (!Array.isArray(sanitizedUpdates.departmentAccess)) {
-          return res.status(400).json({ message: "Department access must be an array" });
+        if (!Array.isArray(sanitizedUpdates.departments)) {
+          return res.status(400).json({ message: "Departments must be an array" });
         }
-        for (const dept of sanitizedUpdates.departmentAccess) {
+        for (const dept of sanitizedUpdates.departments) {
           if (!validDepartments.includes(dept)) {
-            return res.status(400).json({ message: `Invalid department access: ${dept}` });
+            return res.status(400).json({ message: `Invalid department: ${dept}` });
           }
         }
       }
@@ -985,7 +985,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin Role Management - Super admins can update user roles and department access
+  // Admin Role Management - Super admins can update user roles and departments
   app.post("/api/users/:id/update-role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
@@ -1000,20 +1000,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. Cannot modify role for seed accounts." });
       }
       
-      const { role, department, departmentAccess } = req.body;
+      const { role, departments } = req.body;
       
-      // Validate role if provided
-      const validRoles = ['superadmin', 'agent', 'field', 'approver', 'requester'];
+      // Validate role if provided (simplified to superadmin and agent only)
+      const validRoles = ['superadmin', 'agent'];
       if (role && !validRoles.includes(role)) {
-        return res.status(400).json({ message: "Invalid role specified" });
+        return res.status(400).json({ message: "Invalid role specified. Must be 'superadmin' or 'agent'" });
       }
 
-      // Validate department access if provided
+      // Validate departments if provided
       const validDepartments = ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'];
-      if (departmentAccess && Array.isArray(departmentAccess)) {
-        for (const dept of departmentAccess) {
+      if (departments && Array.isArray(departments)) {
+        for (const dept of departments) {
           if (!validDepartments.includes(dept)) {
-            return res.status(400).json({ message: `Invalid department access: ${dept}` });
+            return res.status(400).json({ message: `Invalid department: ${dept}` });
           }
         }
       }
@@ -1026,8 +1026,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Prepare updates object
       const updates: any = {};
       if (role !== undefined) updates.role = role;
-      if (department !== undefined) updates.department = department;
-      if (departmentAccess !== undefined) updates.departmentAccess = departmentAccess;
+      if (departments !== undefined) updates.departments = departments;
 
       // Update user
       const updatedUser = await storage.updateUser(id, updates);
@@ -1956,7 +1955,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control using new departmentAccess system
+      // Enforce access control using departments
       const accessibleModules = getAccessibleQueueModules(currentUser);
       if (accessibleModules.length === 0) {
         return res.status(403).json({ message: "No queue access permissions" });
@@ -2002,7 +2001,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control using new departmentAccess system
+      // Enforce access control using departments
       const accessibleModules = getAccessibleQueueModules(currentUser);
       if (accessibleModules.length === 0) {
         return res.status(403).json({ message: "No queue access permissions" });
@@ -2358,7 +2357,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control using new departmentAccess system
+      // Enforce access control using departments
       if (!hasQueueAccess(currentUser, module as QueueModule)) {
         return res.status(403).json({ message: "Access denied to this queue" });
       }
@@ -2523,7 +2522,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control using new departmentAccess system
+      // Enforce access control using departments
       if (!hasQueueAccess(currentUser, module as QueueModule)) {
         return res.status(403).json({ message: "Access denied to this queue" });
       }
@@ -2576,7 +2575,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control using new departmentAccess system
+      // Enforce access control using departments
       if (!hasQueueAccess(currentUser, module as QueueModule)) {
         return res.status(403).json({ message: "Access denied to this queue" });
       }
@@ -2658,7 +2657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Enforce access control using new departmentAccess system
+      // Enforce access control using departments
       if (!hasQueueAccess(currentUser, module as QueueModule)) {
         return res.status(403).json({ message: "Access denied to this queue" });
       }

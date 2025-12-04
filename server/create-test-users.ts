@@ -1,58 +1,52 @@
 import { storage } from "./storage";
 import bcrypt from "bcrypt";
 
-// Create sample users for each role type for testing
+// Create sample users for testing - simplified to just superadmin and agent roles
 export async function createTestUsers() {
   console.log("Creating test users for role-based access control testing...");
 
   const testUsers = [
     {
-      username: "assets_user",
+      username: "assets_agent",
       email: "assets@test.com",
       password: "test123",
-      role: "assets",
-      department: "ASSETS",
-      departmentAccess: ["ASSETS"]
+      role: "agent",
+      departments: ["ASSETS"]
     },
     {
-      username: "fleet_user",
+      username: "fleet_agent",
       email: "fleet@test.com", 
       password: "test123",
-      role: "fleet",
-      department: "FLEET",
-      departmentAccess: ["FLEET"]
+      role: "agent",
+      departments: ["FLEET"]
     },
     {
-      username: "inventory_user",
+      username: "inventory_agent",
       email: "inventory@test.com",
       password: "test123", 
-      role: "inventory",
-      department: "INVENTORY",
-      departmentAccess: ["INVENTORY"]
+      role: "agent",
+      departments: ["INVENTORY"]
     },
     {
-      username: "ntao_user",
+      username: "ntao_agent",
       email: "ntao@test.com",
       password: "test123",
-      role: "ntao", 
-      department: "NTAO",
-      departmentAccess: ["NTAO"]
+      role: "agent", 
+      departments: ["NTAO"]
     },
     {
-      username: "field_user",
-      email: "field@test.com",
+      username: "multi_dept_agent",
+      email: "multi@test.com",
       password: "test123",
-      role: "field",
-      department: null,
-      departmentAccess: []
+      role: "agent",
+      departments: ["NTAO", "ASSETS"]
     },
     {
       username: "superadmin",
       email: "admin@test.com", 
       password: "test123",
       role: "superadmin",
-      department: null,
-      departmentAccess: ["NTAO", "ASSETS", "INVENTORY", "FLEET"]
+      departments: ["NTAO", "ASSETS", "INVENTORY", "FLEET"]
     }
   ];
 
@@ -71,25 +65,24 @@ export async function createTestUsers() {
           email: userData.email,
           password: hashedPassword,
           role: userData.role,
-          department: userData.department,
-          departmentAccess: userData.departmentAccess
+          departments: userData.departments
         });
         
-        console.log(`✅ Created test user: ${userData.username} (${userData.role})`);
+        console.log(`Created test user: ${userData.username} (${userData.role})`);
       } else {
-        console.log(`⏭️  User ${userData.username} already exists, skipping...`);
+        console.log(`User ${userData.username} already exists, skipping...`);
       }
     } catch (error) {
-      console.error(`❌ Failed to create user ${userData.username}:`, error);
+      console.error(`Failed to create user ${userData.username}:`, error);
     }
   }
 
   console.log("Test user creation complete!");
   console.log("\nTest User Credentials:");
-  console.log("- assets_user / test123 (Assets role)");
-  console.log("- fleet_user / test123 (Fleet role)");
-  console.log("- inventory_user / test123 (Inventory role)");
-  console.log("- ntao_user / test123 (NTAO — National Truck Assortment role)"); 
-  console.log("- field_user / test123 (Field role)");
-  console.log("- superadmin / test123 (Super Admin role)");
+  console.log("- assets_agent / test123 (Agent with Assets access)");
+  console.log("- fleet_agent / test123 (Agent with Fleet access)");
+  console.log("- inventory_agent / test123 (Agent with Inventory access)");
+  console.log("- ntao_agent / test123 (Agent with NTAO access)"); 
+  console.log("- multi_dept_agent / test123 (Agent with NTAO + Assets access)");
+  console.log("- superadmin / test123 (Super Admin with all access)");
 }

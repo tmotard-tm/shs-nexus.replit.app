@@ -28,7 +28,7 @@ export function PickUpRequestDialog({
 }: PickUpRequestDialogProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
 
-  // Filter agents based on department, queue access, and role
+  // Filter agents based on department and role
   const getEligibleAgents = () => {
     const filtered = users.filter(user => {
       // Always include superadmins
@@ -36,40 +36,25 @@ export function PickUpRequestDialog({
         return true;
       }
 
-      // If we have a specific queue module, check user's department access
-      if (queueModule) {
-        if (user.departmentAccess && user.departmentAccess.length > 0) {
+      // For agents, check if they have access to this queue module via departments
+      if (user.role === "agent" && queueModule) {
+        if (user.departments && user.departments.length > 0) {
           const queueModuleMap: Record<QueueModule, string> = {
-            ntao: "NTAO", // National Truck Assortment
+            ntao: "NTAO",
             assets: "ASSETS", 
             inventory: "INVENTORY",
             fleet: "FLEET"
           };
-          return user.departmentAccess.includes(queueModuleMap[queueModule]);
+          return user.departments.includes(queueModuleMap[queueModule]);
         }
-        
-        // Fallback to department-based filtering if no accessibleQueues
-        const departmentMap: Record<QueueModule, string> = {
-          ntao: "NTAO",
-          assets: "Assets Management",
-          inventory: "Inventory Control",
-          fleet: "Fleet Management"
-        };
-        
-        return user.department === departmentMap[queueModule];
+        return false;
       }
 
-      // If we have a specific department, filter by department
-      if (department) {
-        return user.department === department;
-      }
-
-      // Include all department-based roles by default
-      const validRoles = ["assets", "fleet", "inventory", "ntao", "superadmin", "field"];
-      return validRoles.includes(user.role);
+      // Include agents by default if no specific queue module
+      return user.role === "agent";
     });
     
-    // Always ensure the current user is included first, even if they don't match filters
+    // Always ensure the current user is included first
     if (currentUser && !filtered.some(u => u.id === currentUser.id)) {
       return [currentUser, ...filtered];
     }
@@ -82,13 +67,12 @@ export function PickUpRequestDialog({
   const handlePickUp = () => {
     if (selectedAgentId) {
       onPickUp(selectedAgentId);
-      setSelectedAgentId(""); // Reset selection
-      // Don't call onClose() immediately - let the assignment success handler close it
+      setSelectedAgentId("");
     }
   };
 
   const handleClose = () => {
-    setSelectedAgentId(""); // Reset selection when closing
+    setSelectedAgentId("");
     onClose();
   };
 
@@ -96,64 +80,62 @@ export function PickUpRequestDialog({
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-md" data-testid="dialog-pick-up-request">
         <DialogHeader>
-          <DialogTitle data-testid="text-dialog-title">Pick Up Request</DialogTitle>
-          <DialogDescription data-testid="text-dialog-description">
-            Select an agent to assign this request to.
+          <DialogTitle>Assign Task</DialogTitle>
+          <DialogDescription>
+            Select an agent to assign this task to. Only agents with access to this queue are shown.
           </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="agent-select" data-testid="label-agent-name">
-              Agent Name:
-            </Label>
+            <Label htmlFor="agent-select">Assign to Agent</Label>
             <Select 
               value={selectedAgentId} 
               onValueChange={setSelectedAgentId}
-              disabled={isLoading}
             >
-              <SelectTrigger id="agent-select" data-testid="select-agent-name">
+              <SelectTrigger id="agent-select" data-testid="select-agent">
                 <SelectValue placeholder="Select an agent..." />
               </SelectTrigger>
-              <SelectContent data-testid="select-content-agents">
+              <SelectContent>
                 {eligibleAgents.length === 0 ? (
-                  <SelectItem value="no-agents" disabled data-testid="option-no-agents">
-                    No eligible agents available
+                  <SelectItem value="none" disabled>
+                    No eligible agents found
                   </SelectItem>
                 ) : (
-                  eligibleAgents.map((user) => {
-                    const isCurrentUser = currentUser && user.id === currentUser.id;
-                    return (
-                      <SelectItem 
-                        key={user.id} 
-                        value={user.id} 
-                        data-testid={`option-agent-${user.id}`}
-                      >
-                        {user.username} {isCurrentUser ? "(You)" : `(${user.department || "No Department"})`}
-                      </SelectItem>
-                    );
-                  })
+                  eligibleAgents.map(agent => (
+                    <SelectItem 
+                      key={agent.id} 
+                      value={agent.id}
+                      data-testid={`select-agent-${agent.id}`}
+                    >
+                      {agent.username} 
+                      {agent.id === currentUser?.id && " (You)"}
+                      {agent.role === "superadmin" && " (Admin)"}
+                      {agent.departments && agent.departments.length > 0 && 
+                        ` - ${agent.departments.join(", ")}`
+                      }
+                    </SelectItem>
+                  ))
                 )}
               </SelectContent>
             </Select>
           </div>
         </div>
 
-        <div className="flex justify-end space-x-2">
+        <div className="flex justify-end gap-2">
           <Button 
             variant="outline" 
             onClick={handleClose}
-            disabled={isLoading}
-            data-testid="button-cancel"
+            data-testid="button-cancel-pick-up"
           >
             Cancel
           </Button>
           <Button 
             onClick={handlePickUp}
-            disabled={!selectedAgentId || selectedAgentId === "no-agents" || isLoading}
-            data-testid="button-pick-up"
+            disabled={!selectedAgentId || isLoading}
+            data-testid="button-confirm-pick-up"
           >
-            {isLoading ? "Picking Up..." : "Pick Up"}
+            {isLoading ? "Assigning..." : "Assign"}
           </Button>
         </div>
       </DialogContent>

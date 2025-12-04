@@ -1,19 +1,21 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date, index, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Queue module types for unified queue access
 export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet';
 
+// Role types - simplified to just superadmin and agent
+export type UserRole = 'superadmin' | 'agent';
+
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
-  role: text("role").notNull().default("field"), // superadmin, agent, field
-  department: text("department"), // NTAO — National Truck Assortment, Assets Management, Inventory Control, Fleet Management
-  departmentAccess: text("department_access").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'] where NTAO = National Truck Assortment
+  role: text("role").notNull().default("agent"), // superadmin, agent (simplified from 9 roles)
+  departments: text("departments").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET']
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => {
   return {
@@ -22,6 +24,37 @@ export const users = pgTable("users", {
     emailIdx: index("users_email_lower_idx").on(sql`LOWER(${table.email})`),
   };
 });
+
+// Role permissions table - stores hierarchical UI visibility settings per role
+export const rolePermissions = pgTable("role_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  role: text("role").notNull().unique(), // 'superadmin' or 'agent'
+  permissions: jsonb("permissions").notNull(), // Hierarchical permission object
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Permission structure type for the jsonb column
+export interface RolePermissionSettings {
+  homePage: boolean;
+  sidebar: {
+    enabled: boolean;
+    dashboards: {
+      enabled: boolean;
+      dashboard: boolean;
+      vehicleAssignmentDash: boolean;
+      operationsDash: boolean;
+    };
+    queues: {
+      enabled: boolean;
+      queueManagement: boolean;
+    };
+    management: boolean;
+    activities: boolean;
+    account: boolean;
+    helpAndTutorial: boolean;
+  };
+}
 
 export const requests = pgTable("requests", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -535,9 +568,40 @@ export const anonymousByovEnrollmentSchema = z.object({
   // Additional BYOV-specific fields
 }).strict();
 
+// Role permissions insert schema
+export const insertRolePermissionsSchema = createInsertSchema(rolePermissions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Role permissions validation schema for the permissions object
+export const rolePermissionSettingsSchema = z.object({
+  homePage: z.boolean(),
+  sidebar: z.object({
+    enabled: z.boolean(),
+    dashboards: z.object({
+      enabled: z.boolean(),
+      dashboard: z.boolean(),
+      vehicleAssignmentDash: z.boolean(),
+      operationsDash: z.boolean(),
+    }),
+    queues: z.object({
+      enabled: z.boolean(),
+      queueManagement: z.boolean(),
+    }),
+    management: z.boolean(),
+    activities: z.boolean(),
+    account: z.boolean(),
+    helpAndTutorial: z.boolean(),
+  }),
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+export type InsertRolePermission = z.infer<typeof insertRolePermissionsSchema>;
 export type Request = typeof requests.$inferSelect;
 export type InsertRequest = z.infer<typeof insertRequestSchema>;
 export type ApiConfiguration = typeof apiConfigurations.$inferSelect;
