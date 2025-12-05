@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { BackButton } from "@/components/ui/back-button";
-import { Database, CheckCircle, XCircle, Loader2, Play, RefreshCw, Users } from "lucide-react";
+import { Database, CheckCircle, XCircle, Loader2, Play, RefreshCw, Users, History, AlertTriangle } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
@@ -18,11 +18,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { SyncLog } from "@shared/schema";
 
 export default function SnowflakeIntegration() {
   const { toast } = useToast();
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
+
+  const { data: syncLogs = [], isLoading: syncLogsLoading } = useQuery<SyncLog[]>({
+    queryKey: ["/api/sync-logs"],
+    refetchInterval: 30000,
+  });
 
   const { data: status, isLoading: statusLoading } = useQuery<{ 
     configured: boolean;
@@ -282,6 +288,109 @@ export default function SnowflakeIntegration() {
                 </>
               )}
             </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Sync History
+            </CardTitle>
+            <CardDescription>
+              View recent synchronization activity and results
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {syncLogsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : syncLogs.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No sync history available yet.
+              </div>
+            ) : (
+              <div className="rounded-md border overflow-auto max-h-[400px]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Started</TableHead>
+                      <TableHead>Duration</TableHead>
+                      <TableHead>Records</TableHead>
+                      <TableHead>Queue Items</TableHead>
+                      <TableHead>Triggered By</TableHead>
+                      <TableHead>Errors</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {syncLogs.slice(0, 25).map((log) => {
+                      const startTime = new Date(log.startedAt);
+                      const endTime = log.completedAt ? new Date(log.completedAt) : null;
+                      const duration = endTime 
+                        ? Math.round((endTime.getTime() - startTime.getTime()) / 1000)
+                        : null;
+                      
+                      return (
+                        <TableRow key={log.id} data-testid={`row-sync-${log.id}`}>
+                          <TableCell>
+                            <Badge variant="outline" className="font-mono text-xs">
+                              {log.syncType === 'termed_techs' ? 'Termed Techs' : 'All Techs'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge 
+                              variant={
+                                log.status === 'completed' ? 'default' :
+                                log.status === 'failed' ? 'destructive' :
+                                log.status === 'running' ? 'secondary' : 'outline'
+                              }
+                              className="flex items-center gap-1 w-fit"
+                            >
+                              {log.status === 'completed' && <CheckCircle className="h-3 w-3" />}
+                              {log.status === 'failed' && <XCircle className="h-3 w-3" />}
+                              {log.status === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
+                              {log.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {startTime.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {duration !== null ? `${duration}s` : '-'}
+                          </TableCell>
+                          <TableCell className="text-sm font-mono">
+                            {log.recordsProcessed || 0}
+                          </TableCell>
+                          <TableCell className="text-sm font-mono">
+                            {log.queueItemsCreated || 0}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            <Badge variant="outline" className="text-xs">
+                              {log.triggeredBy || 'unknown'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {log.errorMessage ? (
+                              <div className="flex items-center gap-1 text-destructive">
+                                <AlertTriangle className="h-3 w-3" />
+                                <span className="text-xs max-w-[200px] truncate" title={log.errorMessage}>
+                                  {log.errorMessage}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">None</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
 
