@@ -32,8 +32,11 @@ import {
   FileText,
   Clipboard,
   Play,
-  Edit
+  Edit,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
@@ -106,7 +109,8 @@ export default function UnifiedQueueManagement() {
   const [selectedEmployee, setSelectedEmployee] = useState<TechRosterEntry | null>(null);
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("oldest");
+  const [sortField, setSortField] = useState<"dateAdded" | "lastDayWorking">("dateAdded");
+  const [sortDirection, setSortDirection] = useState<"newest" | "oldest">("oldest");
   const [expandedQueues, setExpandedQueues] = useState<Record<QueueModule, boolean>>({} as Record<QueueModule, boolean>);
   const [expandedStatusSections, setExpandedStatusSections] = useState<Record<string, boolean>>({});
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
@@ -116,6 +120,7 @@ export default function UnifiedQueueManagement() {
   const [isWorkModuleOpen, setIsWorkModuleOpen] = useState(false);
   const [reassignItem, setReassignItem] = useState<CombinedQueueItem | null>(null);
   const [selectedReassignee, setSelectedReassignee] = useState<string>("");
+  const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
 
   // Auto-populate module selection based on user's departments
   useEffect(() => {
@@ -526,6 +531,21 @@ export default function UnifiedQueueManagement() {
     }
   };
 
+  // Helper function to extract lastDayWorked from a queue item's data
+  const getLastDayWorked = (item: CombinedQueueItem): string | null => {
+    if (!item.data) return null;
+    try {
+      const data = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
+      // Check multiple possible locations for lastDayWorked
+      return data?.employee?.lastDayWorked || 
+             data?.technician?.lastDayWorked || 
+             data?.lastDayWorked || 
+             null;
+    } catch {
+      return null;
+    }
+  };
+
   // Filter items based on date, agent, workflow type, and employee criteria
   const getFilteredItems = (items: CombinedQueueItem[]) => {
     let filtered = items;
@@ -589,11 +609,26 @@ export default function UnifiedQueueManagement() {
       });
     }
 
-    // Apply sort order
+    // Apply sort order based on sortField and sortDirection
     filtered = [...filtered].sort((a, b) => {
-      const dateA = new Date(a.createdAt).getTime();
-      const dateB = new Date(b.createdAt).getTime();
-      return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
+      if (sortField === "dateAdded") {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        return sortDirection === "newest" ? dateB - dateA : dateA - dateB;
+      } else {
+        // Sort by lastDayWorking
+        const lastDayA = getLastDayWorked(a);
+        const lastDayB = getLastDayWorked(b);
+        
+        // Items without lastDayWorked go to the end
+        if (!lastDayA && !lastDayB) return 0;
+        if (!lastDayA) return 1;
+        if (!lastDayB) return -1;
+        
+        const dateA = new Date(lastDayA).getTime();
+        const dateB = new Date(lastDayB).getTime();
+        return sortDirection === "newest" ? dateB - dateA : dateA - dateB;
+      }
     });
 
     return filtered;
@@ -641,15 +676,31 @@ export default function UnifiedQueueManagement() {
           </div>
         </div>
 
-        {/* Filters and Search */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Filter className="h-5 w-5" />
-              Filters & Search
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        {/* Filters and Search - Collapsible */}
+        <Collapsible open={isFiltersExpanded} onOpenChange={setIsFiltersExpanded}>
+          <Card>
+            <CollapsibleTrigger asChild>
+              <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-5 w-5" />
+                    Filters & Search
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {isFiltersExpanded ? "Click to collapse" : "Click to expand"}
+                    </span>
+                    {isFiltersExpanded ? (
+                      <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                    )}
+                  </div>
+                </CardTitle>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="space-y-4">
             {/* Show Queues Selection - controlled by queueCheckboxes permission */}
             {(filterPerms?.queueCheckboxes !== false) && (
             <div className="space-y-3">
@@ -809,7 +860,7 @@ export default function UnifiedQueueManagement() {
               </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 {/* Workflow Type Filter - controlled by workflowTypeFilter permission */}
                 {(filterPerms?.workflowTypeFilter !== false) && (
                 <div>
@@ -880,24 +931,40 @@ export default function UnifiedQueueManagement() {
                 </>
                 )}
 
-                {/* Sort Order - controlled by sortOrder permission */}
+                {/* Sort Field - controlled by sortOrder permission */}
                 {(filterPerms?.sortOrder !== false) && (
+                <>
                 <div>
-                  <Label htmlFor="sort-order">Sort By Date</Label>
-                  <Select value={sortOrder} onValueChange={(value: "newest" | "oldest") => setSortOrder(value)}>
-                    <SelectTrigger data-testid="select-sort-order">
-                      <SelectValue placeholder="Sort order" />
+                  <Label htmlFor="sort-field">Sort By</Label>
+                  <Select value={sortField} onValueChange={(value: "dateAdded" | "lastDayWorking") => setSortField(value)}>
+                    <SelectTrigger data-testid="select-sort-field">
+                      <SelectValue placeholder="Sort field" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="newest">Newest First</SelectItem>
-                      <SelectItem value="oldest">Oldest First</SelectItem>
+                      <SelectItem value="dateAdded">Date Added</SelectItem>
+                      <SelectItem value="lastDayWorking">Last Day Working</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                <div>
+                  <Label htmlFor="sort-direction">Order</Label>
+                  <Select value={sortDirection} onValueChange={(value: "newest" | "oldest") => setSortDirection(value)}>
+                    <SelectTrigger data-testid="select-sort-direction">
+                      <SelectValue placeholder="Sort direction" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="oldest">Oldest First</SelectItem>
+                      <SelectItem value="newest">Newest First</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                </>
                 )}
               </div>
-            </CardContent>
+              </CardContent>
+            </CollapsibleContent>
           </Card>
+        </Collapsible>
 
         {/* Queue Items - Grouped by Module */}
         {selectedModules.length > 0 && (
@@ -1043,11 +1110,18 @@ export default function UnifiedQueueManagement() {
                                                 {item.description}
                                               </p>
 
-                                              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                                <div className="flex items-center gap-1">
+                                              <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                                                <div className="flex items-center gap-1" title="Date Added">
                                                   <Calendar className="h-4 w-4" />
-                                                  <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+                                                  <span>Added: {new Date(item.createdAt).toLocaleDateString()}</span>
                                                 </div>
+                                                
+                                                {getLastDayWorked(item) && (
+                                                  <div className="flex items-center gap-1 text-orange-600 dark:text-orange-400 font-medium" title="Last Day Working">
+                                                    <Clock className="h-4 w-4" />
+                                                    <span>Last Day: {new Date(getLastDayWorked(item)!).toLocaleDateString()}</span>
+                                                  </div>
+                                                )}
                                                 
                                                 {item.assignedTo && (
                                                   <div className="flex items-center gap-1">

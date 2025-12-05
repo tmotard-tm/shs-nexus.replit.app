@@ -21,7 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
-import { AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar, Car, MapPin, ClipboardList } from "lucide-react";
+import { AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar, Car, MapPin, ClipboardList, CheckCircle } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
@@ -50,6 +50,10 @@ export default function OffboardTechnician() {
     taskCount: number;
     tasks: Array<{ id: string; status: string; createdAt: string; module: string }>;
   } | null>(null);
+  
+  // State for "Add Another Technician" dialog
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+  const [lastSubmittedTech, setLastSubmittedTech] = useState("");
   
   const [technicianOffboard, setTechnicianOffboard] = useState({
     vehicleId: "",
@@ -482,14 +486,10 @@ export default function OffboardTechnician() {
       description: `Phase 1 (Day 0) tasks created for ${technicianOffboard.techName}: NTAO — National Truck Assortment, Equipment, Fleet, and Inventory teams. Phase 2 tasks will auto-trigger after all Day 0 tasks complete.`,
     });
     
-    setTimeout(() => {
-      toast({
-        title: "Workflow Phases",
-        description: `✅ PHASE 1: Day 0 tasks (all 4 teams) → PHASE 2: Day 1-5 Fleet follow-up tasks (auto-generated)`,
-        variant: "default"
-      });
-    }, 2000);
+    // Store the tech name for the success dialog
+    setLastSubmittedTech(technicianOffboard.techName);
     
+    // Reset the form
     setTechnicianOffboard({
       vehicleId: "",
       techRacfId: "",
@@ -507,11 +507,15 @@ export default function OffboardTechnician() {
       vehicleModel: ""
     });
     setHolmanLookupResult(null);
+    setTpmsLookupResult(null);
     setLocationOptions([]);
     setSelectedLocationId('');
     setCustomLocation({ type: 'address', address: '', latitude: '', longitude: '' });
     
     setIsSubmitting(false);
+    
+    // Show the success dialog asking if they want to add another
+    setShowSuccessDialog(true);
   };
 
   const getStatusColor = (status: string) => {
@@ -1278,6 +1282,36 @@ export default function OffboardTechnician() {
               className="bg-primary"
             >
               Go to Queue Management
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Success Dialog - Add Another Technician */}
+      <AlertDialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              Offboarding Started Successfully
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Offboarding workflow has been initiated for <strong>{lastSubmittedTech}</strong>. 
+              Would you like to offboard another technician?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel 
+              onClick={() => navigate("/")}
+              data-testid="button-go-home"
+            >
+              No, Go to Home
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => setShowSuccessDialog(false)}
+              data-testid="button-add-another"
+            >
+              Yes, Add Another Technician
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

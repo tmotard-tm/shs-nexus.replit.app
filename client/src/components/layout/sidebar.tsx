@@ -58,7 +58,7 @@ type NavCategory = {
 };
 
 export function Sidebar() {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const { user, logout } = useAuth();
   const { startOnboarding, resetOnboarding } = useOnboarding();
   const { permissions, effectiveRole } = usePermissions();
@@ -357,6 +357,7 @@ export function Sidebar() {
                 onClick={() => {
                   logout();
                   setIsOpen(false);
+                  setLocation("/login");
                 }}
                 data-testid="button-logout"
               >

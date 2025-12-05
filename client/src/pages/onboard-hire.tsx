@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +9,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, CheckCircle, Clock, Users, Package, Wrench, MapPin } from "lucide-react";
 import { getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
@@ -20,6 +31,12 @@ import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 export default function OnboardHire() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const [, navigate] = useLocation();
+  
+  // State for "Add Another Technician" dialog
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+  const [lastSubmittedTech, setLastSubmittedTech] = useState("");
+  
   const [employeeForm, setEmployeeForm] = useState({
     firstName: "",
     lastName: "",
@@ -214,6 +231,9 @@ export default function OnboardHire() {
       return;
     }
     
+    // Store the tech name before submitting
+    const techName = `${employeeForm.firstName} ${employeeForm.lastName}`;
+    
     try {
       // Use unified form submission endpoint that triggers automatic task creation across all departments
       const unifiedFormData = {
@@ -245,47 +265,53 @@ export default function OnboardHire() {
       
       toast({
         title: "Employee Onboarded Successfully",
-        description: `${employeeForm.firstName} ${employeeForm.lastName} has been onboarded. Tasks have been automatically created for all departments including NTAO, Assets, Fleet, and Inventory.`,
+        description: `${techName} has been onboarded. Tasks have been automatically created for all departments including NTAO, Assets, Fleet, and Inventory.`,
       });
+      
+      // Store the tech name for the success dialog
+      setLastSubmittedTech(techName);
+      
+      // Reset the form
+      setEmployeeForm({
+        firstName: "",
+        lastName: "",
+        email: "",
+        phone: "",
+        street: "",
+        city: "",
+        state: "",
+        zipCode: "",
+        department: "",
+        position: "",
+        startDate: "",
+        manager: "",
+        employeeId: "",
+        region: "",
+        district: "",
+        requisitionId: "",
+        enterpriseId: "",
+        techId: "",
+        proposedRouteStartDate: "",
+        specialties: [],
+        isGeneralist: false,
+        isFSSLTech: false
+      });
+
+      setOnboardingTasks(tasks => tasks.map(task => ({ ...task, completed: false })));
+      setSupplyOrders({ assetsSupplies: false, ntaoPartsStock: false });
+      setVehicleAssignment({ autoAssign: false, workZipcode: "" });
+      
+      // Show the success dialog asking if they want to add another
+      setShowSuccessDialog(true);
       
     } catch (error) {
       console.error('Error submitting onboarding form:', error);
       toast({
         title: "Error",
-        description: `Failed to onboard ${employeeForm.firstName} ${employeeForm.lastName}. Please try again or contact support.`,
+        description: `Failed to onboard ${techName}. Please try again or contact support.`,
         variant: "destructive"
       });
     }
-    
-    setEmployeeForm({
-      firstName: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      street: "",
-      city: "",
-      state: "",
-      zipCode: "",
-      department: "",
-      position: "",
-      startDate: "",
-      manager: "",
-      employeeId: "",
-      region: "",
-      district: "",
-      requisitionId: "",
-      enterpriseId: "",
-      techId: "",
-      proposedRouteStartDate: "",
-  
-      specialties: [],
-      isGeneralist: false,
-      isFSSLTech: false
-    });
-
-    setOnboardingTasks(tasks => tasks.map(task => ({ ...task, completed: false })));
-    setSupplyOrders({ assetsSupplies: false, ntaoPartsStock: false });
-    setVehicleAssignment({ autoAssign: false, workZipcode: "" });
   };
 
   const toggleTask = (taskId: string) => {
@@ -852,6 +878,36 @@ export default function OnboardHire() {
           </div>
         </div>
       </main>
+
+      {/* Success Dialog - Add Another Technician */}
+      <AlertDialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              Onboarding Started Successfully
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Onboarding workflow has been initiated for <strong>{lastSubmittedTech}</strong>. 
+              Would you like to onboard another technician?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel 
+              onClick={() => navigate("/")}
+              data-testid="button-go-home"
+            >
+              No, Go to Home
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => setShowSuccessDialog(false)}
+              data-testid="button-add-another"
+            >
+              Yes, Add Another Technician
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainContent>
   );
 }
