@@ -298,8 +298,8 @@ export default function OnboardHire() {
       });
 
       setOnboardingTasks(tasks => tasks.map(task => ({ ...task, completed: false })));
-      setSupplyOrders({ assetsSupplies: false, ntaoPartsStock: false });
-      setVehicleAssignment({ autoAssign: false, workZipcode: "" });
+      setSupplyOrders({ assetsSupplies: true, ntaoPartsStock: true });
+      setVehicleAssignment({ autoAssign: true, workZipcode: "" });
       
       // Show the success dialog asking if they want to add another
       setShowSuccessDialog(true);
