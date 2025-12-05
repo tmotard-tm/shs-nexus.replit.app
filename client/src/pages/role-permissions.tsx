@@ -118,6 +118,100 @@ const PERMISSION_TREE: PermissionNode[] = [
       },
     ],
   },
+  {
+    key: "pageFeatures",
+    label: "Page Features",
+    description: "Granular control over features within individual pages",
+    children: [
+      {
+        key: "queueManagement",
+        label: "Queue Management Page",
+        description: "Controls for Queue Management page elements",
+        children: [
+          {
+            key: "filters",
+            label: "Filters Section",
+            description: "Control filter and search elements",
+            children: [
+              { key: "queueCheckboxes", label: "Queue Checkboxes", description: "Show/hide department queue checkboxes" },
+              { key: "statusCards", label: "Status Cards", description: "Show/hide status filter cards (New, In Progress, etc.)" },
+              { key: "employeeSearch", label: "Employee Search", description: "Show/hide employee search combobox" },
+              { key: "workflowTypeFilter", label: "Workflow Type Filter", description: "Show/hide workflow type dropdown" },
+              { key: "assignedAgentFilter", label: "Assigned Agent Filter", description: "Show/hide assigned agent dropdown" },
+              { key: "dateFilters", label: "Date Filters", description: "Show/hide date from/to pickers" },
+              { key: "sortOrder", label: "Sort Order", description: "Show/hide sort order dropdown" },
+            ],
+          },
+          {
+            key: "taskActions",
+            label: "Task Actions",
+            description: "Control action buttons on task items",
+            children: [
+              { key: "viewTask", label: "View Task", description: "Show/hide View button" },
+              { key: "startWork", label: "Start Work", description: "Show/hide Start Work button" },
+              { key: "continueWork", label: "Continue Work", description: "Show/hide Continue Work button" },
+              { key: "pickUpForMe", label: "Pick Up For Me", description: "Show/hide Pick Up For Me button" },
+              { key: "assignToOther", label: "Assign To Other", description: "Show/hide Assign To Other button" },
+            ],
+          },
+          {
+            key: "adminActions",
+            label: "Admin Actions",
+            description: "Control admin-only actions in task view dialog",
+            children: [
+              { key: "releaseTask", label: "Release Task", description: "Show/hide Release Task button" },
+              { key: "reassignTask", label: "Reassign Task", description: "Show/hide Reassign Task button" },
+            ],
+          },
+        ],
+      },
+      {
+        key: "userManagement",
+        label: "User Management Page",
+        description: "Controls for User Management page elements",
+        children: [
+          { key: "createUser", label: "Create User", description: "Show/hide Create User button" },
+          { key: "editUser", label: "Edit User", description: "Show/hide Edit User button" },
+          { key: "deleteUser", label: "Delete User", description: "Show/hide Delete User button" },
+          { key: "resetPassword", label: "Reset Password", description: "Show/hide Reset Password button" },
+          { key: "changeRole", label: "Change Role", description: "Show/hide role change functionality" },
+        ],
+      },
+      {
+        key: "templateManagement",
+        label: "Template Management Page",
+        description: "Controls for Template Management page elements",
+        children: [
+          { key: "createTemplate", label: "Create Template", description: "Show/hide Create Template button" },
+          { key: "editTemplate", label: "Edit Template", description: "Show/hide Edit Template button" },
+          { key: "deleteTemplate", label: "Delete Template", description: "Show/hide Delete Template button" },
+          { key: "toggleStatus", label: "Toggle Status", description: "Show/hide template status toggle" },
+        ],
+      },
+      {
+        key: "vehicleAssignments",
+        label: "Vehicle Assignments Page",
+        description: "Controls for Vehicle Assignments page elements",
+        children: [
+          { key: "viewAssignments", label: "View Assignments", description: "Show/hide assignment view" },
+          { key: "createAssignment", label: "Create Assignment", description: "Show/hide Create Assignment button" },
+          { key: "editAssignment", label: "Edit Assignment", description: "Show/hide Edit Assignment button" },
+          { key: "deleteAssignment", label: "Delete Assignment", description: "Show/hide Delete Assignment button" },
+          { key: "syncFromTPMS", label: "Sync from TPMS", description: "Show/hide TPMS sync button" },
+        ],
+      },
+      {
+        key: "storageSpots",
+        label: "Storage Spots Page",
+        description: "Controls for Storage Spots page elements",
+        children: [
+          { key: "createSpot", label: "Create Spot", description: "Show/hide Create Spot button" },
+          { key: "editSpot", label: "Edit Spot", description: "Show/hide Edit Spot button" },
+          { key: "deleteSpot", label: "Delete Spot", description: "Show/hide Delete Spot button" },
+        ],
+      },
+    ],
+  },
 ];
 
 function getNestedValue(obj: any, path: string[]): boolean {

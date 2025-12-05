@@ -3,6 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -85,8 +86,15 @@ function getUserAccessibleModules(user: UserType): QueueModule[] {
 export default function UnifiedQueueManagement() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { permissions } = usePermissions();
   const [, navigate] = useLocation();
   const searchString = useSearch();
+  
+  // Page feature permissions
+  const pagePerms = permissions.pageFeatures?.queueManagement;
+  const filterPerms = pagePerms?.filters;
+  const taskPerms = pagePerms?.taskActions;
+  const adminPerms = pagePerms?.adminActions;
   
   // Selected queue modules - start with empty array for security
   const [selectedModules, setSelectedModules] = useState<QueueModule[]>([]);
@@ -642,7 +650,8 @@ export default function UnifiedQueueManagement() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Show Queues Selection */}
+            {/* Show Queues Selection - controlled by queueCheckboxes permission */}
+            {(filterPerms?.queueCheckboxes !== false) && (
             <div className="space-y-3">
               <Label className="text-sm font-medium">Show Queues ({(queueStats?.pending || 0) + (queueStats?.in_progress || 0)} - Total Open Tasks)</Label>
               <div className="flex flex-wrap gap-6">
@@ -681,7 +690,9 @@ export default function UnifiedQueueManagement() {
                 })}
               </div>
             </div>
-              {/* Status Filter Cards */}
+            )}
+              {/* Status Filter Cards - controlled by statusCards permission */}
+              {(filterPerms?.statusCards !== false) && (
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <Card 
                   className={`cursor-pointer transition-all hover:scale-105 ${
@@ -763,8 +774,10 @@ export default function UnifiedQueueManagement() {
                   </CardContent>
                 </Card>
               </div>
+              )}
               
-              {/* Employee Search Filter - Full Width Row */}
+              {/* Employee Search Filter - Full Width Row - controlled by employeeSearch permission */}
+              {(filterPerms?.employeeSearch !== false) && (
               <div className="mb-4">
                 <Label htmlFor="employee-search">Search Employee</Label>
                 <div className="flex gap-2">
@@ -794,8 +807,11 @@ export default function UnifiedQueueManagement() {
                   </p>
                 )}
               </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                {/* Workflow Type Filter - controlled by workflowTypeFilter permission */}
+                {(filterPerms?.workflowTypeFilter !== false) && (
                 <div>
                   <Label htmlFor="workflow-type">Workflow Type</Label>
                   <Select value={selectedWorkflowType} onValueChange={setSelectedWorkflowType}>
@@ -813,7 +829,10 @@ export default function UnifiedQueueManagement() {
                     </SelectContent>
                   </Select>
                 </div>
+                )}
 
+                {/* Assigned Agent Filter - controlled by assignedAgentFilter permission */}
+                {(filterPerms?.assignedAgentFilter !== false) && (
                 <div>
                   <Label htmlFor="agent">Assigned Agent</Label>
                   <Select value={selectedAgent} onValueChange={setSelectedAgent}>
@@ -832,7 +851,11 @@ export default function UnifiedQueueManagement() {
                     </SelectContent>
                   </Select>
                 </div>
+                )}
 
+                {/* Date Filters - controlled by dateFilters permission */}
+                {(filterPerms?.dateFilters !== false) && (
+                <>
                 <div>
                   <Label htmlFor="date-from">Date From</Label>
                   <Input
@@ -854,7 +877,11 @@ export default function UnifiedQueueManagement() {
                     data-testid="input-date-to"
                   />
                 </div>
+                </>
+                )}
 
+                {/* Sort Order - controlled by sortOrder permission */}
+                {(filterPerms?.sortOrder !== false) && (
                 <div>
                   <Label htmlFor="sort-order">Sort By Date</Label>
                   <Select value={sortOrder} onValueChange={(value: "newest" | "oldest") => setSortOrder(value)}>
@@ -867,6 +894,7 @@ export default function UnifiedQueueManagement() {
                     </SelectContent>
                   </Select>
                 </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -1039,9 +1067,11 @@ export default function UnifiedQueueManagement() {
                                               </div>
                                             </div>
 
-                                            {/* Direct action buttons */}
+                                            {/* Direct action buttons - controlled by taskActions permissions */}
                                             <div className="flex flex-col gap-2 ml-4 min-w-fit">
                                               <div className="flex items-center gap-2">
+                                                {/* View button - controlled by viewTask permission */}
+                                                {(taskPerms?.viewTask !== false) && (
                                                 <Button
                                                   variant="outline"
                                                   size="sm"
@@ -1051,9 +1081,10 @@ export default function UnifiedQueueManagement() {
                                                   <Eye className="h-4 w-4 mr-1" />
                                                   View
                                                 </Button>
+                                                )}
                                                 
-                                                {/* Start Work button */}
-                                                {item.status === "pending" && item.assignedTo === user?.id && (
+                                                {/* Start Work button - controlled by startWork permission */}
+                                                {(taskPerms?.startWork !== false) && item.status === "pending" && item.assignedTo === user?.id && (
                                                   <Button
                                                     size="sm"
                                                     className="bg-green-600 hover:bg-green-700 text-white font-medium shadow-md"
@@ -1066,8 +1097,8 @@ export default function UnifiedQueueManagement() {
                                                   </Button>
                                                 )}
                                                 
-                                                {/* Continue Work button - opens dialog for editing */}
-                                                {item.status === "in_progress" && item.assignedTo === user?.id && (
+                                                {/* Continue Work button - controlled by continueWork permission */}
+                                                {(taskPerms?.continueWork !== false) && item.status === "in_progress" && item.assignedTo === user?.id && (
                                                   <Button
                                                     size="sm"
                                                     className="bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md"
@@ -1084,6 +1115,8 @@ export default function UnifiedQueueManagement() {
                                               {/* Pick Up buttons for unassigned items */}
                                               {item.status === "pending" && !item.assignedTo && (
                                                 <div className="flex gap-2">
+                                                  {/* Pick Up for Me - controlled by pickUpForMe permission */}
+                                                  {(taskPerms?.pickUpForMe !== false) && (
                                                   <Button
                                                     variant="default"
                                                     size="sm"
@@ -1106,6 +1139,9 @@ export default function UnifiedQueueManagement() {
                                                     <User className="h-4 w-4 mr-1" />
                                                     Pick Up for Me
                                                   </Button>
+                                                  )}
+                                                  {/* Assign to Other - controlled by assignToOther permission */}
+                                                  {(taskPerms?.assignToOther !== false) && (
                                                   <Button
                                                     variant="outline"
                                                     size="sm"
@@ -1116,6 +1152,7 @@ export default function UnifiedQueueManagement() {
                                                     <Users className="h-4 w-4 mr-1" />
                                                     Assign to Other
                                                   </Button>
+                                                  )}
                                                 </div>
                                               )}
                                             </div>
@@ -1221,8 +1258,8 @@ export default function UnifiedQueueManagement() {
                   </div>
                 )}
 
-                {/* Superadmin Actions - Release and Reassign */}
-                {user?.role === 'superadmin' && viewQueueItem.assignedTo && viewQueueItem.status !== 'completed' && (
+                {/* Admin Actions - Release and Reassign - controlled by adminActions permissions */}
+                {(adminPerms?.enabled !== false) && viewQueueItem.assignedTo && viewQueueItem.status !== 'completed' && (
                   <div className="border-t pt-4 mt-4">
                     <Label className="text-base font-semibold mb-3 block">Admin Actions</Label>
                     <p className="text-sm text-muted-foreground mb-3">
@@ -1232,6 +1269,8 @@ export default function UnifiedQueueManagement() {
                       </span>
                     </p>
                     <div className="flex gap-3">
+                      {/* Release Task - controlled by releaseTask permission */}
+                      {(adminPerms?.releaseTask !== false) && (
                       <Button
                         variant="outline"
                         onClick={() => {
@@ -1246,6 +1285,9 @@ export default function UnifiedQueueManagement() {
                         <XCircle className="h-4 w-4 mr-2" />
                         {releaseMutation.isPending ? "Releasing..." : "Release Task"}
                       </Button>
+                      )}
+                      {/* Reassign Task - controlled by reassignTask permission */}
+                      {(adminPerms?.reassignTask !== false) && (
                       <Button
                         variant="default"
                         onClick={() => {
@@ -1257,6 +1299,7 @@ export default function UnifiedQueueManagement() {
                         <Users className="h-4 w-4 mr-2" />
                         Reassign Task
                       </Button>
+                      )}
                     </div>
                   </div>
                 )}
