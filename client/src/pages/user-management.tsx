@@ -30,7 +30,7 @@ import { Plus, Edit, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft,
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createInsertSchema } from "drizzle-zod";
-import { users } from "@shared/schema";
+import { users, RolePermission } from "@shared/schema";
 import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -92,6 +92,19 @@ export default function UserManagement() {
   const { data: allUsers = [], isLoading } = useQuery<User[]>({
     queryKey: ["/api/users"],
   });
+
+  // Fetch all roles (including custom roles)
+  const { data: rolePermissions = [] } = useQuery<RolePermission[]>({
+    queryKey: ["/api/role-permissions"],
+  });
+
+  // Build list of available roles for dropdown
+  const availableRoles = rolePermissions.map(rp => ({
+    value: rp.role,
+    label: rp.role === 'superadmin' ? 'Super Admin' : 
+           rp.role === 'agent' ? 'Agent' : 
+           rp.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+  }));
 
   // Create user mutation
   const createUserMutation = useMutation({
@@ -383,13 +396,14 @@ export default function UserManagement() {
               </div>
               <div>
                 <Label htmlFor="role">Role</Label>
-                <Select value={form.watch("role") || "agent"} onValueChange={(value) => form.setValue("role", value as "superadmin" | "agent")}>
+                <Select value={form.watch("role") || "agent"} onValueChange={(value) => form.setValue("role", value)}>
                   <SelectTrigger data-testid="select-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="superadmin">Super Admin</SelectItem>
-                    <SelectItem value="agent">Agent</SelectItem>
+                    {availableRoles.map(role => (
+                      <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 {form.formState.errors.role && (
@@ -754,14 +768,15 @@ export default function UserManagement() {
               <Label htmlFor="edit-role">Role</Label>
               <Select 
                 value={editForm.watch("role")} 
-                onValueChange={(value) => editForm.setValue("role", value as "superadmin" | "agent")}
+                onValueChange={(value) => editForm.setValue("role", value)}
               >
                 <SelectTrigger data-testid="select-edit-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="superadmin">Super Admin</SelectItem>
-                  <SelectItem value="agent">Agent</SelectItem>
+                  {availableRoles.map(role => (
+                    <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -919,14 +934,15 @@ export default function UserManagement() {
               <Label htmlFor="role">User Role</Label>
               <Select 
                 value={roleManagementForm.watch("role")} 
-                onValueChange={(value) => roleManagementForm.setValue("role", value as any)}
+                onValueChange={(value) => roleManagementForm.setValue("role", value)}
               >
                 <SelectTrigger data-testid="select-manage-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="superadmin">Super Admin</SelectItem>
-                  <SelectItem value="agent">Agent</SelectItem>
+                  {availableRoles.map(role => (
+                    <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               {roleManagementForm.formState.errors.role && (
