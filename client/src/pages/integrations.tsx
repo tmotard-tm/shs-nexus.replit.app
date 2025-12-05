@@ -12,13 +12,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { ApiConfiguration, AllTech } from "@shared/schema";
+import { ApiConfiguration, AllTech, SyncLog } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { 
   Plus, Settings, TestTube, Database, ArrowRight, 
   ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Play, Truck, RefreshCw, Users,
-  Search, Clock, AlertCircle
+  Search, Clock, AlertCircle, History, AlertTriangle
 } from "lucide-react";
 import { format } from "date-fns";
 import { Link } from "wouter";
@@ -78,6 +78,11 @@ export default function Integrations() {
     allTechs: { lastSync: string | null; status: string; recordCount: number };
   }>({
     queryKey: ['/api/snowflake/sync/status'],
+  });
+
+  const { data: syncLogs = [], isLoading: syncLogsLoading } = useQuery<SyncLog[]>({
+    queryKey: ['/api/sync-logs'],
+    refetchInterval: 30000,
   });
 
   const syncAllTechsMutation = useMutation({
@@ -705,6 +710,110 @@ export default function Integrations() {
                         </>
                       )}
                     </Button>
+                  </CardContent>
+                </Card>
+
+                {/* Sync History */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <History className="h-4 w-4" />
+                      Sync History
+                    </CardTitle>
+                    <CardDescription>
+                      View recent synchronization activity and results
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {syncLogsLoading ? (
+                      <div className="flex items-center justify-center py-6">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      </div>
+                    ) : syncLogs.length === 0 ? (
+                      <div className="text-center py-6 text-muted-foreground text-sm">
+                        No sync history available yet.
+                      </div>
+                    ) : (
+                      <div className="rounded-md border overflow-auto max-h-[300px]">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Type</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Started</TableHead>
+                              <TableHead>Duration</TableHead>
+                              <TableHead>Records</TableHead>
+                              <TableHead>Queue Items</TableHead>
+                              <TableHead>Source</TableHead>
+                              <TableHead>Errors</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {syncLogs.slice(0, 20).map((log) => {
+                              const startTime = new Date(log.startedAt);
+                              const endTime = log.completedAt ? new Date(log.completedAt) : null;
+                              const duration = endTime 
+                                ? Math.round((endTime.getTime() - startTime.getTime()) / 1000)
+                                : null;
+                              
+                              return (
+                                <TableRow key={log.id} data-testid={`row-sync-${log.id}`}>
+                                  <TableCell>
+                                    <Badge variant="outline" className="font-mono text-xs">
+                                      {log.syncType === 'termed_techs' ? 'Termed' : 'All Techs'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge 
+                                      variant={
+                                        log.status === 'completed' ? 'default' :
+                                        log.status === 'failed' ? 'destructive' :
+                                        log.status === 'running' ? 'secondary' : 'outline'
+                                      }
+                                      className="flex items-center gap-1 w-fit text-xs"
+                                    >
+                                      {log.status === 'completed' && <CheckCircle className="h-3 w-3" />}
+                                      {log.status === 'failed' && <XCircle className="h-3 w-3" />}
+                                      {log.status === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
+                                      {log.status}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-xs">
+                                    {format(startTime, 'MMM d, h:mm a')}
+                                  </TableCell>
+                                  <TableCell className="text-xs">
+                                    {duration !== null ? `${duration}s` : '-'}
+                                  </TableCell>
+                                  <TableCell className="text-xs font-mono">
+                                    {log.recordsProcessed || 0}
+                                  </TableCell>
+                                  <TableCell className="text-xs font-mono">
+                                    {log.queueItemsCreated || 0}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline" className="text-xs">
+                                      {log.triggeredBy || 'unknown'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    {log.errorMessage ? (
+                                      <div className="flex items-center gap-1 text-destructive">
+                                        <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+                                        <span className="text-xs max-w-[150px] truncate" title={log.errorMessage}>
+                                          {log.errorMessage}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground text-xs">-</span>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
