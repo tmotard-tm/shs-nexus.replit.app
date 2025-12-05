@@ -52,6 +52,63 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       tutorial: true,
     },
   },
+  pageFeatures: {
+    queueManagement: {
+      enabled: true,
+      filters: {
+        enabled: true,
+        queueCheckboxes: true,
+        statusCards: true,
+        employeeSearch: true,
+        workflowTypeFilter: true,
+        assignedAgentFilter: true,
+        dateFilters: true,
+        sortOrder: true,
+      },
+      taskActions: {
+        enabled: true,
+        viewTask: true,
+        startWork: true,
+        continueWork: true,
+        pickUpForMe: true,
+        assignToOther: true,
+      },
+      adminActions: {
+        enabled: true,
+        releaseTask: true,
+        reassignTask: true,
+      },
+    },
+    userManagement: {
+      enabled: true,
+      createUser: true,
+      editUser: true,
+      deleteUser: true,
+      resetPassword: true,
+      changeRole: true,
+    },
+    templateManagement: {
+      enabled: true,
+      createTemplate: true,
+      editTemplate: true,
+      deleteTemplate: true,
+      toggleStatus: true,
+    },
+    vehicleAssignments: {
+      enabled: true,
+      viewAssignments: true,
+      createAssignment: true,
+      editAssignment: true,
+      deleteAssignment: true,
+      syncFromTPMS: true,
+    },
+    storageSpots: {
+      enabled: true,
+      createSpot: true,
+      editSpot: true,
+      deleteSpot: true,
+    },
+  },
 };
 
 export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
@@ -103,6 +160,63 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
     helpAndTutorial: {
       enabled: true,
       tutorial: true,
+    },
+  },
+  pageFeatures: {
+    queueManagement: {
+      enabled: true,
+      filters: {
+        enabled: true,
+        queueCheckboxes: true,
+        statusCards: true,
+        employeeSearch: true,
+        workflowTypeFilter: true,
+        assignedAgentFilter: false, // Agents can't filter by other agents
+        dateFilters: true,
+        sortOrder: true,
+      },
+      taskActions: {
+        enabled: true,
+        viewTask: true,
+        startWork: true,
+        continueWork: true,
+        pickUpForMe: true,
+        assignToOther: false, // Agents can only pick up for themselves
+      },
+      adminActions: {
+        enabled: false, // Admin actions disabled for agents
+        releaseTask: false,
+        reassignTask: false,
+      },
+    },
+    userManagement: {
+      enabled: false,
+      createUser: false,
+      editUser: false,
+      deleteUser: false,
+      resetPassword: false,
+      changeRole: false,
+    },
+    templateManagement: {
+      enabled: false,
+      createTemplate: false,
+      editTemplate: false,
+      deleteTemplate: false,
+      toggleStatus: false,
+    },
+    vehicleAssignments: {
+      enabled: false,
+      viewAssignments: false,
+      createAssignment: false,
+      editAssignment: false,
+      deleteAssignment: false,
+      syncFromTPMS: false,
+    },
+    storageSpots: {
+      enabled: false,
+      createSpot: false,
+      editSpot: false,
+      deleteSpot: false,
     },
   },
 };

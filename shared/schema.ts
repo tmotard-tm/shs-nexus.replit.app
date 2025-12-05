@@ -86,6 +86,67 @@ export interface RolePermissionSettings {
       tutorial: boolean;
     };
   };
+  // Page-level feature permissions - granular control over elements within each page
+  pageFeatures: {
+    queueManagement: {
+      enabled: boolean;
+      // Filters Section
+      filters: {
+        enabled: boolean;
+        queueCheckboxes: boolean;
+        statusCards: boolean;
+        employeeSearch: boolean;
+        workflowTypeFilter: boolean;
+        assignedAgentFilter: boolean;
+        dateFilters: boolean;
+        sortOrder: boolean;
+      };
+      // Task Item Actions
+      taskActions: {
+        enabled: boolean;
+        viewTask: boolean;
+        startWork: boolean;
+        continueWork: boolean;
+        pickUpForMe: boolean;
+        assignToOther: boolean;
+      };
+      // Admin Actions (in view dialog)
+      adminActions: {
+        enabled: boolean;
+        releaseTask: boolean;
+        reassignTask: boolean;
+      };
+    };
+    userManagement: {
+      enabled: boolean;
+      createUser: boolean;
+      editUser: boolean;
+      deleteUser: boolean;
+      resetPassword: boolean;
+      changeRole: boolean;
+    };
+    templateManagement: {
+      enabled: boolean;
+      createTemplate: boolean;
+      editTemplate: boolean;
+      deleteTemplate: boolean;
+      toggleStatus: boolean;
+    };
+    vehicleAssignments: {
+      enabled: boolean;
+      viewAssignments: boolean;
+      createAssignment: boolean;
+      editAssignment: boolean;
+      deleteAssignment: boolean;
+      syncFromTPMS: boolean;
+    };
+    storageSpots: {
+      enabled: boolean;
+      createSpot: boolean;
+      editSpot: boolean;
+      deleteSpot: boolean;
+    };
+  };
 }
 
 export const requests = pgTable("requests", {
