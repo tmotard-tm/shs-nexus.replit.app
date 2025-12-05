@@ -7,12 +7,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronDown, ChevronRight, Shield, Users, Save, RefreshCw, Settings } from "lucide-react";
+import { ChevronDown, ChevronRight, Shield, Users, Save, RefreshCw, Settings, Plus, Trash2, UserCog } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import type { RolePermissionSettings } from "@shared/schema";
 import { DEFAULT_SUPERADMIN_PERMISSIONS, DEFAULT_AGENT_PERMISSIONS } from "@/lib/role-permissions";
 
@@ -359,6 +362,10 @@ function RolePermissionsEditor({
     setHasChanges(true);
   };
 
+  const roleDisplayName = role === 'superadmin' ? 'Super Admin' : 
+                          role === 'agent' ? 'Agent' : 
+                          role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+
   const handleSave = () => {
     onSave(permissions);
     setHasChanges(false);
@@ -369,7 +376,7 @@ function RolePermissionsEditor({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Badge variant={role === 'superadmin' ? 'default' : 'secondary'}>
-            {role === 'superadmin' ? 'Super Admin' : 'Agent'}
+            {roleDisplayName}
           </Badge>
           {hasChanges && (
             <Badge variant="outline" className="text-amber-600 border-amber-600">
@@ -410,6 +417,9 @@ export default function RolePermissions() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [selectedRole, setSelectedRole] = useState<string>("superadmin");
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [newRoleName, setNewRoleName] = useState("");
+  const [deleteRole, setDeleteRole] = useState<string | null>(null);
 
   const { data: permissions, isLoading, error } = useQuery<RolePermission[]>({
     queryKey: ['/api/role-permissions'],
@@ -435,6 +445,54 @@ export default function RolePermissions() {
     },
   });
 
+  const createRoleMutation = useMutation({
+    mutationFn: async (roleName: string) => {
+      return apiRequest('POST', '/api/role-permissions', { role: roleName });
+    },
+    onSuccess: (_, roleName) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/role-permissions'] });
+      toast({
+        title: "Role Created",
+        description: `New role "${roleName}" has been created successfully.`,
+      });
+      setCreateDialogOpen(false);
+      setNewRoleName("");
+      setSelectedRole(roleName);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create role",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteRoleMutation = useMutation({
+    mutationFn: async (roleName: string) => {
+      return apiRequest('DELETE', `/api/role-permissions/${roleName}`);
+    },
+    onSuccess: (_, roleName) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/role-permissions'] });
+      toast({
+        title: "Role Deleted",
+        description: `Role "${roleName}" has been deleted.`,
+      });
+      setDeleteRole(null);
+      if (selectedRole === roleName) {
+        setSelectedRole("superadmin");
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete role",
+        variant: "destructive",
+      });
+      setDeleteRole(null);
+    },
+  });
+
   const seedMutation = useMutation({
     mutationFn: async () => {
       return apiRequest('POST', '/api/role-permissions/seed');
@@ -454,6 +512,40 @@ export default function RolePermissions() {
       });
     },
   });
+
+  const handleCreateRole = () => {
+    const trimmedName = newRoleName.trim().toLowerCase().replace(/\s+/g, '_');
+    if (trimmedName) {
+      createRoleMutation.mutate(trimmedName);
+    }
+  };
+
+  const handleDeleteRole = (roleName: string) => {
+    deleteRoleMutation.mutate(roleName);
+  };
+
+  const isCustomRole = (role: string) => role !== 'superadmin' && role !== 'agent';
+
+  const getRoleIcon = (role: string) => {
+    if (role === 'superadmin') return <Shield className="h-4 w-4 mr-2" />;
+    if (role === 'agent') return <Users className="h-4 w-4 mr-2" />;
+    return <UserCog className="h-4 w-4 mr-2" />;
+  };
+
+  const getRoleLabel = (role: string) => {
+    if (role === 'superadmin') return 'Super Admin';
+    if (role === 'agent') return 'Agent';
+    return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  };
+
+  const allRoles = (() => {
+    const coreRoles = ['superadmin', 'agent'];
+    const customRoles = permissions
+      ?.map(p => p.role)
+      .filter(r => !coreRoles.includes(r))
+      .sort() || [];
+    return [...coreRoles, ...customRoles];
+  })();
 
   if (user?.role !== 'superadmin') {
     return (
@@ -532,9 +624,54 @@ export default function RolePermissions() {
   return (
     <div className="container mx-auto p-6 max-w-4xl">
       <div className="mb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <Settings className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-bold" data-testid="page-title">Role Permissions</h1>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-3">
+            <Settings className="h-8 w-8 text-primary" />
+            <h1 className="text-3xl font-bold" data-testid="page-title">Role Permissions</h1>
+          </div>
+          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button data-testid="btn-create-role">
+                <Plus className="h-4 w-4 mr-2" />
+                Create New Role
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New Role</DialogTitle>
+                <DialogDescription>
+                  Create a custom role with its own permission settings. The role name should be lowercase with no spaces (use underscores instead).
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="role-name">Role Name</Label>
+                  <Input
+                    id="role-name"
+                    placeholder="e.g., team_lead, supervisor, viewer"
+                    value={newRoleName}
+                    onChange={(e) => setNewRoleName(e.target.value)}
+                    data-testid="input-role-name"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Use lowercase letters, numbers, and underscores only. The new role will start with Agent-level permissions.
+                  </p>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleCreateRole} 
+                  disabled={!newRoleName.trim() || createRoleMutation.isPending}
+                  data-testid="btn-confirm-create-role"
+                >
+                  {createRoleMutation.isPending ? 'Creating...' : 'Create Role'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
         <p className="text-muted-foreground">
           Configure which features and pages each role can access. Changes take effect immediately for all users with that role.
@@ -579,34 +716,64 @@ export default function RolePermissions() {
             </div>
           ) : (
             <Tabs value={selectedRole} onValueChange={setSelectedRole}>
-              <TabsList className="mb-4">
-                <TabsTrigger value="superadmin" data-testid="tab-superadmin">
-                  <Shield className="h-4 w-4 mr-2" />
-                  Super Admin
-                </TabsTrigger>
-                <TabsTrigger value="agent" data-testid="tab-agent">
-                  <Users className="h-4 w-4 mr-2" />
-                  Agent
-                </TabsTrigger>
+              <TabsList className="mb-4 flex-wrap h-auto gap-1">
+                {allRoles.map((role) => (
+                  <TabsTrigger key={role} value={role} data-testid={`tab-${role}`}>
+                    {getRoleIcon(role)}
+                    {getRoleLabel(role)}
+                    {isCustomRole(role) && (
+                      <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
+                        Custom
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                ))}
               </TabsList>
 
-              <TabsContent value="superadmin">
-                <RolePermissionsEditor
-                  role="superadmin"
-                  initialPermissions={getPermissionsForRole('superadmin')}
-                  onSave={(perms) => updateMutation.mutate({ role: 'superadmin', permissions: perms })}
-                  isSaving={updateMutation.isPending}
-                />
-              </TabsContent>
-
-              <TabsContent value="agent">
-                <RolePermissionsEditor
-                  role="agent"
-                  initialPermissions={getPermissionsForRole('agent')}
-                  onSave={(perms) => updateMutation.mutate({ role: 'agent', permissions: perms })}
-                  isSaving={updateMutation.isPending}
-                />
-              </TabsContent>
+              {allRoles.map((role) => (
+                <TabsContent key={role} value={role}>
+                  <div className="space-y-4">
+                    {isCustomRole(role) && (
+                      <div className="flex justify-end">
+                        <AlertDialog open={deleteRole === role} onOpenChange={(open) => setDeleteRole(open ? role : null)}>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="destructive" size="sm" data-testid={`btn-delete-${role}`}>
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete Role
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete Role "{getRoleLabel(role)}"?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This action cannot be undone. This will permanently delete the role and its permission settings.
+                                <br /><br />
+                                <strong>Note:</strong> You cannot delete a role if there are users assigned to it. Reassign those users first.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction 
+                                onClick={() => handleDeleteRole(role)}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                data-testid={`btn-confirm-delete-${role}`}
+                              >
+                                {deleteRoleMutation.isPending ? 'Deleting...' : 'Delete Role'}
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    )}
+                    <RolePermissionsEditor
+                      role={role}
+                      initialPermissions={getPermissionsForRole(role)}
+                      onSave={(perms) => updateMutation.mutate({ role, permissions: perms })}
+                      isSaving={updateMutation.isPending}
+                    />
+                  </div>
+                </TabsContent>
+              ))}
             </Tabs>
           )}
         </CardContent>

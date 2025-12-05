@@ -5063,6 +5063,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Create a new custom role
+  app.post("/api/role-permissions", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      }
+
+      const { role, permissions } = req.body;
+
+      if (!role || typeof role !== 'string') {
+        return res.status(400).json({ message: "Role name is required" });
+      }
+
+      // Validate role name (lowercase, no spaces, alphanumeric with underscores)
+      const roleNameRegex = /^[a-z][a-z0-9_]*$/;
+      if (!roleNameRegex.test(role)) {
+        return res.status(400).json({ message: "Role name must start with a letter and contain only lowercase letters, numbers, and underscores" });
+      }
+
+      // Check if role already exists
+      const existing = await storage.getRolePermission(role);
+      if (existing) {
+        return res.status(409).json({ message: "A role with this name already exists" });
+      }
+
+      // Import default agent permissions as base for new roles
+      const { DEFAULT_AGENT_PERMISSIONS } = await import('../client/src/lib/role-permissions');
+      const rolePermissions = permissions || DEFAULT_AGENT_PERMISSIONS;
+
+      const created = await storage.upsertRolePermission(role, rolePermissions);
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "role_created",
+        entityType: "role_permission",
+        entityId: role,
+        details: `New role '${role}' created`,
+      });
+
+      res.status(201).json(created);
+    } catch (error) {
+      console.error("Error creating role:", error);
+      res.status(500).json({ message: "Failed to create role" });
+    }
+  });
+
+  // Delete a custom role (not superadmin or agent)
+  app.delete("/api/role-permissions/:role", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      }
+
+      const { role } = req.params;
+
+      // Prevent deletion of core roles
+      if (role === 'superadmin' || role === 'agent') {
+        return res.status(400).json({ message: "Cannot delete core system roles (superadmin, agent)" });
+      }
+
+      // Check if any users are assigned to this role
+      const usersWithRole = await storage.getUsersByRole(role);
+      if (usersWithRole && usersWithRole.length > 0) {
+        return res.status(400).json({ 
+          message: `Cannot delete role. ${usersWithRole.length} user(s) are currently assigned to this role.` 
+        });
+      }
+
+      const deleted = await storage.deleteRolePermission(role);
+      if (!deleted) {
+        return res.status(404).json({ message: "Role not found" });
+      }
+
+      // Log activity
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "role_deleted",
+        entityType: "role_permission",
+        entityId: role,
+        details: `Role '${role}' deleted`,
+      });
+
+      res.json({ message: "Role deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting role:", error);
+      res.status(500).json({ message: "Failed to delete role" });
+    }
+  });
+
   // Seed default role permissions (for initial setup)
   app.post("/api/role-permissions/seed", requireAuth, async (req: any, res) => {
     try {

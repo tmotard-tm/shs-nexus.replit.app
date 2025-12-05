@@ -16,10 +16,23 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
   - Home Page
   - Sidebar Navigation (Dashboards, Queues, Management, Activities, Account, Help sections)
   - Individual pages within each section (e.g., NTAO Queue, Assets Queue, User Management, etc.)
+  - Page Features: Granular control over buttons, filters, and actions within each page
+- **Custom Roles**: Create unlimited custom roles beyond superadmin/agent:
+  - "Create New Role" button on Role Permissions page
+  - Role names must be lowercase with underscores (e.g., team_lead, supervisor)
+  - New roles start with Agent-level permissions as baseline
+  - Custom roles can be deleted (if no users assigned)
+  - Custom roles display with "Custom" badge in role tabs
 - **Database Storage**: `role_permissions` table with JSONB permissions column
-- **API Endpoints**: GET/PATCH `/api/role-permissions/:role`, POST `/api/role-permissions/seed`
+- **API Endpoints**: 
+  - GET `/api/role-permissions` - List all roles
+  - POST `/api/role-permissions` - Create new custom role
+  - PATCH `/api/role-permissions/:role` - Update role permissions
+  - DELETE `/api/role-permissions/:role` - Delete custom role
+  - POST `/api/role-permissions/seed` - Seed default permissions
 - **Deep Merge**: New permission fields automatically inherit from defaults when not in stored data
 - **Real-time Updates**: Changes take effect immediately for all users with that role
+- **View as Role**: Super Admins can preview the app as any role to verify permissions
 
 **Template Management System**: Added comprehensive template management system for superadmin users (September 2025). Provides full CRUD operations for workflow templates across all departments with security-first implementation including server-side ID generation, field whitelisting, and multi-layer access control.
 

@@ -284,6 +284,8 @@ export interface IStorage {
   getAllRolePermissions(): Promise<RolePermission[]>;
   upsertRolePermission(role: string, permissions: RolePermissionSettings): Promise<RolePermission>;
   updateRolePermission(role: string, permissions: RolePermissionSettings): Promise<RolePermission | undefined>;
+  deleteRolePermission(role: string): Promise<boolean>;
+  getUsersByRole(role: string): Promise<User[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -2897,6 +2899,12 @@ export class MemStorage implements IStorage {
   async updateRolePermission(_role: string, _permissions: RolePermissionSettings): Promise<RolePermission | undefined> {
     throw new Error("MemStorage does not support role permissions. Use DatabaseStorage.");
   }
+  async deleteRolePermission(_role: string): Promise<boolean> {
+    throw new Error("MemStorage does not support role permissions. Use DatabaseStorage.");
+  }
+  async getUsersByRole(_role: string): Promise<User[]> {
+    throw new Error("MemStorage does not support getUsersByRole. Use DatabaseStorage.");
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -4430,6 +4438,15 @@ export class DatabaseStorage implements IStorage {
       .where(eq(rolePermissions.role, role))
       .returning();
     return updated;
+  }
+
+  async deleteRolePermission(role: string): Promise<boolean> {
+    const result = await db.delete(rolePermissions).where(eq(rolePermissions.role, role));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getUsersByRole(role: string): Promise<User[]> {
+    return await db.select().from(users).where(eq(users.role, role));
   }
 
   // Migration method to bulk-insert data from MemStorage
