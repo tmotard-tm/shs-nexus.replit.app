@@ -435,11 +435,37 @@ export function WorkModuleDialog({
 
   // Extract request details - uses enrichedEmployeeData which includes roster data
   const getRequestDetails = () => {
+    // Look for district in multiple places
+    const district = enrichedEmployeeData.district || 
+                     enrichedEmployeeData.districtNo || 
+                     taskData.district || 
+                     taskData.districtNo ||
+                     taskData.employee?.district ||
+                     taskData.employee?.districtNo ||
+                     taskData.technician?.district ||
+                     taskData.technician?.districtNo ||
+                     "N/A";
+    
+    // Look for phone in multiple places for contact info
+    const phone = enrichedEmployeeData.phone || 
+                  enrichedEmployeeData.phoneNumber || 
+                  enrichedEmployeeData.cellPhone ||
+                  taskData.phone || 
+                  taskData.phoneNumber || 
+                  taskData.cellPhone ||
+                  taskData.employee?.phone ||
+                  taskData.employee?.phoneNumber ||
+                  taskData.technician?.phone ||
+                  taskData.technician?.phoneNumber ||
+                  null;
+    
     return {
       requestId: currentQueueItem?.id?.slice(-8) || "N/A",
-      employeeId: enrichedEmployeeData.employeeId || "N/A",
-      enterpriseId: enrichedEmployeeData.techRacfid || enrichedEmployeeData.enterpriseId || enrichedEmployeeData.racfId || "N/A",
-      district: enrichedEmployeeData.district || enrichedEmployeeData.districtNo || taskData.district || "N/A",
+      employeeId: enrichedEmployeeData.employeeId || taskData.employeeId || taskData.employee?.employeeId || "N/A",
+      enterpriseId: enrichedEmployeeData.techRacfid || enrichedEmployeeData.enterpriseId || enrichedEmployeeData.racfId || 
+                    taskData.enterpriseId || taskData.racfId || taskData.employee?.enterpriseId || taskData.technician?.enterpriseId || "N/A",
+      district,
+      phone,
       serviceOrder: taskData.serviceOrder || taskData.workflowId || currentQueueItem?.id?.slice(-6) || "N/A",
       status: currentQueueItem?.status || "pending"
     };
@@ -491,6 +517,10 @@ export function WorkModuleDialog({
                 <div>
                   <Label className="text-sm font-medium text-muted-foreground">District</Label>
                   <p className="text-sm" data-testid="text-district">{requestDetails.district}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-muted-foreground">Contact Phone</Label>
+                  <p className="text-sm" data-testid="text-contact-phone">{requestDetails.phone || "N/A"}</p>
                 </div>
                 <div>
                   <Label className="text-sm font-medium text-muted-foreground">Service Order</Label>
@@ -694,38 +724,48 @@ export function WorkModuleDialog({
                   <div>
                     <div>
                       <Label className="text-sm font-medium text-primary">Contact Information</Label>
-                      <div className="grid grid-cols-1 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
-                        {(enrichedEmployeeData.address || taskData.address || enrichedEmployeeData.street || taskData.street) && (
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Full Address</Label>
-                            <div className="text-sm space-y-1" data-testid="text-address">
-                              {(enrichedEmployeeData.address || taskData.address) ? (
-                                <p>{enrichedEmployeeData.address || taskData.address}</p>
-                              ) : (
-                                <div>
-                                  {(enrichedEmployeeData.street || taskData.street) && (
-                                    <p>{enrichedEmployeeData.street || taskData.street}</p>
-                                  )}
-                                  <p>
-                                    {[
-                                      enrichedEmployeeData.city || taskData.city,
-                                      enrichedEmployeeData.state || taskData.state,
-                                      enrichedEmployeeData.zip || taskData.zipCode || taskData.zip
-                                    ].filter(Boolean).join(", ")}
-                                  </p>
-                                </div>
-                              )}
-                            </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Phone Number</Label>
+                          <p className="text-sm" data-testid="text-phone">
+                            {enrichedEmployeeData.phone || enrichedEmployeeData.phoneNumber || enrichedEmployeeData.cellPhone || enrichedEmployeeData.mobilePhone ||
+                             taskData.phone || taskData.phoneNumber || taskData.cellPhone || taskData.mobilePhone ||
+                             taskData.employee?.phone || taskData.employee?.phoneNumber || taskData.employee?.cellPhone ||
+                             taskData.technician?.phone || taskData.technician?.phoneNumber || taskData.technician?.cellPhone ||
+                             "N/A"}
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Email</Label>
+                          <p className="text-sm" data-testid="text-email">
+                            {enrichedEmployeeData.email || enrichedEmployeeData.emailAddress ||
+                             taskData.email || taskData.emailAddress ||
+                             taskData.employee?.email || taskData.employee?.emailAddress ||
+                             taskData.technician?.email || taskData.technician?.emailAddress ||
+                             "N/A"}
+                          </p>
+                        </div>
+                        <div className="md:col-span-2">
+                          <Label className="text-sm font-medium text-muted-foreground">Full Address</Label>
+                          <div className="text-sm" data-testid="text-address">
+                            {(enrichedEmployeeData.address || taskData.address || taskData.employee?.address || taskData.technician?.address) ? (
+                              <p>{enrichedEmployeeData.address || taskData.address || taskData.employee?.address || taskData.technician?.address}</p>
+                            ) : (enrichedEmployeeData.street || taskData.street || taskData.employee?.street || taskData.technician?.street) ? (
+                              <div>
+                                <p>{enrichedEmployeeData.street || taskData.street || taskData.employee?.street || taskData.technician?.street}</p>
+                                <p>
+                                  {[
+                                    enrichedEmployeeData.city || taskData.city || taskData.employee?.city || taskData.technician?.city,
+                                    enrichedEmployeeData.state || taskData.state || taskData.employee?.state || taskData.technician?.state,
+                                    enrichedEmployeeData.zip || taskData.zipCode || taskData.zip || taskData.employee?.zip || taskData.technician?.zip
+                                  ].filter(Boolean).join(", ")}
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="text-muted-foreground">N/A</p>
+                            )}
                           </div>
-                        )}
-                        {(enrichedEmployeeData.phone || taskData.phone) && (
-                          <div>
-                            <Label className="text-sm font-medium text-muted-foreground">Phone Number</Label>
-                            <p className="text-sm" data-testid="text-phone">
-                              {enrichedEmployeeData.phone || taskData.phone || "N/A"}
-                            </p>
-                          </div>
-                        )}
+                        </div>
                       </div>
                     </div>
                   </div>
