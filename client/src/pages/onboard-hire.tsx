@@ -885,11 +885,10 @@ export default function OnboardHire() {
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <CheckCircle className="h-5 w-5 text-green-500" />
-              Onboarding Started Successfully
+              Success
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Onboarding workflow has been initiated for <strong>{lastSubmittedTech}</strong>. 
-              Would you like to onboard another technician?
+              Would you like to add another tech?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -897,13 +896,13 @@ export default function OnboardHire() {
               onClick={() => navigate("/")}
               data-testid="button-go-home"
             >
-              No, Go to Home
+              No
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => setShowSuccessDialog(false)}
               data-testid="button-add-another"
             >
-              Yes, Add Another Technician
+              Yes
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

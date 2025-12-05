@@ -1226,6 +1226,35 @@ export default function OffboardTechnician() {
         </div>
       </main>
 
+      {/* Success Dialog - Add Another Technician */}
+      <AlertDialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              Success
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Would you like to add another tech?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel 
+              onClick={() => navigate("/")}
+              data-testid="button-go-home"
+            >
+              No
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => setShowSuccessDialog(false)}
+              data-testid="button-add-another"
+            >
+              Yes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Alert Dialog for Existing Offboarding Tasks */}
       <AlertDialog open={showExistingTasksDialog} onOpenChange={setShowExistingTasksDialog}>
         <AlertDialogContent>
