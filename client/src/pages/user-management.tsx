@@ -306,12 +306,23 @@ export default function UserManagement() {
     ? allUsers.filter((u: User) => !u.departments || u.departments.length === 0)
     : allUsers.filter((u: User) => u.departments?.includes(departmentFilter));
 
-  // Statistics
+  // Statistics - dynamically count users per role
   const userStats = {
     total: allUsers.length,
-    superadmin: allUsers.filter((u: User) => u.role === 'superadmin').length,
-    agent: allUsers.filter((u: User) => u.role === 'agent').length,
+    byRole: availableRoles.reduce((acc, role) => {
+      acc[role.value] = allUsers.filter((u: User) => u.role === role.value).length;
+      return acc;
+    }, {} as Record<string, number>),
   };
+
+  // Define colors for role cards
+  const roleCardStyles: Record<string, { iconColor: string; textColor: string; icon: typeof Shield }> = {
+    superadmin: { iconColor: 'text-red-500', textColor: 'text-red-600', icon: Shield },
+    agent: { iconColor: 'text-blue-500', textColor: 'text-blue-600', icon: UserCheck },
+  };
+
+  // Default style for custom roles
+  const defaultRoleStyle = { iconColor: 'text-purple-500', textColor: 'text-purple-600', icon: Users };
 
   // Department statistics (based on departments array)
   const departmentStats = {
@@ -521,8 +532,8 @@ export default function UserManagement() {
         </Dialog>
       </div>
 
-      {/* Role Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* Role Statistics Cards - Dynamic based on available roles */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Users</CardTitle>
@@ -532,33 +543,23 @@ export default function UserManagement() {
             <div className="text-2xl font-bold" data-testid="stat-total-users">{userStats.total}</div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Super Admins</CardTitle>
-            <Shield className="h-4 w-4 text-red-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600" data-testid="stat-superadmin-users">{userStats.superadmin}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Agents</CardTitle>
-            <UserCheck className="h-4 w-4 text-blue-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600" data-testid="stat-agent-users">{userStats.agent}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Field Users</CardTitle>
-            <Users className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600" data-testid="stat-field-users">{userStats.field}</div>
-          </CardContent>
-        </Card>
+        {availableRoles.map((role) => {
+          const style = roleCardStyles[role.value] || defaultRoleStyle;
+          const IconComponent = style.icon;
+          return (
+            <Card key={role.value}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{role.label}</CardTitle>
+                <IconComponent className={`h-4 w-4 ${style.iconColor}`} />
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${style.textColor}`} data-testid={`stat-${role.value}-users`}>
+                  {userStats.byRole[role.value] || 0}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Team Access Statistics */}
