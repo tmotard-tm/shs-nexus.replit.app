@@ -1215,7 +1215,7 @@ export default function OffboardTechnician() {
                       disabled={isSubmitting}
                       data-testid="button-submit-offboard"
                     >
-                      {isSubmitting ? "Processing..." : "Start Offboarding Workflow"}
+                      {isSubmitting ? "Processing..." : "Offboard Technician & Generate Tasks"}
                     </Button>
                   </form>
                 </CardContent>
