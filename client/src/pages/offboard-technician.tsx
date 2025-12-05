@@ -278,10 +278,10 @@ export default function OffboardTechnician() {
       return;
     }
     
-    if (!/^[a-zA-Z0-9]{7}$/.test(technicianOffboard.techRacfId)) {
+    if (!/^[a-zA-Z0-9]{5,7}$/.test(technicianOffboard.techRacfId)) {
       toast({
         title: "Validation Error",
-        description: "Employee Enterprise ID must be exactly 7 characters (letters and numbers only).",
+        description: "Employee Enterprise ID must be 5-7 characters (letters and numbers only).",
         variant: "destructive"
       });
       return;
