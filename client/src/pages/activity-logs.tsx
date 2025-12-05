@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { format } from "date-fns";
+import { format, startOfDay, endOfDay, isWithinInterval } from "date-fns";
 import {
   Table,
   TableBody,
@@ -21,6 +21,18 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { 
   ArrowLeft, 
   Search, 
@@ -33,9 +45,14 @@ import {
   CheckCircle,
   PlayCircle,
   XCircle,
-  Users
+  Users,
+  CalendarIcon,
+  Download,
+  FileSpreadsheet,
+  FileText
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
 import type { ActivityLog, User } from "@shared/schema";
 
 const ACTION_ICONS: Record<string, any> = {
@@ -107,10 +124,14 @@ const ACTION_TYPE_OPTIONS = [
 export default function ActivityLogs() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [entityTypeFilter, setEntityTypeFilter] = useState("all");
   const [actionTypeFilter, setActionTypeFilter] = useState("all");
   const [userFilter, setUserFilter] = useState("all");
+  const [fromDate, setFromDate] = useState<Date | undefined>(undefined);
+  const [toDate, setToDate] = useState<Date | undefined>(undefined);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Redirect non-superadmin users
   useEffect(() => {
@@ -157,7 +178,21 @@ export default function ActivityLogs() {
     const matchesUser =
       userFilter === "all" || log.userId === userFilter;
 
-    return matchesSearch && matchesEntityType && matchesActionType && matchesUser;
+    // Date filter logic
+    const logDate = new Date(log.createdAt);
+    let matchesDateRange = true;
+    if (fromDate && toDate) {
+      matchesDateRange = isWithinInterval(logDate, {
+        start: startOfDay(fromDate),
+        end: endOfDay(toDate)
+      });
+    } else if (fromDate) {
+      matchesDateRange = logDate >= startOfDay(fromDate);
+    } else if (toDate) {
+      matchesDateRange = logDate <= endOfDay(toDate);
+    }
+
+    return matchesSearch && matchesEntityType && matchesActionType && matchesUser && matchesDateRange;
   });
 
   const handleBackClick = () => {
@@ -180,8 +215,131 @@ export default function ActivityLogs() {
     );
   };
 
+  const formatDate = (date: Date | string) => {
+    return format(new Date(date), "MMM dd, yyyy");
+  };
+
+  const formatTime = (date: Date | string) => {
+    return format(new Date(date), "HH:mm:ss");
+  };
+
   const formatTimestamp = (date: Date | string) => {
     return format(new Date(date), "MMM dd, yyyy HH:mm:ss");
+  };
+
+  // Clear date filters
+  const clearDateFilters = () => {
+    setFromDate(undefined);
+    setToDate(undefined);
+  };
+
+  // Export to CSV
+  const exportToCSV = () => {
+    setIsExporting(true);
+    try {
+      const headers = ["Date", "Time", "User", "Action", "Entity Type", "Details"];
+      const rows = filteredLogs.map(log => [
+        formatDate(log.createdAt),
+        formatTime(log.createdAt),
+        log.userId === "system" ? "System" : userMap[log.userId] || log.userId,
+        ACTION_LABELS[log.action] || log.action.replace(/_/g, " "),
+        log.entityType,
+        log.details || ""
+      ]);
+
+      const csvContent = [
+        headers.join(","),
+        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      ].join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `activity-logs-${format(new Date(), "yyyy-MM-dd")}.csv`);
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast({
+        title: "Export Complete",
+        description: `Exported ${filteredLogs.length} records to CSV`,
+      });
+    } catch (error) {
+      toast({
+        title: "Export Failed",
+        description: "Failed to export activity logs to CSV",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Export to XLSX
+  const exportToXLSX = async () => {
+    setIsExporting(true);
+    try {
+      const ExcelJS = await import("exceljs");
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Activity Logs");
+
+      // Add headers
+      worksheet.columns = [
+        { header: "Date", key: "date", width: 15 },
+        { header: "Time", key: "time", width: 12 },
+        { header: "User", key: "user", width: 20 },
+        { header: "Action", key: "action", width: 25 },
+        { header: "Entity Type", key: "entityType", width: 15 },
+        { header: "Details", key: "details", width: 50 },
+      ];
+
+      // Style header row
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
+      };
+
+      // Add data rows
+      filteredLogs.forEach(log => {
+        worksheet.addRow({
+          date: formatDate(log.createdAt),
+          time: formatTime(log.createdAt),
+          user: log.userId === "system" ? "System" : userMap[log.userId] || log.userId,
+          action: ACTION_LABELS[log.action] || log.action.replace(/_/g, " "),
+          entityType: log.entityType,
+          details: log.details || "",
+        });
+      });
+
+      // Generate file
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `activity-logs-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast({
+        title: "Export Complete",
+        description: `Exported ${filteredLogs.length} records to Excel`,
+      });
+    } catch (error) {
+      toast({
+        title: "Export Failed",
+        description: "Failed to export activity logs to Excel",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // Calculate stats
@@ -284,7 +442,7 @@ export default function ActivityLogs() {
             <CardDescription>Search and filter activity logs</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -337,19 +495,101 @@ export default function ActivityLogs() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Date Range Filters */}
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">From:</span>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-[180px] justify-start text-left font-normal"
+                      data-testid="button-from-date"
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {fromDate ? format(fromDate, "MMM dd, yyyy") : "Select date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={fromDate}
+                      onSelect={setFromDate}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">To:</span>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-[180px] justify-start text-left font-normal"
+                      data-testid="button-to-date"
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {toDate ? format(toDate, "MMM dd, yyyy") : "Select date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={toDate}
+                      onSelect={setToDate}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {(fromDate || toDate) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearDateFilters}
+                  data-testid="button-clear-dates"
+                >
+                  Clear Dates
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
 
         {/* Logs Table */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              Activity Log
-            </CardTitle>
-            <CardDescription>
-              Showing {filteredLogs.length} of {logs.length} log entries
-            </CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Activity className="h-5 w-5" />
+                Activity Log
+              </CardTitle>
+              <CardDescription>
+                Showing {filteredLogs.length} of {logs.length} log entries
+              </CardDescription>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={isExporting || filteredLogs.length === 0} data-testid="button-export">
+                  <Download className="mr-2 h-4 w-4" />
+                  {isExporting ? "Exporting..." : "Export"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={exportToCSV} data-testid="menu-export-csv">
+                  <FileText className="mr-2 h-4 w-4" />
+                  Export as CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={exportToXLSX} data-testid="menu-export-xlsx">
+                  <FileSpreadsheet className="mr-2 h-4 w-4" />
+                  Export as Excel (XLSX)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -365,7 +605,8 @@ export default function ActivityLogs() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[180px]">Timestamp</TableHead>
+                      <TableHead className="w-[120px]">Date</TableHead>
+                      <TableHead className="w-[100px]">Time</TableHead>
                       <TableHead className="w-[120px]">User</TableHead>
                       <TableHead className="w-[180px]">Action</TableHead>
                       <TableHead className="w-[100px]">Entity Type</TableHead>
@@ -376,7 +617,10 @@ export default function ActivityLogs() {
                     {filteredLogs.map((log) => (
                       <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
                         <TableCell className="font-mono text-sm">
-                          {formatTimestamp(log.createdAt)}
+                          {formatDate(log.createdAt)}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {formatTime(log.createdAt)}
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary">
