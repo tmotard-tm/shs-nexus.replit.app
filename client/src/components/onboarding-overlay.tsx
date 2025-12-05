@@ -3,6 +3,8 @@ import { useOnboarding, OnboardingStep } from "@/hooks/use-onboarding";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { X, ChevronLeft, ChevronRight, SkipForward, Sparkles, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +35,16 @@ export function OnboardingOverlay() {
   const [spotlight, setSpotlight] = useState<SpotlightPosition | null>(null);
   const [tooltipPos, setTooltipPos] = useState<TooltipPosition>({ top: 0, left: 0, arrowPosition: "none" });
   const [isAnimating, setIsAnimating] = useState(false);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  const handleSkip = () => {
+    if (dontShowAgain) {
+      skipOnboarding();
+    } else {
+      endOnboarding(false);
+    }
+  };
 
   const step = steps[currentStep] as OnboardingStep | undefined;
   const progress = ((currentStep + 1) / steps.length) * 100;
@@ -131,7 +142,7 @@ export function OnboardingOverlay() {
       if (!isActive) return;
       
       if (e.key === "Escape") {
-        skipOnboarding();
+        handleSkip();
       } else if (e.key === "ArrowRight" || e.key === "Enter") {
         nextStep();
       } else if (e.key === "ArrowLeft" && !isFirstStep) {
@@ -141,7 +152,7 @@ export function OnboardingOverlay() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isActive, isFirstStep, nextStep, prevStep, skipOnboarding]);
+  }, [isActive, isFirstStep, nextStep, prevStep, handleSkip]);
 
   if (!isActive || !step) return null;
 
@@ -149,7 +160,7 @@ export function OnboardingOverlay() {
     <div className="fixed inset-0 z-[100]" data-testid="onboarding-overlay">
       <div 
         className="absolute inset-0 bg-black/60 transition-opacity duration-300"
-        onClick={skipOnboarding}
+        onClick={handleSkip}
       />
       
       {spotlight && (
@@ -210,7 +221,7 @@ export function OnboardingOverlay() {
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              onClick={() => skipOnboarding()}
+              onClick={handleSkip}
               data-testid="button-close-onboarding"
             >
               <X className="h-4 w-4" />
@@ -229,6 +240,21 @@ export function OnboardingOverlay() {
               <span>{Math.round(progress)}% complete</span>
             </div>
             <Progress value={progress} className="h-1.5" />
+          </div>
+
+          <div className="mt-4 flex items-center space-x-2">
+            <Checkbox 
+              id="dont-show-again" 
+              checked={dontShowAgain}
+              onCheckedChange={(checked) => setDontShowAgain(checked === true)}
+              data-testid="checkbox-dont-show-again"
+            />
+            <Label 
+              htmlFor="dont-show-again" 
+              className="text-xs text-muted-foreground cursor-pointer"
+            >
+              Don't show this tutorial again
+            </Label>
           </div>
         </CardContent>
 
@@ -252,7 +278,7 @@ export function OnboardingOverlay() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={skipOnboarding}
+                onClick={handleSkip}
                 data-testid="button-skip-onboarding"
               >
                 <SkipForward className="h-4 w-4 mr-1" />
