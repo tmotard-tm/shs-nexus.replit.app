@@ -1,6 +1,7 @@
-import { createContext, useContext, ReactNode } from "react";
+import { createContext, useContext, ReactNode, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { usePreviewRole } from "@/hooks/use-preview-role";
 import { getDefaultPermissions } from "@/lib/role-permissions";
 import type { RolePermissionSettings, UserRole } from "@shared/schema";
 
@@ -63,12 +64,14 @@ interface PermissionsContextType {
   permissions: RolePermissionSettings;
   isLoading: boolean;
   refetch: () => void;
+  effectiveRole: UserRole;
 }
 
 const PermissionsContext = createContext<PermissionsContextType | null>(null);
 
 export function PermissionsProvider({ children }: { children: ReactNode }) {
   const { user, isLoading: isAuthLoading } = useAuth();
+  const { previewRole } = usePreviewRole();
 
   const { data: allPermissions, isLoading, refetch } = useQuery<RolePermission[]>({
     queryKey: ['/api/role-permissions'],
@@ -84,12 +87,29 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     gcTime: 10 * 60 * 1000,
   });
 
+  const effectiveRole = useMemo(() => {
+    if (user?.role === 'superadmin' && previewRole) {
+      return previewRole;
+    }
+    return (user?.role as UserRole) || 'agent';
+  }, [user?.role, previewRole]);
+
   const getPermissions = (): RolePermissionSettings => {
     if (!user) {
       return getDefaultPermissions('agent');
     }
 
     const userRole = user.role as UserRole;
+    
+    if (userRole === 'superadmin' && previewRole && allPermissions) {
+      const previewDefaults = getDefaultPermissions(previewRole);
+      const found = allPermissions.find(p => p.role === previewRole);
+      if (found) {
+        return deepMergePermissions(previewDefaults, found.permissions);
+      }
+      return previewDefaults;
+    }
+
     const defaults = getDefaultPermissions(userRole);
 
     if (userRole === 'superadmin' && allPermissions) {
@@ -111,6 +131,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       permissions: getPermissions(),
       isLoading: isAuthLoading || isLoading,
       refetch,
+      effectiveRole,
     }}>
       {children}
     </PermissionsContext.Provider>

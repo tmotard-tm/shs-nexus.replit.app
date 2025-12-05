@@ -4,7 +4,8 @@ import { RoleSelector } from "@/components/role-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { usePermissions } from "@/hooks/use-permissions";
-import type { RolePermissionSettings } from "@shared/schema";
+import { usePreviewRole } from "@/hooks/use-preview-role";
+import type { RolePermissionSettings, UserRole } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import {
@@ -17,6 +18,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
   DropdownMenuPortal,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
 import { 
   LogOut, 
@@ -35,7 +38,8 @@ import {
   Menu,
   Database,
   Truck,
-  Shield
+  Shield,
+  Eye
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -52,11 +56,16 @@ type NavCategory = {
   items: NavItem[];
 };
 
+const AVAILABLE_ROLES: { value: UserRole; label: string }[] = [
+  { value: 'agent', label: 'Agent' },
+];
+
 export function Sidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
   const { startOnboarding, resetOnboarding } = useOnboarding();
-  const { permissions } = usePermissions();
+  const { permissions, effectiveRole } = usePermissions();
+  const { previewRole, setPreviewRole, isPreviewMode, exitPreviewMode } = usePreviewRole();
   const [isOpen, setIsOpen] = useState(false);
   
   const handleStartTutorial = () => {
@@ -66,6 +75,15 @@ export function Sidebar() {
   };
 
   const handleNavClick = () => {
+    setIsOpen(false);
+  };
+
+  const handlePreviewRoleChange = (role: string) => {
+    if (role === 'none') {
+      exitPreviewMode();
+    } else {
+      setPreviewRole(role as UserRole);
+    }
     setIsOpen(false);
   };
 
@@ -266,6 +284,36 @@ export function Sidebar() {
           })}
 
           <DropdownMenuSeparator />
+
+          {/* View as Role - Super Admin Only */}
+          {user.role === 'superadmin' && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="flex items-center gap-3" data-testid="menu-view-as-role">
+                <Eye className="h-4 w-4" />
+                <span>View as Role</span>
+                {isPreviewMode && (
+                  <span className="ml-auto text-xs bg-amber-500/20 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                    Active
+                  </span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuSubContent className="min-w-48">
+                  <DropdownMenuRadioGroup value={previewRole || 'none'} onValueChange={handlePreviewRoleChange}>
+                    <DropdownMenuRadioItem value="none" data-testid="radio-view-as-superadmin">
+                      Super Admin (My Role)
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuSeparator />
+                    {AVAILABLE_ROLES.map((role) => (
+                      <DropdownMenuRadioItem key={role.value} value={role.value} data-testid={`radio-view-as-${role.value}`}>
+                        {role.label}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuPortal>
+            </DropdownMenuSub>
+          )}
 
           <DropdownMenuItem
             onClick={handleStartTutorial}
