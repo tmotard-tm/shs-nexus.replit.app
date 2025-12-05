@@ -1,11 +1,12 @@
 import { Link, useLocation } from "wouter";
 import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { RoleSelector } from "@/components/role-selector";
 import { useAuth } from "@/hooks/use-auth";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { usePermissions } from "@/hooks/use-permissions";
 import { usePreviewRole } from "@/hooks/use-preview-role";
-import type { RolePermissionSettings, UserRole } from "@shared/schema";
+import type { RolePermissionSettings, UserRole, RolePermission } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import {
@@ -56,10 +57,6 @@ type NavCategory = {
   items: NavItem[];
 };
 
-const AVAILABLE_ROLES: { value: UserRole; label: string }[] = [
-  { value: 'agent', label: 'Agent' },
-];
-
 export function Sidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
@@ -67,6 +64,21 @@ export function Sidebar() {
   const { permissions, effectiveRole } = usePermissions();
   const { previewRole, setPreviewRole, isPreviewMode, exitPreviewMode } = usePreviewRole();
   const [isOpen, setIsOpen] = useState(false);
+
+  const { data: rolePermissions = [] } = useQuery<RolePermission[]>({
+    queryKey: ['/api/role-permissions'],
+    enabled: user?.role === 'superadmin',
+  });
+
+  const availableRoles = useMemo(() => {
+    return rolePermissions
+      .filter(rp => rp.role !== 'superadmin')
+      .map(rp => ({
+        value: rp.role as UserRole,
+        label: rp.role === 'agent' ? 'Agent' : 
+               rp.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+      }));
+  }, [rolePermissions]);
   
   const handleStartTutorial = () => {
     resetOnboarding();
@@ -304,7 +316,7 @@ export function Sidebar() {
                       Super Admin (My Role)
                     </DropdownMenuRadioItem>
                     <DropdownMenuSeparator />
-                    {AVAILABLE_ROLES.map((role) => (
+                    {availableRoles.map((role) => (
                       <DropdownMenuRadioItem key={role.value} value={role.value} data-testid={`radio-view-as-${role.value}`}>
                         {role.label}
                       </DropdownMenuRadioItem>
