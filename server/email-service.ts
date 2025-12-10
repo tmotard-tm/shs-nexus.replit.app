@@ -25,13 +25,17 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
   // Use the verified sender if no from address provided or if the from address isn't verified
   const fromEmail = params.from || DEFAULT_FROM_EMAIL;
   
+  // Ensure we have valid content - SendGrid requires non-empty content
+  const textContent = params.text || (params.html ? params.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : 'Please view this email in an HTML-capable email client.');
+  const htmlContent = params.html || params.text || textContent;
+  
   const msg = {
     to: params.to,
     from: DEFAULT_FROM_EMAIL, // Always use verified sender
     replyTo: fromEmail !== DEFAULT_FROM_EMAIL ? fromEmail : undefined,
     subject: params.subject,
-    text: params.text || '',
-    html: params.html || params.text || '',
+    text: textContent,
+    html: htmlContent,
   };
 
   // If no API key, log the email but return false to indicate it wasn't sent
