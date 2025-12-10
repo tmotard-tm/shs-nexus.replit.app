@@ -3019,6 +3019,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Email notification endpoint for credit card deactivation
+  // DISABLED: OneCard emails temporarily disabled - have not coordinated with OneCard team yet
   app.post("/api/send-deactivation-email", async (req, res) => {
     try {
       const { employeeName, employeeId, racfId, lastDayWorked, reason } = req.body;
@@ -3028,21 +3029,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Missing required employee information" });
       }
 
-      const emailParams = createCreditCardDeactivationEmail({
-        name: employeeName,
-        employeeId: employeeId,
-        racfId: racfId,
-        lastDayWorked: lastDayWorked,
-        reason: reason
-      });
-
-      const emailSent = await sendEmail(emailParams);
+      // DISABLED: Do not send actual emails until coordinated with OneCard team
+      console.log('[DISABLED] Would send OneCard deactivation email for:', { employeeName, employeeId, racfId, lastDayWorked, reason });
       
-      if (emailSent) {
-        res.json({ message: "Credit card deactivation notification sent successfully", recipient: "onecardhelpdesk@transformco.com" });
-      } else {
-        res.status(500).json({ message: "Failed to send credit card deactivation notification" });
-      }
+      // Return success without sending email
+      res.json({ message: "Credit card deactivation notification logged (email sending disabled)", disabled: true });
     } catch (error) {
       console.error('Error in send-deactivation-email endpoint:', error);
       res.status(500).json({ message: "Failed to process credit card deactivation notification" });
