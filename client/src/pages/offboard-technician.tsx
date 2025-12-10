@@ -460,13 +460,15 @@ export default function OffboardTechnician() {
           employeeName: technicianOffboard.techName,
           employeeId: technicianOffboard.employeeId,
           racfId: technicianOffboard.techRacfId,
-          lastDayWorked: technicianOffboard.lastDayWorked
+          lastDayWorked: technicianOffboard.lastDayWorked,
+          reason: "Employee Termination"
         });
       } catch (emailError) {
         console.error('Error sending credit card deactivation email:', emailError);
         toast({
           title: "Email Notification",
-          description: "Offboarding created successfully. Credit card deactivation notification logged to server console (no email service configured).",
+          description: "Offboarding created successfully but credit card deactivation email could not be sent. Please notify OneCard Help Desk manually.",
+          variant: "destructive"
         });
       }
 

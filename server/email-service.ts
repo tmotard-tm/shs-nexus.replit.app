@@ -1,4 +1,17 @@
-// Email service - logs email content instead of sending (no email service configured)
+// Email service using SendGrid
+import sgMail from '@sendgrid/mail';
+
+// Initialize SendGrid with API key
+const apiKey = process.env.SENDGRID_API_KEY;
+if (apiKey) {
+  sgMail.setApiKey(apiKey);
+  console.log('SendGrid email service initialized');
+} else {
+  console.warn('SENDGRID_API_KEY not found - email service will log messages instead of sending');
+}
+
+// Default verified sender email
+const DEFAULT_FROM_EMAIL = 'stephen.wong@transformco.com';
 
 interface EmailParams {
   to: string;
@@ -9,22 +22,42 @@ interface EmailParams {
 }
 
 export async function sendEmail(params: EmailParams): Promise<boolean> {
+  // Use the verified sender if no from address provided or if the from address isn't verified
+  const fromEmail = params.from || DEFAULT_FROM_EMAIL;
+  
+  const msg = {
+    to: params.to,
+    from: DEFAULT_FROM_EMAIL, // Always use verified sender
+    replyTo: fromEmail !== DEFAULT_FROM_EMAIL ? fromEmail : undefined,
+    subject: params.subject,
+    text: params.text || '',
+    html: params.html || params.text || '',
+  };
+
+  // If no API key, log the email but return false to indicate it wasn't sent
+  if (!apiKey) {
+    console.warn('========================================');
+    console.warn('EMAIL NOT SENT - SENDGRID_API_KEY not configured');
+    console.warn('========================================');
+    console.warn(`To: ${msg.to}`);
+    console.warn(`From: ${msg.from}`);
+    console.warn(`Subject: ${msg.subject}`);
+    console.warn('');
+    console.warn('Message would have been:');
+    console.warn(msg.text);
+    console.warn('========================================');
+    return false;
+  }
+
   try {
-    // Log the email content since no email service is configured
-    console.log('========================================');
-    console.log('EMAIL NOTIFICATION (would be sent to):');
-    console.log('========================================');
-    console.log(`To: ${params.to}`);
-    console.log(`From: ${params.from}`);
-    console.log(`Subject: ${params.subject}`);
-    console.log('');
-    console.log('Message:');
-    console.log(params.text);
-    console.log('========================================');
-    
+    await sgMail.send(msg);
+    console.log(`Email sent successfully to ${params.to}: ${params.subject}`);
     return true;
-  } catch (error) {
-    console.error('Email logging error:', error);
+  } catch (error: any) {
+    console.error('SendGrid email error:', error);
+    if (error.response) {
+      console.error('SendGrid error details:', error.response.body);
+    }
     return false;
   }
 }
@@ -104,7 +137,7 @@ Sears IT Administration
 
   return {
     to: "onecardhelpdesk@transformco.com",
-    from: "noreply@sears.com", // This would need to be a verified sender
+    from: DEFAULT_FROM_EMAIL,
     subject,
     text,
     html

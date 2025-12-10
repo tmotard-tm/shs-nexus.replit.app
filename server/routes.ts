@@ -3039,9 +3039,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const emailSent = await sendEmail(emailParams);
       
       if (emailSent) {
-        res.json({ message: "Credit card deactivation notification logged (no email service configured)", recipient: "onecardhelpdesk@transformco.com" });
+        res.json({ message: "Credit card deactivation notification sent successfully", recipient: "onecardhelpdesk@transformco.com" });
       } else {
-        res.status(500).json({ message: "Failed to log credit card deactivation notification" });
+        res.status(500).json({ message: "Failed to send credit card deactivation notification" });
       }
     } catch (error) {
       console.error('Error in send-deactivation-email endpoint:', error);
