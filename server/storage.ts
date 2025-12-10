@@ -885,7 +885,10 @@ export class MemStorage implements IStorage {
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     try {
-      const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+      const normalizedEmail = email.toLowerCase();
+      const result = await db.select().from(users).where(
+        sql`LOWER(${users.email}) = ${normalizedEmail}`
+      ).limit(1);
       return result[0] || undefined;
     } catch (error) {
       console.error('Error getting user by email:', error);
