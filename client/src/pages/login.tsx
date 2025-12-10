@@ -4,9 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, Eye, EyeOff } from "lucide-react";
+import { Settings, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useLocation } from "wouter";
+import { apiRequest } from "@/lib/queryClient";
 
 // Validates the next URL parameter to prevent open redirect attacks
 function validateNextUrl(next: string | null): string {
@@ -43,6 +45,12 @@ export default function Login() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
+  // Forgot password state
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
+  const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -70,6 +78,46 @@ export default function Login() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!forgotPasswordEmail.trim()) {
+      toast({
+        title: "Email Required",
+        description: "Please enter your email address",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setForgotPasswordLoading(true);
+
+    try {
+      await apiRequest("POST", "/api/auth/forgot-password", {
+        email: forgotPasswordEmail.trim()
+      });
+      
+      setForgotPasswordSent(true);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to send password reset email. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setForgotPasswordLoading(false);
+    }
+  };
+
+  const handleForgotPasswordDialogChange = (open: boolean) => {
+    if (!open) {
+      // Only reset form state when closing
+      setForgotPasswordEmail("");
+      setForgotPasswordSent(false);
+    }
+    setShowForgotPassword(open);
   };
 
   return (
@@ -139,8 +187,97 @@ export default function Login() {
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
+          
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
+              className="text-sm text-primary hover:underline"
+              data-testid="link-forgot-password"
+            >
+              Forgot Password?
+            </button>
+          </div>
         </CardContent>
       </Card>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={showForgotPassword} onOpenChange={handleForgotPasswordDialogChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+            <DialogDescription>
+              {forgotPasswordSent 
+                ? "Check your email for password reset instructions."
+                : "Enter your email address and we'll send you a password reset link."
+              }
+            </DialogDescription>
+          </DialogHeader>
+          
+          {forgotPasswordSent ? (
+            <div className="space-y-4">
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                <p className="text-sm text-green-800 dark:text-green-200">
+                  If an account exists with the email <strong>{forgotPasswordEmail}</strong>, you will receive a password reset email shortly.
+                </p>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Please check your inbox and spam folder. The reset link will expire in 1 hour.
+              </p>
+              <Button 
+                onClick={() => handleForgotPasswordDialogChange(false)} 
+                className="w-full"
+                data-testid="button-close-forgot-password"
+              >
+                Back to Login
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="forgot-email">Email Address</Label>
+                <Input
+                  id="forgot-email"
+                  type="email"
+                  value={forgotPasswordEmail}
+                  onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                  placeholder="Enter your email address"
+                  required
+                  disabled={forgotPasswordLoading}
+                  data-testid="input-forgot-email"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  type="button"
+                  variant="outline"
+                  onClick={() => handleForgotPasswordDialogChange(false)}
+                  className="flex-1"
+                  disabled={forgotPasswordLoading}
+                  data-testid="button-cancel-forgot-password"
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit"
+                  className="flex-1"
+                  disabled={forgotPasswordLoading}
+                  data-testid="button-submit-forgot-password"
+                >
+                  {forgotPasswordLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    "Send Reset Link"
+                  )}
+                </Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
