@@ -1084,15 +1084,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await sendEmail({
           to: email,
           from: "noreply@sears.com",
-          subject: "Password Reset Request - Sears Operations Portal",
+          subject: "Password Reset Request - Sears Driveline Portal",
           html: `
             <h2>Password Reset Request</h2>
             <p>Hello ${user.username},</p>
-            <p>You requested a password reset for your Sears Operations Portal account.</p>
+            <p>You requested a password reset for your Sears Driveline Portal account.</p>
             <p>Your password reset token is: <strong>${resetToken}</strong></p>
             <p>This token will expire in 1 hour.</p>
             <p>If you did not request this reset, please ignore this email.</p>
-            <p>Best regards,<br>Sears Operations Portal Team</p>
+            <p>Best regards,<br>Sears Driveline Portal Team</p>
           `
         });
 
