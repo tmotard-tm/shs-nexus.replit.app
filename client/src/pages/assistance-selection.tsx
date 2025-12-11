@@ -3,16 +3,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
-import { useAuth } from "@/hooks/use-auth";
 import { usePermissions } from "@/hooks/use-permissions";
-import { MapPin, Truck, UserPlus, UserMinus, Settings, Map, Plus, LayoutGrid } from "lucide-react";
+import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
 import { FilteredMap } from "@/components/vehicle-map-filters";
 
 export default function AssistanceSelection() {
-  const { user } = useAuth();
   const { permissions } = usePermissions();
   const [, setLocation] = useLocation();
   const [isAssignUpdateDialogOpen, setIsAssignUpdateDialogOpen] = useState(false);
@@ -37,23 +35,9 @@ export default function AssistanceSelection() {
 
   return (
     <MainContent>
-      {/* Header */}
-      <header className="bg-card border-b border-border">
-        <div className="flex items-center justify-between p-6">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-              <Settings className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Welcome back, {user?.username}</p>
-            </div>
-          </div>
-        </div>
-      </header>
-
       {/* Main Content */}
       <main 
-        className="p-8 relative min-h-screen"
+        className="p-4 relative min-h-screen"
         style={{
           backgroundImage: `url(${searsVanImage})`,
           backgroundSize: 'cover',
@@ -62,11 +46,11 @@ export default function AssistanceSelection() {
         }}
       >
         {/* Overlay for better content readability */}
-        <div className="absolute inset-0 bg-background/80"></div>
-        <div className="relative z-10 max-w-3xl mx-auto">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold mb-4" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-selection-title">
-              Welcome to SearsDriveLine Management Systems
+        <div className="absolute inset-0 bg-background/60"></div>
+        <div className="relative z-10 max-w-4xl mx-auto pt-12">
+          <div className="text-center mb-6">
+            <h2 className="text-3xl font-bold mb-3" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-selection-title">
+              Welcome to Sears Drive Line Management Systems
             </h2>
             <p className="text-lg" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>
               What can we help you with today?
@@ -141,7 +125,7 @@ export default function AssistanceSelection() {
                 }}
                 data-testid="button-dialog-update-vehicle"
               >
-                <Settings className="mr-2 h-4 w-4" />
+                <Wrench className="mr-2 h-4 w-4" />
                 Update Vehicle Information
               </Button>
             </div>
