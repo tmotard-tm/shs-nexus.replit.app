@@ -1134,6 +1134,8 @@ export const holmanVehiclesCache = pgTable("holman_vehicles_cache", {
   district: text("district"),
   inServiceDate: text("in_service_date"),
   outOfServiceDate: text("out_of_service_date"),
+  odometer: integer("odometer"),
+  odometerDate: text("odometer_date"),
   branding: text("branding"),
   interior: text("interior"),
   tuneStatus: text("tune_status"),

@@ -636,11 +636,15 @@ export default function ActiveVehicles() {
                             <span>Acquired: {vehicle.deliveryDate}</span>
                           </div>
                         )}
-                        {vehicle.odometerDelivery > 0 && (
+                        {(vehicle.odometer && vehicle.odometer > 0) ? (
+                          <div>
+                            <span>Odometer: {vehicle.odometer.toLocaleString()} miles</span>
+                          </div>
+                        ) : vehicle.odometerDelivery > 0 ? (
                           <div>
                             <span>Odometer: {vehicle.odometerDelivery.toLocaleString()} miles</span>
                           </div>
-                        )}
+                        ) : null}
                         {vehicle.remainingBookValue > 0 && (
                           <div>
                             <span>Book Value: ${vehicle.remainingBookValue.toLocaleString()}</span>

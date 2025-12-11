@@ -18,6 +18,8 @@ export interface FleetVehicle {
   region: string;
   district: string;
   odometerDelivery: number;
+  odometer?: number;
+  odometerDate?: string;
   deliveryAddress: string;
   city: string;
   state: string;

@@ -24,6 +24,8 @@ interface FleetVehicle {
   district: string;
   inServiceDate: string;
   outOfServiceDate: string;
+  odometer: number;
+  odometerDate: string;
   branding: string;
   interior: string;
   tuneStatus: string;
@@ -202,30 +204,32 @@ class HolmanVehicleSyncService {
     const now = new Date();
 
     for (const v of holmanVehicles) {
-      const vehicleNumber = v.vehicleNumber?.toString() || v.vehicle_number?.toString();
+      const vehicleNumber = v.holmanVehicleNumber?.toString() || v.clientVehicleNumber?.toString() || v.vehicleNumber?.toString();
       if (!vehicleNumber) continue;
 
       const cacheData: InsertHolmanVehicleCache = {
         holmanVehicleNumber: vehicleNumber,
         statusCode: v.statusCode || v.status_code,
         vin: v.vin,
-        licensePlate: v.licensePlate || v.license_plate,
-        licenseState: v.licenseState || v.license_state,
-        makeName: v.makeName || v.make_name,
-        modelName: v.modelName || v.model_name,
-        modelYear: v.modelYear || v.model_year,
+        licensePlate: v.licensePlate,
+        licenseState: v.tagStateProvince || v.licenseState,
+        makeName: v.makeVin || v.makeClient || v.makeName,
+        modelName: v.modelVin || v.modelClient || v.modelName,
+        modelYear: v.modelYear || v.year,
         color: v.exteriorColor || v.color,
-        fuelType: v.fuelType || v.fuel_type,
-        engineSize: v.engineSize || v.engine_size,
-        driverName: v.driverName || v.driver_name,
-        driverEmail: v.driverEmail || v.driver_email,
-        driverPhone: v.driverPhone || v.driver_phone,
-        city: v.garagingCity || v.city,
-        state: v.garagingState || v.state,
-        region: v.region || '',
-        district: v.district || '',
-        inServiceDate: v.inServiceDate || v.in_service_date,
-        outOfServiceDate: v.outOfServiceDate || v.out_of_service_date,
+        fuelType: v.fuelType || v.fuelTypeDescription,
+        engineSize: v.engineType || v.engineSize,
+        driverName: v.firstName && v.lastName ? `${v.firstName} ${v.lastName}`.trim() : (v.driverName || ''),
+        driverEmail: v.email || v.driverEmail,
+        driverPhone: v.cellPhone || v.workPhone || v.homePhone || v.driverPhone,
+        city: v.city,
+        state: v.stateProvince || v.state,
+        region: v.region || v.division || '',
+        district: v.prefix || v.district || '',
+        inServiceDate: v.onRoadDate || v.deliveryDate || v.inServiceDate,
+        outOfServiceDate: v.outOfServiceDate,
+        odometer: v.odometer || 0,
+        odometerDate: v.odometerDate || '',
         branding: v.branding || 'Standard',
         interior: v.interior || 'Standard',
         tuneStatus: v.tuneStatus || 'Tuned',
@@ -388,29 +392,32 @@ class HolmanVehicleSyncService {
 
   private transformToFleetVehicle(v: any): FleetVehicle {
     // Map Holman API field names to our FleetVehicle structure
-    // Holman API uses: holmanVehicleNumber, clientVehicleNumber, year, make, model, exteriorColor, garagingCity, garagingState, etc.
+    // Holman API uses: holmanVehicleNumber, clientVehicleNumber, modelYear, makeVin/makeClient, modelVin/modelClient, 
+    // prefix (district), stateProvince, city, odometer, odometerDate, etc.
     const vehicleNumber = v.holmanVehicleNumber?.toString() || v.clientVehicleNumber?.toString() || v.vehicleNumber?.toString() || '';
     return {
       id: vehicleNumber,
       vehicleNumber,
       vin: v.vin || '',
-      licensePlate: v.licensePlate || v.license_plate || '',
-      licenseState: v.licenseState || v.license_state || '',
-      makeName: v.make || v.makeName || '',
-      modelName: v.model || v.modelName || '',
-      modelYear: v.year || v.modelYear || 0,
+      licensePlate: v.licensePlate || '',
+      licenseState: v.tagStateProvince || v.licenseState || '',
+      makeName: v.makeVin || v.makeClient || v.make || '',
+      modelName: v.modelVin || v.modelClient || v.model || '',
+      modelYear: v.modelYear || v.year || 0,
       color: v.exteriorColor || v.color || '',
-      fuelType: v.fuelType || v.fuel_type || '',
-      engineSize: v.engineSize || v.engine_size || '',
-      driverName: v.driverName || v.driver_name || '',
-      driverEmail: v.driverEmail || v.driver_email || '',
-      driverPhone: v.driverPhone || v.driver_phone || '',
-      city: v.garagingCity || v.city || '',
-      state: v.garagingState || v.state || '',
-      region: v.region || '',
-      district: v.district || '',
-      inServiceDate: v.inServiceDate || v.in_service_date || '',
-      outOfServiceDate: v.outOfServiceDate || v.out_of_service_date || '',
+      fuelType: v.fuelType || v.fuelTypeDescription || '',
+      engineSize: v.engineType || v.engineSize || '',
+      driverName: v.firstName && v.lastName ? `${v.firstName} ${v.lastName}`.trim() : (v.driverName || ''),
+      driverEmail: v.email || v.driverEmail || '',
+      driverPhone: v.cellPhone || v.workPhone || v.homePhone || v.driverPhone || '',
+      city: v.city || '',
+      state: v.stateProvince || v.state || '',
+      region: v.region || v.division || '',
+      district: v.prefix || v.district || '',
+      inServiceDate: v.onRoadDate || v.deliveryDate || v.inServiceDate || '',
+      outOfServiceDate: v.outOfServiceDate || '',
+      odometer: v.odometer || 0,
+      odometerDate: v.odometerDate || '',
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',
       tuneStatus: v.tuneStatus || 'Tuned',
@@ -440,6 +447,8 @@ class HolmanVehicleSyncService {
       district: v.district || '',
       inServiceDate: v.inServiceDate || '',
       outOfServiceDate: v.outOfServiceDate || '',
+      odometer: v.odometer || 0,
+      odometerDate: v.odometerDate || '',
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',
       tuneStatus: v.tuneStatus || 'Tuned',
