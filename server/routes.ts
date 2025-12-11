@@ -5358,6 +5358,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Fleet vehicles endpoint - fetches all vehicles from Holman and transforms to FleetVehicle format
+  app.get("/api/holman/fleet-vehicles", requireAuth, async (req: any, res) => {
+    try {
+      console.log('[Holman Fleet] Fetching all vehicles for Active Vehicles page...');
+      
+      if (!holmanApiService.isConfigured()) {
+        return res.status(503).json({ 
+          success: false, 
+          message: "Holman API not configured",
+          vehicles: [] 
+        });
+      }
+
+      const { pageNumber = '1', pageSize = '500' } = req.query;
+      
+      // Fetch vehicles with all needed properties using custom query
+      const result = await holmanApiService.queryVehiclesCustom({
+        lesseeCode: '2B56',
+        properties: [
+          'vin',
+          'holmanVehicleNumber',
+          'clientVehicleNumber',
+          'modelYear',
+          'makeVin',
+          'makeClient',
+          'modelVin',
+          'modelClient',
+          'licenseState',
+          'licensePlate',
+          'color',
+          'status',
+          'assignedStatus',
+          'garagingStreet1',
+          'garagingCity',
+          'garagingState',
+          'garagingZip',
+          'deliveryDate',
+          'outOfServiceDate',
+          'saleDate',
+          'odometerDelivery',
+          'leaseEndDate',
+          'remainingBookValue',
+          'regRenewalDate'
+        ],
+        pageNumber: parseInt(pageNumber),
+        pageSize: parseInt(pageSize)
+      });
+
+      // Transform Holman vehicles to FleetVehicle format
+      const fleetVehicles = (result.data || result.items || []).map((v: any) => ({
+        vin: v.vin || '',
+        vehicleNumber: v.holmanVehicleNumber || v.clientVehicleNumber || '',
+        deliveryDate: v.deliveryDate || '',
+        outOfServiceDate: v.outOfServiceDate || '',
+        saleDate: v.saleDate || '',
+        modelYear: parseInt(v.modelYear) || 0,
+        makeName: v.makeVin || v.makeClient || '',
+        modelName: v.modelVin || v.modelClient || '',
+        licenseState: v.licenseState || '',
+        licensePlate: v.licensePlate || '',
+        regRenewalDate: v.regRenewalDate || '',
+        color: v.color || '',
+        branding: v.branding || 'Sears',
+        interior: v.interior || '',
+        tuneStatus: v.status || v.assignedStatus || '',
+        region: v.region || '',
+        district: v.district || '',
+        odometerDelivery: parseInt(v.odometerDelivery) || 0,
+        deliveryAddress: v.garagingStreet1 || '',
+        city: v.garagingCity || '',
+        state: v.garagingState || '',
+        zip: v.garagingZip || '',
+        mis: v.mis || '',
+        remainingBookValue: parseFloat(v.remainingBookValue) || 0,
+        leaseEndDate: v.leaseEndDate || '',
+        source: 'Holman' as const
+      }));
+
+      console.log(`[Holman Fleet] Transformed ${fleetVehicles.length} vehicles`);
+      
+      res.json({
+        success: true,
+        totalCount: result.totalCount || fleetVehicles.length,
+        pageInfo: result.pageInfo,
+        vehicles: fleetVehicles
+      });
+    } catch (error: any) {
+      console.error("Error fetching Holman fleet vehicles:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: error.message || "Failed to fetch fleet vehicles from Holman API",
+        vehicles: []
+      });
+    }
+  });
+
   console.log("Registering Snowflake API routes...");
   const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
 
