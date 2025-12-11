@@ -63,46 +63,25 @@ class HolmanVehicleSyncService {
     try {
       console.log('[HolmanSync] Attempting live fetch from Holman API');
       
-      const apiResponse = await holmanApiService.queryVehiclesCustom({
-        lesseeCode: '2B56',
-        properties: [
-          'vin',
-          'holmanVehicleNumber',
-          'clientVehicleNumber',
-          'modelYear',
-          'makeVin',
-          'makeClient',
-          'modelVin',
-          'modelClient',
-          'licenseState',
-          'licensePlate',
-          'color',
-          'status',
-          'assignedStatus',
-          'garagingStreet1',
-          'garagingCity',
-          'garagingState',
-          'garagingZip',
-          'deliveryDate',
-          'outOfServiceDate',
-          'saleDate',
-          'odometerDelivery',
-          'leaseEndDate',
-          'remainingBookValue',
-          'regRenewalDate'
-        ],
-        pageNumber: page,
-        pageSize: pageSize
-      });
-
-      const vehicleData = apiResponse.data || (apiResponse as any).items || [];
+      // Use the simple getVehicles method that works on integrations page
+      // Status code 1 = active vehicles
+      const apiResponse = await holmanApiService.getVehicles(
+        '2B56',           // lesseeCode
+        String(statusCode), // statusCodes (1 = active)
+        undefined,        // soldDateCode
+        page,
+        pageSize
+      );
+      
+      // Extract vehicles array from response object
+      const vehicleData = apiResponse?.data || [];
       
       if (!vehicleData || vehicleData.length === 0) {
         console.log('[HolmanSync] No vehicles returned from API, falling back to cache');
         return this.getCachedVehicles(page, pageSize, statusCode, 'No vehicles returned from API');
       }
 
-      console.log(`[HolmanSync] Got ${vehicleData.length} vehicles from Holman API`);
+      console.log(`[HolmanSync] Got ${vehicleData.length} vehicles from Holman API (total: ${apiResponse?.totalCount || vehicleData.length})`);
 
       const fleetVehicles = vehicleData.map((v: any) => this.transformToFleetVehicle(v));
 
@@ -112,7 +91,7 @@ class HolmanVehicleSyncService {
       this.lastSuccessfulSync = new Date();
 
       const pendingCount = await this.getPendingChangeCount();
-      const totalCount = apiResponse.totalCount || fleetVehicles.length;
+      const totalCount = apiResponse?.totalCount || vehicleData.length;
 
       return {
         success: true,
