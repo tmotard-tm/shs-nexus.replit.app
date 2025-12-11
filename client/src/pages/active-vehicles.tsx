@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle } from "lucide-react";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { 
@@ -485,7 +485,7 @@ export default function ActiveVehicles() {
                         </div>
                       </div>
                       
-                      <div className="mt-4 pt-4 border-t grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-muted-foreground">
+                      <div className="mt-4 pt-4 border-t grid grid-cols-1 md:grid-cols-4 gap-4 text-xs text-muted-foreground">
                         {vehicle.deliveryDate && (
                           <div className="flex items-center gap-2">
                             <Calendar className="h-3 w-3" />
@@ -502,6 +502,12 @@ export default function ActiveVehicles() {
                             <span>Book Value: ${vehicle.remainingBookValue.toLocaleString()}</span>
                           </div>
                         )}
+                        <div className="flex items-center gap-2">
+                          <Database className="h-3 w-3" />
+                          <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium" data-testid={`source-${vehicle.vin}`}>
+                            {vehicle.source || 'Holman'}
+                          </span>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

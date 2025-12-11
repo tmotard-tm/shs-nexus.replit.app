@@ -25,6 +25,7 @@ export interface FleetVehicle {
   mis: string;
   remainingBookValue: number;
   leaseEndDate: string;
+  source: 'Holman' | 'TPMS' | 'Snowflake' | 'Manual';
 }
 
 // All active vehicles from CSV (vehicles without sale date)
@@ -39,7 +40,7 @@ export const activeVehicles: FleetVehicle[] = [
     color: "White", branding: "Kenmore", interior: "Gray", tuneStatus: "Active",
     region: "West Coast", district: "Los Angeles", odometerDelivery: 5000,
     deliveryAddress: "123 Demo St", city: "LOS ANGELES", state: "CA", zip: "90210",
-    mis: "DEMO", remainingBookValue: 45000, leaseEndDate: "12/31/2027"
+    mis: "DEMO", remainingBookValue: 45000, leaseEndDate: "12/31/2027", source: "Holman"
   },
   {
     vin: "DEMO00000000002",
@@ -50,7 +51,7 @@ export const activeVehicles: FleetVehicle[] = [
     color: "Blue", branding: "Craftsman", interior: "Black", tuneStatus: "Repair",
     region: "Southwest", district: "Dallas", odometerDelivery: 8000,
     deliveryAddress: "456 Demo Ave", city: "DALLAS", state: "TX", zip: "75201",
-    mis: "DEMO", remainingBookValue: 42000, leaseEndDate: "12/31/2027"
+    mis: "DEMO", remainingBookValue: 42000, leaseEndDate: "12/31/2027", source: "Holman"
   },
   {
     vin: "DEMO00000000003",
@@ -61,7 +62,7 @@ export const activeVehicles: FleetVehicle[] = [
     color: "Orange", branding: "DieHard", interior: "Gray", tuneStatus: "Declined",
     region: "Southeast", district: "Miami", odometerDelivery: 12000,
     deliveryAddress: "789 Demo Blvd", city: "MIAMI", state: "FL", zip: "33101",
-    mis: "DEMO", remainingBookValue: 40000, leaseEndDate: "12/31/2027"
+    mis: "DEMO", remainingBookValue: 40000, leaseEndDate: "12/31/2027", source: "Holman"
   },
   {
     vin: "DEMO00000000004",
@@ -72,7 +73,7 @@ export const activeVehicles: FleetVehicle[] = [
     color: "Purple", branding: "PartsDirect", interior: "Black", tuneStatus: "Spare",
     region: "Northeast", district: "New York", odometerDelivery: 2000,
     deliveryAddress: "321 Demo Dr", city: "NEW YORK", state: "NY", zip: "10001",
-    mis: "DEMO", remainingBookValue: 48000, leaseEndDate: "12/31/2027"
+    mis: "DEMO", remainingBookValue: 48000, leaseEndDate: "12/31/2027", source: "Holman"
   },
   {
     vin: "1FTNE1EW5EDA44473",
@@ -99,7 +100,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19114",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1FTNE24203HA54483",
@@ -126,7 +127,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60007",
     mis: "171",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24213HA54489",
@@ -153,7 +154,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60007",
     mis: "171",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24263HA52480",
@@ -180,7 +181,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60007",
     mis: "165",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24273HA50060",
@@ -207,7 +208,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "163",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24283HA50360",
@@ -234,7 +235,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92020",
     mis: "167",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24283HA51024",
@@ -261,7 +262,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "167",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24283HA54778",
@@ -288,7 +289,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "143",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24293HA52151",
@@ -315,7 +316,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21060",
     mis: "163",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24L24HA64264",
@@ -342,7 +343,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80233",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24L74HA64275",
@@ -369,7 +370,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "99518",
     mis: "172",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W04HA63690",
@@ -396,7 +397,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W05HA44400",
@@ -423,7 +424,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19079",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W06DA98174",
@@ -450,7 +451,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "122",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W06DA98580",
@@ -477,7 +478,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "139",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W14HA63746",
@@ -504,7 +505,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "169",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W25HA38548",
@@ -531,7 +532,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80601",
     mis: "162",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W25HA42244",
@@ -558,7 +559,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "122",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W34HA63750",
@@ -585,7 +586,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "169",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W35HA38431",
@@ -612,7 +613,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "163",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W35HA42270",
@@ -639,7 +640,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W35HA44553",
@@ -666,7 +667,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8527",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W36DA98525",
@@ -693,7 +694,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "140",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W36DB05537",
@@ -720,7 +721,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "969",
     mis: "140",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W55HA38558",
@@ -747,7 +748,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80601",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W56DA98476",
@@ -774,7 +775,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21060",
     mis: "105",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W65HA44482",
@@ -801,7 +802,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W75HA42031",
@@ -828,7 +829,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "142",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W75HA44491",
@@ -855,7 +856,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W76DA98124",
@@ -882,7 +883,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85204",
     mis: "118",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W84HA63727",
@@ -909,7 +910,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W84HA63744",
@@ -936,7 +937,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "169",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W84HA65073",
@@ -963,7 +964,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W85HA38490",
@@ -990,7 +991,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85204",
     mis: "139",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W86DA98133",
@@ -1017,7 +1018,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85204",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W94HA13807",
@@ -1044,7 +1045,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "969",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W95HA42029",
@@ -1071,7 +1072,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "143",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX4HA63227",
@@ -1098,7 +1099,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30337",
     mis: "149",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX4HA63292",
@@ -1125,7 +1126,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "119",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX4HA63311",
@@ -1152,7 +1153,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX5HA44551",
@@ -1179,7 +1180,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19079",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX6DA98232",
@@ -1206,7 +1207,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80233",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX6DB05535",
@@ -1233,7 +1234,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "969",
     mis: "140",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKA91071",
@@ -1260,7 +1261,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93704",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19597",
@@ -1287,7 +1288,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85705",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1GCGG25C081147031",
@@ -1314,7 +1315,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "125",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C081148440",
@@ -1341,7 +1342,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "125",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C091137911",
@@ -1368,7 +1369,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "112",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C181147362",
@@ -1395,7 +1396,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "125",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C281133860",
@@ -1422,7 +1423,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97477",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C281134927",
@@ -1449,7 +1450,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97477",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C281147094",
@@ -1476,7 +1477,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "213",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C481146738",
@@ -1503,7 +1504,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "125",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C481146769",
@@ -1530,7 +1531,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "125",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C491135689",
@@ -1557,7 +1558,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "200",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C581140978",
@@ -1584,7 +1585,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76137",
     mis: "105",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C581146988",
@@ -1611,7 +1612,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "125",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C681146949",
@@ -1638,7 +1639,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C781147270",
@@ -1665,7 +1666,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93727",
     mis: "123",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C791137548",
@@ -1692,7 +1693,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "200",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C881150338",
@@ -1719,7 +1720,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "124",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C891136960",
@@ -1746,7 +1747,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "173",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C981147187",
@@ -1773,7 +1774,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "125",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C991135574",
@@ -1800,7 +1801,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93612",
     mis: "200",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C991140208",
@@ -1827,7 +1828,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85282",
     mis: "190",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81134609",
@@ -1854,7 +1855,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85204",
     mis: "122",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81134884",
@@ -1881,7 +1882,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97477",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81137929",
@@ -1908,7 +1909,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "125",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81146954",
@@ -1935,7 +1936,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46142",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81147067",
@@ -1962,7 +1963,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "165",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81147330",
@@ -1989,7 +1990,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93727",
     mis: "123",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81150616",
@@ -2016,7 +2017,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "125",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81150633",
@@ -2043,7 +2044,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72212",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81150888",
@@ -2070,7 +2071,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "128",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX91136751",
@@ -2097,7 +2098,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76137",
     mis: "112",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX91138726",
@@ -2124,7 +2125,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U341246932",
@@ -2151,7 +2152,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92020",
     mis: "150",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U831216873",
@@ -2178,7 +2179,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4401",
     mis: "163",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1153140",
@@ -2205,7 +2206,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35175",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1168995",
@@ -2232,7 +2233,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1161326",
@@ -2259,7 +2260,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "41035",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1169136",
@@ -2286,7 +2287,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1133615",
@@ -2313,7 +2314,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93612",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1146171",
@@ -2340,7 +2341,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38133",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1168333",
@@ -2367,7 +2368,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1155083",
@@ -2394,7 +2395,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1170764",
@@ -2421,7 +2422,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6057",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/6/2018\r"
+    leaseEndDate: "6/6/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1171073",
@@ -2448,7 +2449,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "17754",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1133785",
@@ -2475,7 +2476,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1134337",
@@ -2502,7 +2503,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1168553",
@@ -2529,7 +2530,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1168794",
@@ -2556,7 +2557,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1167552",
@@ -2583,7 +2584,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "13041",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1168323",
@@ -2610,7 +2611,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1168905",
@@ -2637,7 +2638,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45342",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1167911",
@@ -2664,7 +2665,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "17724",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1168945",
@@ -2691,7 +2692,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14810",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1169397",
@@ -2718,7 +2719,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "12449",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1166658",
@@ -2745,7 +2746,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1179815",
@@ -2772,7 +2773,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92563",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1169210",
@@ -2799,7 +2800,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1171653",
@@ -2826,7 +2827,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "16508",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1134172",
@@ -2853,7 +2854,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93926",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1166619",
@@ -2880,7 +2881,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "65804",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1169021",
@@ -2907,7 +2908,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA0D1157007",
@@ -2934,7 +2935,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA7D1157652",
@@ -2961,7 +2962,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/3/2018\r"
+    leaseEndDate: "5/3/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA9D1147947",
@@ -2988,7 +2989,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCAXC1194127",
@@ -3015,7 +3016,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/21/2017\r"
+    leaseEndDate: "8/21/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCAXD1148539",
@@ -3042,7 +3043,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCZGFBA0A1143702",
@@ -3069,7 +3070,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93612",
     mis: "180",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA1A1143188",
@@ -3096,7 +3097,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "180",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA2A1141532",
@@ -3123,7 +3124,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "179",
     remainingBookValue: 0,
-    leaseEndDate: "9/15/2015\r"
+    leaseEndDate: "9/15/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA2A1142549",
@@ -3150,7 +3151,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA4A1141421",
@@ -3177,7 +3178,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA7A1141462",
@@ -3204,7 +3205,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA9A1141608",
@@ -3231,7 +3232,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA9A1142953",
@@ -3258,7 +3259,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93612",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBAXA1142864",
@@ -3285,7 +3286,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "94509",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBAXA1143724",
@@ -3312,7 +3313,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93454",
     mis: "180",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "3C6MRVJG0PE507800",
@@ -3339,7 +3340,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75208",
     mis: "23",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3C6MRVJG1PE508051",
@@ -3366,7 +3367,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76084",
     mis: "23",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3C6MRVJG7PE507793",
@@ -3393,7 +3394,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79106",
     mis: "23",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3C6MRVJG9PE508041",
@@ -3420,7 +3421,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75417",
     mis: "23",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3C6MRVJGXPE500983",
@@ -3447,7 +3448,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76055",
     mis: "23",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3C6MRVJGXPE507805",
@@ -3474,7 +3475,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77060",
     mis: "23",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "NM0LS7E75G1282501",
@@ -3501,7 +3502,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75071",
     mis: "106",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "NM0LS7S20P1566711",
@@ -3528,7 +3529,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33032",
     mis: "14",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "NM0LS7S22P1566712",
@@ -3555,7 +3556,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30528",
     mis: "14",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "NM0LS7S24P1566713",
@@ -3582,7 +3583,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92040",
     mis: "14",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "NM0LS7S26P1566714",
@@ -3609,7 +3610,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "14",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "NM0LS7S29P1566710",
@@ -3636,7 +3637,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92376",
     mis: "14",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "WD0PD644165864738",
@@ -3663,7 +3664,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92020",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "WD0PD644555848329",
@@ -3690,7 +3691,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23231",
     mis: "129",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GTGK24U0YE290255",
@@ -3717,7 +3718,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19030",
     mis: "307",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FBSS31L29DA53662",
@@ -3744,7 +3745,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19030",
     mis: "199",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GNDU23148D150503",
@@ -3771,7 +3772,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "34474",
     mis: "211",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "2FMZA512X7BA24554",
@@ -3798,7 +3799,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "34474",
     mis: "223",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNF20598ED57073",
@@ -3825,7 +3826,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "34474",
     mis: "211",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GNUGBD49A1143912",
@@ -3852,7 +3853,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93203",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1C4RJEAG6LC123169",
@@ -3879,7 +3880,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27909",
     mis: "14",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1C6RREBT1PN552726",
@@ -3906,7 +3907,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29526",
     mis: "14",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1DW1A5322JBA06431",
@@ -3933,7 +3934,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60169",
     mis: "0",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FT7X2A63DEB77773",
@@ -3960,7 +3961,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77489",
     mis: "142",
     remainingBookValue: 0,
-    leaseEndDate: "10/9/2018\r"
+    leaseEndDate: "10/9/2018", source: "Holman"
   },
   {
     vin: "1FTEW1E55JKD89884",
@@ -3987,7 +3988,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85935",
     mis: "15",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTEW1EP6JFB01297",
@@ -4014,7 +4015,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28429",
     mis: "17",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTEW1EP7JFC56909",
@@ -4041,7 +4042,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "42325",
     mis: "13",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTFE24Y6THA32156",
@@ -4068,7 +4069,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92336",
     mis: "0",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTMF1CW4AKE72228",
@@ -4095,7 +4096,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77435",
     mis: "176",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2016\r"
+    leaseEndDate: "5/10/2016", source: "Holman"
   },
   {
     vin: "1FTMF1CW7AKE72191",
@@ -4122,7 +4123,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6010",
     mis: "173",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2016\r"
+    leaseEndDate: "5/10/2016", source: "Holman"
   },
   {
     vin: "1FTNE1EW7EDA41266",
@@ -4149,7 +4150,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89403",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTNE24W24HA65389",
@@ -4176,7 +4177,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7753",
     mis: "149",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W64HA63760",
@@ -4203,7 +4204,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7753",
     mis: "166",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W84HA63680",
@@ -4230,7 +4231,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7753",
     mis: "127",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W95HA38532",
@@ -4257,7 +4258,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32514",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX4HA13816",
@@ -4284,7 +4285,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "969",
     mis: "140",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX5HA38295",
@@ -4311,7 +4312,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96819",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTPX14V69KB98946",
@@ -4338,7 +4339,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85901",
     mis: "0",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTRF12W18KE22758",
@@ -4365,7 +4366,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91304",
     mis: "206",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTRF12W88KE22756",
@@ -4392,7 +4393,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75098",
     mis: "206",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA90962",
@@ -4419,7 +4420,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA90993",
@@ -4446,7 +4447,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36877",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA91013",
@@ -4473,7 +4474,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19585",
@@ -4500,7 +4501,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "86004",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA91053",
@@ -4527,7 +4528,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92545",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08644",
@@ -4554,7 +4555,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08711",
@@ -4581,7 +4582,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64801",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08742",
@@ -4608,7 +4609,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85249",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB11706",
@@ -4635,7 +4636,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19594",
@@ -4662,7 +4663,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85339",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKA91000",
@@ -4689,7 +4690,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33404",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19586",
@@ -4716,7 +4717,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "86442",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08645",
@@ -4743,7 +4744,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08712",
@@ -4770,7 +4771,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66202",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08743",
@@ -4797,7 +4798,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85379",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19595",
@@ -4824,7 +4825,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85303",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19600",
@@ -4851,7 +4852,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85051",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKA91015",
@@ -4878,7 +4879,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08654",
@@ -4905,7 +4906,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14092",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19587",
@@ -4932,7 +4933,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85741",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19590",
@@ -4959,7 +4960,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85395",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKA90990",
@@ -4986,7 +4987,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36874",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19596",
@@ -5013,7 +5014,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85635",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19601",
@@ -5040,7 +5041,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85037",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19476",
@@ -5067,7 +5068,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64150",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19591",
@@ -5094,7 +5095,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "86314",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKA90960",
@@ -5121,7 +5122,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKA91011",
@@ -5148,7 +5149,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA91082",
@@ -5175,7 +5176,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90630",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08656",
@@ -5202,7 +5203,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "13027",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08737",
@@ -5229,7 +5230,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92121",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB11704",
@@ -5256,7 +5257,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14737",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19589",
@@ -5283,7 +5284,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85715",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19592",
@@ -5310,7 +5311,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85757",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKA90961",
@@ -5337,7 +5338,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKA90989",
@@ -5364,7 +5365,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30022",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKA91009",
@@ -5391,7 +5392,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23230",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKA91012",
@@ -5418,7 +5419,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19964",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19598",
@@ -5445,7 +5446,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85122",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA90998",
@@ -5472,7 +5473,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33478",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA91004",
@@ -5499,7 +5500,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "34744",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA91035",
@@ -5526,7 +5527,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80603",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08643",
@@ -5553,7 +5554,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08710",
@@ -5580,7 +5581,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "65781",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08741",
@@ -5607,7 +5608,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85323",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08769",
@@ -5634,7 +5635,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90201",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08805",
@@ -5661,7 +5662,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97814",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB11705",
@@ -5688,7 +5689,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19593",
@@ -5715,7 +5716,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85334",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1GCCSBF96C8136549",
@@ -5742,7 +5743,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91304",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCGG25U231175964",
@@ -5769,7 +5770,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7753",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U941217130",
@@ -5796,7 +5797,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7753",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25V651171797",
@@ -5823,7 +5824,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7753",
     mis: "143",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1162369",
@@ -5850,7 +5851,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1168415",
@@ -5877,7 +5878,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1168754",
@@ -5904,7 +5905,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1187739",
@@ -5931,7 +5932,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40351",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1168647",
@@ -5958,7 +5959,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92584",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1168441",
@@ -5985,7 +5986,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1167994",
@@ -6012,7 +6013,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29488",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1169583",
@@ -6039,7 +6040,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29615",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1169317",
@@ -6066,7 +6067,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1167723",
@@ -6093,7 +6094,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92505",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153104",
@@ -6120,7 +6121,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77328",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1157654",
@@ -6147,7 +6148,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29511",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1153587",
@@ -6174,7 +6175,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155940",
@@ -6201,7 +6202,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1156053",
@@ -6228,7 +6229,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87113",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1158269",
@@ -6255,7 +6256,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1167845",
@@ -6282,7 +6283,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1134754",
@@ -6309,7 +6310,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95624",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1170382",
@@ -6336,7 +6337,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21015",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGAFP8M1260369",
@@ -6363,7 +6364,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28129",
     mis: "16",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GNDS13S132209178",
@@ -6390,7 +6391,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27804",
     mis: "7",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GRAA0624HB704055",
@@ -6417,7 +6418,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60169",
     mis: "0",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GRAP0628PK255927",
@@ -6444,7 +6445,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60169",
     mis: "0",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1J4NF1GB2BD130594",
@@ -6471,7 +6472,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "174",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2015\r"
+    leaseEndDate: "5/10/2015", source: "Holman"
   },
   {
     vin: "2GNALAEKXF6363859",
@@ -6498,7 +6499,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30214",
     mis: "122",
     remainingBookValue: 0,
-    leaseEndDate: "1/24/2021\r"
+    leaseEndDate: "1/24/2021", source: "Holman"
   },
   {
     vin: "2HGFA15559H351126",
@@ -6525,7 +6526,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37167",
     mis: "12",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "2HKRM4H50EH710190",
@@ -6552,7 +6553,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1007",
     mis: "18",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3C6JD6DP5CG125263",
@@ -6579,7 +6580,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29203",
     mis: "163",
     remainingBookValue: 0,
-    leaseEndDate: "3/24/2016\r"
+    leaseEndDate: "3/24/2016", source: "Holman"
   },
   {
     vin: "3C6JD6DP7CG125264",
@@ -6606,7 +6607,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74146",
     mis: "163",
     remainingBookValue: 0,
-    leaseEndDate: "3/12/2016\r"
+    leaseEndDate: "3/12/2016", source: "Holman"
   },
   {
     vin: "3C6LRVBG4ME565138",
@@ -6633,7 +6634,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28590",
     mis: "9",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3C6RR7KT5LG131798",
@@ -6660,7 +6661,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28425",
     mis: "14",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3GCPKSE7XDG333768",
@@ -6687,7 +6688,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39828",
     mis: "17",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3GCPWBEK2MG444193",
@@ -6714,7 +6715,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33032",
     mis: "17",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3N6CM0KN6DK695865",
@@ -6741,7 +6742,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66203",
     mis: "14",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "3N6CM0KN8HK706452",
@@ -6768,7 +6769,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64656",
     mis: "12",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "4A3AK34Y1XE093976",
@@ -6795,7 +6796,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28562",
     mis: "11",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "5UXTR7C5XKLF35830",
@@ -6822,7 +6823,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30519",
     mis: "16",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "5YFS4MCE2RP182749",
@@ -6849,7 +6850,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33132",
     mis: "12",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "JL6CRK1A4EK000432",
@@ -6876,7 +6877,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "3/21/2019\r"
+    leaseEndDate: "3/21/2019", source: "Holman"
   },
   {
     vin: "JL6CRK1A8EK003625",
@@ -6903,7 +6904,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95815",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "4/14/2019\r"
+    leaseEndDate: "4/14/2019", source: "Holman"
   },
   {
     vin: "JTEHH20V326033279",
@@ -6930,7 +6931,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80524",
     mis: "9",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "JTMZFREV4HD107555",
@@ -6957,7 +6958,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30041",
     mis: "13",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "KM8J3CA45KU985787",
@@ -6984,7 +6985,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "86323",
     mis: "17",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "KM8JBCAE0PU184154",
@@ -7011,7 +7012,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97222",
     mis: "9",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "KNDJP3A57H7502972",
@@ -7038,7 +7039,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "40",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "KNDJT2A15B7325204",
@@ -7065,7 +7066,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46167",
     mis: "10",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "NM0GE9F73E1142477",
@@ -7092,7 +7093,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "34476",
     mis: "17",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "NM0LS6E74J1348327",
@@ -7119,7 +7120,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78676",
     mis: "17",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "NM0LS7E71G1282463",
@@ -7146,7 +7147,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85326",
     mis: "105",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "NM0LS7E74G1245441",
@@ -7173,7 +7174,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "NM0LS7E74G1282506",
@@ -7200,7 +7201,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30281",
     mis: "106",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "NM0LS7E79G1282503",
@@ -7227,7 +7228,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78253",
     mis: "105",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "WD0PD644365864319",
@@ -7254,7 +7255,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "127",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FADP3K25EL235308",
@@ -7281,7 +7282,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40258",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "7/2/2019\r"
+    leaseEndDate: "7/2/2019", source: "Holman"
   },
   {
     vin: "1FDKE37HXTHB27444",
@@ -7308,7 +7309,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "306",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FDWE35L62HA07812",
@@ -7335,7 +7336,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "165",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE1EW0EDA41187",
@@ -7362,7 +7363,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "680",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW0EDA41190",
@@ -7389,7 +7390,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "612",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW0EDA41237",
@@ -7416,7 +7417,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19020",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW0EDA41268",
@@ -7443,7 +7444,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW0EDA44459",
@@ -7470,7 +7471,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40258",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW0EDA44493",
@@ -7497,7 +7498,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33773",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW1EDA41196",
@@ -7524,7 +7525,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92336",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTNE1EW1EDA41246",
@@ -7551,7 +7552,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTNE1EW1EDA41294",
@@ -7578,7 +7579,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70058",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW1EDA44454",
@@ -7605,7 +7606,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29020",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW1EDA44485",
@@ -7632,7 +7633,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30214",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTNE1EW2EDA41188",
@@ -7659,7 +7660,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "773",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW2EDA41191",
@@ -7686,7 +7687,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66441",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW2EDA41207",
@@ -7713,7 +7714,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW2EDA41210",
@@ -7740,7 +7741,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW2EDA41238",
@@ -7767,7 +7768,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW2EDA41269",
@@ -7794,7 +7795,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80128",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW2EDA44446",
@@ -7821,7 +7822,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44699",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW3EDA41216",
@@ -7848,7 +7849,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22407",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW3EDA41247",
@@ -7875,7 +7876,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35209",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW3EDA41281",
@@ -7902,7 +7903,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW3EDA41295",
@@ -7929,7 +7930,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW3EDA44455",
@@ -7956,7 +7957,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29588",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW3EDA44472",
@@ -7983,7 +7984,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2886",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW3EDA44486",
@@ -8010,7 +8011,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30214",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW4EDA37904",
@@ -8037,7 +8038,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72956",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTNE1EW4EDA41189",
@@ -8064,7 +8065,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30135",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW4EDA41211",
@@ -8091,7 +8092,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79912",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW4EDA41225",
@@ -8118,7 +8119,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71291",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW4EDA41242",
@@ -8145,7 +8146,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW4EDA41256",
@@ -8172,7 +8173,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6111",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW4EDA44450",
@@ -8199,7 +8200,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW4EDA44464",
@@ -8226,7 +8227,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW5EDA60639",
@@ -8253,7 +8254,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "969",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW6EDA41243",
@@ -8280,7 +8281,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW6EDA41257",
@@ -8307,7 +8308,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "12538",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW6EDA41288",
@@ -8334,7 +8335,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW6EDA44451",
@@ -8361,7 +8362,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW6EDA44482",
@@ -8388,7 +8389,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29661",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTNE1EW6EDA44496",
@@ -8415,7 +8416,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36866",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW7EDA41199",
@@ -8442,7 +8443,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98597",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW7EDA41221",
@@ -8469,7 +8470,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27529",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW7EDA41249",
@@ -8496,7 +8497,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71291",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW7EDA44443",
@@ -8523,7 +8524,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44833",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW7EDA44491",
@@ -8550,7 +8551,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48433",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW8EDA41289",
@@ -8577,7 +8578,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW8EDA41292",
@@ -8604,7 +8605,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW8EDA44452",
@@ -8631,7 +8632,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA37901",
@@ -8658,7 +8659,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95946",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA41219",
@@ -8685,7 +8686,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43228",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA41236",
@@ -8712,7 +8713,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA41253",
@@ -8739,7 +8740,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1961",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA41270",
@@ -8766,7 +8767,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92530",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA44444",
@@ -8793,7 +8794,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43756",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA44458",
@@ -8820,7 +8821,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24530",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA44475",
@@ -8847,7 +8848,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA44489",
@@ -8874,7 +8875,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49245",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EW9EDA44492",
@@ -8901,7 +8902,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38128",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EWXEDA41200",
@@ -8928,7 +8929,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98932",
     mis: "128",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1EWXEDA41214",
@@ -8955,7 +8956,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTNE1EWXEDA44467",
@@ -8982,7 +8983,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1YM0FKA27233",
@@ -9009,7 +9010,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96720",
     mis: "119",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE1YM7FKA37192",
@@ -9036,7 +9037,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96778",
     mis: "119",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTNE24231HA46018",
@@ -9063,7 +9064,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60007",
     mis: "191",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24241HA29650",
@@ -9090,7 +9091,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21060",
     mis: "170",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24261HA45784",
@@ -9117,7 +9118,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21060",
     mis: "164",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W04HA64922",
@@ -9144,7 +9145,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63026",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W04HA65052",
@@ -9171,7 +9172,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8057",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W05HA49791",
@@ -9198,7 +9199,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63026",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W05HA50021",
@@ -9225,7 +9226,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48313",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W15HA44454",
@@ -9252,7 +9253,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "142",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W15HA44714",
@@ -9279,7 +9280,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64120",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W15HA49766",
@@ -9306,7 +9307,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60007",
     mis: "162",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W15HA49783",
@@ -9333,7 +9334,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63026",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W26DA98029",
@@ -9360,7 +9361,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93727",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W34HA65076",
@@ -9387,7 +9388,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "169",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W36DA98492",
@@ -9414,7 +9415,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7753",
     mis: "139",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W45HA42097",
@@ -9441,7 +9442,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87109",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W55HA50029",
@@ -9468,7 +9469,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48313",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W56DA98025",
@@ -9495,7 +9496,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "138",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W64HA65332",
@@ -9522,7 +9523,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63026",
     mis: "149",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W65HA44417",
@@ -9549,7 +9550,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7753",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W66DA98020",
@@ -9576,7 +9577,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "138",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W74HA64920",
@@ -9603,7 +9604,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63026",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W84HA65400",
@@ -9630,7 +9631,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W85HA49778",
@@ -9657,7 +9658,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63026",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W94HA64787",
@@ -9684,7 +9685,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27609",
     mis: "151",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24W95HA42354",
@@ -9711,7 +9712,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX4HA64782",
@@ -9738,7 +9739,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27609",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX4HA65074",
@@ -9765,7 +9766,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "152",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX4HA65110",
@@ -9792,7 +9793,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "169",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX5HA49992",
@@ -9819,7 +9820,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48313",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX5HA50026",
@@ -9846,7 +9847,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48313",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNE24WX5HA50110",
@@ -9873,7 +9874,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1FTNR1YM9FKA27235",
@@ -9900,7 +9901,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96706",
     mis: "120",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTNR1YMXFKA12324",
@@ -9927,7 +9928,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "120",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA89536",
@@ -9954,7 +9955,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15601",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA90976",
@@ -9981,7 +9982,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "692",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA91027",
@@ -10008,7 +10009,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA91044",
@@ -10035,7 +10036,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA91058",
@@ -10062,7 +10063,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA91061",
@@ -10089,7 +10090,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "94545",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKA91075",
@@ -10116,7 +10117,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "94590",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08540",
@@ -10143,7 +10144,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2184",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08554",
@@ -10170,7 +10171,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08568",
@@ -10197,7 +10198,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08571",
@@ -10224,7 +10225,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08585",
@@ -10251,7 +10252,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "670",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08599",
@@ -10278,7 +10279,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08604",
@@ -10305,7 +10306,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08618",
@@ -10332,7 +10333,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08621",
@@ -10359,7 +10360,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08635",
@@ -10386,7 +10387,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08652",
@@ -10413,7 +10414,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14880",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08666",
@@ -10440,7 +10441,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76086",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08683",
@@ -10467,7 +10468,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75048",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08716",
@@ -10494,7 +10495,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80920",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08747",
@@ -10521,7 +10522,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96789",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08750",
@@ -10548,7 +10549,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08778",
@@ -10575,7 +10576,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08795",
@@ -10602,7 +10603,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB08800",
@@ -10629,7 +10630,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB11700",
@@ -10656,7 +10657,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB13026",
@@ -10683,7 +10684,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75670",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB13043",
@@ -10710,7 +10711,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB13074",
@@ -10737,7 +10738,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "83404",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19196",
@@ -10764,7 +10765,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "10/18/2023\r"
+    leaseEndDate: "10/18/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19246",
@@ -10791,7 +10792,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19263",
@@ -10818,7 +10819,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36575",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19280",
@@ -10845,7 +10846,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28227",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19294",
@@ -10872,7 +10873,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19313",
@@ -10899,7 +10900,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19327",
@@ -10926,7 +10927,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19330",
@@ -10953,7 +10954,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19344",
@@ -10980,7 +10981,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44410",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19425",
@@ -11007,7 +11008,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19473",
@@ -11034,7 +11035,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66209",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19537",
@@ -11061,7 +11062,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92707",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19554",
@@ -11088,7 +11089,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90713",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19568",
@@ -11115,7 +11116,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19571",
@@ -11142,7 +11143,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19604",
@@ -11169,7 +11170,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92274",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0GKB19618",
@@ -11196,7 +11197,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98445",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM0HKA77159",
@@ -11223,7 +11224,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "97",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA86547",
@@ -11250,7 +11251,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA89531",
@@ -11277,7 +11278,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "17601",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA89545",
@@ -11304,7 +11305,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45459",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA89576",
@@ -11331,7 +11332,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63366",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA90971",
@@ -11358,7 +11359,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30157",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA90985",
@@ -11385,7 +11386,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40403",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA90999",
@@ -11412,7 +11413,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33417",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA91005",
@@ -11439,7 +11440,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32210",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA91022",
@@ -11466,7 +11467,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75024",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA91036",
@@ -11493,7 +11494,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89107",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA91067",
@@ -11520,7 +11521,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKA91070",
@@ -11547,7 +11548,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08563",
@@ -11574,7 +11575,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08594",
@@ -11601,7 +11602,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33844",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08613",
@@ -11628,7 +11629,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08627",
@@ -11655,7 +11656,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08630",
@@ -11682,7 +11683,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08661",
@@ -11709,7 +11710,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44135",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08675",
@@ -11736,7 +11737,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76645",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08689",
@@ -11763,7 +11764,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72501",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08692",
@@ -11790,7 +11791,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08708",
@@ -11817,7 +11818,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "65648",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08725",
@@ -11844,7 +11845,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "81008",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08739",
@@ -11871,7 +11872,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "86441",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08756",
@@ -11898,7 +11899,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "94533",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08773",
@@ -11925,7 +11926,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08790",
@@ -11952,7 +11953,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96732",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB08806",
@@ -11979,7 +11980,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "99362",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB13018",
@@ -12006,7 +12007,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4210",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB13021",
@@ -12033,7 +12034,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1830",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB13035",
@@ -12060,7 +12061,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19157",
@@ -12087,7 +12088,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2343",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19174",
@@ -12114,7 +12115,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6716",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19188",
@@ -12141,7 +12142,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19238",
@@ -12168,7 +12169,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "687",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19255",
@@ -12195,7 +12196,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "623",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19269",
@@ -12222,7 +12223,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70114",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19272",
@@ -12249,7 +12250,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19319",
@@ -12276,7 +12277,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19322",
@@ -12303,7 +12304,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19353",
@@ -12330,7 +12331,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19403",
@@ -12357,7 +12358,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77338",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19417",
@@ -12384,7 +12385,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19420",
@@ -12411,7 +12412,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19479",
@@ -12438,7 +12439,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "65340",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19482",
@@ -12465,7 +12466,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66617",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19501",
@@ -12492,7 +12493,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87402",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19532",
@@ -12519,7 +12520,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19546",
@@ -12546,7 +12547,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19563",
@@ -12573,7 +12574,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90713",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB19580",
@@ -12600,7 +12601,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92677",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM1GKB23015",
@@ -12627,7 +12628,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "918",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKA89537",
@@ -12654,7 +12655,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15631",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKA89540",
@@ -12681,7 +12682,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "16601",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKA90963",
@@ -12708,7 +12709,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKA90977",
@@ -12735,7 +12736,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36301",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKA90980",
@@ -12762,7 +12763,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35133",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKA91028",
@@ -12789,7 +12790,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77095",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKA91045",
@@ -12816,7 +12817,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92707",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKA91062",
@@ -12843,7 +12844,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08555",
@@ -12870,7 +12871,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08569",
@@ -12897,7 +12898,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08572",
@@ -12924,7 +12925,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08586",
@@ -12951,7 +12952,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08605",
@@ -12978,7 +12979,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08619",
@@ -13005,7 +13006,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08622",
@@ -13032,7 +13033,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08636",
@@ -13059,7 +13060,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08653",
@@ -13086,7 +13087,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14224",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08667",
@@ -13113,7 +13114,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76705",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08670",
@@ -13140,7 +13141,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76040",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08684",
@@ -13167,7 +13168,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79605",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08698",
@@ -13194,7 +13195,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08703",
@@ -13221,7 +13222,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77039",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08717",
@@ -13248,7 +13249,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80226",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08720",
@@ -13275,7 +13276,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80104",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08734",
@@ -13302,7 +13303,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08748",
@@ -13329,7 +13330,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96734",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08751",
@@ -13356,7 +13357,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96706",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08779",
@@ -13383,7 +13384,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93906",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08782",
@@ -13410,7 +13411,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96720",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB08801",
@@ -13437,7 +13438,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB13030",
@@ -13464,7 +13465,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37204",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB13044",
@@ -13491,7 +13492,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB13058",
@@ -13518,7 +13519,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19152",
@@ -13545,7 +13546,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19183",
@@ -13572,7 +13573,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19197",
@@ -13599,7 +13600,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19202",
@@ -13626,7 +13627,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30252",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19233",
@@ -13653,7 +13654,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38117",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19247",
@@ -13680,7 +13681,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "982",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19250",
@@ -13707,7 +13708,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "602",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19278",
@@ -13734,7 +13735,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "985",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19281",
@@ -13761,7 +13762,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19314",
@@ -13788,7 +13789,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19328",
@@ -13815,7 +13816,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19331",
@@ -13842,7 +13843,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19359",
@@ -13869,7 +13870,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45612",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19362",
@@ -13896,7 +13897,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28150",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19393",
@@ -13923,7 +13924,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49331",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19409",
@@ -13950,7 +13951,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19412",
@@ -13977,7 +13978,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19555",
@@ -14004,7 +14005,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90713",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19569",
@@ -14031,7 +14032,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19572",
@@ -14058,7 +14059,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19605",
@@ -14085,7 +14086,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92503",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB19619",
@@ -14112,7 +14113,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98383",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB23007",
@@ -14139,7 +14140,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "669",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2GKB23010",
@@ -14166,7 +14167,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "738",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2HKA77244",
@@ -14193,7 +14194,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "99",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2HKA91340",
@@ -14220,7 +14221,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92647",
     mis: "98",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM2HKB06127",
@@ -14247,7 +14248,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "97",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKA89532",
@@ -14274,7 +14275,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKA89577",
@@ -14301,7 +14302,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKA90972",
@@ -14328,7 +14329,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30135",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKA90986",
@@ -14355,7 +14356,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37643",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKA91006",
@@ -14382,7 +14383,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32223",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKA91040",
@@ -14409,7 +14410,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKA91054",
@@ -14436,7 +14437,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90713",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08547",
@@ -14463,7 +14464,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08550",
@@ -14490,7 +14491,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08564",
@@ -14517,7 +14518,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08581",
@@ -14544,7 +14545,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08595",
@@ -14571,7 +14572,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08600",
@@ -14598,7 +14599,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08614",
@@ -14625,7 +14626,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08628",
@@ -14652,7 +14653,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08662",
@@ -14679,7 +14680,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43223",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08676",
@@ -14706,7 +14707,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76018",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08693",
@@ -14733,7 +14734,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08709",
@@ -14760,7 +14761,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66102",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08760",
@@ -14787,7 +14788,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "94588",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08788",
@@ -14814,7 +14815,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96768",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08791",
@@ -14841,7 +14842,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96732",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB08807",
@@ -14868,7 +14869,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98032",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB11710",
@@ -14895,7 +14896,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63376",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB13019",
@@ -14922,7 +14923,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "3825",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB13036",
@@ -14949,7 +14950,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB13053",
@@ -14976,7 +14977,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "47710",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19144",
@@ -15003,7 +15004,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6119",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19158",
@@ -15030,7 +15031,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1440",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19161",
@@ -15057,7 +15058,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4106",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19175",
@@ -15084,7 +15085,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19189",
@@ -15111,7 +15112,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19192",
@@ -15138,7 +15139,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19211",
@@ -15165,7 +15166,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "41635",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19225",
@@ -15192,7 +15193,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28306",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19242",
@@ -15219,7 +15220,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19256",
@@ -15246,7 +15247,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19290",
@@ -15273,7 +15274,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19306",
@@ -15300,7 +15301,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19975",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19323",
@@ -15327,7 +15328,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19340",
@@ -15354,7 +15355,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44070",
     mis: "106",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19354",
@@ -15381,7 +15382,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19368",
@@ -15408,7 +15409,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37863",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19385",
@@ -15435,7 +15436,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49525",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19404",
@@ -15462,7 +15463,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77845",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19418",
@@ -15489,7 +15490,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19421",
@@ -15516,7 +15517,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19466",
@@ -15543,7 +15544,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66209",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19533",
@@ -15570,7 +15571,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92707",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19547",
@@ -15597,7 +15598,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19550",
@@ -15624,7 +15625,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92336",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19564",
@@ -15651,7 +15652,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90713",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19578",
@@ -15678,7 +15679,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92154",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB19614",
@@ -15705,7 +15706,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98277",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM3GKB23016",
@@ -15732,7 +15733,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "641",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKA89541",
@@ -15759,7 +15760,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "16046",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKA90964",
@@ -15786,7 +15787,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32571",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKA90978",
@@ -15813,7 +15814,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30519",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKA90981",
@@ -15840,7 +15841,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30013",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKA91029",
@@ -15867,7 +15868,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66851",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKA91032",
@@ -15894,7 +15895,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "50458",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKA91046",
@@ -15921,7 +15922,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85366",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKA91080",
@@ -15948,7 +15949,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08539",
@@ -15975,7 +15976,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08542",
@@ -16002,7 +16003,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08556",
@@ -16029,7 +16030,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14043",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08573",
@@ -16056,7 +16057,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08587",
@@ -16083,7 +16084,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08590",
@@ -16110,7 +16111,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08606",
@@ -16137,7 +16138,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08623",
@@ -16164,7 +16165,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22193",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08668",
@@ -16191,7 +16192,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75048",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08671",
@@ -16218,7 +16219,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76116",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08685",
@@ -16245,7 +16246,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76028",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08699",
@@ -16272,7 +16273,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08718",
@@ -16299,7 +16300,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "81050",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08735",
@@ -16326,7 +16327,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92544",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08766",
@@ -16353,7 +16354,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95682",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08783",
@@ -16380,7 +16381,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96749",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB08797",
@@ -16407,7 +16408,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB11716",
@@ -16434,7 +16435,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77082",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB13028",
@@ -16461,7 +16462,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38856",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB13031",
@@ -16488,7 +16489,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39170",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB13076",
@@ -16515,7 +16516,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97471",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19153",
@@ -16542,7 +16543,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19167",
@@ -16569,7 +16570,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19170",
@@ -16596,7 +16597,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19184",
@@ -16623,7 +16624,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19198",
@@ -16650,7 +16651,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19203",
@@ -16677,7 +16678,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "918",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19217",
@@ -16704,7 +16705,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27615",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19220",
@@ -16731,7 +16732,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29486",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19248",
@@ -16758,7 +16759,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19251",
@@ -16785,7 +16786,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19282",
@@ -16812,7 +16813,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32224",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19301",
@@ -16839,7 +16840,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19315",
@@ -16866,7 +16867,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19329",
@@ -16893,7 +16894,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19332",
@@ -16920,7 +16921,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19363",
@@ -16947,7 +16948,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28278",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19394",
@@ -16974,7 +16975,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49048",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19413",
@@ -17001,7 +17002,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19427",
@@ -17028,7 +17029,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19556",
@@ -17055,7 +17056,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19573",
@@ -17082,7 +17083,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB19606",
@@ -17109,7 +17110,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB23008",
@@ -17136,7 +17137,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "681",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4GKB23011",
@@ -17163,7 +17164,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "646",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4HKA77195",
@@ -17190,7 +17191,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45806",
     mis: "99",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4HKA77245",
@@ -17217,7 +17218,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "99",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM4HKB06128",
@@ -17244,7 +17245,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "53714",
     mis: "97",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKA89533",
@@ -17271,7 +17272,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15102",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKA89578",
@@ -17298,7 +17299,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKA90973",
@@ -17325,7 +17326,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30214",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKA91007",
@@ -17352,7 +17353,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKA91038",
@@ -17379,7 +17380,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKA91041",
@@ -17406,7 +17407,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKA91055",
@@ -17433,7 +17434,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90713",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKA91069",
@@ -17460,7 +17461,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08548",
@@ -17487,7 +17488,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08565",
@@ -17514,7 +17515,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08582",
@@ -17541,7 +17542,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08615",
@@ -17568,7 +17569,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08629",
@@ -17595,7 +17596,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08632",
@@ -17622,7 +17623,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22191",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08646",
@@ -17649,7 +17650,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08677",
@@ -17676,7 +17677,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76309",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08680",
@@ -17703,7 +17704,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75159",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08727",
@@ -17730,7 +17731,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75904",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08730",
@@ -17757,7 +17758,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80239",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08744",
@@ -17784,7 +17785,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85710",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08761",
@@ -17811,7 +17812,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92545",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08775",
@@ -17838,7 +17839,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93704",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08789",
@@ -17865,7 +17866,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96790",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB08792",
@@ -17892,7 +17893,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96768",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB11708",
@@ -17919,7 +17920,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75092",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB11711",
@@ -17946,7 +17947,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB13023",
@@ -17973,7 +17974,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB13037",
@@ -18000,7 +18001,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB13040",
@@ -18027,7 +18028,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB13068",
@@ -18054,7 +18055,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB13071",
@@ -18081,7 +18082,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19145",
@@ -18108,7 +18109,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2886",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19176",
@@ -18135,7 +18136,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19212",
@@ -18162,7 +18163,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45652",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19243",
@@ -18189,7 +18190,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "987",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19257",
@@ -18216,7 +18217,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19260",
@@ -18243,7 +18244,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36526",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19291",
@@ -18270,7 +18271,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19310",
@@ -18297,7 +18298,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19324",
@@ -18324,7 +18325,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19355",
@@ -18351,7 +18352,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43123",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19419",
@@ -18378,7 +18379,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19453",
@@ -18405,7 +18406,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "88001",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19467",
@@ -18432,7 +18433,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63558",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19470",
@@ -18459,7 +18460,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74403",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19484",
@@ -18486,7 +18487,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19498",
@@ -18513,7 +18514,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87801",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19503",
@@ -18540,7 +18541,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19534",
@@ -18567,7 +18568,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19548",
@@ -18594,7 +18595,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92708",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19551",
@@ -18621,7 +18622,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92021",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19579",
@@ -18648,7 +18649,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92139",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB19582",
@@ -18675,7 +18676,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92040",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB23017",
@@ -18702,7 +18703,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "987",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB23020",
@@ -18729,7 +18730,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "777",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM5GKB37712",
@@ -18756,7 +18757,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "703",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA89542",
@@ -18783,7 +18784,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15601",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA90965",
@@ -18810,7 +18811,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36571",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA90979",
@@ -18837,7 +18838,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31794",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA90996",
@@ -18864,7 +18865,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70127",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA91002",
@@ -18891,7 +18892,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30667",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA91016",
@@ -18918,7 +18919,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40353",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA91033",
@@ -18945,7 +18946,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "68114",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA91047",
@@ -18972,7 +18973,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92707",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA91050",
@@ -18999,7 +19000,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92704",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA91064",
@@ -19026,7 +19027,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKA91078",
@@ -19053,7 +19054,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08543",
@@ -19080,7 +19081,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4901",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08557",
@@ -19107,7 +19108,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08560",
@@ -19134,7 +19135,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08574",
@@ -19161,7 +19162,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6824",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08588",
@@ -19188,7 +19189,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08591",
@@ -19215,7 +19216,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08607",
@@ -19242,7 +19243,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08610",
@@ -19269,7 +19270,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08624",
@@ -19296,7 +19297,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08638",
@@ -19323,7 +19324,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08641",
@@ -19350,7 +19351,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08655",
@@ -19377,7 +19378,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08672",
@@ -19404,7 +19405,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76134",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08686",
@@ -19431,7 +19432,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77545",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08705",
@@ -19458,7 +19459,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71327",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08719",
@@ -19485,7 +19486,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "84062",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08722",
@@ -19512,7 +19513,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "84790",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08736",
@@ -19539,7 +19540,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92376",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08767",
@@ -19566,7 +19567,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93245",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08770",
@@ -19593,7 +19594,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08784",
@@ -19620,7 +19621,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08798",
@@ -19647,7 +19648,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB08803",
@@ -19674,7 +19675,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB13032",
@@ -19701,7 +19702,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38133",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB13046",
@@ -19728,7 +19729,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49331",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB13063",
@@ -19755,7 +19756,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19154",
@@ -19782,7 +19783,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19168",
@@ -19809,7 +19810,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "10/18/2023\r"
+    leaseEndDate: "10/18/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19171",
@@ -19836,7 +19837,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19185",
@@ -19863,7 +19864,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19204",
@@ -19890,7 +19891,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32501",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19218",
@@ -19917,7 +19918,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27615",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19221",
@@ -19944,7 +19945,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28021",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19249",
@@ -19971,7 +19972,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19252",
@@ -19998,7 +19999,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "771",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19266",
@@ -20025,7 +20026,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "707",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19316",
@@ -20052,7 +20053,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19333",
@@ -20079,7 +20080,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19364",
@@ -20106,7 +20107,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44514",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19378",
@@ -20133,7 +20134,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48893",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19381",
@@ -20160,7 +20161,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48014",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19400",
@@ -20187,7 +20188,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79602",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19414",
@@ -20214,7 +20215,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19431",
@@ -20241,7 +20242,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19462",
@@ -20268,7 +20269,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79602",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19493",
@@ -20295,7 +20296,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19557",
@@ -20322,7 +20323,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90713",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19560",
@@ -20349,7 +20350,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19574",
@@ -20376,7 +20377,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB19610",
@@ -20403,7 +20404,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97408",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB23009",
@@ -20430,7 +20431,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "612",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6GKB23012",
@@ -20457,7 +20458,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "731",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6HKA77165",
@@ -20484,7 +20485,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15601",
     mis: "98",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM6HKB06129",
@@ -20511,7 +20512,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46176",
     mis: "97",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKA89534",
@@ -20538,7 +20539,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "17552",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKA90974",
@@ -20565,7 +20566,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35071",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKA91008",
@@ -20592,7 +20593,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKA91039",
@@ -20619,7 +20620,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKA91056",
@@ -20646,7 +20647,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92301",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKA91073",
@@ -20673,7 +20674,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08549",
@@ -20700,7 +20701,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08552",
@@ -20727,7 +20728,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08566",
@@ -20754,7 +20755,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08583",
@@ -20781,7 +20782,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "725",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08597",
@@ -20808,7 +20809,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33773",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08602",
@@ -20835,7 +20836,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08616",
@@ -20862,7 +20863,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08633",
@@ -20889,7 +20890,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08647",
@@ -20916,7 +20917,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08650",
@@ -20943,7 +20944,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08664",
@@ -20970,7 +20971,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44017",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08695",
@@ -20997,7 +20998,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77573",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08700",
@@ -21024,7 +21025,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77573",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08714",
@@ -21051,7 +21052,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80634",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08728",
@@ -21078,7 +21079,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64131",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08759",
@@ -21105,7 +21106,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95451",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08776",
@@ -21132,7 +21133,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB08793",
@@ -21159,7 +21160,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB11709",
@@ -21186,7 +21187,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76801",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB13024",
@@ -21213,7 +21214,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8360",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB13055",
@@ -21240,7 +21241,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB13069",
@@ -21267,7 +21268,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91324",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB13072",
@@ -21294,7 +21295,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96720",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19163",
@@ -21321,7 +21322,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4062",
     mis: "106",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19177",
@@ -21348,7 +21349,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19194",
@@ -21375,7 +21376,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "10/18/2023\r"
+    leaseEndDate: "10/18/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19227",
@@ -21402,7 +21403,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35228",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19244",
@@ -21429,7 +21430,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19258",
@@ -21456,7 +21457,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70737",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19261",
@@ -21483,7 +21484,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37204",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19289",
@@ -21510,7 +21511,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19292",
@@ -21537,7 +21538,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19311",
@@ -21564,7 +21565,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19325",
@@ -21591,7 +21592,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19339",
@@ -21618,7 +21619,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44470",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19342",
@@ -21645,7 +21646,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15666",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19356",
@@ -21672,7 +21673,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28740",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19390",
@@ -21699,7 +21700,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48532",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19406",
@@ -21726,7 +21727,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19454",
@@ -21753,7 +21754,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79912",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19468",
@@ -21780,7 +21781,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "67214",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19471",
@@ -21807,7 +21808,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74021",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19499",
@@ -21834,7 +21835,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87114",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19504",
@@ -21861,7 +21862,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19535",
@@ -21888,7 +21889,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19549",
@@ -21915,7 +21916,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90606",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19552",
@@ -21942,7 +21943,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19566",
@@ -21969,7 +21970,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19583",
@@ -21996,7 +21997,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91950",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB19602",
@@ -22023,7 +22024,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92028",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB23018",
@@ -22050,7 +22051,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "987",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7GKB23021",
@@ -22077,7 +22078,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "693",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM7HKA77157",
@@ -22104,7 +22105,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "99",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA89543",
@@ -22131,7 +22132,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44147",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA89574",
@@ -22158,7 +22159,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA90966",
@@ -22185,7 +22186,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32405",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA90983",
@@ -22212,7 +22213,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24317",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA90997",
@@ -22239,7 +22240,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33024",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA91003",
@@ -22266,7 +22267,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33619",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA91020",
@@ -22293,7 +22294,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76708",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA91048",
@@ -22320,7 +22321,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92841",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA91051",
@@ -22347,7 +22348,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91016",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKA91079",
@@ -22374,7 +22375,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08558",
@@ -22401,7 +22402,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08561",
@@ -22428,7 +22429,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08575",
@@ -22455,7 +22456,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08589",
@@ -22482,7 +22483,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08608",
@@ -22509,7 +22510,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30457",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08625",
@@ -22536,7 +22537,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08639",
@@ -22563,7 +22564,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08642",
@@ -22590,7 +22591,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08673",
@@ -22617,7 +22618,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75149",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08687",
@@ -22644,7 +22645,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70518",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08690",
@@ -22671,7 +22672,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75703",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08706",
@@ -22698,7 +22699,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75904",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08723",
@@ -22725,7 +22726,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08740",
@@ -22752,7 +22753,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85323",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08754",
@@ -22779,7 +22780,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08771",
@@ -22806,7 +22807,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95356",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08799",
@@ -22833,7 +22834,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98065",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB08804",
@@ -22860,7 +22861,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB13033",
@@ -22887,7 +22888,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38134",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB13050",
@@ -22914,7 +22915,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40228",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19155",
@@ -22941,7 +22942,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4037",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19169",
@@ -22968,7 +22969,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19186",
@@ -22995,7 +22996,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19205",
@@ -23022,7 +23023,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35209",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19219",
@@ -23049,7 +23050,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "687",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19222",
@@ -23076,7 +23077,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "985",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19236",
@@ -23103,7 +23104,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38611",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19253",
@@ -23130,7 +23131,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19267",
@@ -23157,7 +23158,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "956",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19270",
@@ -23184,7 +23185,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "987",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19284",
@@ -23211,7 +23212,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22963",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19320",
@@ -23238,7 +23239,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19365",
@@ -23265,7 +23266,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44502",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19379",
@@ -23292,7 +23293,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49014",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19382",
@@ -23319,7 +23320,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49056",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19401",
@@ -23346,7 +23347,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76036",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19415",
@@ -23373,7 +23374,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19432",
@@ -23400,7 +23401,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77318",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19463",
@@ -23427,7 +23428,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76063",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19477",
@@ -23454,7 +23455,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "65757",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19494",
@@ -23481,7 +23482,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "62023",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19530",
@@ -23508,7 +23509,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92707",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB19561",
@@ -23535,7 +23536,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8GKB23013",
@@ -23562,7 +23563,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "969",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8HKA77166",
@@ -23589,7 +23590,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92627",
     mis: "98",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM8HKA91259",
@@ -23616,7 +23617,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "98",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKA90975",
@@ -23643,7 +23644,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30215",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKA91043",
@@ -23670,7 +23671,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKA91057",
@@ -23697,7 +23698,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92706",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKA91074",
@@ -23724,7 +23725,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08553",
@@ -23751,7 +23752,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08567",
@@ -23778,7 +23779,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08570",
@@ -23805,7 +23806,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08584",
@@ -23832,7 +23833,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08598",
@@ -23859,7 +23860,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32583",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08603",
@@ -23886,7 +23887,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08617",
@@ -23913,7 +23914,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08620",
@@ -23940,7 +23941,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "17268",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08634",
@@ -23967,7 +23968,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "20744",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08648",
@@ -23994,7 +23995,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14870",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08665",
@@ -24021,7 +24022,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "88101",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08682",
@@ -24048,7 +24049,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75840",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08696",
@@ -24075,7 +24076,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08701",
@@ -24102,7 +24103,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77331",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08715",
@@ -24129,7 +24130,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "84745",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08729",
@@ -24156,7 +24157,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80209",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08732",
@@ -24183,7 +24184,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08780",
@@ -24210,7 +24211,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB08794",
@@ -24237,7 +24238,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97015",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB11713",
@@ -24264,7 +24265,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14905",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB13025",
@@ -24291,7 +24292,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB13039",
@@ -24318,7 +24319,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55431",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB13042",
@@ -24345,7 +24346,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB13056",
@@ -24372,7 +24373,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37918",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB13073",
@@ -24399,7 +24400,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98188",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19195",
@@ -24426,7 +24427,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "10/18/2023\r"
+    leaseEndDate: "10/18/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19200",
@@ -24453,7 +24454,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35031",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19228",
@@ -24480,7 +24481,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70515",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19231",
@@ -24507,7 +24508,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38654",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19245",
@@ -24534,7 +24535,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19259",
@@ -24561,7 +24562,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19262",
@@ -24588,7 +24589,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32514",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19309",
@@ -24615,7 +24616,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19312",
@@ -24642,7 +24643,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19326",
@@ -24669,7 +24670,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19343",
@@ -24696,7 +24697,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "26301",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19357",
@@ -24723,7 +24724,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "16353",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19360",
@@ -24750,7 +24751,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43204",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19388",
@@ -24777,7 +24778,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49341",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19410",
@@ -24804,7 +24805,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19455",
@@ -24831,7 +24832,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79912",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19469",
@@ -24858,7 +24859,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74820",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19472",
@@ -24885,7 +24886,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74467",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19553",
@@ -24912,7 +24913,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92630",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19570",
@@ -24939,7 +24940,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19603",
@@ -24966,7 +24967,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92563",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB19617",
@@ -24993,7 +24994,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97527",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9GKB23019",
@@ -25020,7 +25021,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89436",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YM9HKA77158",
@@ -25047,7 +25048,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14772",
     mis: "97",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA89544",
@@ -25074,7 +25075,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44135",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA90967",
@@ -25101,7 +25102,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31029",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA90984",
@@ -25128,7 +25129,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28208",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA91018",
@@ -25155,7 +25156,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76131",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA91049",
@@ -25182,7 +25183,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92707",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA91052",
@@ -25209,7 +25210,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90670",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKA91066",
@@ -25236,7 +25237,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08545",
@@ -25263,7 +25264,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08559",
@@ -25290,7 +25291,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08562",
@@ -25317,7 +25318,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "18447",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08609",
@@ -25344,7 +25345,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08612",
@@ -25371,7 +25372,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "20852",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08674",
@@ -25398,7 +25399,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75021",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08691",
@@ -25425,7 +25426,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "111",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08707",
@@ -25452,7 +25453,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08724",
@@ -25479,7 +25480,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08772",
@@ -25506,7 +25507,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB08786",
@@ -25533,7 +25534,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96720",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB13020",
@@ -25560,7 +25561,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4062",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB13051",
@@ -25587,7 +25588,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44710",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19173",
@@ -25614,7 +25615,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19223",
@@ -25641,7 +25642,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "725",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19237",
@@ -25668,7 +25669,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71078",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19254",
@@ -25695,7 +25696,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19268",
@@ -25722,7 +25723,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39645",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19271",
@@ -25749,7 +25750,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70056",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19304",
@@ -25776,7 +25777,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "20659",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19318",
@@ -25803,7 +25804,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "61832",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19321",
@@ -25830,7 +25831,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19366",
@@ -25857,7 +25858,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "47117",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19383",
@@ -25884,7 +25885,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49408",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19402",
@@ -25911,7 +25912,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75460",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19416",
@@ -25938,7 +25939,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19433",
@@ -25965,7 +25966,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75140",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19464",
@@ -25992,7 +25993,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "73084",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19478",
@@ -26019,7 +26020,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66102",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19481",
@@ -26046,7 +26047,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "67114",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19500",
@@ -26073,7 +26074,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85282",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19545",
@@ -26100,7 +26101,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90713",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19559",
@@ -26127,7 +26128,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19562",
@@ -26154,7 +26155,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91744",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB19576",
@@ -26181,7 +26182,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92036",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXGKB23014",
@@ -26208,7 +26209,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "957",
     mis: "108",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXHKA77167",
@@ -26235,7 +26236,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24401",
     mis: "98",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1FTYE1YMXHKA77184",
@@ -26262,7 +26263,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "98",
     remainingBookValue: 0,
-    leaseEndDate: "11/26/2023\r"
+    leaseEndDate: "11/26/2023", source: "Holman"
   },
   {
     vin: "1GCCSBF90C8130486",
@@ -26289,7 +26290,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCCSBF91C8136006",
@@ -26316,7 +26317,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCCSBF92C8130490",
@@ -26343,7 +26344,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCCSBF92C8143689",
@@ -26370,7 +26371,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43230",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCCSBF93C8130742",
@@ -26397,7 +26398,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91304",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCCSBF93C8137352",
@@ -26424,7 +26425,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCCSBF96C8140326",
@@ -26451,7 +26452,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95624",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCCSBF98C8135659",
@@ -26478,7 +26479,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30022",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCCSBF98C8140201",
@@ -26505,7 +26506,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96720",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCCSBF99C8141986",
@@ -26532,7 +26533,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30214",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "6/8/2017\r"
+    leaseEndDate: "6/8/2017", source: "Holman"
   },
   {
     vin: "1GCGG25C081134652",
@@ -26559,7 +26560,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C081134862",
@@ -26586,7 +26587,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C081135414",
@@ -26613,7 +26614,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C081138264",
@@ -26640,7 +26641,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "106",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C181135387",
@@ -26667,7 +26668,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30093",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C281134636",
@@ -26694,7 +26695,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64772",
     mis: "104",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C281138590",
@@ -26721,7 +26722,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C381133818",
@@ -26748,7 +26749,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C381141725",
@@ -26775,7 +26776,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C481135108",
@@ -26802,7 +26803,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C481142270",
@@ -26829,7 +26830,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64772",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C481146724",
@@ -26856,7 +26857,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92408",
     mis: "213",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C491141430",
@@ -26883,7 +26884,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37604",
     mis: "96",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C581134582",
@@ -26910,7 +26911,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64772",
     mis: "103",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C581134663",
@@ -26937,7 +26938,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72903",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C581135344",
@@ -26964,7 +26965,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64772",
     mis: "104",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C581135358",
@@ -26991,7 +26992,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "126",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C581137904",
@@ -27018,7 +27019,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64772",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C591140254",
@@ -27045,7 +27046,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "81",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C691134236",
@@ -27072,7 +27073,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "200",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C691141753",
@@ -27099,7 +27100,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27609",
     mis: "96",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C781138245",
@@ -27126,7 +27127,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C781144790",
@@ -27153,7 +27154,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C791136173",
@@ -27180,7 +27181,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87109",
     mis: "113",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C791139056",
@@ -27207,7 +27208,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80601",
     mis: "112",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C881134379",
@@ -27234,7 +27235,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C881138318",
@@ -27261,7 +27262,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "107",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C981134360",
@@ -27288,7 +27289,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "52402",
     mis: "110",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C981171781",
@@ -27315,7 +27316,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48313",
     mis: "113",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25C991138846",
@@ -27342,7 +27343,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "200",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81134819",
@@ -27369,7 +27370,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87109",
     mis: "123",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81140619",
@@ -27396,7 +27397,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "213",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25CX81141964",
@@ -27423,7 +27424,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64772",
     mis: "109",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U031119067",
@@ -27450,7 +27451,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "162",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U051210973",
@@ -27477,7 +27478,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85204",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U141240501",
@@ -27504,7 +27505,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63026",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U151205684",
@@ -27531,7 +27532,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48313",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U241212819",
@@ -27558,7 +27559,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "153",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U451211351",
@@ -27585,7 +27586,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "138",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U541212717",
@@ -27612,7 +27613,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63026",
     mis: "151",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U541213138",
@@ -27639,7 +27640,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "149",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U541237102",
@@ -27666,7 +27667,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U551224349",
@@ -27693,7 +27694,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11747",
     mis: "140",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U641247928",
@@ -27720,7 +27721,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "153",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U731194705",
@@ -27747,7 +27748,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "167",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U951210826",
@@ -27774,7 +27775,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "139",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25U951218814",
@@ -27801,7 +27802,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCGG25V241203532",
@@ -27828,7 +27829,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60179",
     mis: "140",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCHG35U531133816",
@@ -27855,7 +27856,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97230",
     mis: "168",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1134956",
@@ -27882,7 +27883,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91104",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1135332",
@@ -27909,7 +27910,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85233",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1135430",
@@ -27936,7 +27937,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91911",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1136917",
@@ -27963,7 +27964,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1137050",
@@ -27990,7 +27991,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96732",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1137081",
@@ -28017,7 +28018,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90650",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1139087",
@@ -28044,7 +28045,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78602",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1139560",
@@ -28071,7 +28072,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1139655",
@@ -28098,7 +28099,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "67110",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1139834",
@@ -28125,7 +28126,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85743",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1141454",
@@ -28152,7 +28153,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87059",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1142927",
@@ -28179,7 +28180,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33702",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1143561",
@@ -28206,7 +28207,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32068",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1144144",
@@ -28233,7 +28234,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29526",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1144175",
@@ -28260,7 +28261,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32927",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1144273",
@@ -28287,7 +28288,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "51239",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1144998",
@@ -28314,7 +28315,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35218",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1145388",
@@ -28341,7 +28342,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28146",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1145505",
@@ -28368,7 +28369,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1148369",
@@ -28395,7 +28396,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1148372",
@@ -28422,7 +28423,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91764",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1156620",
@@ -28449,7 +28450,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1156987",
@@ -28476,7 +28477,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6010",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1170887",
@@ -28503,7 +28504,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80920",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1171439",
@@ -28530,7 +28531,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89011",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1171747",
@@ -28557,7 +28558,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92254",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1172008",
@@ -28584,7 +28585,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1172056",
@@ -28611,7 +28612,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1172719",
@@ -28638,7 +28639,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/13/2017\r"
+    leaseEndDate: "7/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1177144",
@@ -28665,7 +28666,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "61761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1177774",
@@ -28692,7 +28693,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30214",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1178908",
@@ -28719,7 +28720,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1179623",
@@ -28746,7 +28747,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1179976",
@@ -28773,7 +28774,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32571",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1180321",
@@ -28800,7 +28801,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49277",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1181324",
@@ -28827,7 +28828,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85365",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1183767",
@@ -28854,7 +28855,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/19/2017\r"
+    leaseEndDate: "9/19/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1185714",
@@ -28881,7 +28882,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27284",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/17/2017\r"
+    leaseEndDate: "8/17/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1185955",
@@ -28908,7 +28909,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "18640",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/7/2017\r"
+    leaseEndDate: "8/7/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1186197",
@@ -28935,7 +28936,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92114",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1186457",
@@ -28962,7 +28963,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1188001",
@@ -28989,7 +28990,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "94550",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/20/2017\r"
+    leaseEndDate: "9/20/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1188242",
@@ -29016,7 +29017,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92501",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/20/2017\r"
+    leaseEndDate: "8/20/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1191528",
@@ -29043,7 +29044,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0C1191688",
@@ -29070,7 +29071,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1146901",
@@ -29097,7 +29098,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23464",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1147126",
@@ -29124,7 +29125,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45429",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/12/2018\r"
+    leaseEndDate: "4/12/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1147272",
@@ -29151,7 +29152,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37659",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1147434",
@@ -29178,7 +29179,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23851",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1150186",
@@ -29205,7 +29206,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15902",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1154576",
@@ -29232,7 +29233,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1155131",
@@ -29259,7 +29260,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2351",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/3/2018\r"
+    leaseEndDate: "5/3/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1155856",
@@ -29286,7 +29287,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22193",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1156764",
@@ -29313,7 +29314,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1157297",
@@ -29340,7 +29341,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1158305",
@@ -29367,7 +29368,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8057",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1159101",
@@ -29394,7 +29395,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97030",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1159163",
@@ -29421,7 +29422,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1159275",
@@ -29448,7 +29449,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98661",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1160359",
@@ -29475,7 +29476,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97408",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/16/2018\r"
+    leaseEndDate: "5/16/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1161074",
@@ -29502,7 +29503,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "20904",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1161107",
@@ -29529,7 +29530,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1161155",
@@ -29556,7 +29557,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "10567",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/3/2018\r"
+    leaseEndDate: "5/3/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1161365",
@@ -29583,7 +29584,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "12582",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/14/2018\r"
+    leaseEndDate: "6/14/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1161897",
@@ -29610,7 +29611,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "3743",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1167280",
@@ -29637,7 +29638,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1167344",
@@ -29664,7 +29665,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1167585",
@@ -29691,7 +29692,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "34211",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/7/2018\r"
+    leaseEndDate: "6/7/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1168915",
@@ -29718,7 +29719,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85654",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/13/2018\r"
+    leaseEndDate: "6/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1169904",
@@ -29745,7 +29746,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19054",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1170891",
@@ -29772,7 +29773,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21702",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1171264",
@@ -29799,7 +29800,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1171832",
@@ -29826,7 +29827,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1172320",
@@ -29853,7 +29854,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78405",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1172415",
@@ -29880,7 +29881,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78405",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/10/2018\r"
+    leaseEndDate: "6/10/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1172916",
@@ -29907,7 +29908,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28704",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1173113",
@@ -29934,7 +29935,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37914",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "7/26/2018\r"
+    leaseEndDate: "7/26/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1173452",
@@ -29961,7 +29962,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27127",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1175251",
@@ -29988,7 +29989,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76689",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/12/2018\r"
+    leaseEndDate: "6/12/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX0D1179848",
@@ -30015,7 +30016,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32205",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1153221",
@@ -30042,7 +30043,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1153400",
@@ -30069,7 +30070,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1153414",
@@ -30096,7 +30097,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1153459",
@@ -30123,7 +30124,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1153705",
@@ -30150,7 +30151,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75067",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1153879",
@@ -30177,7 +30178,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1153929",
@@ -30204,7 +30205,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1154417",
@@ -30231,7 +30232,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1155101",
@@ -30258,7 +30259,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1155115",
@@ -30285,7 +30286,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1155406",
@@ -30312,7 +30313,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1155731",
@@ -30339,7 +30340,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39170",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1155812",
@@ -30366,7 +30367,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1155891",
@@ -30393,7 +30394,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1156281",
@@ -30420,7 +30421,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1156443",
@@ -30447,7 +30448,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27591",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1156491",
@@ -30474,7 +30475,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29687",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1156538",
@@ -30501,7 +30502,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1157320",
@@ -30528,7 +30529,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1157544",
@@ -30555,7 +30556,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1158449",
@@ -30582,7 +30583,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1158533",
@@ -30609,7 +30610,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29307",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1159374",
@@ -30636,7 +30637,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78520",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1159469",
@@ -30663,7 +30664,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23602",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1159584",
@@ -30690,7 +30691,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70528",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1159682",
@@ -30717,7 +30718,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1163103",
@@ -30744,7 +30745,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38804",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1163473",
@@ -30771,7 +30772,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31072",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1163604",
@@ -30798,7 +30799,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6451",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1163747",
@@ -30825,7 +30826,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1166048",
@@ -30852,7 +30853,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1166406",
@@ -30879,7 +30880,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1166986",
@@ -30906,7 +30907,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1168396",
@@ -30933,7 +30934,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "16504",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1168771",
@@ -30960,7 +30961,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "83402",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1168835",
@@ -30987,7 +30988,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "13039",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX0E1169497",
@@ -31014,7 +31015,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1133816",
@@ -31041,7 +31042,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1134710",
@@ -31068,7 +31069,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "86442",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1135078",
@@ -31095,7 +31096,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92392",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1135372",
@@ -31122,7 +31123,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93033",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1137459",
@@ -31149,7 +31150,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1137509",
@@ -31176,7 +31177,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6340",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1138823",
@@ -31203,7 +31204,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1139924",
@@ -31230,7 +31231,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1143312",
@@ -31257,7 +31258,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30041",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1143391",
@@ -31284,7 +31285,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38703",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1143715",
@@ -31311,7 +31312,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1145867",
@@ -31338,7 +31339,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1147263",
@@ -31365,7 +31366,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32725",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1147764",
@@ -31392,7 +31393,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1148896",
@@ -31419,7 +31420,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33025",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1149143",
@@ -31446,7 +31447,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1149384",
@@ -31473,7 +31474,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1149742",
@@ -31500,7 +31501,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1150163",
@@ -31527,7 +31528,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39520",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1154200",
@@ -31554,7 +31555,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38133",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1154732",
@@ -31581,7 +31582,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1170963",
@@ -31608,7 +31609,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75418",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1172860",
@@ -31635,7 +31636,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77356",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1173801",
@@ -31662,7 +31663,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1175581",
@@ -31689,7 +31690,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1175662",
@@ -31716,7 +31717,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77044",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1175886",
@@ -31743,7 +31744,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46236",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/17/2017\r"
+    leaseEndDate: "8/17/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1176259",
@@ -31770,7 +31771,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1176424",
@@ -31797,7 +31798,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1176486",
@@ -31824,7 +31825,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29526",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1177444",
@@ -31851,7 +31852,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45103",
     mis: "153",
     remainingBookValue: 0,
-    leaseEndDate: "11/7/2017\r"
+    leaseEndDate: "11/7/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1178240",
@@ -31878,7 +31879,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36376",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1178531",
@@ -31905,7 +31906,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35217",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1180005",
@@ -31932,7 +31933,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38141",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "10/15/2017\r"
+    leaseEndDate: "10/15/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1181185",
@@ -31959,7 +31960,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1182059",
@@ -31986,7 +31987,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1182224",
@@ -32013,7 +32014,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46268",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1182238",
@@ -32040,7 +32041,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1182739",
@@ -32067,7 +32068,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1183289",
@@ -32094,7 +32095,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1185592",
@@ -32121,7 +32122,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "9/21/2017\r"
+    leaseEndDate: "9/21/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1185785",
@@ -32148,7 +32149,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/3/2017\r"
+    leaseEndDate: "8/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1186757",
@@ -32175,7 +32176,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/16/2017\r"
+    leaseEndDate: "8/16/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1186984",
@@ -32202,7 +32203,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96720",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1187617",
@@ -32229,7 +32230,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29732",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/3/2017\r"
+    leaseEndDate: "8/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1187889",
@@ -32256,7 +32257,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1190212",
@@ -32283,7 +32284,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36022",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1190727",
@@ -32310,7 +32311,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/3/2017\r"
+    leaseEndDate: "8/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1190792",
@@ -32337,7 +32338,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1C1190873",
@@ -32364,7 +32365,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1148334",
@@ -32391,7 +32392,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23005",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1154750",
@@ -32418,7 +32419,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "3052",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1155820",
@@ -32445,7 +32446,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "4/23/2018\r"
+    leaseEndDate: "4/23/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1156109",
@@ -32472,7 +32473,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1156840",
@@ -32499,7 +32500,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1158121",
@@ -32526,7 +32527,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92203",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1158507",
@@ -32553,7 +32554,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1159351",
@@ -32580,7 +32581,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1161231",
@@ -32607,7 +32608,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1161519",
@@ -32634,7 +32635,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "5468",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1161987",
@@ -32661,7 +32662,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6382",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/17/2018\r"
+    leaseEndDate: "5/17/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1162136",
@@ -32688,7 +32689,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/9/2018\r"
+    leaseEndDate: "5/9/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1162234",
@@ -32715,7 +32716,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31217",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "6/14/2018\r"
+    leaseEndDate: "6/14/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1162315",
@@ -32742,7 +32743,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1162900",
@@ -32769,7 +32770,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1167031",
@@ -32796,7 +32797,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1170284",
@@ -32823,7 +32824,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31088",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/6/2018\r"
+    leaseEndDate: "6/6/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1171564",
@@ -32850,7 +32851,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78552",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/6/2018\r"
+    leaseEndDate: "6/6/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1172620",
@@ -32877,7 +32878,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22968",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2018\r"
+    leaseEndDate: "5/23/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1173492",
@@ -32904,7 +32905,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27284",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2018\r"
+    leaseEndDate: "5/23/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1173539",
@@ -32931,7 +32932,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27284",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2018\r"
+    leaseEndDate: "5/23/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1173735",
@@ -32958,7 +32959,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "7/2/2018\r"
+    leaseEndDate: "7/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1175887",
@@ -32985,7 +32986,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1177042",
@@ -33012,7 +33013,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36305",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/12/2018\r"
+    leaseEndDate: "6/12/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1D1178336",
@@ -33039,7 +33040,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/13/2018\r"
+    leaseEndDate: "6/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1153020",
@@ -33066,7 +33067,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "99350",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1153177",
@@ -33093,7 +33094,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70065",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1153244",
@@ -33120,7 +33121,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1153311",
@@ -33147,7 +33148,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29407",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1153468",
@@ -33174,7 +33175,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31088",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1153647",
@@ -33201,7 +33202,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31404",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1153695",
@@ -33228,7 +33229,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30127",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1153860",
@@ -33255,7 +33256,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6110",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1153941",
@@ -33282,7 +33283,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64505",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1154071",
@@ -33309,7 +33310,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75904",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1154376",
@@ -33336,7 +33337,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "73703",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1154409",
@@ -33363,7 +33364,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27292",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1154622",
@@ -33390,7 +33391,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1154653",
@@ -33417,7 +33418,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23464",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1155012",
@@ -33444,7 +33445,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1155673",
@@ -33471,7 +33472,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98188",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1155933",
@@ -33498,7 +33499,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78639",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1156029",
@@ -33525,7 +33526,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24202",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1156743",
@@ -33552,7 +33553,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1156841",
@@ -33579,7 +33580,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24219",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1157150",
@@ -33606,7 +33607,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28586",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1157245",
@@ -33633,7 +33634,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28546",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1157262",
@@ -33660,7 +33661,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1157455",
@@ -33687,7 +33688,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1157469",
@@ -33714,7 +33715,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1158153",
@@ -33741,7 +33742,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28443",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1158203",
@@ -33768,7 +33769,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1158427",
@@ -33795,7 +33796,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27592",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1159576",
@@ -33822,7 +33823,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1159707",
@@ -33849,7 +33850,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77701",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1161361",
@@ -33876,7 +33877,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1162445",
@@ -33903,7 +33904,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "3848",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1163045",
@@ -33930,7 +33931,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32246",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1163885",
@@ -33957,7 +33958,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "918",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1164132",
@@ -33984,7 +33985,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1164440",
@@ -34011,7 +34012,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96732",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1164535",
@@ -34038,7 +34039,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1165815",
@@ -34065,7 +34066,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1166317",
@@ -34092,7 +34093,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1166494",
@@ -34119,7 +34120,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1167628",
@@ -34146,7 +34147,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "3867",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1167967",
@@ -34173,7 +34174,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70043",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1168102",
@@ -34200,7 +34201,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "12992",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1168259",
@@ -34227,7 +34228,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "10566",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1168357",
@@ -34254,7 +34255,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14425",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1168424",
@@ -34281,7 +34282,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2879",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1169296",
@@ -34308,7 +34309,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14845",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1169377",
@@ -34335,7 +34336,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2886",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1171193",
@@ -34362,7 +34363,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "84119",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX1E1171999",
@@ -34389,7 +34390,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2136",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1135302",
@@ -34416,7 +34417,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91103",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1136594",
@@ -34443,7 +34444,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2124",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1138734",
@@ -34470,7 +34471,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1138958",
@@ -34497,7 +34498,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6517",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1139172",
@@ -34524,7 +34525,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1139477",
@@ -34551,7 +34552,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70443",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1141083",
@@ -34578,7 +34579,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1141990",
@@ -34605,7 +34606,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32514",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1142394",
@@ -34632,7 +34633,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1142833",
@@ -34659,7 +34660,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49009",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1143612",
@@ -34686,7 +34687,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30417",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1144016",
@@ -34713,7 +34714,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27603",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1144095",
@@ -34740,7 +34741,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33709",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1145652",
@@ -34767,7 +34768,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1147210",
@@ -34794,7 +34795,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "10998",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1147398",
@@ -34821,7 +34822,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1147420",
@@ -34848,7 +34849,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85705",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/5/2017\r"
+    leaseEndDate: "6/5/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1147854",
@@ -34875,7 +34876,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78247",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1148485",
@@ -34902,7 +34903,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93704",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1149717",
@@ -34929,7 +34930,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32571",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1154626",
@@ -34956,7 +34957,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72396",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1155453",
@@ -34983,7 +34984,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1155646",
@@ -35010,7 +35011,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40383",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1155890",
@@ -35037,7 +35038,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63033",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1156375",
@@ -35064,7 +35065,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1170020",
@@ -35091,7 +35092,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1173743",
@@ -35118,7 +35119,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1174472",
@@ -35145,7 +35146,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28645",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1176433",
@@ -35172,7 +35173,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/19/2017\r"
+    leaseEndDate: "7/19/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1177338",
@@ -35199,7 +35200,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/9/2017\r"
+    leaseEndDate: "8/9/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1177503",
@@ -35226,7 +35227,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85015",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1177663",
@@ -35253,7 +35254,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36695",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1177808",
@@ -35280,7 +35281,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "12496",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1180286",
@@ -35307,7 +35308,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45231",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1182104",
@@ -35334,7 +35335,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "9/13/2017\r"
+    leaseEndDate: "9/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1184208",
@@ -35361,7 +35362,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/22/2017\r"
+    leaseEndDate: "8/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1185942",
@@ -35388,7 +35389,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "9/13/2017\r"
+    leaseEndDate: "9/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1186301",
@@ -35415,7 +35416,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98208",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/20/2017\r"
+    leaseEndDate: "9/20/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1186427",
@@ -35442,7 +35443,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/16/2017\r"
+    leaseEndDate: "8/16/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1187111",
@@ -35469,7 +35470,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "9/13/2017\r"
+    leaseEndDate: "9/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1187321",
@@ -35496,7 +35497,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92057",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/13/2017\r"
+    leaseEndDate: "8/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1188016",
@@ -35523,7 +35524,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/13/2017\r"
+    leaseEndDate: "9/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1188517",
@@ -35550,7 +35551,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/13/2017\r"
+    leaseEndDate: "9/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2C1191160",
@@ -35577,7 +35578,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1151288",
@@ -35604,7 +35605,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28601",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1152635",
@@ -35631,7 +35632,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "65804",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "4/16/2018\r"
+    leaseEndDate: "4/16/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1153915",
@@ -35658,7 +35659,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1154837",
@@ -35685,7 +35686,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89108",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/7/2018\r"
+    leaseEndDate: "5/7/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1155227",
@@ -35712,7 +35713,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72761",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/16/2018\r"
+    leaseEndDate: "4/16/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1156166",
@@ -35739,7 +35740,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1156863",
@@ -35766,7 +35767,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1085",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1158175",
@@ -35793,7 +35794,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "84096",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/17/2018\r"
+    leaseEndDate: "4/17/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1158547",
@@ -35820,7 +35821,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98368",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1158791",
@@ -35847,7 +35848,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1158824",
@@ -35874,7 +35875,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80920",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/14/2018\r"
+    leaseEndDate: "6/14/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1159147",
@@ -35901,7 +35902,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14020",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/9/2018\r"
+    leaseEndDate: "5/9/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1159410",
@@ -35928,7 +35929,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64134",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/3/2018\r"
+    leaseEndDate: "5/3/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1159729",
@@ -35955,7 +35956,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1160623",
@@ -35982,7 +35983,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8021",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1160640",
@@ -36009,7 +36010,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49024",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1160931",
@@ -36036,7 +36037,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/9/2018\r"
+    leaseEndDate: "5/9/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1161707",
@@ -36063,7 +36064,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48708",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/7/2018\r"
+    leaseEndDate: "5/7/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1162078",
@@ -36090,7 +36091,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1162307",
@@ -36117,7 +36118,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92036",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1166518",
@@ -36144,7 +36145,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1167149",
@@ -36171,7 +36172,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28792",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1167796",
@@ -36198,7 +36199,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79065",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "7/4/2018\r"
+    leaseEndDate: "7/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1168723",
@@ -36225,7 +36226,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77441",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1168933",
@@ -36252,7 +36253,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92595",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1169208",
@@ -36279,7 +36280,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1170682",
@@ -36306,7 +36307,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1171881",
@@ -36333,7 +36334,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66061",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/25/2018\r"
+    leaseEndDate: "6/25/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1174196",
@@ -36360,7 +36361,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28306",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/12/2018\r"
+    leaseEndDate: "6/12/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1174408",
@@ -36387,7 +36388,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92028",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1174926",
@@ -36414,7 +36415,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35806",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1178247",
@@ -36441,7 +36442,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/20/2018\r"
+    leaseEndDate: "6/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1178765",
@@ -36468,7 +36469,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1178944",
@@ -36495,7 +36496,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39272",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/24/2018\r"
+    leaseEndDate: "6/24/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX2D1180323",
@@ -36522,7 +36523,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1152961",
@@ -36549,7 +36550,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1153043",
@@ -36576,7 +36577,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8232",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1153141",
@@ -36603,7 +36604,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35005",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1153155",
@@ -36630,7 +36631,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1153186",
@@ -36657,7 +36658,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24219",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1153219",
@@ -36684,7 +36685,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "26554",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1153334",
@@ -36711,7 +36712,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77335",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1153396",
@@ -36738,7 +36739,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "65710",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1153785",
@@ -36765,7 +36766,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1154046",
@@ -36792,7 +36793,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95605",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1154242",
@@ -36819,7 +36820,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1154516",
@@ -36846,7 +36847,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1154953",
@@ -36873,7 +36874,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1155195",
@@ -36900,7 +36901,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23601",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1155410",
@@ -36927,7 +36928,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1155746",
@@ -36954,7 +36955,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76104",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1155780",
@@ -36981,7 +36982,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1155794",
@@ -37008,7 +37009,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23464",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1155987",
@@ -37035,7 +37036,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37421",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1156072",
@@ -37062,7 +37063,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1156184",
@@ -37089,7 +37090,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35806",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1156525",
@@ -37116,7 +37117,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4037",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1156766",
@@ -37143,7 +37144,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1157187",
@@ -37170,7 +37171,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1157934",
@@ -37197,7 +37198,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1158047",
@@ -37224,7 +37225,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29526",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1158341",
@@ -37251,7 +37252,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1158775",
@@ -37278,7 +37279,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1159103",
@@ -37305,7 +37306,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22827",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1159246",
@@ -37332,7 +37333,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77578",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1159344",
@@ -37359,7 +37360,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44511",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1159487",
@@ -37386,7 +37387,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77096",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1160042",
@@ -37413,7 +37414,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98383",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1160283",
@@ -37440,7 +37441,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23693",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1161305",
@@ -37467,7 +37468,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71303",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1162759",
@@ -37494,7 +37495,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1163667",
@@ -37521,7 +37522,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1163829",
@@ -37548,7 +37549,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76309",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1164043",
@@ -37575,7 +37576,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1164785",
@@ -37602,7 +37603,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1166195",
@@ -37629,7 +37630,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21029",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1166343",
@@ -37656,7 +37657,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1166827",
@@ -37683,7 +37684,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1167606",
@@ -37710,7 +37711,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1168058",
@@ -37737,7 +37738,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1168089",
@@ -37764,7 +37765,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4294",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1168500",
@@ -37791,7 +37792,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2889",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1168545",
@@ -37818,7 +37819,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89431",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1168707",
@@ -37845,7 +37846,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX2E1171283",
@@ -37872,7 +37873,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1134014",
@@ -37899,7 +37900,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85641",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1134627",
@@ -37926,7 +37927,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1135227",
@@ -37953,7 +37954,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85226",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1138709",
@@ -37980,7 +37981,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1140332",
@@ -38007,7 +38008,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1140525",
@@ -38034,7 +38035,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72801",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1142811",
@@ -38061,7 +38062,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24219",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "9/19/2017\r"
+    leaseEndDate: "9/19/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1143215",
@@ -38088,7 +38089,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1145076",
@@ -38115,7 +38116,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1146244",
@@ -38142,7 +38143,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43230",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1148009",
@@ -38169,7 +38170,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40322",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1148012",
@@ -38196,7 +38197,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/5/2017\r"
+    leaseEndDate: "6/5/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1148544",
@@ -38223,7 +38224,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1149225",
@@ -38250,7 +38251,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1149340",
@@ -38277,7 +38278,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55439",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1149760",
@@ -38304,7 +38305,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1150875",
@@ -38331,7 +38332,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1153758",
@@ -38358,7 +38359,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90623",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1154344",
@@ -38385,7 +38386,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1154456",
@@ -38412,7 +38413,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1170463",
@@ -38439,7 +38440,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1172374",
@@ -38466,7 +38467,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1172844",
@@ -38493,7 +38494,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64110",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/13/2017\r"
+    leaseEndDate: "7/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1173105",
@@ -38520,7 +38521,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45385",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1175856",
@@ -38547,7 +38548,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39211",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1176098",
@@ -38574,7 +38575,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29203",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1176747",
@@ -38601,7 +38602,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1177543",
@@ -38628,7 +38629,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38118",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/14/2017\r"
+    leaseEndDate: "8/14/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1179650",
@@ -38655,7 +38656,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1180152",
@@ -38682,7 +38683,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32514",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1181639",
@@ -38709,7 +38710,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87144",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1186078",
@@ -38736,7 +38737,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92683",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/16/2017\r"
+    leaseEndDate: "8/16/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1186131",
@@ -38763,7 +38764,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85083",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/13/2017\r"
+    leaseEndDate: "8/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1186291",
@@ -38790,7 +38791,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96789",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1186436",
@@ -38817,7 +38818,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/13/2017\r"
+    leaseEndDate: "8/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1186470",
@@ -38844,7 +38845,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98328",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "10/24/2017\r"
+    leaseEndDate: "10/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1187148",
@@ -38871,7 +38872,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/3/2017\r"
+    leaseEndDate: "8/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3C1189739",
@@ -38898,7 +38899,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/20/2017\r"
+    leaseEndDate: "8/20/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1147878",
@@ -38925,7 +38926,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40517",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/16/2018\r"
+    leaseEndDate: "4/16/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1147993",
@@ -38952,7 +38953,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "41059",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/19/2018\r"
+    leaseEndDate: "4/19/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1150263",
@@ -38979,7 +38980,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44067",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1152952",
@@ -39006,7 +39007,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2368",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1155849",
@@ -39033,7 +39034,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "68443",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/20/2018\r"
+    leaseEndDate: "5/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1156385",
@@ -39060,7 +39061,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/25/2018\r"
+    leaseEndDate: "4/25/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1156600",
@@ -39087,7 +39088,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1156614",
@@ -39114,7 +39115,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1156757",
@@ -39141,7 +39142,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89169",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1157553",
@@ -39168,7 +39169,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28645",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/22/2018\r"
+    leaseEndDate: "4/22/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1158198",
@@ -39195,7 +39196,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1159142",
@@ -39222,7 +39223,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1160338",
@@ -39249,7 +39250,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98503",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1160548",
@@ -39276,7 +39277,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1160758",
@@ -39303,7 +39304,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1161022",
@@ -39330,7 +39331,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91905",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1161151",
@@ -39357,7 +39358,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87110",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1162090",
@@ -39384,7 +39385,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "86314",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1162400",
@@ -39411,7 +39412,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92335",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1162462",
@@ -39438,7 +39439,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "17074",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1168603",
@@ -39465,7 +39466,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92336",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1168665",
@@ -39492,7 +39493,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85215",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1169136",
@@ -39519,7 +39520,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96813",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1169282",
@@ -39546,7 +39547,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "84115",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1173221",
@@ -39573,7 +39574,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "7/2/2018\r"
+    leaseEndDate: "7/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1177110",
@@ -39600,7 +39601,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30035",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1178354",
@@ -39627,7 +39628,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "7/2/2018\r"
+    leaseEndDate: "7/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1178466",
@@ -39654,7 +39655,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75002",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1178631",
@@ -39681,7 +39682,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15042",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "7/2/2018\r"
+    leaseEndDate: "7/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1179794",
@@ -39708,7 +39709,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74441",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1181206",
@@ -39735,7 +39736,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29209",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1181433",
@@ -39762,7 +39763,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32514",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/20/2018\r"
+    leaseEndDate: "6/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1181447",
@@ -39789,7 +39790,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32343",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3D1182629",
@@ -39816,7 +39817,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71327",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1153374",
@@ -39843,7 +39844,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1153391",
@@ -39870,7 +39871,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29575",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1153441",
@@ -39897,7 +39898,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77703",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1153861",
@@ -39924,7 +39925,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36784",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1154105",
@@ -39951,7 +39952,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70647",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1154136",
@@ -39978,7 +39979,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77407",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1154220",
@@ -40005,7 +40006,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1154329",
@@ -40032,7 +40033,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "16601",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1154444",
@@ -40059,7 +40060,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90019",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1154587",
@@ -40086,7 +40087,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "26041",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1154783",
@@ -40113,7 +40114,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37013",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1155643",
@@ -40140,7 +40141,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1155769",
@@ -40167,7 +40168,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23453",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1156372",
@@ -40194,7 +40195,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1156548",
@@ -40221,7 +40222,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29596",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1156808",
@@ -40248,7 +40249,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1156890",
@@ -40275,7 +40276,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95128",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1157344",
@@ -40302,7 +40303,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31520",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1157702",
@@ -40329,7 +40330,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27517",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1157747",
@@ -40356,7 +40357,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1157750",
@@ -40383,7 +40384,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29203",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1158025",
@@ -40410,7 +40411,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28358",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1158865",
@@ -40437,7 +40438,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1159269",
@@ -40464,7 +40465,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45694",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1159918",
@@ -40491,7 +40492,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43155",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1160809",
@@ -40518,7 +40519,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23692",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1160972",
@@ -40545,7 +40546,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24502",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1162110",
@@ -40572,7 +40573,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1085",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1162821",
@@ -40599,7 +40600,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1163077",
@@ -40626,7 +40627,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30534",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1163175",
@@ -40653,7 +40654,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1163404",
@@ -40680,7 +40681,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "623",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1163502",
@@ -40707,7 +40708,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30214",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1164018",
@@ -40734,7 +40735,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1164875",
@@ -40761,7 +40762,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1164990",
@@ -40788,7 +40789,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1166223",
@@ -40815,7 +40816,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1166691",
@@ -40842,7 +40843,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1167694",
@@ -40869,7 +40870,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38117",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1167937",
@@ -40896,7 +40897,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80233",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1168036",
@@ -40923,7 +40924,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6082",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1168523",
@@ -40950,7 +40951,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39501",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1168814",
@@ -40977,7 +40978,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "94534",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX3E1171339",
@@ -41004,7 +41005,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36456",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1133583",
@@ -41031,7 +41032,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90650",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1133924",
@@ -41058,7 +41059,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93612",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1134376",
@@ -41085,7 +41086,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92301",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1135043",
@@ -41112,7 +41113,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1135155",
@@ -41139,7 +41140,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93705",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1137262",
@@ -41166,7 +41167,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97404",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1137715",
@@ -41193,7 +41194,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74012",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1138315",
@@ -41220,7 +41221,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1139190",
@@ -41247,7 +41248,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70056",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1142073",
@@ -41274,7 +41275,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22980",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1142655",
@@ -41301,7 +41302,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45322",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1144955",
@@ -41328,7 +41329,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1146737",
@@ -41355,7 +41356,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76116",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1146754",
@@ -41382,7 +41383,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30106",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1147578",
@@ -41409,7 +41410,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43136",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1147810",
@@ -41436,7 +41437,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48036",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1148794",
@@ -41463,7 +41464,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1149346",
@@ -41490,7 +41491,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1150447",
@@ -41517,7 +41518,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36067",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1154787",
@@ -41544,7 +41545,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40258",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1170424",
@@ -41571,7 +41572,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "34607",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1170696",
@@ -41598,7 +41599,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1175395",
@@ -41625,7 +41626,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29488",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1177051",
@@ -41652,7 +41653,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80014",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1178698",
@@ -41679,7 +41680,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36301",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1179401",
@@ -41706,7 +41707,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1182394",
@@ -41733,7 +41734,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1186039",
@@ -41760,7 +41761,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/9/2017\r"
+    leaseEndDate: "8/9/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1187059",
@@ -41787,7 +41788,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "10/2/2017\r"
+    leaseEndDate: "10/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1187675",
@@ -41814,7 +41815,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/13/2017\r"
+    leaseEndDate: "8/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1189023",
@@ -41841,7 +41842,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/20/2017\r"
+    leaseEndDate: "8/20/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1190396",
@@ -41868,7 +41869,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36582",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/14/2017\r"
+    leaseEndDate: "12/14/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1191497",
@@ -41895,7 +41896,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "57106",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/14/2017\r"
+    leaseEndDate: "8/14/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1191810",
@@ -41922,7 +41923,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1193251",
@@ -41949,7 +41950,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "10/2/2017\r"
+    leaseEndDate: "10/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4C1193606",
@@ -41976,7 +41977,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "969",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "10/4/2017\r"
+    leaseEndDate: "10/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1147887",
@@ -42003,7 +42004,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28213",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1148182",
@@ -42030,7 +42031,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29203",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1152586",
@@ -42057,7 +42058,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1153995",
@@ -42084,7 +42085,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1154340",
@@ -42111,7 +42112,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89115",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/7/2018\r"
+    leaseEndDate: "5/7/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1154810",
@@ -42138,7 +42139,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6770",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1155360",
@@ -42165,7 +42166,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6705",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/24/2018\r"
+    leaseEndDate: "4/24/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1155536",
@@ -42192,7 +42193,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93612",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1155570",
@@ -42219,7 +42220,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1156136",
@@ -42246,7 +42247,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "52403",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1158162",
@@ -42273,7 +42274,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "18704",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/6/2018\r"
+    leaseEndDate: "5/6/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1158274",
@@ -42300,7 +42301,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1159120",
@@ -42327,7 +42328,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98328",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1161322",
@@ -42354,7 +42355,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15301",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/22/2018\r"
+    leaseEndDate: "5/22/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1162082",
@@ -42381,7 +42382,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6111",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1162146",
@@ -42408,7 +42409,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37826",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1167024",
@@ -42435,7 +42436,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "81008",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1167136",
@@ -42462,7 +42463,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49022",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1167234",
@@ -42489,7 +42490,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1167783",
@@ -42516,7 +42517,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1169677",
@@ -42543,7 +42544,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96720",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1170487",
@@ -42570,7 +42571,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1171705",
@@ -42597,7 +42598,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1173874",
@@ -42624,7 +42625,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "50310",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/20/2018\r"
+    leaseEndDate: "6/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1176158",
@@ -42651,7 +42652,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32725",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "7/8/2018\r"
+    leaseEndDate: "7/8/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1177262",
@@ -42678,7 +42679,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93726",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1178489",
@@ -42705,7 +42706,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75071",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/11/2018\r"
+    leaseEndDate: "6/11/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1179318",
@@ -42732,7 +42733,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79065",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/11/2018\r"
+    leaseEndDate: "6/11/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1179898",
@@ -42759,7 +42760,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33709",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1180470",
@@ -42786,7 +42787,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70582",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/21/2018\r"
+    leaseEndDate: "6/21/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4D1181361",
@@ -42813,7 +42814,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89011",
     mis: "143",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2018\r"
+    leaseEndDate: "8/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1153125",
@@ -42840,7 +42841,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1153304",
@@ -42867,7 +42868,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70360",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1153531",
@@ -42894,7 +42895,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70668",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1153609",
@@ -42921,7 +42922,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1153688",
@@ -42948,7 +42949,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1153741",
@@ -42975,7 +42976,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92707",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1153836",
@@ -43002,7 +43003,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1153853",
@@ -43029,7 +43030,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38635",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1154128",
@@ -43056,7 +43057,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55427",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1154131",
@@ -43083,7 +43084,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1154338",
@@ -43110,7 +43111,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91406",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1154341",
@@ -43137,7 +43138,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85225",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1154632",
@@ -43164,7 +43165,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1155019",
@@ -43191,7 +43192,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1155277",
@@ -43218,7 +43219,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1155294",
@@ -43245,7 +43246,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23836",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1155649",
@@ -43272,7 +43273,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1155702",
@@ -43299,7 +43300,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1155716",
@@ -43326,7 +43327,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1155750",
@@ -43353,7 +43354,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1155926",
@@ -43380,7 +43381,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1156140",
@@ -43407,7 +43408,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23223",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1156154",
@@ -43434,7 +43435,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98837",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1156204",
@@ -43461,7 +43462,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1156252",
@@ -43488,7 +43489,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23464",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1156963",
@@ -43515,7 +43516,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1157966",
@@ -43542,7 +43543,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1158065",
@@ -43569,7 +43570,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92585",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1158647",
@@ -43596,7 +43597,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98662",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1160821",
@@ -43623,7 +43624,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85382",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1162004",
@@ -43650,7 +43651,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "918",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1162083",
@@ -43677,7 +43678,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1162214",
@@ -43704,7 +43705,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76179",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1162455",
@@ -43731,7 +43732,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "12953",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1162777",
@@ -43758,7 +43759,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1162875",
@@ -43785,7 +43786,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "956",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1163198",
@@ -43812,7 +43813,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1164173",
@@ -43839,7 +43840,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1164271",
@@ -43866,7 +43867,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79416",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1164500",
@@ -43893,7 +43894,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1164562",
@@ -43920,7 +43921,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1166909",
@@ -43947,7 +43948,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1166926",
@@ -43974,7 +43975,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96786",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1167087",
@@ -44001,7 +44002,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1167655",
@@ -44028,7 +44029,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32514",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1167686",
@@ -44055,7 +44056,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46217",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1167784",
@@ -44082,7 +44083,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1168224",
@@ -44109,7 +44110,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2886",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX4E1168885",
@@ -44136,7 +44137,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1134502",
@@ -44163,7 +44164,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92231",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1136718",
@@ -44190,7 +44191,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95121",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1138243",
@@ -44217,7 +44218,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33018",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1139036",
@@ -44244,7 +44245,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1139473",
@@ -44271,7 +44272,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1139635",
@@ -44298,7 +44299,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1139683",
@@ -44325,7 +44326,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64801",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1141143",
@@ -44352,7 +44353,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1141580",
@@ -44379,7 +44380,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6119",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1141806",
@@ -44406,7 +44407,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "73121",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1142194",
@@ -44433,7 +44434,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93726",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1143264",
@@ -44460,7 +44461,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43019",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1147007",
@@ -44487,7 +44488,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1147752",
@@ -44514,7 +44515,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1148769",
@@ -44541,7 +44542,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "20886",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1149758",
@@ -44568,7 +44569,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1150490",
@@ -44595,7 +44596,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1150540",
@@ -44622,7 +44623,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36502",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1153860",
@@ -44649,7 +44650,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1154717",
@@ -44676,7 +44677,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1155513",
@@ -44703,7 +44704,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43026",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1156001",
@@ -44730,7 +44731,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23605",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1170321",
@@ -44757,7 +44758,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76012",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1172151",
@@ -44784,7 +44785,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28314",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1173140",
@@ -44811,7 +44812,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75708",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1175339",
@@ -44838,7 +44839,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15601",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/4/2017\r"
+    leaseEndDate: "7/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1175843",
@@ -44865,7 +44866,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35120",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1176880",
@@ -44892,7 +44893,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1178435",
@@ -44919,7 +44920,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32218",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1182677",
@@ -44946,7 +44947,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1191217",
@@ -44973,7 +44974,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5C1194358",
@@ -45000,7 +45001,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "731",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "10/4/2017\r"
+    leaseEndDate: "10/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1147462",
@@ -45027,7 +45028,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24522",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/19/2018\r"
+    leaseEndDate: "4/19/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1148661",
@@ -45054,7 +45055,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40258",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/25/2018\r"
+    leaseEndDate: "4/25/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1148952",
@@ -45081,7 +45082,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30114",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/19/2018\r"
+    leaseEndDate: "4/19/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1150829",
@@ -45108,7 +45109,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40220",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1152788",
@@ -45135,7 +45136,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66209",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "4/16/2018\r"
+    leaseEndDate: "4/16/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1154699",
@@ -45162,7 +45163,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1832",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1155268",
@@ -45189,7 +45190,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6492",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1155531",
@@ -45216,7 +45217,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1844",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1156551",
@@ -45243,7 +45244,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "68114",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1157375",
@@ -45270,7 +45271,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66209",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2018\r"
+    leaseEndDate: "5/10/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1157991",
@@ -45297,7 +45298,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95815",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2018\r"
+    leaseEndDate: "5/10/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1159241",
@@ -45324,7 +45325,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/14/2018\r"
+    leaseEndDate: "5/14/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1160938",
@@ -45351,7 +45352,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92028",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1161460",
@@ -45378,7 +45379,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23228",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1162589",
@@ -45405,7 +45406,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1162611",
@@ -45432,7 +45433,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1162687",
@@ -45459,7 +45460,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "17601",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1166903",
@@ -45486,7 +45487,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32805",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/13/2018\r"
+    leaseEndDate: "6/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1167808",
@@ -45513,7 +45514,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "94550",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/13/2018\r"
+    leaseEndDate: "5/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1168277",
@@ -45540,7 +45541,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78227",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1168893",
@@ -45567,7 +45568,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96720",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1170627",
@@ -45594,7 +45595,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "13790",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1171003",
@@ -45621,7 +45622,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1172927",
@@ -45648,7 +45649,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1173298",
@@ -45675,7 +45676,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78247",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1173656",
@@ -45702,7 +45703,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78550",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1176038",
@@ -45729,7 +45730,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30534",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1177951",
@@ -45756,7 +45757,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79404",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/11/2018\r"
+    leaseEndDate: "6/11/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX5D1181501",
@@ -45783,7 +45784,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77904",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1153005",
@@ -45810,7 +45811,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40223",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1153182",
@@ -45837,7 +45838,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "86314",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1153537",
@@ -45864,7 +45865,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92703",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1153747",
@@ -45891,7 +45892,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92707",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1154025",
@@ -45918,7 +45919,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27301",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1154185",
@@ -45945,7 +45946,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91752",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1154400",
@@ -45972,7 +45973,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44133",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1154493",
@@ -45999,7 +46000,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98684",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1154767",
@@ -46026,7 +46027,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1154803",
@@ -46053,7 +46054,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1154851",
@@ -46080,7 +46081,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1155045",
@@ -46107,7 +46108,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1155269",
@@ -46134,7 +46135,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75460",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1155272",
@@ -46161,7 +46162,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1155336",
@@ -46188,7 +46189,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1155708",
@@ -46215,7 +46216,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75021",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1155739",
@@ -46242,7 +46243,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "87109",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1155952",
@@ -46269,7 +46270,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1156017",
@@ -46296,7 +46297,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1156034",
@@ -46323,7 +46324,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75150",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1156048",
@@ -46350,7 +46351,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1156227",
@@ -46377,7 +46378,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24014",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1156275",
@@ -46404,7 +46405,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "17074",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1156731",
@@ -46431,7 +46432,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37912",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1156907",
@@ -46458,7 +46459,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1156955",
@@ -46485,7 +46486,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1157023",
@@ -46512,7 +46513,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1157202",
@@ -46539,7 +46540,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29501",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1157717",
@@ -46566,7 +46567,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1157863",
@@ -46593,7 +46594,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27514",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1158091",
@@ -46620,7 +46621,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1158186",
@@ -46647,7 +46648,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27105",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1158348",
@@ -46674,7 +46675,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79065",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1158530",
@@ -46701,7 +46702,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74965",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1159323",
@@ -46728,7 +46729,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1159693",
@@ -46755,7 +46756,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24014",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1160214",
@@ -46782,7 +46783,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85641",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1161783",
@@ -46809,7 +46810,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23605",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1161797",
@@ -46836,7 +46837,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98188",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1162688",
@@ -46863,7 +46864,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1843",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1163310",
@@ -46890,7 +46891,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38804",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1167518",
@@ -46917,7 +46918,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1167728",
@@ -46944,7 +46945,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1168197",
@@ -46971,7 +46972,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1168569",
@@ -46998,7 +46999,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1168894",
@@ -47025,7 +47026,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1169060",
@@ -47052,7 +47053,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1169205",
@@ -47079,7 +47080,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49120",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1169365",
@@ -47106,7 +47107,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1171326",
@@ -47133,7 +47134,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2780",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX5E1171911",
@@ -47160,7 +47161,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2886",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1133522",
@@ -47187,7 +47188,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1134430",
@@ -47214,7 +47215,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85041",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1136873",
@@ -47241,7 +47242,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1137070",
@@ -47268,7 +47269,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1138221",
@@ -47295,7 +47296,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70815",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1138753",
@@ -47322,7 +47323,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30666",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "6/25/2017\r"
+    leaseEndDate: "6/25/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1139269",
@@ -47349,7 +47350,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1141006",
@@ -47376,7 +47377,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1143371",
@@ -47403,7 +47404,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1145122",
@@ -47430,7 +47431,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6902",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1145914",
@@ -47457,7 +47458,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45214",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1146187",
@@ -47484,7 +47485,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1147260",
@@ -47511,7 +47512,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75060",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2017\r"
+    leaseEndDate: "6/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1149820",
@@ -47538,7 +47539,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27610",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/4/2017\r"
+    leaseEndDate: "7/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1150398",
@@ -47565,7 +47566,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23002",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1150482",
@@ -47592,7 +47593,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1153754",
@@ -47619,7 +47620,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48036",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1154158",
@@ -47646,7 +47647,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44055",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1154337",
@@ -47673,7 +47674,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1155780",
@@ -47700,7 +47701,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "62002",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1169758",
@@ -47727,7 +47728,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1174328",
@@ -47754,7 +47755,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/4/2017\r"
+    leaseEndDate: "7/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1174491",
@@ -47781,7 +47782,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77064",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1175141",
@@ -47808,7 +47809,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28584",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/23/2017\r"
+    leaseEndDate: "7/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1176631",
@@ -47835,7 +47836,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30349",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/11/2017\r"
+    leaseEndDate: "7/11/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1177181",
@@ -47862,7 +47863,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1177262",
@@ -47889,7 +47890,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1177732",
@@ -47916,7 +47917,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36871",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1177830",
@@ -47943,7 +47944,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1177925",
@@ -47970,7 +47971,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1179030",
@@ -47997,7 +47998,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30273",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1179223",
@@ -48024,7 +48025,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1179657",
@@ -48051,7 +48052,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "34434",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1179755",
@@ -48078,7 +48079,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70301",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1181439",
@@ -48105,7 +48106,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "57106",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1182459",
@@ -48132,7 +48133,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1185975",
@@ -48159,7 +48160,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "10/3/2017\r"
+    leaseEndDate: "10/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1186317",
@@ -48186,7 +48187,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1186852",
@@ -48213,7 +48214,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89119",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/13/2017\r"
+    leaseEndDate: "8/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1187127",
@@ -48240,7 +48241,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1187287",
@@ -48267,7 +48268,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1187936",
@@ -48294,7 +48295,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "10/2/2017\r"
+    leaseEndDate: "10/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1188231",
@@ -48321,7 +48322,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1189086",
@@ -48348,7 +48349,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6C1190528",
@@ -48375,7 +48376,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1145641",
@@ -48402,7 +48403,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1152394",
@@ -48429,7 +48430,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40258",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/9/2018\r"
+    leaseEndDate: "5/9/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1156090",
@@ -48456,7 +48457,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1156199",
@@ -48483,7 +48484,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27106",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "4/22/2018\r"
+    leaseEndDate: "4/22/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1158633",
@@ -48510,7 +48511,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90630",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1158910",
@@ -48537,7 +48538,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6119",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/14/2018\r"
+    leaseEndDate: "5/14/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1159748",
@@ -48564,7 +48565,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1159829",
@@ -48591,7 +48592,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "83535",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1159992",
@@ -48618,7 +48619,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1160754",
@@ -48645,7 +48646,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6111",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1161242",
@@ -48672,7 +48673,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/9/2018\r"
+    leaseEndDate: "5/9/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1161385",
@@ -48699,7 +48700,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1161998",
@@ -48726,7 +48727,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1162438",
@@ -48753,7 +48754,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27604",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1162505",
@@ -48780,7 +48781,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24260",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1168658",
@@ -48807,7 +48808,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85305",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1170118",
@@ -48834,7 +48835,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1171902",
@@ -48861,7 +48862,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63376",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1172435",
@@ -48888,7 +48889,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "7/2/2018\r"
+    leaseEndDate: "7/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1172595",
@@ -48915,7 +48916,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1173407",
@@ -48942,7 +48943,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78251",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1173813",
@@ -48969,7 +48970,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78253",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1174718",
@@ -48996,7 +48997,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23234",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1176145",
@@ -49023,7 +49024,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22427",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1176582",
@@ -49050,7 +49051,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39440",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1178090",
@@ -49077,7 +49078,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33709",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1179885",
@@ -49104,7 +49105,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1182401",
@@ -49131,7 +49132,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72103",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/21/2018\r"
+    leaseEndDate: "6/21/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX6D1182527",
@@ -49158,7 +49159,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93726",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1153384",
@@ -49185,7 +49186,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "62232",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1153417",
@@ -49212,7 +49213,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29649",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1153823",
@@ -49239,7 +49240,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30281",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1154115",
@@ -49266,7 +49267,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98387",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1154163",
@@ -49293,7 +49294,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77656",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1154180",
@@ -49320,7 +49321,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1154387",
@@ -49347,7 +49348,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1154454",
@@ -49374,7 +49375,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28213",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1154597",
@@ -49401,7 +49402,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1154728",
@@ -49428,7 +49429,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78227",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1155118",
@@ -49455,7 +49456,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23666",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1155460",
@@ -49482,7 +49483,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75071",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1155653",
@@ -49509,7 +49510,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1155698",
@@ -49536,7 +49537,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75604",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1156060",
@@ -49563,7 +49564,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "62221",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1156186",
@@ -49590,7 +49591,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38567",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1156382",
@@ -49617,7 +49618,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23851",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1156432",
@@ -49644,7 +49645,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1157161",
@@ -49671,7 +49672,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4106",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1157497",
@@ -49698,7 +49699,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63052",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1157628",
@@ -49725,7 +49726,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1157662",
@@ -49752,7 +49753,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1157922",
@@ -49779,7 +49780,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1160223",
@@ -49806,7 +49807,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "20905",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1161405",
@@ -49833,7 +49834,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24301",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1162280",
@@ -49860,7 +49861,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1163297",
@@ -49887,7 +49888,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33709",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1164613",
@@ -49914,7 +49915,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1165423",
@@ -49941,7 +49942,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89122",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1165700",
@@ -49968,7 +49969,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1165924",
@@ -49995,7 +49996,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1166538",
@@ -50022,7 +50023,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96717",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1167348",
@@ -50049,7 +50050,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1167527",
@@ -50076,7 +50077,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "18428",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "10/18/2022\r"
+    leaseEndDate: "10/18/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1167706",
@@ -50103,7 +50104,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14626",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1168581",
@@ -50130,7 +50131,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1168788",
@@ -50157,7 +50158,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38134",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1168824",
@@ -50184,7 +50185,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1169004",
@@ -50211,7 +50212,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1169018",
@@ -50238,7 +50239,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "13357",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1169116",
@@ -50265,7 +50266,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1169360",
@@ -50292,7 +50293,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX6E1169570",
@@ -50319,7 +50320,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "73132",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1134565",
@@ -50346,7 +50347,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1134596",
@@ -50373,7 +50374,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1134789",
@@ -50400,7 +50401,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85338",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1135036",
@@ -50427,7 +50428,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91350",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1136526",
@@ -50454,7 +50455,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1136820",
@@ -50481,7 +50482,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1138020",
@@ -50508,7 +50509,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1138938",
@@ -50535,7 +50536,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80917",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1139863",
@@ -50562,7 +50563,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31014",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1140396",
@@ -50589,7 +50590,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29506",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1142004",
@@ -50616,7 +50617,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44646",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1142181",
@@ -50643,7 +50644,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1142701",
@@ -50670,7 +50671,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35806",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1143427",
@@ -50697,7 +50698,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1143847",
@@ -50724,7 +50725,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39328",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/7/2017\r"
+    leaseEndDate: "5/7/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1144125",
@@ -50751,7 +50752,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32708",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1144867",
@@ -50778,7 +50779,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1146876",
@@ -50805,7 +50806,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30033",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1147445",
@@ -50832,7 +50833,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "12550",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1147865",
@@ -50859,7 +50860,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43230",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1148224",
@@ -50886,7 +50887,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36695",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1148398",
@@ -50913,7 +50914,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "61611",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1149020",
@@ -50940,7 +50941,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1150085",
@@ -50967,7 +50968,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1153780",
@@ -50994,7 +50995,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1155545",
@@ -51021,7 +51022,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1155948",
@@ -51048,7 +51049,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1171518",
@@ -51075,7 +51076,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1174824",
@@ -51102,7 +51103,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1176797",
@@ -51129,7 +51130,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "84115",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1177044",
@@ -51156,7 +51157,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30032",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/14/2017\r"
+    leaseEndDate: "8/14/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1177125",
@@ -51183,7 +51184,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15102",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "9/10/2017\r"
+    leaseEndDate: "9/10/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1178176",
@@ -51210,7 +51211,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33714",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1179165",
@@ -51237,7 +51238,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1179778",
@@ -51264,7 +51265,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70058",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1180302",
@@ -51291,7 +51292,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1180445",
@@ -51318,7 +51319,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71118",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/13/2017\r"
+    leaseEndDate: "8/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1181112",
@@ -51345,7 +51346,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1182034",
@@ -51372,7 +51373,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92704",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/16/2017\r"
+    leaseEndDate: "8/16/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1182079",
@@ -51399,7 +51400,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1186696",
@@ -51426,7 +51427,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/20/2017\r"
+    leaseEndDate: "8/20/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1186956",
@@ -51453,7 +51454,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90621",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/13/2017\r"
+    leaseEndDate: "8/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1187427",
@@ -51480,7 +51481,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92320",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/17/2017\r"
+    leaseEndDate: "8/17/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1187685",
@@ -51507,7 +51508,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "83617",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/21/2017\r"
+    leaseEndDate: "8/21/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1188464",
@@ -51534,7 +51535,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92801",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/19/2017\r"
+    leaseEndDate: "9/19/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1189193",
@@ -51561,7 +51562,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1189775",
@@ -51588,7 +51589,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1190389",
@@ -51615,7 +51616,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/14/2017\r"
+    leaseEndDate: "12/14/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7C1192000",
@@ -51642,7 +51643,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "73130",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1147155",
@@ -51669,7 +51670,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28312",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1157152",
@@ -51696,7 +51697,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66221",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2018\r"
+    leaseEndDate: "5/10/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1159760",
@@ -51723,7 +51724,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98383",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1159922",
@@ -51750,7 +51751,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29615",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/3/2018\r"
+    leaseEndDate: "5/3/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1160066",
@@ -51777,7 +51778,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1161282",
@@ -51804,7 +51805,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29577",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1161315",
@@ -51831,7 +51832,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44076",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1161735",
@@ -51858,7 +51859,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1162058",
@@ -51885,7 +51886,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1162738",
@@ -51912,7 +51913,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1162996",
@@ -51939,7 +51940,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1167566",
@@ -51966,7 +51967,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48603",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1168023",
@@ -51993,7 +51994,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2018\r"
+    leaseEndDate: "5/10/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1169611",
@@ -52020,7 +52021,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1171360",
@@ -52047,7 +52048,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29053",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1172203",
@@ -52074,7 +52075,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49519",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1172332",
@@ -52101,7 +52102,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29203",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "7/26/2018\r"
+    leaseEndDate: "7/26/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1173996",
@@ -52128,7 +52129,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1174257",
@@ -52155,7 +52156,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33055",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/20/2018\r"
+    leaseEndDate: "6/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1176686",
@@ -52182,7 +52183,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31565",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2018\r"
+    leaseEndDate: "6/18/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1177465",
@@ -52209,7 +52210,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39328",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2018\r"
+    leaseEndDate: "8/6/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1177885",
@@ -52236,7 +52237,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/13/2018\r"
+    leaseEndDate: "6/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1179023",
@@ -52263,7 +52264,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/20/2018\r"
+    leaseEndDate: "6/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1180737",
@@ -52290,7 +52291,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45424",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "7/22/2018\r"
+    leaseEndDate: "7/22/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1181578",
@@ -52317,7 +52318,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70360",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/20/2018\r"
+    leaseEndDate: "6/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1181791",
@@ -52344,7 +52345,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1182374",
@@ -52371,7 +52372,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36693",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7D1182536",
@@ -52398,7 +52399,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32514",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "7/12/2018\r"
+    leaseEndDate: "7/12/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1152969",
@@ -52425,7 +52426,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153071",
@@ -52452,7 +52453,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153099",
@@ -52479,7 +52480,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89011",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153202",
@@ -52506,7 +52507,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28364",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153264",
@@ -52533,7 +52534,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153328",
@@ -52560,7 +52561,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153541",
@@ -52587,7 +52588,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85233",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153622",
@@ -52614,7 +52615,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153703",
@@ -52641,7 +52642,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35758",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153944",
@@ -52668,7 +52669,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1153961",
@@ -52695,7 +52696,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70733",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1154205",
@@ -52722,7 +52723,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91945",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1154270",
@@ -52749,7 +52750,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92544",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1154415",
@@ -52776,7 +52777,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98661",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1154608",
@@ -52803,7 +52804,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1154639",
@@ -52830,7 +52831,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23452",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1154706",
@@ -52857,7 +52858,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1154902",
@@ -52884,7 +52885,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1155080",
@@ -52911,7 +52912,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1155127",
@@ -52938,7 +52939,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1155306",
@@ -52965,7 +52966,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1155497",
@@ -52992,7 +52993,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43701",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1155502",
@@ -53019,7 +53020,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1155855",
@@ -53046,7 +53047,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1155967",
@@ -53073,7 +53074,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23314",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1156004",
@@ -53100,7 +53101,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96766",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1156228",
@@ -53127,7 +53128,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1156908",
@@ -53154,7 +53155,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1157010",
@@ -53181,7 +53182,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1157394",
@@ -53208,7 +53209,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40361",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1157413",
@@ -53235,7 +53236,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1157606",
@@ -53262,7 +53263,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92336",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1157640",
@@ -53289,7 +53290,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1157685",
@@ -53316,7 +53317,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1158156",
@@ -53343,7 +53344,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29662",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1158464",
@@ -53370,7 +53371,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92336",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1158660",
@@ -53397,7 +53398,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1160702",
@@ -53424,7 +53425,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70058",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1161333",
@@ -53451,7 +53452,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30252",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1162174",
@@ -53478,7 +53479,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1162384",
@@ -53505,7 +53506,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "3743",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1163373",
@@ -53532,7 +53533,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23323",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1163762",
@@ -53559,7 +53560,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33709",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1163907",
@@ -53586,7 +53587,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1164295",
@@ -53613,7 +53614,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1164412",
@@ -53640,7 +53641,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37167",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1164913",
@@ -53667,7 +53668,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1166516",
@@ -53694,7 +53695,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1166709",
@@ -53721,7 +53722,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1166774",
@@ -53748,7 +53749,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1167035",
@@ -53775,7 +53776,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1167567",
@@ -53802,7 +53803,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1168069",
@@ -53829,7 +53830,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6804",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1168492",
@@ -53856,7 +53857,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "5649",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1169111",
@@ -53883,7 +53884,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1169254",
@@ -53910,7 +53911,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1169304",
@@ -53937,7 +53938,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1169447",
@@ -53964,7 +53965,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6093",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX7E1169884",
@@ -53991,7 +53992,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2909",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1134218",
@@ -54018,7 +54019,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91731",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1134865",
@@ -54045,7 +54046,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91306",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1135384",
@@ -54072,7 +54073,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91311",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1138074",
@@ -54099,7 +54100,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78550",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1140312",
@@ -54126,7 +54127,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30161",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1141055",
@@ -54153,7 +54154,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40258",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1144151",
@@ -54180,7 +54181,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28012",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1144506",
@@ -54207,7 +54208,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30529",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1145218",
@@ -54234,7 +54235,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27529",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/5/2017\r"
+    leaseEndDate: "6/5/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1148877",
@@ -54261,7 +54262,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74441",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1149429",
@@ -54288,7 +54289,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1150192",
@@ -54315,7 +54316,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8232",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1150502",
@@ -54342,7 +54343,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46123",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1150788",
@@ -54369,7 +54370,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80013",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1154890",
@@ -54396,7 +54397,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40258",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1169888",
@@ -54423,7 +54424,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96766",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1175769",
@@ -54450,7 +54451,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64116",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1178543",
@@ -54477,7 +54478,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27529",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1182169",
@@ -54504,7 +54505,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45040",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/15/2017\r"
+    leaseEndDate: "8/15/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1183080",
@@ -54531,7 +54532,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48654",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/9/2017\r"
+    leaseEndDate: "8/9/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1186402",
@@ -54558,7 +54559,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1186478",
@@ -54585,7 +54586,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85392",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/3/2017\r"
+    leaseEndDate: "8/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1187033",
@@ -54612,7 +54613,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92584",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/13/2017\r"
+    leaseEndDate: "8/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1187162",
@@ -54639,7 +54640,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "99212",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1187419",
@@ -54666,7 +54667,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/16/2017\r"
+    leaseEndDate: "8/16/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1188599",
@@ -54693,7 +54694,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/19/2017\r"
+    leaseEndDate: "9/19/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1189946",
@@ -54720,7 +54721,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/20/2017\r"
+    leaseEndDate: "8/20/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8C1190983",
@@ -54747,7 +54748,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1147228",
@@ -54774,7 +54775,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "25159",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1148640",
@@ -54801,7 +54802,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "24556",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1148752",
@@ -54828,7 +54829,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "16105",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/25/2018\r"
+    leaseEndDate: "4/25/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1159654",
@@ -54855,7 +54856,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97230",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/9/2018\r"
+    leaseEndDate: "5/9/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1160321",
@@ -54882,7 +54883,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1161260",
@@ -54909,7 +54910,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1161937",
@@ -54936,7 +54937,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1162649",
@@ -54963,7 +54964,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/20/2018\r"
+    leaseEndDate: "5/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1162716",
@@ -54990,7 +54991,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "5871",
     mis: "143",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1167530",
@@ -55017,7 +55018,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77035",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1167835",
@@ -55044,7 +55045,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75944",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2018\r"
+    leaseEndDate: "5/10/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1168032",
@@ -55071,7 +55072,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1170556",
@@ -55098,7 +55099,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1171383",
@@ -55125,7 +55126,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29407",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1171934",
@@ -55152,7 +55153,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29412",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1172260",
@@ -55179,7 +55180,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35806",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/13/2018\r"
+    leaseEndDate: "6/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1172727",
@@ -55206,7 +55207,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "7/2/2018\r"
+    leaseEndDate: "7/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1173201",
@@ -55233,7 +55234,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1173666",
@@ -55260,7 +55261,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29154",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/12/2018\r"
+    leaseEndDate: "6/12/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1174414",
@@ -55287,7 +55288,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31794",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1175157",
@@ -55314,7 +55315,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "73742",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1175305",
@@ -55341,7 +55342,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27520",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1175854",
@@ -55368,7 +55369,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30013",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1176518",
@@ -55395,7 +55396,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71909",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1177393",
@@ -55422,7 +55423,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66209",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1179547",
@@ -55449,7 +55450,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35228",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/13/2018\r"
+    leaseEndDate: "6/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1180262",
@@ -55476,7 +55477,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8D1180679",
@@ -55503,7 +55504,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36693",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "7/12/2018\r"
+    leaseEndDate: "7/12/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1150230",
@@ -55530,7 +55531,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "138",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1153032",
@@ -55557,7 +55558,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1153130",
@@ -55584,7 +55585,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85350",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1153161",
@@ -55611,7 +55612,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1153189",
@@ -55638,7 +55639,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72002",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1153368",
@@ -55665,7 +55666,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1153936",
@@ -55692,7 +55693,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98662",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1154178",
@@ -55719,7 +55720,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "26301",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1154472",
@@ -55746,7 +55747,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1154665",
@@ -55773,7 +55774,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1154925",
@@ -55800,7 +55801,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77067",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1155086",
@@ -55827,7 +55828,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39301",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1155105",
@@ -55854,7 +55855,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75604",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1155167",
@@ -55881,7 +55882,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1155220",
@@ -55908,7 +55909,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1155315",
@@ -55935,7 +55936,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71291",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1155346",
@@ -55962,7 +55963,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27958",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1155573",
@@ -55989,7 +55990,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76401",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1155850",
@@ -56016,7 +56017,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79912",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1155976",
@@ -56043,7 +56044,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37066",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1156237",
@@ -56070,7 +56071,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96756",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1156531",
@@ -56097,7 +56098,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1156612",
@@ -56124,7 +56125,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27330",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1156657",
@@ -56151,7 +56152,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1156691",
@@ -56178,7 +56179,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "90813",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1156982",
@@ -56205,7 +56206,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29649",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1157288",
@@ -56232,7 +56233,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1157596",
@@ -56259,7 +56260,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1157775",
@@ -56286,7 +56287,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1157985",
@@ -56313,7 +56314,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71665",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1157999",
@@ -56340,7 +56341,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29527",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1158263",
@@ -56367,7 +56368,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37643",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1160546",
@@ -56394,7 +56395,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70528",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1161504",
@@ -56421,7 +56422,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70816",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1161793",
@@ -56448,7 +56449,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98513",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1162118",
@@ -56475,7 +56476,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1162328",
@@ -56502,7 +56503,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1163690",
@@ -56529,7 +56530,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2121",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1163818",
@@ -56556,7 +56557,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "754",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1163835",
@@ -56583,7 +56584,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1163978",
@@ -56610,7 +56611,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37204",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1164595",
@@ -56637,7 +56638,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1165567",
@@ -56664,7 +56665,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1167805",
@@ -56691,7 +56692,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1167836",
@@ -56718,7 +56719,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1168078",
@@ -56745,7 +56746,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33012",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1168288",
@@ -56772,7 +56773,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1168470",
@@ -56799,7 +56800,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64075",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1168937",
@@ -56826,7 +56827,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "16345",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1169800",
@@ -56853,7 +56854,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "84653",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1170560",
@@ -56880,7 +56881,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33773",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX8E1171952",
@@ -56907,7 +56908,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "3901",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1133577",
@@ -56934,7 +56935,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92336",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1133806",
@@ -56961,7 +56962,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1133885",
@@ -56988,7 +56989,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1134342",
@@ -57015,7 +57016,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92021",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1135314",
@@ -57042,7 +57043,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85365",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1137385",
@@ -57069,7 +57070,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "956",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1138505",
@@ -57096,7 +57097,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1138794",
@@ -57123,7 +57124,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1139606",
@@ -57150,7 +57151,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "74569",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1140867",
@@ -57177,7 +57178,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "17601",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1141386",
@@ -57204,7 +57205,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28546",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1143249",
@@ -57231,7 +57232,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45505",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1147477",
@@ -57258,7 +57259,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30310",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1147611",
@@ -57285,7 +57286,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1148144",
@@ -57312,7 +57313,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1149620",
@@ -57339,7 +57340,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1150038",
@@ -57366,7 +57367,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76116",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1151027",
@@ -57393,7 +57394,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "19973",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1155708",
@@ -57420,7 +57421,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66605",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1170001",
@@ -57447,7 +57448,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6010",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/17/2017\r"
+    leaseEndDate: "7/17/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1170189",
@@ -57474,7 +57475,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1174145",
@@ -57501,7 +57502,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27587",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1176025",
@@ -57528,7 +57529,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33175",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/20/2017\r"
+    leaseEndDate: "7/20/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1177692",
@@ -57555,7 +57556,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1178227",
@@ -57582,7 +57583,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72120",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1178857",
@@ -57609,7 +57610,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1182276",
@@ -57636,7 +57637,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/8/2017\r"
+    leaseEndDate: "8/8/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1182908",
@@ -57663,7 +57664,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44485",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1185887",
@@ -57690,7 +57691,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/13/2017\r"
+    leaseEndDate: "8/13/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1186070",
@@ -57717,7 +57718,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27320",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/3/2017\r"
+    leaseEndDate: "8/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1186652",
@@ -57744,7 +57745,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "10/3/2017\r"
+    leaseEndDate: "10/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1189017",
@@ -57771,7 +57772,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1190474",
@@ -57798,7 +57799,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1191107",
@@ -57825,7 +57826,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "12/4/2017\r"
+    leaseEndDate: "12/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1191284",
@@ -57852,7 +57853,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9C1191317",
@@ -57879,7 +57880,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1147397",
@@ -57906,7 +57907,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45430",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1148730",
@@ -57933,7 +57934,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27948",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/19/2018\r"
+    leaseEndDate: "4/19/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1152678",
@@ -57960,7 +57961,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/16/2018\r"
+    leaseEndDate: "4/16/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1155483",
@@ -57987,7 +57988,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "67217",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "4/19/2018\r"
+    leaseEndDate: "4/19/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1155905",
@@ -58014,7 +58015,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6710",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1156536",
@@ -58041,7 +58042,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1157170",
@@ -58068,7 +58069,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1095",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1157685",
@@ -58095,7 +58096,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1960",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "4/24/2018\r"
+    leaseEndDate: "4/24/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1159131",
@@ -58122,7 +58123,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1159694",
@@ -58149,7 +58150,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91977",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/16/2018\r"
+    leaseEndDate: "5/16/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1160795",
@@ -58176,7 +58177,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1161350",
@@ -58203,7 +58204,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35983",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1161557",
@@ -58230,7 +58231,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44060",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1162918",
@@ -58257,7 +58258,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15133",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1166578",
@@ -58284,7 +58285,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "34208",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1166631",
@@ -58311,7 +58312,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70058",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/20/2018\r"
+    leaseEndDate: "5/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1169318",
@@ -58338,7 +58339,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78239",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/13/2018\r"
+    leaseEndDate: "5/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1169349",
@@ -58365,7 +58366,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91945",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1169982",
@@ -58392,7 +58393,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "12992",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1173532",
@@ -58419,7 +58420,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40391",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/13/2018\r"
+    leaseEndDate: "6/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1174065",
@@ -58446,7 +58447,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "72212",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1175281",
@@ -58473,7 +58474,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75119",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "12/26/2022\r"
+    leaseEndDate: "12/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1176009",
@@ -58500,7 +58501,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77406",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "7/2/2018\r"
+    leaseEndDate: "7/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1176964",
@@ -58527,7 +58528,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75490",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/17/2018\r"
+    leaseEndDate: "6/17/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1177855",
@@ -58554,7 +58555,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1179623",
@@ -58581,7 +58582,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75071",
     mis: "143",
     remainingBookValue: 0,
-    leaseEndDate: "6/11/2018\r"
+    leaseEndDate: "6/11/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1180156",
@@ -58608,7 +58609,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43760",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9D1180447",
@@ -58635,7 +58636,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32222",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/20/2018\r"
+    leaseEndDate: "6/20/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1150611",
@@ -58662,7 +58663,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "681",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1153265",
@@ -58689,7 +58690,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37874",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1153282",
@@ -58716,7 +58717,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30236",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1153315",
@@ -58743,7 +58744,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55431",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1153640",
@@ -58770,7 +58771,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1153671",
@@ -58797,7 +58798,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89104",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1153685",
@@ -58824,7 +58825,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1153962",
@@ -58851,7 +58852,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1154058",
@@ -58878,7 +58879,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1154660",
@@ -58905,7 +58906,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79416",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1154819",
@@ -58932,7 +58933,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1154836",
@@ -58959,7 +58960,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77369",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1154920",
@@ -58986,7 +58987,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155033",
@@ -59013,7 +59014,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37204",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155159",
@@ -59040,7 +59041,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155419",
@@ -59067,7 +59068,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78250",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155534",
@@ -59094,7 +59095,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36526",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155579",
@@ -59121,7 +59122,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155615",
@@ -59148,7 +59149,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79413",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155632",
@@ -59175,7 +59176,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15714",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155680",
@@ -59202,7 +59203,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1155887",
@@ -59229,7 +59230,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1156120",
@@ -59256,7 +59257,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44221",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1156165",
@@ -59283,7 +59284,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46077",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1156568",
@@ -59310,7 +59311,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63116",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1156862",
@@ -59337,7 +59338,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27606",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1157073",
@@ -59364,7 +59365,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1157672",
@@ -59391,7 +59392,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1158322",
@@ -59418,7 +59419,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31419",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1159048",
@@ -59445,7 +59446,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29526",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1161155",
@@ -59472,7 +59473,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28690",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1161558",
@@ -59499,7 +59500,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1163407",
@@ -59526,7 +59527,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "956",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1163861",
@@ -59553,7 +59554,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33709",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1164377",
@@ -59580,7 +59581,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39042",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1165318",
@@ -59607,7 +59608,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1165531",
@@ -59634,7 +59635,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93726",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1165836",
@@ -59661,7 +59662,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1166601",
@@ -59688,7 +59689,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1168283",
@@ -59715,7 +59716,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4116",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1168347",
@@ -59742,7 +59743,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38133",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1168719",
@@ -59769,7 +59770,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1169272",
@@ -59796,7 +59797,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77568",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1169515",
@@ -59823,7 +59824,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1169577",
@@ -59850,7 +59851,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFX9E1171376",
@@ -59877,7 +59878,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70466",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1133877",
@@ -59904,7 +59905,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91321",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1134107",
@@ -59931,7 +59932,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91722",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1134205",
@@ -59958,7 +59959,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92802",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1135418",
@@ -59985,7 +59986,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85365",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1137668",
@@ -60012,7 +60013,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "83607",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1138402",
@@ -60039,7 +60040,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78415",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1138772",
@@ -60066,7 +60067,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1139498",
@@ -60093,7 +60094,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1139680",
@@ -60120,7 +60121,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1139761",
@@ -60147,7 +60148,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1140425",
@@ -60174,7 +60175,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15601",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1143552",
@@ -60201,7 +60202,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38117",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1143745",
@@ -60228,7 +60229,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33709",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1144362",
@@ -60255,7 +60256,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1144538",
@@ -60282,7 +60283,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70058",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1146824",
@@ -60309,7 +60310,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66209",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/23/2017\r"
+    leaseEndDate: "5/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1147682",
@@ -60336,7 +60337,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1148783",
@@ -60363,7 +60364,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1150064",
@@ -60390,7 +60391,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1151005",
@@ -60417,7 +60418,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/18/2017\r"
+    leaseEndDate: "7/18/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1154017",
@@ -60444,7 +60445,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32507",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1155622",
@@ -60471,7 +60472,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1155751",
@@ -60498,7 +60499,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1841",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1156866",
@@ -60525,7 +60526,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "5602",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1169858",
@@ -60552,7 +60553,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75241",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1173697",
@@ -60579,7 +60580,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "78245",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1174588",
@@ -60606,7 +60607,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71360",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1174977",
@@ -60633,7 +60634,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/3/2017\r"
+    leaseEndDate: "7/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1175451",
@@ -60660,7 +60661,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "44646",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1176230",
@@ -60687,7 +60688,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38128",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1178138",
@@ -60714,7 +60715,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32656",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1178382",
@@ -60741,7 +60742,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1178494",
@@ -60768,7 +60769,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92119",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1178821",
@@ -60795,7 +60796,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "1843",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1180147",
@@ -60822,7 +60823,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1180925",
@@ -60849,7 +60850,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1182349",
@@ -60876,7 +60877,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "153",
     remainingBookValue: 0,
-    leaseEndDate: "8/3/2017\r"
+    leaseEndDate: "8/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1182643",
@@ -60903,7 +60904,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48327",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2017\r"
+    leaseEndDate: "8/6/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1186367",
@@ -60930,7 +60931,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "29407",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/2/2017\r"
+    leaseEndDate: "8/2/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1186899",
@@ -60957,7 +60958,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1187681",
@@ -60984,7 +60985,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91945",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/3/2017\r"
+    leaseEndDate: "8/3/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1187728",
@@ -61011,7 +61012,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/17/2017\r"
+    leaseEndDate: "8/17/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1188328",
@@ -61038,7 +61039,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85282",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/17/2017\r"
+    leaseEndDate: "8/17/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1190421",
@@ -61065,7 +61066,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/17/2017\r"
+    leaseEndDate: "9/17/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXC1190757",
@@ -61092,7 +61093,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1146727",
@@ -61119,7 +61120,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "149",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1146985",
@@ -61146,7 +61147,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40258",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1148803",
@@ -61173,7 +61174,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23323",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "5/3/2018\r"
+    leaseEndDate: "5/3/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1154911",
@@ -61200,7 +61201,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "52804",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1155007",
@@ -61227,7 +61228,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2150",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/8/2018\r"
+    leaseEndDate: "5/8/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1155718",
@@ -61254,7 +61255,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1156626",
@@ -61281,7 +61282,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22193",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1157307",
@@ -61308,7 +61309,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89011",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1159610",
@@ -61335,7 +61336,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98444",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1160384",
@@ -61362,7 +61363,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1160563",
@@ -61389,7 +61390,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "99217",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1160594",
@@ -61416,7 +61417,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1161082",
@@ -61443,7 +61444,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1161373",
@@ -61470,7 +61471,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6119",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1161700",
@@ -61497,7 +61498,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2018\r"
+    leaseEndDate: "6/18/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1161941",
@@ -61524,7 +61525,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1162555",
@@ -61551,7 +61552,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6057",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1167433",
@@ -61578,7 +61579,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "49001",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/14/2018\r"
+    leaseEndDate: "6/14/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1168596",
@@ -61605,7 +61606,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2018\r"
+    leaseEndDate: "5/10/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1169389",
@@ -61632,7 +61633,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92201",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1170168",
@@ -61659,7 +61660,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "12514",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1171191",
@@ -61686,7 +61687,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1172163",
@@ -61713,7 +61714,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1172924",
@@ -61740,7 +61741,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1173605",
@@ -61767,7 +61768,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37912",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1176603",
@@ -61794,7 +61795,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30044",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "7/8/2018\r"
+    leaseEndDate: "7/8/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1176973",
@@ -61821,7 +61822,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36580",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1177332",
@@ -61848,7 +61849,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1177993",
@@ -61875,7 +61876,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1178593",
@@ -61902,7 +61903,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38375",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "8/6/2018\r"
+    leaseEndDate: "8/6/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1178979",
@@ -61929,7 +61930,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/13/2018\r"
+    leaseEndDate: "6/13/2018", source: "Holman"
   },
   {
     vin: "1GCSGAFXXD1179274",
@@ -61956,7 +61957,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30083",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1152996",
@@ -61983,7 +61984,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "6/18/2023\r"
+    leaseEndDate: "6/18/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1153047",
@@ -62010,7 +62011,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92115",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1153095",
@@ -62037,7 +62038,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "41339",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1153145",
@@ -62064,7 +62065,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31909",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2022\r"
+    leaseEndDate: "5/26/2022", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1153209",
@@ -62091,7 +62092,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28054",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1153324",
@@ -62118,7 +62119,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31907",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1153646",
@@ -62145,7 +62146,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15063",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1153758",
@@ -62172,7 +62173,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15644",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1154067",
@@ -62199,7 +62200,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1154554",
@@ -62226,7 +62227,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36106",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1154649",
@@ -62253,7 +62254,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "48036",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1154683",
@@ -62280,7 +62281,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "79912",
     mis: "135",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1154697",
@@ -62307,7 +62308,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "45681",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1154988",
@@ -62334,7 +62335,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63028",
     mis: "137",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1155445",
@@ -62361,7 +62362,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98903",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1155817",
@@ -62388,7 +62389,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1156272",
@@ -62415,7 +62416,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85301",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1156336",
@@ -62442,7 +62443,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28546",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1156708",
@@ -62469,7 +62470,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1157325",
@@ -62496,7 +62497,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93720",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1157485",
@@ -62523,7 +62524,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33015",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1159222",
@@ -62550,7 +62551,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98134",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1159429",
@@ -62577,7 +62578,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "97302",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1160421",
@@ -62604,7 +62605,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92544",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1161455",
@@ -62631,7 +62632,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "70360",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1162038",
@@ -62658,7 +62659,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38305",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1162346",
@@ -62685,7 +62686,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36067",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1162430",
@@ -62712,7 +62713,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31794",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1163027",
@@ -62739,7 +62740,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "30214",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1163142",
@@ -62766,7 +62767,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "918",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1163478",
@@ -62793,7 +62794,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1163853",
@@ -62820,7 +62821,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1164002",
@@ -62847,7 +62848,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "680",
     mis: "132",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1164159",
@@ -62874,7 +62875,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37172",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1164274",
@@ -62901,7 +62902,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96706",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1164632",
@@ -62928,7 +62929,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1164758",
@@ -62955,7 +62956,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1165666",
@@ -62982,7 +62983,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "130",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1166445",
@@ -63009,7 +63010,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1168843",
@@ -63036,7 +63037,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1168969",
@@ -63063,7 +63064,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "11746",
     mis: "134",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCSGAFXXE1169166",
@@ -63090,7 +63091,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "38117",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA0C1189065",
@@ -63117,7 +63118,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "4011",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/14/2017\r"
+    leaseEndDate: "8/14/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA0C1192600",
@@ -63144,7 +63145,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "66209",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/7/2017\r"
+    leaseEndDate: "9/7/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA0C1194038",
@@ -63171,7 +63172,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA0D1166838",
@@ -63198,7 +63199,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "42503",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/14/2018\r"
+    leaseEndDate: "5/14/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA0D1169688",
@@ -63225,7 +63226,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35216",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA0D1180948",
@@ -63252,7 +63253,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37204",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA1C1144264",
@@ -63279,7 +63280,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64157",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA1D1145643",
@@ -63306,7 +63307,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA1D1147683",
@@ -63333,7 +63334,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "93662",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA2C1142846",
@@ -63360,7 +63361,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "77084",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA2C1189598",
@@ -63387,7 +63388,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "56431",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/5/2017\r"
+    leaseEndDate: "9/5/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA2C1191240",
@@ -63414,7 +63415,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85282",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/20/2017\r"
+    leaseEndDate: "9/20/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA2C1193344",
@@ -63441,7 +63442,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "14623",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "10/10/2017\r"
+    leaseEndDate: "10/10/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA2D1162371",
@@ -63468,7 +63469,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "64127",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/10/2018\r"
+    leaseEndDate: "5/10/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA2D1178196",
@@ -63495,7 +63496,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "71119",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "6/17/2019\r"
+    leaseEndDate: "6/17/2019", source: "Holman"
   },
   {
     vin: "1GCWGFCA2D1180076",
@@ -63522,7 +63523,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40223",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/24/2018\r"
+    leaseEndDate: "6/24/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA3C1144167",
@@ -63549,7 +63550,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23455",
     mis: "160",
     remainingBookValue: 0,
-    leaseEndDate: "8/7/2017\r"
+    leaseEndDate: "8/7/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA3D1147507",
@@ -63576,7 +63577,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95829",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA3D1156000",
@@ -63603,7 +63604,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/14/2018\r"
+    leaseEndDate: "6/14/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA3D1156644",
@@ -63630,7 +63631,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "98661",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA3D1168955",
@@ -63657,7 +63658,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76180",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA3D1169149",
@@ -63684,7 +63685,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80031",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/14/2018\r"
+    leaseEndDate: "6/14/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA3D1169412",
@@ -63711,7 +63712,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75092",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA3D1169670",
@@ -63738,7 +63739,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37407",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/17/2018\r"
+    leaseEndDate: "5/17/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA3D1169751",
@@ -63765,7 +63766,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "15642",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA4C1148454",
@@ -63792,7 +63793,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "50158",
     mis: "157",
     remainingBookValue: 0,
-    leaseEndDate: "8/15/2017\r"
+    leaseEndDate: "8/15/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA4C1189666",
@@ -63819,7 +63820,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36111",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2017\r"
+    leaseEndDate: "9/24/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA4C1190333",
@@ -63846,7 +63847,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "41011",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/22/2017\r"
+    leaseEndDate: "8/22/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA4C1191045",
@@ -63873,7 +63874,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33837",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "10/11/2017\r"
+    leaseEndDate: "10/11/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA4C1192986",
@@ -63900,7 +63901,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "10/3/2017\r"
+    leaseEndDate: "10/3/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA4D1161061",
@@ -63927,7 +63928,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "63005",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA4D1162257",
@@ -63954,7 +63955,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "43119",
     mis: "148",
     remainingBookValue: 0,
-    leaseEndDate: "6/10/2018\r"
+    leaseEndDate: "6/10/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA4D1162727",
@@ -63981,7 +63982,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "22709",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA4D1166857",
@@ -64008,7 +64009,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27529",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/14/2018\r"
+    leaseEndDate: "5/14/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA4D1167183",
@@ -64035,7 +64036,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "27886",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA4D1168835",
@@ -64062,7 +64063,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "84115",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "7/2/2018\r"
+    leaseEndDate: "7/2/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA5C1135843",
@@ -64089,7 +64090,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92064",
     mis: "161",
     remainingBookValue: 0,
-    leaseEndDate: "5/28/2017\r"
+    leaseEndDate: "5/28/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA5C1194455",
@@ -64116,7 +64117,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36111",
     mis: "154",
     remainingBookValue: 0,
-    leaseEndDate: "12/12/2017\r"
+    leaseEndDate: "12/12/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA5D1160582",
@@ -64143,7 +64144,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23707",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/2/2018\r"
+    leaseEndDate: "5/2/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA5D1180010",
@@ -64170,7 +64171,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31833",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/21/2018\r"
+    leaseEndDate: "6/21/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA5D1182324",
@@ -64197,7 +64198,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "76310",
     mis: "144",
     remainingBookValue: 0,
-    leaseEndDate: "7/19/2018\r"
+    leaseEndDate: "7/19/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA6D1162163",
@@ -64224,7 +64225,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "2324",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/21/2018\r"
+    leaseEndDate: "5/21/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA6D1167315",
@@ -64251,7 +64252,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA6D1168058",
@@ -64278,7 +64279,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75109",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA6D1169291",
@@ -64305,7 +64306,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37421",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/17/2018\r"
+    leaseEndDate: "5/17/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA7C1143961",
@@ -64332,7 +64333,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "89011",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "6/22/2017\r"
+    leaseEndDate: "6/22/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA7D1167470",
@@ -64359,7 +64360,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "13126",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA8C1149560",
@@ -64386,7 +64387,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "8048",
     mis: "158",
     remainingBookValue: 0,
-    leaseEndDate: "7/24/2017\r"
+    leaseEndDate: "7/24/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA8C1191985",
@@ -64413,7 +64414,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "8/23/2017\r"
+    leaseEndDate: "8/23/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA8C1192294",
@@ -64440,7 +64441,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "55344",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA8C1193378",
@@ -64467,7 +64468,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "67002",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/14/2017\r"
+    leaseEndDate: "9/14/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA8C1194160",
@@ -64494,7 +64495,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95610",
     mis: "155",
     remainingBookValue: 0,
-    leaseEndDate: "9/4/2017\r"
+    leaseEndDate: "9/4/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA8D1161662",
@@ -64521,7 +64522,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "6111",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/17/2018\r"
+    leaseEndDate: "5/17/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA8D1182320",
@@ -64548,7 +64549,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "31803",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA9C1150541",
@@ -64575,7 +64576,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40258",
     mis: "159",
     remainingBookValue: 0,
-    leaseEndDate: "5/24/2017\r"
+    leaseEndDate: "5/24/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA9C1190764",
@@ -64602,7 +64603,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "40351",
     mis: "156",
     remainingBookValue: 0,
-    leaseEndDate: "8/16/2017\r"
+    leaseEndDate: "8/16/2017", source: "Holman"
   },
   {
     vin: "1GCWGFCA9D1157751",
@@ -64629,7 +64630,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80909",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/17/2018\r"
+    leaseEndDate: "6/17/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCA9D1161962",
@@ -64656,7 +64657,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "46032",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA9D1166952",
@@ -64683,7 +64684,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "23225",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "2/2/2023\r"
+    leaseEndDate: "2/2/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCA9D1168846",
@@ -64710,7 +64711,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "75071",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "6/4/2018\r"
+    leaseEndDate: "6/4/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCAXD1157516",
@@ -64737,7 +64738,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "80640",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCWGFCAXD1167043",
@@ -64764,7 +64765,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37774",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/20/2018\r"
+    leaseEndDate: "5/20/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCAXD1167060",
@@ -64791,7 +64792,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28054",
     mis: "147",
     remainingBookValue: 0,
-    leaseEndDate: "5/14/2018\r"
+    leaseEndDate: "5/14/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCAXD1167477",
@@ -64818,7 +64819,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28304",
     mis: "146",
     remainingBookValue: 0,
-    leaseEndDate: "5/20/2018\r"
+    leaseEndDate: "5/20/2018", source: "Holman"
   },
   {
     vin: "1GCWGFCAXD1181914",
@@ -64845,7 +64846,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32792",
     mis: "145",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "1GCZGFBA0A1145773",
@@ -64872,7 +64873,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA1A1144146",
@@ -64899,7 +64900,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "21771",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA2A1143202",
@@ -64926,7 +64927,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "36117",
     mis: "182",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA2A1144074",
@@ -64953,7 +64954,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "7728",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA2A1151140",
@@ -64980,7 +64981,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA3A1142771",
@@ -65007,7 +65008,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96797",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA3A1152037",
@@ -65034,7 +65035,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35756",
     mis: "180",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA3A1152197",
@@ -65061,7 +65062,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA4A1142343",
@@ -65088,7 +65089,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "35456",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA5A1141542",
@@ -65115,7 +65116,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA6A1151674",
@@ -65142,7 +65143,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "180",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA7A1142918",
@@ -65169,7 +65170,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "96746",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA8A1153037",
@@ -65196,7 +65197,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "37912",
     mis: "180",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA9A1143276",
@@ -65223,7 +65224,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "33773",
     mis: "181",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "1GCZGFBA9A1152415",
@@ -65250,7 +65251,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "28314",
     mis: "180",
     remainingBookValue: 0,
-    leaseEndDate: "9/24/2015\r"
+    leaseEndDate: "9/24/2015", source: "Holman"
   },
   {
     vin: "3C6TRVAG3EE109425",
@@ -65277,7 +65278,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "112",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "JL6CRK1A0EK000475",
@@ -65304,7 +65305,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32750",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "4/2/2019\r"
+    leaseEndDate: "4/2/2019", source: "Holman"
   },
   {
     vin: "NM0LS7CN8DT166839",
@@ -65331,7 +65332,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "85233",
     mis: "136",
     remainingBookValue: 0,
-    leaseEndDate: "1/26/2023\r"
+    leaseEndDate: "1/26/2023", source: "Holman"
   },
   {
     vin: "NM0LS7E72G1282472",
@@ -65358,7 +65359,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "60192",
     mis: "106",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "NM0LS7E79G1282467",
@@ -65385,7 +65386,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "95602",
     mis: "106",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "NM0LS7E79G1282498",
@@ -65412,7 +65413,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "39211",
     mis: "105",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "NM0LS7E7XG1282462",
@@ -65439,7 +65440,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "32514",
     mis: "106",
     remainingBookValue: 0,
-    leaseEndDate: "5/26/2023\r"
+    leaseEndDate: "5/26/2023", source: "Holman"
   },
   {
     vin: "WD0PD644255842780",
@@ -65466,7 +65467,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "92020",
     mis: "138",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "WD0PD644255844240",
@@ -65493,7 +65494,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "131",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   },
   {
     vin: "WD0PD644955842601",
@@ -65520,7 +65521,7 @@ export const activeVehicles: FleetVehicle[] = [
     zip: "91761",
     mis: "133",
     remainingBookValue: 0,
-    leaseEndDate: "\r"
+    leaseEndDate: "", source: "Holman"
   }
 ];
 
