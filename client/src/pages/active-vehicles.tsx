@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,28 +8,25 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database } from "lucide-react";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
-import { 
-  getAvailableVehicles, 
-  getActiveVehicleCount,
-  getUnassignedVehicles,
-  activeVehicles,
-  getBrandingOptions, 
-  getInteriorOptions, 
-  getTuneStatusOptions,
-  getMakeOptions,
-  getModelOptions,
-  getColorOptions,
-  getStateOptions,
-  getLicenseStateOptions,
-  getRegionOptions,
-  getDistrictOptions,
-  getYearOptions,
-  getCityOptions,
-  type FleetVehicle 
-} from "@/data/fleetData";
+import { useQuery } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { type FleetVehicle } from "@/data/fleetData";
+
+interface FleetVehiclesResponse {
+  success: boolean;
+  totalCount: number;
+  pageInfo?: {
+    pageNumber: number;
+    pageSize: number;
+    totalPages: number;
+  };
+  vehicles: FleetVehicle[];
+  message?: string;
+}
 
 export default function ActiveVehicles() {
   const [location] = useLocation();
@@ -49,15 +46,14 @@ export default function ActiveVehicles() {
   const [assignmentStatusFilter, setAssignmentStatusFilter] = useState("all");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   
-  // Check for URL parameters and set initial filter
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const filterParam = urlParams.get('filter');
-    if (filterParam === 'assigned') {
-      // Filter is already set to show only assigned vehicles by using getAvailableVehicles()
-      // which filters out out-of-service vehicles
-    }
-  }, [location]);
+  // Fetch vehicles from Holman API
+  const { data: apiResponse, isLoading, error, refetch, isFetching } = useQuery<FleetVehiclesResponse>({
+    queryKey: ['/api/holman/fleet-vehicles'],
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    refetchOnWindowFocus: false,
+  });
+
+  const allVehicles = apiResponse?.vehicles || [];
   
   // Count active filters
   const activeFiltersCount = [
@@ -73,12 +69,34 @@ export default function ActiveVehicles() {
   const showOnlyUnassigned = filterParam === 'unassigned';
   
   // Use appropriate vehicle list based on filter
-  let baseVehicles = activeVehicles;
+  let baseVehicles = allVehicles;
   if (showOnlyAssigned) {
-    baseVehicles = getAvailableVehicles();
+    baseVehicles = allVehicles.filter(v => !v.outOfServiceDate);
   } else if (showOnlyUnassigned) {
-    baseVehicles = getUnassignedVehicles();
+    baseVehicles = allVehicles.filter(v => v.outOfServiceDate);
   }
+  
+  // Generate filter options dynamically from the loaded data
+  const filterOptions = useMemo(() => {
+    const unique = (arr: string[]) => Array.from(new Set(arr.filter(Boolean))).sort();
+    const uniqueNum = (arr: number[]) => Array.from(new Set(arr.filter(n => n > 0))).sort((a, b) => b - a);
+    
+    return {
+      makes: unique(allVehicles.map(v => v.makeName)),
+      models: unique(allVehicles.map(v => v.modelName)),
+      colors: unique(allVehicles.map(v => v.color)),
+      states: unique(allVehicles.map(v => v.state)),
+      licenseStates: unique(allVehicles.map(v => v.licenseState)),
+      regions: unique(allVehicles.map(v => v.region)),
+      districts: unique(allVehicles.map(v => v.district)),
+      cities: unique(allVehicles.map(v => v.city)),
+      years: uniqueNum(allVehicles.map(v => v.modelYear)),
+      brandings: unique(allVehicles.map(v => v.branding)),
+      interiors: unique(allVehicles.map(v => v.interior)),
+      tuneStatuses: unique(allVehicles.map(v => v.tuneStatus)),
+    };
+  }, [allVehicles]);
+
   const filteredVehicles = baseVehicles.filter(vehicle => {
     const matchesSearch = !searchQuery || 
       vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -120,7 +138,65 @@ export default function ActiveVehicles() {
         <div className="max-w-6xl mx-auto">
           <BackButton href="/" />
 
-          <div className="space-y-6">
+          {/* Loading State */}
+          {isLoading && (
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span>Loading vehicles from Holman API...</span>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Skeleton className="h-10 w-full" />
+                  <div className="grid gap-4">
+                    {[1, 2, 3].map(i => (
+                      <Skeleton key={i} className="h-32 w-full" />
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Error State */}
+          {error && !isLoading && (
+            <Alert variant="destructive" className="mb-6">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Error Loading Vehicles</AlertTitle>
+              <AlertDescription className="flex items-center justify-between">
+                <span>{(error as Error).message || 'Failed to load vehicles from Holman API'}</span>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => refetch()}
+                  disabled={isFetching}
+                  data-testid="button-retry-load"
+                >
+                  {isFetching ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                  Retry
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Main Content */}
+          {!isLoading && <div className="space-y-6">
+            {/* Refresh Button */}
+            <div className="flex justify-end">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => refetch()}
+                disabled={isFetching}
+                data-testid="button-refresh-vehicles"
+              >
+                {isFetching ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                Refresh from Holman
+              </Button>
+            </div>
+
             {/* Search and Filters */}
             <Card>
               <CardHeader>
@@ -154,7 +230,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All makes</SelectItem>
-                                  {getMakeOptions().map(option => (
+                                  {filterOptions.makes.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -169,7 +245,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All models</SelectItem>
-                                  {getModelOptions().map(option => (
+                                  {filterOptions.models.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -184,7 +260,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All years</SelectItem>
-                                  {getYearOptions().map(option => (
+                                  {filterOptions.years.map(option => (
                                     <SelectItem key={option.toString()} value={option.toString()}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -199,7 +275,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All colors</SelectItem>
-                                  {getColorOptions().map(option => (
+                                  {filterOptions.colors.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -220,7 +296,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All branding</SelectItem>
-                                  {getBrandingOptions().map(option => (
+                                  {filterOptions.brandings.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -235,7 +311,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All interiors</SelectItem>
-                                  {getInteriorOptions().map(option => (
+                                  {filterOptions.interiors.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -250,7 +326,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All tune statuses</SelectItem>
-                                  {getTuneStatusOptions().map(option => (
+                                  {filterOptions.tuneStatuses.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -291,7 +367,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All states</SelectItem>
-                                  {getStateOptions().map(option => (
+                                  {filterOptions.states.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -306,7 +382,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All cities</SelectItem>
-                                  {getCityOptions().map(option => (
+                                  {filterOptions.cities.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -321,7 +397,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All license states</SelectItem>
-                                  {getLicenseStateOptions().map(option => (
+                                  {filterOptions.licenseStates.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -336,7 +412,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All regions</SelectItem>
-                                  {getRegionOptions().map(option => (
+                                  {filterOptions.regions.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -351,7 +427,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All districts</SelectItem>
-                                  {getDistrictOptions().map(option => (
+                                  {filterOptions.districts.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -430,7 +506,7 @@ export default function ActiveVehicles() {
             {/* Vehicle List */}
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold">{showOnlyAssigned ? `Assigned Vehicles (${baseVehicles.length})` : showOnlyUnassigned ? `Unassigned Vehicles (${baseVehicles.length})` : `Active Vehicles (${getActiveVehicleCount()})`}</h3>
+                <h3 className="text-lg font-semibold">{showOnlyAssigned ? `Assigned Vehicles (${baseVehicles.length})` : showOnlyUnassigned ? `Unassigned Vehicles (${baseVehicles.length})` : `Active Vehicles (${apiResponse?.totalCount || allVehicles.length})`}</h3>
               </div>
               
               <div className="grid gap-4">
@@ -523,7 +599,7 @@ export default function ActiveVehicles() {
                 )}
               </div>
             </div>
-          </div>
+          </div>}
         </div>
       </main>
     </MainContent>

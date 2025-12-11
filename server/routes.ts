@@ -5407,7 +5407,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Transform Holman vehicles to FleetVehicle format
-      const fleetVehicles = (result.data || result.items || []).map((v: any) => ({
+      const vehicleData = result.data || (result as any).items || [];
+      const fleetVehicles = vehicleData.map((v: any) => ({
         vin: v.vin || '',
         vehicleNumber: v.holmanVehicleNumber || v.clientVehicleNumber || '',
         deliveryDate: v.deliveryDate || '',
