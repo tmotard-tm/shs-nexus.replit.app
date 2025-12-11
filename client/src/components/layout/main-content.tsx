@@ -4,13 +4,15 @@ import { cn } from "@/lib/utils";
 interface MainContentProps {
   children: ReactNode;
   className?: string;
+  noPadding?: boolean;
 }
 
-export function MainContent({ children, className }: MainContentProps) {
+export function MainContent({ children, className, noPadding = false }: MainContentProps) {
   return (
     <div 
       className={cn(
-        "flex-1 w-full min-w-0 overflow-x-hidden flex flex-col pt-16",
+        "flex-1 w-full min-w-0 overflow-x-hidden flex flex-col",
+        !noPadding && "pt-16",
         className
       )}
     >

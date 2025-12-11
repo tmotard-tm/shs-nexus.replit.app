@@ -78,9 +78,7 @@ function Router() {
       
       <Route path="/">
         <ProtectedRoute>
-          <MainContent>
-            <RoleBasedHome />
-          </MainContent>
+          <RoleBasedHome />
         </ProtectedRoute>
       </Route>
       

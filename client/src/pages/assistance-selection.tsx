@@ -34,10 +34,10 @@ export default function AssistanceSelection() {
   }, [permissions]);
 
   return (
-    <MainContent>
+    <MainContent noPadding>
       {/* Main Content */}
       <main 
-        className="p-4 relative min-h-screen"
+        className="relative min-h-screen"
         style={{
           backgroundImage: `url(${searsVanImage})`,
           backgroundSize: 'cover',
@@ -47,7 +47,7 @@ export default function AssistanceSelection() {
       >
         {/* Overlay for better content readability */}
         <div className="absolute inset-0 bg-background/60"></div>
-        <div className="relative z-10 max-w-4xl mx-auto pt-4">
+        <div className="relative z-10 max-w-4xl mx-auto pt-4 px-4">
           <div className="text-center mb-6">
             <h2 className="text-3xl font-bold mb-3" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-selection-title">
               Welcome to Sears Drive Line Management Systems
