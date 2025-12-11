@@ -64,10 +64,10 @@ class HolmanVehicleSyncService {
       console.log('[HolmanSync] Attempting live fetch from Holman API');
       
       // Use the simple getVehicles method that works on integrations page
-      // Status code 1 = active vehicles
+      // Status codes: 1 = active, 2 = ordered/in-transit (same as integrations page)
       const apiResponse = await holmanApiService.getVehicles(
         '2B56',           // lesseeCode
-        String(statusCode), // statusCodes (1 = active)
+        '1,2',            // statusCodes - matches what integrations page uses
         undefined,        // soldDateCode
         page,
         pageSize
