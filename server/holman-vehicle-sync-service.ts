@@ -73,8 +73,14 @@ class HolmanVehicleSyncService {
         pageSize
       );
       
-      // Extract vehicles array from response object
-      const vehicleData = apiResponse?.data || [];
+      // Extract vehicles array from response object - can be in 'data' or 'items' property
+      const vehicleData = (apiResponse as any)?.items || apiResponse?.data || [];
+      
+      console.log('[HolmanSync] Extracted vehicles:', {
+        count: vehicleData.length,
+        totalCount: apiResponse?.totalCount,
+        firstVehicle: vehicleData[0] ? `VIN: ${vehicleData[0].vin}` : 'N/A'
+      });
       
       if (!vehicleData || vehicleData.length === 0) {
         console.log('[HolmanSync] No vehicles returned from API, falling back to cache');
