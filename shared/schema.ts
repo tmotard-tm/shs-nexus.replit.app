@@ -1107,3 +1107,96 @@ export const vehicleAssignmentFilterSchema = z.object({
 });
 
 export type VehicleAssignmentFilter = z.infer<typeof vehicleAssignmentFilterSchema>;
+
+// ============================================
+// Holman Vehicle Cache (for offline resilience)
+// ============================================
+
+export const holmanVehiclesCache = pgTable("holman_vehicles_cache", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  holmanVehicleNumber: text("holman_vehicle_number").notNull().unique(),
+  statusCode: integer("status_code"), // 1 = active
+  vin: text("vin"),
+  licensePlate: text("license_plate"),
+  licenseState: text("license_state"),
+  makeName: text("make_name"),
+  modelName: text("model_name"),
+  modelYear: integer("model_year"),
+  color: text("color"),
+  fuelType: text("fuel_type"),
+  engineSize: text("engine_size"),
+  driverName: text("driver_name"),
+  driverEmail: text("driver_email"),
+  driverPhone: text("driver_phone"),
+  city: text("city"),
+  state: text("state"),
+  region: text("region"),
+  district: text("district"),
+  inServiceDate: text("in_service_date"),
+  outOfServiceDate: text("out_of_service_date"),
+  branding: text("branding"),
+  interior: text("interior"),
+  tuneStatus: text("tune_status"),
+  dataSource: text("data_source").default("holman"), // holman, tpms, manual
+  isActive: boolean("is_active").default(true),
+  rawData: jsonb("raw_data"), // Store original API response
+  lastHolmanSyncAt: timestamp("last_holman_sync_at"),
+  lastLocalUpdateAt: timestamp("last_local_update_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  statusIdx: index("holman_cache_status_idx").on(table.statusCode),
+  activeIdx: index("holman_cache_active_idx").on(table.isActive),
+}));
+
+export const insertHolmanVehicleCacheSchema = createInsertSchema(holmanVehiclesCache).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type HolmanVehicleCache = typeof holmanVehiclesCache.$inferSelect;
+export type InsertHolmanVehicleCache = z.infer<typeof insertHolmanVehicleCacheSchema>;
+
+// Change log for offline updates that need to sync back to Holman
+export const vehicleChangeLog = pgTable("vehicle_change_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  holmanVehicleNumber: text("holman_vehicle_number").notNull(),
+  changeType: text("change_type").notNull(), // create, update, delete
+  payload: jsonb("payload").notNull(), // The change data to send to Holman
+  userId: text("user_id"), // Who made the change
+  status: text("status").notNull().default("pending"), // pending, applied, failed
+  attemptCount: integer("attempt_count").default(0),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  appliedAt: timestamp("applied_at"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  statusIdx: index("change_log_status_idx").on(table.status),
+  vehicleIdx: index("change_log_vehicle_idx").on(table.holmanVehicleNumber),
+}));
+
+export const insertVehicleChangeLogSchema = createInsertSchema(vehicleChangeLog).omit({
+  id: true,
+  createdAt: true,
+  attemptCount: true,
+  lastAttemptAt: true,
+  appliedAt: true,
+  errorMessage: true,
+});
+
+export type VehicleChangeLog = typeof vehicleChangeLog.$inferSelect;
+export type InsertVehicleChangeLog = z.infer<typeof insertVehicleChangeLogSchema>;
+
+// Holman sync status metadata
+export const holmanSyncStatusSchema = z.object({
+  dataMode: z.enum(["live", "cached", "empty"]),
+  isStale: z.boolean(),
+  lastSyncAt: z.string().datetime().nullable(),
+  pendingChangeCount: z.number(),
+  totalVehicles: z.number(),
+  apiAvailable: z.boolean(),
+  errorMessage: z.string().nullable().optional(),
+});
+
+export type HolmanSyncStatus = z.infer<typeof holmanSyncStatusSchema>;
