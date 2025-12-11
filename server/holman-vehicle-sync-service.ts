@@ -79,7 +79,8 @@ class HolmanVehicleSyncService {
       console.log('[HolmanSync] Extracted vehicles:', {
         count: vehicleData.length,
         totalCount: apiResponse?.totalCount,
-        firstVehicle: vehicleData[0] ? `VIN: ${vehicleData[0].vin}` : 'N/A'
+        firstVehicleKeys: vehicleData[0] ? Object.keys(vehicleData[0]).join(', ') : 'N/A',
+        firstVehicleSample: vehicleData[0] ? JSON.stringify(vehicleData[0]).substring(0, 500) : 'N/A'
       });
       
       if (!vehicleData || vehicleData.length === 0) {
@@ -386,16 +387,18 @@ class HolmanVehicleSyncService {
   }
 
   private transformToFleetVehicle(v: any): FleetVehicle {
-    const vehicleNumber = v.vehicleNumber?.toString() || v.vehicle_number?.toString() || '';
+    // Map Holman API field names to our FleetVehicle structure
+    // Holman API uses: holmanVehicleNumber, clientVehicleNumber, year, make, model, exteriorColor, garagingCity, garagingState, etc.
+    const vehicleNumber = v.holmanVehicleNumber?.toString() || v.clientVehicleNumber?.toString() || v.vehicleNumber?.toString() || '';
     return {
       id: vehicleNumber,
       vehicleNumber,
       vin: v.vin || '',
       licensePlate: v.licensePlate || v.license_plate || '',
       licenseState: v.licenseState || v.license_state || '',
-      makeName: v.makeName || v.make_name || '',
-      modelName: v.modelName || v.model_name || '',
-      modelYear: v.modelYear || v.model_year || 0,
+      makeName: v.make || v.makeName || '',
+      modelName: v.model || v.modelName || '',
+      modelYear: v.year || v.modelYear || 0,
       color: v.exteriorColor || v.color || '',
       fuelType: v.fuelType || v.fuel_type || '',
       engineSize: v.engineSize || v.engine_size || '',
