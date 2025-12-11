@@ -189,14 +189,13 @@ export default function Login() {
           </form>
           
           <div className="mt-4 text-center">
-            <button
-              type="button"
-              onClick={() => setShowForgotPassword(true)}
-              className="text-sm text-primary hover:underline"
+            <span
+              className="text-sm text-muted-foreground cursor-not-allowed"
               data-testid="link-forgot-password"
+              title="Password reset is temporarily unavailable. Please contact your supervisor or admin."
             >
               Forgot Password?
-            </button>
+            </span>
           </div>
         </CardContent>
       </Card>

@@ -1,6 +1,5 @@
 // scripts/refreshDevFromProd.js
-import pg from "pg";
-const { Client } = pg;
+const { Client } = require("pg");
 
 // Order matters where foreign keys exist.
 // Parents first: integration_data_sources, mapping_sets, data_source_fields,
