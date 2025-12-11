@@ -16,6 +16,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { type FleetVehicle } from "@/data/fleetData";
 
+interface SyncStatus {
+  dataMode: 'live' | 'cached' | 'empty';
+  isStale: boolean;
+  lastSyncAt: string | null;
+  pendingChangeCount: number;
+  totalVehicles: number;
+  apiAvailable: boolean;
+  errorMessage?: string | null;
+}
+
 interface FleetVehiclesResponse {
   success: boolean;
   totalCount: number;
@@ -26,6 +36,7 @@ interface FleetVehiclesResponse {
   };
   vehicles: FleetVehicle[];
   message?: string;
+  syncStatus?: SyncStatus;
 }
 
 export default function ActiveVehicles() {
@@ -54,9 +65,14 @@ export default function ActiveVehicles() {
   });
 
   // Check if API returned success:false
+  const syncStatus = apiResponse?.syncStatus;
   const apiError = apiResponse && !apiResponse.success ? apiResponse.message : null;
-  const hasError = error || apiError;
-  const errorMessage = apiError || (error as Error)?.message || 'Failed to load vehicles from Holman API';
+  const hasError = error || (apiError && syncStatus?.dataMode === 'empty');
+  const errorMessage = apiError || syncStatus?.errorMessage || (error as Error)?.message || 'Failed to load vehicles from Holman API';
+  
+  // Determine if we're in degraded mode (cached data)
+  const isDegradedMode = syncStatus?.dataMode === 'cached';
+  const isLiveMode = syncStatus?.dataMode === 'live';
   
   const allVehicles = apiResponse?.vehicles || [];
   
@@ -184,6 +200,53 @@ export default function ActiveVehicles() {
                 </Button>
               </AlertDescription>
             </Alert>
+          )}
+
+          {/* Degraded Mode Banner - Cached Data */}
+          {isDegradedMode && !isLoading && allVehicles.length > 0 && (
+            <Alert className="mb-6 border-amber-500 bg-amber-50 dark:bg-amber-950/20">
+              <Database className="h-4 w-4 text-amber-600" />
+              <AlertTitle className="text-amber-800 dark:text-amber-400">Using Cached Data</AlertTitle>
+              <AlertDescription className="flex items-center justify-between">
+                <div className="text-amber-700 dark:text-amber-300">
+                  <span>Holman API is unavailable. Showing {allVehicles.length} cached vehicles.</span>
+                  {syncStatus?.lastSyncAt && (
+                    <span className="ml-2 text-sm opacity-80">
+                      Last synced: {new Date(syncStatus.lastSyncAt).toLocaleString()}
+                    </span>
+                  )}
+                  {syncStatus?.pendingChangeCount ? (
+                    <span className="ml-2 text-sm font-medium">
+                      ({syncStatus.pendingChangeCount} pending changes will sync when API recovers)
+                    </span>
+                  ) : null}
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => refetch()}
+                  disabled={isFetching}
+                  className="border-amber-500 text-amber-700 hover:bg-amber-100"
+                  data-testid="button-retry-sync"
+                >
+                  {isFetching ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                  Retry Sync
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Live Mode Indicator */}
+          {isLiveMode && !isLoading && (
+            <div className="mb-4 flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+              <CheckCircle className="h-4 w-4" />
+              <span>Live data from Holman API</span>
+              {syncStatus?.lastSyncAt && (
+                <span className="text-muted-foreground">
+                  • Updated: {new Date(syncStatus.lastSyncAt).toLocaleTimeString()}
+                </span>
+              )}
+            </div>
           )}
 
           {/* Main Content */}
