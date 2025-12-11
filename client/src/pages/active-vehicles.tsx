@@ -53,6 +53,11 @@ export default function ActiveVehicles() {
     refetchOnWindowFocus: false,
   });
 
+  // Check if API returned success:false
+  const apiError = apiResponse && !apiResponse.success ? apiResponse.message : null;
+  const hasError = error || apiError;
+  const errorMessage = apiError || (error as Error)?.message || 'Failed to load vehicles from Holman API';
+  
   const allVehicles = apiResponse?.vehicles || [];
   
   // Count active filters
@@ -161,12 +166,12 @@ export default function ActiveVehicles() {
           )}
 
           {/* Error State */}
-          {error && !isLoading && (
+          {hasError && !isLoading && (
             <Alert variant="destructive" className="mb-6">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Error Loading Vehicles</AlertTitle>
               <AlertDescription className="flex items-center justify-between">
-                <span>{(error as Error).message || 'Failed to load vehicles from Holman API'}</span>
+                <span>{errorMessage}</span>
                 <Button 
                   variant="outline" 
                   size="sm" 
