@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { holmanVehiclesCache, vehicleChangeLog, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus } from "@shared/schema";
 import { eq, sql, and, desc } from "drizzle-orm";
-import holmanApiService from "./holman-api-service";
+import { holmanApiService } from "./holman-api-service";
 
 interface FleetVehicle {
   id: string;
@@ -51,7 +51,7 @@ class HolmanVehicleSyncService {
     pageSize?: number;
     statusCode?: number;
   } = {}): Promise<SyncResult> {
-    const { page = 1, pageSize = 100, statusCode = 1 } = options;
+    const { page = 1, pageSize = 500, statusCode = 1 } = options;
 
     if (!holmanApiService.isConfigured()) {
       console.log('[HolmanSync] API not configured, falling back to cache');
@@ -62,29 +62,57 @@ class HolmanVehicleSyncService {
 
     try {
       console.log('[HolmanSync] Attempting live fetch from Holman API');
-      const apiResponse = await holmanApiService.getVehicles({
+      
+      const apiResponse = await holmanApiService.queryVehiclesCustom({
+        lesseeCode: '2B56',
+        properties: [
+          'vin',
+          'holmanVehicleNumber',
+          'clientVehicleNumber',
+          'modelYear',
+          'makeVin',
+          'makeClient',
+          'modelVin',
+          'modelClient',
+          'licenseState',
+          'licensePlate',
+          'color',
+          'status',
+          'assignedStatus',
+          'garagingStreet1',
+          'garagingCity',
+          'garagingState',
+          'garagingZip',
+          'deliveryDate',
+          'outOfServiceDate',
+          'saleDate',
+          'odometerDelivery',
+          'leaseEndDate',
+          'remainingBookValue',
+          'regRenewalDate'
+        ],
         pageNumber: page,
-        pageSize: pageSize,
+        pageSize: pageSize
       });
 
-      if (!apiResponse.success || !apiResponse.data) {
-        console.log('[HolmanSync] API call failed, falling back to cache:', apiResponse.message);
-        return this.getCachedVehicles(page, pageSize, statusCode, apiResponse.message || 'API call failed');
+      const vehicleData = apiResponse.data || (apiResponse as any).items || [];
+      
+      if (!vehicleData || vehicleData.length === 0) {
+        console.log('[HolmanSync] No vehicles returned from API, falling back to cache');
+        return this.getCachedVehicles(page, pageSize, statusCode, 'No vehicles returned from API');
       }
 
-      const holmanVehicles = apiResponse.data.vehicles || [];
-      const activeVehicles = holmanVehicles.filter((v: any) => v.statusCode === statusCode);
-      
-      console.log(`[HolmanSync] Got ${activeVehicles.length} active vehicles from Holman API`);
+      console.log(`[HolmanSync] Got ${vehicleData.length} vehicles from Holman API`);
 
-      const fleetVehicles = activeVehicles.map((v: any) => this.transformToFleetVehicle(v));
+      const fleetVehicles = vehicleData.map((v: any) => this.transformToFleetVehicle(v));
 
-      await this.updateCache(activeVehicles);
+      await this.updateCache(vehicleData);
       await this.processPendingChanges();
 
       this.lastSuccessfulSync = new Date();
 
       const pendingCount = await this.getPendingChangeCount();
+      const totalCount = apiResponse.totalCount || fleetVehicles.length;
 
       return {
         success: true,
@@ -94,15 +122,15 @@ class HolmanVehicleSyncService {
           isStale: false,
           lastSyncAt: this.lastSuccessfulSync.toISOString(),
           pendingChangeCount: pendingCount,
-          totalVehicles: fleetVehicles.length,
+          totalVehicles: totalCount,
           apiAvailable: true,
           errorMessage: null,
         },
         pagination: {
           page,
           pageSize,
-          totalCount: apiResponse.data.pagination?.totalCount || fleetVehicles.length,
-          totalPages: apiResponse.data.pagination?.totalPages || 1,
+          totalCount,
+          totalPages: Math.ceil(totalCount / pageSize),
         },
       };
     } catch (error) {
