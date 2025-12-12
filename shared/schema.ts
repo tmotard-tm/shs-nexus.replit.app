@@ -1130,7 +1130,8 @@ export const holmanVehiclesCache = pgTable("holman_vehicles_cache", {
   driverPhone: text("driver_phone"),
   city: text("city"),
   state: text("state"),
-  region: text("region"),
+  region: text("region"), // clientData3 from Holman (e.g., "890")
+  division: text("division"), // prefix/division from Holman (e.g., "01")
   district: text("district"),
   inServiceDate: text("in_service_date"),
   outOfServiceDate: text("out_of_service_date"),

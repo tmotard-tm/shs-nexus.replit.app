@@ -678,8 +678,9 @@ export default function ActiveVehicles() {
                             <MapPin className="h-4 w-4 text-muted-foreground" />
                             <span className="text-sm">{vehicle.city}, {vehicle.state} {vehicle.zip}</span>
                           </div>
-                          <p className="text-xs text-muted-foreground">Region: {vehicle.region}</p>
-                          <p className="text-xs text-muted-foreground">District: {vehicle.district}</p>
+                          <p className="text-xs text-muted-foreground">Region: {vehicle.region || 'N/A'}</p>
+                          <p className="text-xs text-muted-foreground">Division: {vehicle.division || 'N/A'}</p>
+                          <p className="text-xs text-muted-foreground">District: {vehicle.district || 'N/A'}</p>
                         </div>
                       </div>
                       

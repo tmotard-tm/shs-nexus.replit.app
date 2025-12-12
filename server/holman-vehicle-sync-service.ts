@@ -21,7 +21,8 @@ interface FleetVehicle {
   driverPhone: string;
   city: string;
   state: string;
-  region: string;
+  region: string; // clientData3 from Holman (e.g., "890")
+  division: string; // prefix/division from Holman (e.g., "01")
   district: string;
   inServiceDate: string;
   outOfServiceDate: string;
@@ -230,8 +231,9 @@ class HolmanVehicleSyncService {
         driverPhone: v.cellPhone || v.workPhone || v.homePhone || v.driverPhone,
         city: v.city,
         state: v.stateProvince || v.state,
-        region: v.region || v.division || '',
-        district: v.prefix || v.district || '',
+        region: v.clientData3 || v.region || '', // clientData3 from Holman (e.g., "890")
+        division: v.prefix || v.division || '', // prefix/division from Holman (e.g., "01")
+        district: v.district || '',
         inServiceDate: v.onRoadDate || v.deliveryDate || v.inServiceDate,
         outOfServiceDate: v.outOfServiceDate,
         odometer: v.odometer || 0,
@@ -421,8 +423,9 @@ class HolmanVehicleSyncService {
       driverPhone: v.cellPhone || v.workPhone || v.homePhone || v.driverPhone || '',
       city: v.city || '',
       state: v.stateProvince || v.state || '',
-      region: v.region || v.division || '',
-      district: v.prefix || v.district || '',
+      region: v.clientData3 || v.region || '', // clientData3 from Holman (e.g., "890")
+      division: v.prefix || v.division || '', // prefix/division from Holman (e.g., "01")
+      district: v.district || '',
       inServiceDate: v.onRoadDate || v.deliveryDate || v.inServiceDate || '',
       outOfServiceDate: v.outOfServiceDate || '',
       odometer: v.odometer || 0,
@@ -455,7 +458,8 @@ class HolmanVehicleSyncService {
       driverPhone: v.driverPhone || '',
       city: v.city || '',
       state: v.state || '',
-      region: v.region || '',
+      region: v.region || '', // clientData3 from Holman
+      division: v.division || '', // prefix/division from Holman
       district: v.district || '',
       inServiceDate: v.inServiceDate || '',
       outOfServiceDate: v.outOfServiceDate || '',

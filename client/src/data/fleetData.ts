@@ -16,6 +16,7 @@ export interface FleetVehicle {
   interior: string;
   tuneStatus: string;
   region: string;
+  division?: string;
   district: string;
   odometerDelivery: number;
   odometer?: number;
