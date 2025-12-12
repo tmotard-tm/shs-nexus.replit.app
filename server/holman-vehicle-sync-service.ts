@@ -1,6 +1,9 @@
 import { db } from "./db";
 import { holmanVehiclesCache, vehicleChangeLog, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus } from "@shared/schema";
-import { eq, sql, and, desc } from "drizzle-orm";
+import { eq, sql, and, desc, inArray } from "drizzle-orm";
+
+// Only divisions 01 and RF are relevant for this application
+const ALLOWED_DIVISIONS = ['01', 'RF'];
 import { holmanApiService } from "./holman-api-service";
 import { getTPMSService } from "./tpms-service";
 
@@ -99,15 +102,24 @@ class HolmanVehicleSyncService {
 
       console.log(`[HolmanSync] Got ${vehicleData.length} vehicles from Holman API (total: ${apiResponse?.totalCount || vehicleData.length})`);
 
-      const fleetVehicles = vehicleData.map((v: any) => this.transformToFleetVehicle(v));
+      // Filter to only divisions 01 and RF - other divisions are not relevant for this application
+      const filteredVehicleData = vehicleData.filter((v: any) => {
+        const division = v.division || v.prefix || '';
+        return ALLOWED_DIVISIONS.includes(division);
+      });
+      
+      console.log(`[HolmanSync] Filtered to ${filteredVehicleData.length} vehicles in divisions ${ALLOWED_DIVISIONS.join(', ')}`);
 
-      await this.updateCache(vehicleData);
+      const fleetVehicles = filteredVehicleData.map((v: any) => this.transformToFleetVehicle(v));
+
+      // Only cache vehicles from allowed divisions
+      await this.updateCache(filteredVehicleData);
       await this.processPendingChanges();
 
       this.lastSuccessfulSync = new Date();
 
       const pendingCount = await this.getPendingChangeCount();
-      const totalCount = apiResponse?.totalCount || vehicleData.length;
+      const totalCount = filteredVehicleData.length;
 
       return {
         success: true,
@@ -144,12 +156,14 @@ class HolmanVehicleSyncService {
     try {
       const offset = (page - 1) * pageSize;
       
+      // Filter to only divisions 01 and RF
       const cachedVehicles = await db
         .select()
         .from(holmanVehiclesCache)
         .where(and(
           eq(holmanVehiclesCache.isActive, true),
-          statusCode ? eq(holmanVehiclesCache.statusCode, statusCode) : sql`true`
+          statusCode ? eq(holmanVehiclesCache.statusCode, statusCode) : sql`true`,
+          inArray(holmanVehiclesCache.division, ALLOWED_DIVISIONS)
         ))
         .orderBy(holmanVehiclesCache.holmanVehicleNumber)
         .limit(pageSize)
@@ -160,7 +174,8 @@ class HolmanVehicleSyncService {
         .from(holmanVehiclesCache)
         .where(and(
           eq(holmanVehiclesCache.isActive, true),
-          statusCode ? eq(holmanVehiclesCache.statusCode, statusCode) : sql`true`
+          statusCode ? eq(holmanVehiclesCache.statusCode, statusCode) : sql`true`,
+          inArray(holmanVehiclesCache.division, ALLOWED_DIVISIONS)
         ));
 
       const totalCount = countResult?.count || 0;

@@ -147,9 +147,10 @@ export default function ActiveVehicles() {
     const matchesDistrict = districtFilter === "all" || vehicle.district === districtFilter;
     const matchesYear = yearFilter === "all" || vehicle.modelYear.toString() === yearFilter;
     const matchesCity = cityFilter === "all" || vehicle.city === cityFilter;
+    // Assignment status is determined by TPMS, not Holman
     const matchesAssignmentStatus = assignmentStatusFilter === "all" || 
-      (assignmentStatusFilter === "assigned" && !vehicle.outOfServiceDate) ||
-      (assignmentStatusFilter === "unassigned" && vehicle.outOfServiceDate);
+      (assignmentStatusFilter === "assigned" && vehicle.tpmsAssignedTechId) ||
+      (assignmentStatusFilter === "unassigned" && !vehicle.tpmsAssignedTechId);
     
     // Holman tech filter
     const matchesHolmanTech = holmanTechFilter === "all" || 
