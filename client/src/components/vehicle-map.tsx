@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter, ZoomIn, ZoomOut, RotateCcw, Compass, RefreshCw } from "lucide-react";
+import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import L from "leaflet";
@@ -28,6 +29,7 @@ interface FleetVehicle {
   deliveryAddress?: string;
   outOfServiceDate?: string | null;
   tpmsAssignedTechId?: string | null;
+  statusCode?: number;
 }
 
 interface VehicleMapProps {
@@ -592,13 +594,33 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
               </DialogHeader>
 
               <div className="space-y-4">
+                {/* Holman Status & Ownership Badges */}
+                <div className="flex items-center gap-2">
+                  <span 
+                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getHolmanStatus(selectedVehicle.statusCode).bgColor} ${getHolmanStatus(selectedVehicle.statusCode).color} border ${getHolmanStatus(selectedVehicle.statusCode).borderColor}`}
+                    data-testid={`holman-status-${selectedVehicle.vin}`}
+                  >
+                    {getHolmanStatus(selectedVehicle.statusCode).label}
+                  </span>
+                  <span 
+                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getVehicleOwnership(selectedVehicle.vehicleNumber).bgColor} ${getVehicleOwnership(selectedVehicle.vehicleNumber).color} border ${getVehicleOwnership(selectedVehicle.vehicleNumber).borderColor}`}
+                    data-testid={`ownership-${selectedVehicle.vin}`}
+                  >
+                    {getVehicleOwnership(selectedVehicle.vehicleNumber).type === 'BYOV' ? (
+                      <><Truck className="h-3 w-3 mr-1" />BYOV</>
+                    ) : (
+                      <>Fleet</>
+                    )}
+                  </span>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm font-medium text-muted-foreground">VIN</Label>
                     <div className="text-sm">{selectedVehicle.vin}</div>
                   </div>
                   <div>
-                    <Label className="text-sm font-medium text-muted-foreground">Status</Label>
+                    <Label className="text-sm font-medium text-muted-foreground">Assignment Status</Label>
                     <div className="text-sm flex items-center gap-2">
                       <div 
                         className="w-2 h-2 rounded-full" 
