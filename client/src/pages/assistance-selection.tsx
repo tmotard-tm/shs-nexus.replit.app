@@ -7,14 +7,36 @@ import { usePermissions } from "@/hooks/use-permissions";
 import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
-import { getActiveVehicleCount, getAvailableVehicles, getUnassignedVehicles } from "@/data/fleetData";
 import { FilteredMap } from "@/components/vehicle-map-filters";
+import { useQuery } from "@tanstack/react-query";
+
+interface FleetVehicle {
+  tpmsAssignedTechId?: string;
+  [key: string]: any;
+}
+
+interface FleetVehiclesResponse {
+  success: boolean;
+  vehicles: FleetVehicle[];
+}
 
 export default function AssistanceSelection() {
   const { permissions } = usePermissions();
   const [, setLocation] = useLocation();
   const [isAssignUpdateDialogOpen, setIsAssignUpdateDialogOpen] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
+
+  // Fetch vehicles from Holman API
+  const { data: apiResponse } = useQuery<FleetVehiclesResponse>({
+    queryKey: ['/api/holman/fleet-vehicles'],
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+  const allVehicles = apiResponse?.vehicles || [];
+  // TPMS assignment determines if vehicle is assigned
+  const assignedVehicles = allVehicles.filter(v => v.tpmsAssignedTechId);
+  const unassignedVehicles = allVehicles.filter(v => !v.tpmsAssignedTechId);
 
   const allWorkflowOptions = [
     { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-600 hover:bg-gray-700", action: () => setLocation("/queue-management"), permissionKey: "taskQueue" as const },
@@ -95,11 +117,11 @@ export default function AssistanceSelection() {
             {/* Vehicle Status Summary */}
             <div className="grid grid-cols-2 gap-4 my-4">
               <div className="text-center p-3 bg-muted rounded-lg">
-                <p className="text-2xl font-bold text-green-600" data-testid="text-assigned-vehicles">{getAvailableVehicles().length}</p>
+                <p className="text-2xl font-bold text-green-600" data-testid="text-assigned-vehicles">{assignedVehicles.length}</p>
                 <p className="text-sm text-muted-foreground">Assigned Vehicles</p>
               </div>
               <div className="text-center p-3 bg-muted rounded-lg">
-                <p className="text-2xl font-bold text-orange-600" data-testid="text-unassigned-vehicles">{getUnassignedVehicles().length}</p>
+                <p className="text-2xl font-bold text-orange-600" data-testid="text-unassigned-vehicles">{unassignedVehicles.length}</p>
                 <p className="text-sm text-muted-foreground">Unassigned Vehicles</p>
               </div>
             </div>
@@ -141,7 +163,7 @@ export default function AssistanceSelection() {
                 TRUCK STATUS - Fleet Vehicle Map
               </DialogTitle>
               <DialogDescription>
-                Interactive fleet tracking with real-time status updates • {getActiveVehicleCount()} Active Vehicles
+                Interactive fleet tracking with real-time status updates • {allVehicles.length} Active Vehicles
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">

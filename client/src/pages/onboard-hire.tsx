@@ -21,8 +21,37 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, CheckCircle, Clock, Users, Package, Wrench, MapPin } from "lucide-react";
-import { getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
 import { apiRequest } from "@/lib/queryClient";
+import { useQuery } from "@tanstack/react-query";
+
+interface FleetVehicle {
+  id: string;
+  vehicleNumber: string;
+  vin: string;
+  licensePlate: string;
+  licenseState: string;
+  makeName: string;
+  modelName: string;
+  modelYear: number;
+  color: string;
+  city: string;
+  state: string;
+  zip: string;
+  region: string;
+  division: string;
+  district: string;
+  branding: string;
+  interior: string;
+  tuneStatus: string;
+  tpmsAssignedTechId?: string;
+  tpmsAssignedTechName?: string;
+  [key: string]: any;
+}
+
+interface FleetVehiclesResponse {
+  success: boolean;
+  vehicles: FleetVehicle[];
+}
 import { useAuth } from "@/hooks/use-auth";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";

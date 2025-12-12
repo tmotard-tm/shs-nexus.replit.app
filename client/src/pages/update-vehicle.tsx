@@ -18,22 +18,50 @@ import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { useToast } from "@/hooks/use-toast";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
-import { 
-  activeVehicles,
-  getBrandingOptions, 
-  getInteriorOptions, 
-  getTuneStatusOptions,
-  getMakeOptions,
-  getModelOptions,
-  getColorOptions,
-  getStateOptions,
-  getLicenseStateOptions,
-  getRegionOptions,
-  getDistrictOptions,
-  getYearOptions,
-  getCityOptions,
-  type FleetVehicle 
-} from "@/data/fleetData";
+// FleetVehicle type for Holman API data
+interface FleetVehicle {
+  vin: string;
+  vehicleNumber: string;
+  modelYear: number;
+  makeName: string;
+  modelName: string;
+  licensePlate: string;
+  licenseState: string;
+  color: string;
+  branding: string;
+  interior: string;
+  tuneStatus: string;
+  city: string;
+  state: string;
+  zip: string;
+  region: string;
+  division?: string;
+  district: string;
+  deliveryAddress?: string;
+  deliveryDate?: string;
+  odometer?: number;
+  outOfServiceDate?: string;
+  saleDate?: string;
+  regRenewalDate?: string;
+  mis?: string;
+  remainingBookValue?: number;
+  leaseEndDate?: string;
+  tpmsAssignedTechId?: string;
+  tpmsAssignedTechName?: string;
+  holmanTechAssigned?: string;
+  holmanTechName?: string;
+  dataSource?: string;
+  [key: string]: any;
+}
+
+interface FleetVehiclesApiResponse {
+  success: boolean;
+  vehicles: FleetVehicle[];
+  syncStatus: {
+    dataMode: string;
+    totalVehicles: number;
+  };
+}
 
 interface HolmanVehicle {
   lesseeCode: string;
@@ -168,51 +196,34 @@ export default function UpdateVehicle() {
     "HA PM Check"
   ];
   
-  const [dataSource, setDataSource] = useState<'holman' | 'local'>('holman');
-
-  const { data: holmanResponse, isLoading: isLoadingHolman, error: holmanError, refetch: refetchHolman } = useQuery<HolmanVehiclesResponse>({
-    queryKey: ['/api/holman/vehicles'],
-    queryFn: async () => {
-      const response = await fetch('/api/holman/vehicles?lesseeCode=2B56&statusCodes=1,2&pageSize=500', {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch Holman vehicles');
-      }
-      return response.json();
-    },
+  // Fetch vehicles from Holman API with TPMS enrichment
+  const { data: fleetResponse, isLoading: isLoadingHolman, error: holmanError, refetch: refetchHolman } = useQuery<FleetVehiclesApiResponse>({
+    queryKey: ['/api/holman/fleet-vehicles'],
     staleTime: 5 * 60 * 1000,
-    retry: 2,
+    refetchOnWindowFocus: false,
   });
 
-  const holmanVehicles: (FleetVehicle & { holmanStatus?: string })[] = (holmanResponse?.data || []).map((hv: HolmanVehicle) => ({
-    vin: hv.vin || '',
-    vehicleNumber: hv.holmanVehicleNumber || hv.clientVehicleNumber || '',
-    modelYear: hv.modelYear || hv.year || 0,
-    makeName: hv.makeVin || hv.makeClient || hv.make || '',
-    modelName: hv.modelVin || hv.modelClient || hv.model || '',
-    licensePlate: hv.licensePlate || '',
-    licenseState: hv.licenseState || '',
-    color: hv.color || 'Unknown',
-    branding: 'N/A',
-    interior: 'N/A',
-    tuneStatus: 'N/A',
-    city: hv.garagingCity || '',
-    state: hv.garagingState || '',
-    zip: hv.garagingZip || '',
-    region: '',
-    district: '',
-    deliveryAddress: hv.garagingStreet1 || '',
-    deliveryDate: '',
-    odometerDelivery: 0,
-    outOfServiceDate: '',
-    saleDate: '',
-    regRenewalDate: '',
-    mis: '',
-    remainingBookValue: 0,
-    leaseEndDate: '',
-    holmanStatus: hv.status || hv.assignedStatus || '',
-  }));
+  const holmanVehicles: FleetVehicle[] = fleetResponse?.vehicles || [];
+  
+  // Generate filter options from actual data
+  const unique = (arr: (string | undefined)[]) => Array.from(new Set(arr.filter(Boolean))).sort() as string[];
+  const uniqueNum = (arr: (number | undefined)[]) => Array.from(new Set(arr.filter((n): n is number => typeof n === 'number' && n > 0))).sort((a, b) => b - a);
+  
+  const filterOptions = {
+    makes: unique(holmanVehicles.map(v => v.makeName)),
+    models: unique(holmanVehicles.map(v => v.modelName)),
+    colors: unique(holmanVehicles.map(v => v.color)),
+    states: unique(holmanVehicles.map(v => v.state)),
+    licenseStates: unique(holmanVehicles.map(v => v.licenseState)),
+    regions: unique(holmanVehicles.map(v => v.region)),
+    divisions: unique(holmanVehicles.map(v => v.division)),
+    districts: unique(holmanVehicles.map(v => v.district)),
+    cities: unique(holmanVehicles.map(v => v.city)),
+    years: uniqueNum(holmanVehicles.map(v => v.modelYear)),
+    brandings: unique(holmanVehicles.map(v => v.branding)),
+    interiors: unique(holmanVehicles.map(v => v.interior)),
+    tuneStatuses: unique(holmanVehicles.map(v => v.tuneStatus)),
+  };
 
   const regions = [
     "Northeast",
@@ -305,9 +316,7 @@ export default function UpdateVehicle() {
     yearFilter, cityFilter
   ].filter(filter => filter !== "all").length;
 
-  const baseVehicles = dataSource === 'holman' && holmanVehicles.length > 0 && !holmanError
-    ? holmanVehicles 
-    : activeVehicles.map(v => ({ ...v, holmanStatus: undefined }));
+  const baseVehicles = holmanVehicles;
   const filteredVehicles = baseVehicles.filter(vehicle => {
     const matchesSearch = !searchQuery || 
       vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -315,7 +324,7 @@ export default function UpdateVehicle() {
       vehicle.licensePlate.toLowerCase().includes(searchQuery.toLowerCase()) ||
       `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
       vehicle.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vehicle.deliveryAddress.toLowerCase().includes(searchQuery.toLowerCase());
+      (vehicle.deliveryAddress || '').toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesBranding = brandingFilter === "all" || vehicle.branding === brandingFilter;
     const matchesInterior = interiorFilter === "all" || vehicle.interior === interiorFilter;
@@ -417,7 +426,7 @@ export default function UpdateVehicle() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All makes</SelectItem>
-                                  {getMakeOptions().map(option => (
+                                  {filterOptions.makes.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -432,7 +441,7 @@ export default function UpdateVehicle() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All models</SelectItem>
-                                  {getModelOptions().map(option => (
+                                  {filterOptions.models.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -447,7 +456,7 @@ export default function UpdateVehicle() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All years</SelectItem>
-                                  {getYearOptions().map(option => (
+                                  {filterOptions.years.map(option => (
                                     <SelectItem key={option.toString()} value={option.toString()}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -462,7 +471,7 @@ export default function UpdateVehicle() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All colors</SelectItem>
-                                  {getColorOptions().map(option => (
+                                  {filterOptions.colors.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -542,85 +551,44 @@ export default function UpdateVehicle() {
               <div className="flex justify-between items-center flex-wrap gap-4">
                 <div className="flex items-center gap-4">
                   <h3 className="text-lg font-semibold">
-                    {dataSource === 'holman' ? 'Holman Fleet Vehicles' : 'Local Vehicles'} 
-                    ({isLoadingHolman && dataSource === 'holman' ? '...' : baseVehicles.length})
+                    Holman Fleet Vehicles ({isLoadingHolman ? '...' : baseVehicles.length})
                   </h3>
-                  {dataSource === 'holman' && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => refetchHolman()}
-                      disabled={isLoadingHolman}
-                      className="h-8"
-                      data-testid="button-refresh-holman"
-                    >
-                      <RefreshCw className={`h-4 w-4 mr-1 ${isLoadingHolman ? 'animate-spin' : ''}`} />
-                      Refresh
-                    </Button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Data Source:</span>
-                  <div className="flex rounded-lg border overflow-hidden">
-                    <button
-                      onClick={() => setDataSource('holman')}
-                      className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                        dataSource === 'holman' 
-                          ? 'bg-primary text-primary-foreground' 
-                          : 'bg-background hover:bg-muted'
-                      }`}
-                      data-testid="button-source-holman"
-                    >
-                      <Truck className="h-4 w-4 inline mr-1" />
-                      Holman
-                    </button>
-                    <button
-                      onClick={() => setDataSource('local')}
-                      className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                        dataSource === 'local' 
-                          ? 'bg-primary text-primary-foreground' 
-                          : 'bg-background hover:bg-muted'
-                      }`}
-                      data-testid="button-source-local"
-                    >
-                      <Car className="h-4 w-4 inline mr-1" />
-                      Local
-                    </button>
-                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => refetchHolman()}
+                    disabled={isLoadingHolman}
+                    className="h-8"
+                    data-testid="button-refresh-holman"
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-1 ${isLoadingHolman ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
                 </div>
               </div>
               
-              {holmanError && dataSource === 'holman' && (
+              {holmanError && (
                 <Card className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20">
                   <CardContent className="p-4 flex items-center gap-3">
                     <AlertCircle className="h-5 w-5 text-amber-500" />
                     <div className="flex-1">
                       <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Holman API temporarily unavailable</p>
                       <p className="text-xs text-amber-600 dark:text-amber-400">
-                        Showing local fleet data instead. The Holman API connection will retry automatically.
+                        The API connection will retry automatically.
                       </p>
                     </div>
-                    <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => refetchHolman()}
-                      >
-                        Retry
-                      </Button>
-                      <Button 
-                        variant="default" 
-                        size="sm" 
-                        onClick={() => setDataSource('local')}
-                      >
-                        Use Local Data
-                      </Button>
-                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => refetchHolman()}
+                    >
+                      Retry
+                    </Button>
                   </CardContent>
                 </Card>
               )}
               
-              {isLoadingHolman && dataSource === 'holman' && holmanVehicles.length === 0 && (
+              {isLoadingHolman && holmanVehicles.length === 0 && (
                 <div className="grid gap-4">
                   {[1, 2, 3].map((i) => (
                     <Card key={i}>
@@ -668,34 +636,20 @@ export default function UpdateVehicle() {
                           <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
                           
-                          {(vehicle as any).holmanStatus && dataSource === 'holman' ? (
-                            <div className="mt-2">
-                              <div 
-                                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium border ${getHolmanStatusInfo((vehicle as any).holmanStatus).color}`}
-                                data-testid="holman-status-badge"
-                              >
-                                {getHolmanStatusInfo((vehicle as any).holmanStatus).icon === 'active' && <CheckCircle className="h-3.5 w-3.5" />}
-                                {getHolmanStatusInfo((vehicle as any).holmanStatus).icon === 'inactive' && <XCircle className="h-3.5 w-3.5" />}
-                                {getHolmanStatusInfo((vehicle as any).holmanStatus).icon === 'pending' && <Loader2 className="h-3.5 w-3.5" />}
-                                {getHolmanStatusInfo((vehicle as any).holmanStatus).icon === 'unknown' && <AlertCircle className="h-3.5 w-3.5" />}
-                                <span>Holman: {getHolmanStatusInfo((vehicle as any).holmanStatus).label}</span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 mt-2">
-                              {!vehicle.outOfServiceDate ? (
-                                <>
-                                  <CheckCircle className="h-4 w-4 text-green-500" />
-                                  <span className="text-sm font-medium text-green-600" data-testid="status-assigned">Assigned</span>
-                                </>
-                              ) : (
-                                <>
-                                  <XCircle className="h-4 w-4 text-red-500" />
-                                  <span className="text-sm font-medium text-red-600" data-testid="status-unassigned">Unassigned</span>
-                                </>
-                              )}
-                            </div>
-                          )}
+                          {/* TPMS determines assignment status */}
+                          <div className="flex items-center gap-2 mt-2">
+                            {vehicle.tpmsAssignedTechId ? (
+                              <>
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                                <span className="text-sm font-medium text-green-600" data-testid="status-assigned">Assigned (TPMS)</span>
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="h-4 w-4 text-red-500" />
+                                <span className="text-sm font-medium text-red-600" data-testid="status-unassigned">Unassigned</span>
+                              </>
+                            )}
+                          </div>
                         </div>
                         
                         <div className="space-y-1">
@@ -782,7 +736,7 @@ export default function UpdateVehicle() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {getColorOptions().map(option => (
+                          {filterOptions.colors.map(option => (
                             <SelectItem key={option} value={option}>{option}</SelectItem>
                           ))}
                         </SelectContent>
@@ -800,7 +754,7 @@ export default function UpdateVehicle() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {getBrandingOptions().map(option => (
+                          {filterOptions.brandings.map(option => (
                             <SelectItem key={option} value={option}>{option}</SelectItem>
                           ))}
                         </SelectContent>
@@ -818,7 +772,7 @@ export default function UpdateVehicle() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {getInteriorOptions().map(option => (
+                          {filterOptions.interiors.map(option => (
                             <SelectItem key={option} value={option}>{option}</SelectItem>
                           ))}
                         </SelectContent>
@@ -836,7 +790,7 @@ export default function UpdateVehicle() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {getTuneStatusOptions().map(option => (
+                          {filterOptions.tuneStatuses.map(option => (
                             <SelectItem key={option} value={option}>{option}</SelectItem>
                           ))}
                         </SelectContent>
@@ -864,7 +818,7 @@ export default function UpdateVehicle() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {getStateOptions().map(option => (
+                          {filterOptions.states.map(option => (
                             <SelectItem key={option} value={option}>{option}</SelectItem>
                           ))}
                         </SelectContent>
