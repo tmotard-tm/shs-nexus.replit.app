@@ -29,6 +29,7 @@ export interface FleetVehicle {
   leaseEndDate: string;
   source: 'Holman' | 'TPMS' | 'Snowflake' | 'Manual';
   holmanTechAssigned?: string; // clientData2 from Holman - enterprise ID of assigned tech
+  holmanTechName?: string; // Tech name from Holman (firstName + lastName)
   tpmsAssignedTechId?: string;
   tpmsAssignedTechName?: string;
 }

@@ -628,8 +628,11 @@ export default function ActiveVehicles() {
                               <User className="h-4 w-4 text-blue-500" />
                               <span className="text-xs font-medium text-blue-600">Holman Tech Assigned</span>
                             </div>
-                            {vehicle.holmanTechAssigned ? (
-                              <p className="text-sm ml-6" data-testid={`holman-tech-${vehicle.vin}`}>{vehicle.holmanTechAssigned}</p>
+                            {vehicle.holmanTechAssigned || vehicle.holmanTechName ? (
+                              <>
+                                <p className="text-sm ml-6" data-testid={`holman-tech-name-${vehicle.vin}`}>{vehicle.holmanTechName || 'N/A'}</p>
+                                <p className="text-xs text-muted-foreground ml-6" data-testid={`holman-tech-id-${vehicle.vin}`}>ID: {vehicle.holmanTechAssigned || 'N/A'}</p>
+                              </>
                             ) : (
                               <p className="text-xs text-muted-foreground ml-6">None</p>
                             )}
