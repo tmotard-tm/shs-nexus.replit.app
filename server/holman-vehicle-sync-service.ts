@@ -488,11 +488,19 @@ class HolmanVehicleSyncService {
       const enrichedBatch = await Promise.all(
         batch.map(async (vehicle) => {
           try {
-            // Remove leading zeros for TPMS lookup
-            const truckNo = vehicle.vehicleNumber.replace(/^0+/, '');
-            if (!truckNo) return vehicle;
+            const originalNumber = vehicle.vehicleNumber;
+            const strippedNumber = originalNumber.replace(/^0+/, '');
             
-            const result = await tpmsService.lookupByTruckNumber(truckNo);
+            if (!strippedNumber) return vehicle;
+            
+            // Try without leading zeros first (most common case)
+            let result = await tpmsService.lookupByTruckNumber(strippedNumber);
+            
+            // If that fails and the original had leading zeros, try with original format
+            if (!result.success && originalNumber !== strippedNumber) {
+              console.log(`[HolmanSync] TPMS lookup failed for ${strippedNumber}, trying original format ${originalNumber}`);
+              result = await tpmsService.lookupByTruckNumber(originalNumber);
+            }
             
             if (result.success && result.data) {
               return {
