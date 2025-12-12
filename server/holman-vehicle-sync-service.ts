@@ -26,6 +26,7 @@ interface FleetVehicle {
   outOfServiceDate: string;
   odometer: number;
   odometerDate: string;
+  regRenewalDate: string;
   branding: string;
   interior: string;
   tuneStatus: string;
@@ -230,6 +231,7 @@ class HolmanVehicleSyncService {
         outOfServiceDate: v.outOfServiceDate,
         odometer: v.odometer || 0,
         odometerDate: v.odometerDate || '',
+        regRenewalDate: v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || '',
         branding: v.branding || 'Standard',
         interior: v.interior || 'Standard',
         tuneStatus: v.tuneStatus || 'Tuned',
@@ -418,6 +420,7 @@ class HolmanVehicleSyncService {
       outOfServiceDate: v.outOfServiceDate || '',
       odometer: v.odometer || 0,
       odometerDate: v.odometerDate || '',
+      regRenewalDate: v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || '',
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',
       tuneStatus: v.tuneStatus || 'Tuned',
@@ -449,6 +452,7 @@ class HolmanVehicleSyncService {
       outOfServiceDate: v.outOfServiceDate || '',
       odometer: v.odometer || 0,
       odometerDate: v.odometerDate || '',
+      regRenewalDate: v.regRenewalDate || '',
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',
       tuneStatus: v.tuneStatus || 'Tuned',
