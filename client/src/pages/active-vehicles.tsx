@@ -127,13 +127,14 @@ export default function ActiveVehicles() {
   }, [allVehicles]);
 
   const filteredVehicles = baseVehicles.filter(vehicle => {
+    const searchLower = searchQuery.toLowerCase();
     const matchesSearch = !searchQuery || 
-      vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vehicle.vehicleNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vehicle.licensePlate.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vehicle.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vehicle.deliveryAddress.toLowerCase().includes(searchQuery.toLowerCase());
+      (vehicle.vin || '').toLowerCase().includes(searchLower) ||
+      (vehicle.vehicleNumber || '').toLowerCase().includes(searchLower) ||
+      (vehicle.licensePlate || '').toLowerCase().includes(searchLower) ||
+      `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchLower) ||
+      (vehicle.city || '').toLowerCase().includes(searchLower) ||
+      (vehicle.deliveryAddress || '').toLowerCase().includes(searchLower);
     
     const matchesBranding = brandingFilter === "all" || vehicle.branding === brandingFilter;
     const matchesInterior = interiorFilter === "all" || vehicle.interior === interiorFilter;
