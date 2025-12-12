@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw, User } from "lucide-react";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw, User, AlertTriangle } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery } from "@tanstack/react-query";
@@ -578,9 +578,25 @@ export default function ActiveVehicles() {
               </div>
               
               <div className="grid gap-4">
-                {filteredVehicles.map((vehicle) => (
-                  <Card key={vehicle.vin} data-testid={`card-vehicle-${vehicle.vin}`}>
+                {filteredVehicles.map((vehicle) => {
+                  // Check for assignment mismatch: both have IDs but they don't match
+                  const holmanId = vehicle.holmanTechAssigned?.trim() || '';
+                  const tpmsId = vehicle.tpmsAssignedTechId?.trim() || '';
+                  const hasMismatch = holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase();
+                  
+                  return (
+                  <Card 
+                    key={vehicle.vin} 
+                    data-testid={`card-vehicle-${vehicle.vin}`}
+                    className={hasMismatch ? 'border-2 border-orange-500 bg-orange-50 dark:bg-orange-950' : ''}
+                  >
                     <CardContent className="p-4">
+                      {hasMismatch && (
+                        <div className="mb-3 p-2 bg-orange-100 dark:bg-orange-900 rounded-md flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 text-orange-600" />
+                          <span className="text-sm font-medium text-orange-700 dark:text-orange-300">Assignment Mismatch: Holman ID ({holmanId}) does not match TPMS ID ({tpmsId})</span>
+                        </div>
+                      )}
                       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
@@ -589,22 +605,6 @@ export default function ActiveVehicles() {
                           </div>
                           <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
-                          <div className="mt-2">
-                            <p className="text-xs text-muted-foreground mb-1">Holman Assignment Status:</p>
-                            <div className="flex items-center gap-2">
-                              {!vehicle.outOfServiceDate ? (
-                                <>
-                                  <CheckCircle className="h-4 w-4 text-green-500" />
-                                  <span className="text-sm font-medium text-green-600" data-testid="status-assigned">Assigned</span>
-                                </>
-                              ) : (
-                                <>
-                                  <XCircle className="h-4 w-4 text-red-500" />
-                                  <span className="text-sm font-medium text-red-600" data-testid="status-unassigned">Unassigned</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
                         </div>
                         
                         <div className="space-y-1">
@@ -627,6 +627,17 @@ export default function ActiveVehicles() {
                             <div className="flex items-center gap-2">
                               <User className="h-4 w-4 text-blue-500" />
                               <span className="text-xs font-medium text-blue-600">Holman Tech Assigned</span>
+                              {vehicle.holmanTechAssigned ? (
+                                <span className="flex items-center gap-1 text-xs text-green-600">
+                                  <CheckCircle className="h-3 w-3" />
+                                  Assigned
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-xs text-red-600">
+                                  <XCircle className="h-3 w-3" />
+                                  Unassigned
+                                </span>
+                              )}
                             </div>
                             {vehicle.holmanTechAssigned || vehicle.holmanTechName ? (
                               <>
@@ -641,10 +652,21 @@ export default function ActiveVehicles() {
                             <div className="flex items-center gap-2">
                               <User className="h-4 w-4 text-purple-500" />
                               <span className="text-xs font-medium text-purple-600">TPMS Assigned Tech</span>
+                              {vehicle.tpmsAssignedTechId ? (
+                                <span className="flex items-center gap-1 text-xs text-green-600">
+                                  <CheckCircle className="h-3 w-3" />
+                                  Assigned
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-xs text-red-600">
+                                  <XCircle className="h-3 w-3" />
+                                  Unassigned
+                                </span>
+                              )}
                             </div>
-                            {vehicle.tpmsAssignedTechName ? (
+                            {vehicle.tpmsAssignedTechId ? (
                               <>
-                                <p className="text-sm ml-6" data-testid={`tpms-tech-name-${vehicle.vin}`}>{vehicle.tpmsAssignedTechName}</p>
+                                <p className="text-sm ml-6" data-testid={`tpms-tech-name-${vehicle.vin}`}>{vehicle.tpmsAssignedTechName || 'N/A'}</p>
                                 <p className="text-xs text-muted-foreground ml-6" data-testid={`tpms-tech-id-${vehicle.vin}`}>ID: {vehicle.tpmsAssignedTechId}</p>
                               </>
                             ) : (
@@ -700,7 +722,8 @@ export default function ActiveVehicles() {
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  );
+                })}
                 
                 {filteredVehicles.length === 0 && (
                   <Card>
