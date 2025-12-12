@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw, User } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery } from "@tanstack/react-query";
@@ -581,7 +581,7 @@ export default function ActiveVehicles() {
                 {filteredVehicles.map((vehicle) => (
                   <Card key={vehicle.vin} data-testid={`card-vehicle-${vehicle.vin}`}>
                     <CardContent className="p-4">
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
                             <Car className="h-4 w-4 text-muted-foreground" />
@@ -617,6 +617,21 @@ export default function ActiveVehicles() {
                           <p className="text-sm font-medium">{vehicle.branding}</p>
                           <p className="text-xs text-muted-foreground">{vehicle.interior}</p>
                           <p className="text-xs text-muted-foreground">Tune: {vehicle.tuneStatus}</p>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium">Assigned Tech</span>
+                          </div>
+                          {vehicle.tpmsAssignedTechName ? (
+                            <>
+                              <p className="text-sm" data-testid={`tech-name-${vehicle.vin}`}>{vehicle.tpmsAssignedTechName}</p>
+                              <p className="text-xs text-muted-foreground" data-testid={`tech-id-${vehicle.vin}`}>ID: {vehicle.tpmsAssignedTechId}</p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">No tech assigned</p>
+                          )}
                         </div>
                         
                         <div className="space-y-1">

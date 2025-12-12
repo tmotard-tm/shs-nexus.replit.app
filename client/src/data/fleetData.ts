@@ -28,6 +28,8 @@ export interface FleetVehicle {
   remainingBookValue: number;
   leaseEndDate: string;
   source: 'Holman' | 'TPMS' | 'Snowflake' | 'Manual';
+  tpmsAssignedTechId?: string;
+  tpmsAssignedTechName?: string;
 }
 
 // All active vehicles from CSV (vehicles without sale date)

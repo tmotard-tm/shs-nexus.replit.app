@@ -5365,7 +5365,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('[Holman Fleet] Fetching vehicles with cache fallback...');
       
-      const { pageNumber = '1', pageSize = '500' } = req.query;
+      const { pageNumber = '1', pageSize = '500', enrichTpms = 'true' } = req.query;
       
       const result = await holmanVehicleSyncService.fetchActiveVehicles({
         page: parseInt(pageNumber as string),
@@ -5374,10 +5374,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`[Holman Fleet] Returned ${result.vehicles.length} vehicles (mode: ${result.syncStatus.dataMode})`);
       
+      // Optionally enrich with TPMS assigned tech data (default: true)
+      let vehicles = result.vehicles;
+      if (enrichTpms === 'true' && vehicles.length > 0) {
+        console.log('[Holman Fleet] Enriching vehicles with TPMS tech assignments...');
+        vehicles = await holmanVehicleSyncService.enrichWithTPMSData(vehicles);
+      }
+      
       res.json({
         success: result.success,
-        totalCount: result.pagination?.totalCount || result.vehicles.length,
-        vehicles: result.vehicles,
+        totalCount: result.pagination?.totalCount || vehicles.length,
+        vehicles: vehicles,
         syncStatus: result.syncStatus,
       });
     } catch (error: any) {

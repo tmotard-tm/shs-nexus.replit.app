@@ -2,6 +2,7 @@ import { db } from "./db";
 import { holmanVehiclesCache, vehicleChangeLog, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus } from "@shared/schema";
 import { eq, sql, and, desc } from "drizzle-orm";
 import { holmanApiService } from "./holman-api-service";
+import { getTPMSService } from "./tpms-service";
 
 interface FleetVehicle {
   id: string;
@@ -31,6 +32,8 @@ interface FleetVehicle {
   interior: string;
   tuneStatus: string;
   dataSource: string;
+  tpmsAssignedTechId?: string;
+  tpmsAssignedTechName?: string;
 }
 
 interface SyncResult {
@@ -458,6 +461,54 @@ class HolmanVehicleSyncService {
       tuneStatus: v.tuneStatus || 'Tuned',
       dataSource: v.dataSource || 'cached',
     };
+  }
+
+  // Enrich vehicles with TPMS assigned tech info
+  async enrichWithTPMSData(vehicles: FleetVehicle[]): Promise<FleetVehicle[]> {
+    const tpmsService = getTPMSService();
+    
+    if (!tpmsService.isConfigured()) {
+      console.log('[HolmanSync] TPMS not configured, skipping enrichment');
+      return vehicles;
+    }
+
+    console.log(`[HolmanSync] Enriching ${vehicles.length} vehicles with TPMS data`);
+    
+    // Process in batches to avoid overwhelming TPMS API
+    const batchSize = 10;
+    const enrichedVehicles: FleetVehicle[] = [];
+    
+    for (let i = 0; i < vehicles.length; i += batchSize) {
+      const batch = vehicles.slice(i, i + batchSize);
+      
+      const enrichedBatch = await Promise.all(
+        batch.map(async (vehicle) => {
+          try {
+            // Remove leading zeros for TPMS lookup
+            const truckNo = vehicle.vehicleNumber.replace(/^0+/, '');
+            if (!truckNo) return vehicle;
+            
+            const result = await tpmsService.lookupByTruckNumber(truckNo);
+            
+            if (result.success && result.data) {
+              return {
+                ...vehicle,
+                tpmsAssignedTechId: result.data.ldapId || '',
+                tpmsAssignedTechName: `${result.data.firstName || ''} ${result.data.lastName || ''}`.trim(),
+              };
+            }
+          } catch (error) {
+            // Silently continue if lookup fails
+          }
+          return vehicle;
+        })
+      );
+      
+      enrichedVehicles.push(...enrichedBatch);
+    }
+    
+    console.log(`[HolmanSync] Enrichment complete for ${enrichedVehicles.length} vehicles`);
+    return enrichedVehicles;
   }
 }
 
