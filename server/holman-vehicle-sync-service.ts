@@ -102,6 +102,25 @@ class HolmanVehicleSyncService {
 
       console.log(`[HolmanSync] Got ${vehicleData.length} vehicles from Holman API (total: ${apiResponse?.totalCount || vehicleData.length})`);
 
+      // Log unique divisions to understand data structure
+      const uniqueDivisions = [...new Set(vehicleData.map((v: any) => v.division || 'undefined'))];
+      console.log(`[HolmanSync] Unique divisions in Holman data:`, uniqueDivisions);
+      
+      // Log BYOV vehicles (88xxx) to see what division they have
+      const byovVehicles = vehicleData.filter((v: any) => {
+        const vNum = (v.holmanVehicleNumber || v.vehicleNumber || '').replace(/^0+/, '');
+        return vNum.startsWith('88');
+      });
+      if (byovVehicles.length > 0) {
+        console.log(`[HolmanSync] Found ${byovVehicles.length} BYOV vehicles (88xxx):`, 
+          byovVehicles.slice(0, 5).map((v: any) => ({
+            num: v.holmanVehicleNumber || v.vehicleNumber,
+            division: v.division,
+            prefix: v.prefix
+          }))
+        );
+      }
+
       // Filter to only divisions 01 and RF - other divisions are not relevant for this application
       const filteredVehicleData = vehicleData.filter((v: any) => {
         const division = v.division || v.prefix || '';
