@@ -5363,14 +5363,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   app.get("/api/holman/fleet-vehicles", requireAuth, async (req: any, res) => {
     try {
-      console.log('[Holman Fleet] Fetching vehicles with cache fallback...');
+      // forceRefresh=true calls live API, otherwise use fast cache-first approach
+      const { pageNumber = '1', pageSize = '500', enrichTpms = 'false', forceRefresh = 'false' } = req.query;
+      const useCacheFirst = forceRefresh !== 'true';
       
-      // enrichTpms defaults to 'false' for fast loading - TPMS data is cached in DB
-      const { pageNumber = '1', pageSize = '500', enrichTpms = 'false' } = req.query;
+      console.log(`[Holman Fleet] Fetching vehicles (cacheFirst: ${useCacheFirst})...`);
       
       const result = await holmanVehicleSyncService.fetchActiveVehicles({
         page: parseInt(pageNumber as string),
         pageSize: parseInt(pageSize as string),
+        cacheFirst: useCacheFirst,
       });
 
       console.log(`[Holman Fleet] Returned ${result.vehicles.length} vehicles (mode: ${result.syncStatus.dataMode})`);

@@ -224,7 +224,16 @@ export default function ActiveVehicles() {
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  onClick={() => refetch()}
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/api/holman/fleet-vehicles?forceRefresh=true', { credentials: 'include' });
+                      if (response.ok) {
+                        refetch();
+                      }
+                    } catch (e) {
+                      console.error('Failed to retry sync', e);
+                    }
+                  }}
                   disabled={isFetching}
                   className="border-amber-500 text-amber-700 hover:bg-amber-100"
                   data-testid="button-retry-sync"
@@ -256,7 +265,16 @@ export default function ActiveVehicles() {
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => refetch()}
+                onClick={async () => {
+                  try {
+                    const response = await fetch('/api/holman/fleet-vehicles?forceRefresh=true', { credentials: 'include' });
+                    if (response.ok) {
+                      refetch();
+                    }
+                  } catch (e) {
+                    console.error('Failed to refresh from Holman', e);
+                  }
+                }}
                 disabled={isFetching}
                 data-testid="button-refresh-vehicles"
               >
@@ -268,7 +286,7 @@ export default function ActiveVehicles() {
                 size="sm" 
                 onClick={async () => {
                   try {
-                    const response = await fetch('/api/holman/fleet-vehicles?enrichTpms=true');
+                    const response = await fetch('/api/holman/fleet-vehicles?forceRefresh=true&enrichTpms=true', { credentials: 'include' });
                     if (response.ok) {
                       refetch();
                     }
