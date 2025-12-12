@@ -11,7 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
-import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User, Database, Loader2, RefreshCw, CheckCircle } from "lucide-react";
+import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User, Database, Loader2, RefreshCw, CheckCircle, Truck } from "lucide-react";
+import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
@@ -55,6 +56,7 @@ interface FleetVehicle {
   tpmsAssignedTechId?: string;
   tpmsAssignedTechName?: string;
   dataSource: string;
+  statusCode?: number;
 }
 
 interface FleetVehiclesResponse {
@@ -641,6 +643,27 @@ export default function AssignVehicleLocation() {
                             </div>
                             <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                             <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
+                            
+                            {/* Holman Status & Ownership Badges */}
+                            <div className="flex items-center gap-2 mt-2">
+                              <span 
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getHolmanStatus(vehicle.statusCode).bgColor} ${getHolmanStatus(vehicle.statusCode).color} border ${getHolmanStatus(vehicle.statusCode).borderColor}`}
+                                data-testid={`holman-status-${vehicle.vin}`}
+                              >
+                                {getHolmanStatus(vehicle.statusCode).label}
+                              </span>
+                              <span 
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getVehicleOwnership(vehicle.vehicleNumber).bgColor} ${getVehicleOwnership(vehicle.vehicleNumber).color} border ${getVehicleOwnership(vehicle.vehicleNumber).borderColor}`}
+                                data-testid={`ownership-${vehicle.vin}`}
+                              >
+                                {getVehicleOwnership(vehicle.vehicleNumber).type === 'BYOV' ? (
+                                  <><Truck className="h-3 w-3 mr-1" />BYOV</>
+                                ) : (
+                                  <>Fleet</>
+                                )}
+                              </span>
+                            </div>
+                            
                             {targetZipcode.trim() && 'distanceScore' in vehicle && (
                               <div className="flex items-center gap-1 mt-1">
                                 <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">

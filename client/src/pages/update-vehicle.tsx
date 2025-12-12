@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User, AlertCircle, Loader2, RefreshCw, Truck } from "lucide-react";
+import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
@@ -51,6 +52,7 @@ interface FleetVehicle {
   holmanTechAssigned?: string;
   holmanTechName?: string;
   dataSource?: string;
+  statusCode?: number;
   [key: string]: any;
 }
 
@@ -636,8 +638,28 @@ export default function UpdateVehicle() {
                           <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
                           
-                          {/* TPMS determines assignment status */}
+                          {/* Holman Status & Ownership Badges */}
                           <div className="flex items-center gap-2 mt-2">
+                            <span 
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getHolmanStatus(vehicle.statusCode).bgColor} ${getHolmanStatus(vehicle.statusCode).color} border ${getHolmanStatus(vehicle.statusCode).borderColor}`}
+                              data-testid={`holman-status-${vehicle.vin}`}
+                            >
+                              {getHolmanStatus(vehicle.statusCode).label}
+                            </span>
+                            <span 
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getVehicleOwnership(vehicle.vehicleNumber).bgColor} ${getVehicleOwnership(vehicle.vehicleNumber).color} border ${getVehicleOwnership(vehicle.vehicleNumber).borderColor}`}
+                              data-testid={`ownership-${vehicle.vin}`}
+                            >
+                              {getVehicleOwnership(vehicle.vehicleNumber).type === 'BYOV' ? (
+                                <><Truck className="h-3 w-3 mr-1" />BYOV</>
+                              ) : (
+                                <>Fleet</>
+                              )}
+                            </span>
+                          </div>
+                          
+                          {/* TPMS determines assignment status */}
+                          <div className="flex items-center gap-2 mt-1">
                             {vehicle.tpmsAssignedTechId ? (
                               <>
                                 <CheckCircle className="h-4 w-4 text-green-500" />

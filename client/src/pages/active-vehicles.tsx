@@ -717,10 +717,10 @@ export default function ActiveVehicles() {
                           {/* Holman Status Badge */}
                           <div className="flex items-center gap-2 mt-2">
                             <span 
-                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getHolmanStatus(vehicle.statusCode).bgColor} ${getHolmanStatus(vehicle.statusCode).color} border ${getHolmanStatus(vehicle.statusCode).borderColor}`}
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getHolmanStatus((vehicle as any).statusCode).bgColor} ${getHolmanStatus((vehicle as any).statusCode).color} border ${getHolmanStatus((vehicle as any).statusCode).borderColor}`}
                               data-testid={`holman-status-${vehicle.vin}`}
                             >
-                              {getHolmanStatus(vehicle.statusCode).label}
+                              {getHolmanStatus((vehicle as any).statusCode).label}
                             </span>
                             
                             {/* BYOV/Fleet Badge */}
