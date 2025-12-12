@@ -127,10 +127,15 @@ export default function ActiveVehicles() {
   }, [allVehicles]);
 
   const filteredVehicles = baseVehicles.filter(vehicle => {
-    const searchLower = searchQuery.toLowerCase();
+    const searchLower = searchQuery.toLowerCase().trim();
+    // Strip leading zeros from both search query and vehicle number for flexible matching
+    const searchNoLeadingZeros = searchLower.replace(/^0+/, '');
+    const vehicleNumNoLeadingZeros = (vehicle.vehicleNumber || '').replace(/^0+/, '').toLowerCase();
+    
     const matchesSearch = !searchQuery || 
       (vehicle.vin || '').toLowerCase().includes(searchLower) ||
       (vehicle.vehicleNumber || '').toLowerCase().includes(searchLower) ||
+      vehicleNumNoLeadingZeros.includes(searchNoLeadingZeros) ||
       (vehicle.licensePlate || '').toLowerCase().includes(searchLower) ||
       `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchLower) ||
       (vehicle.city || '').toLowerCase().includes(searchLower) ||
