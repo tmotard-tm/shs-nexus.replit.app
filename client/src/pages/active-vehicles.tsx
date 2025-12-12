@@ -8,13 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw, User, AlertTriangle } from "lucide-react";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw, User, AlertTriangle, Truck } from "lucide-react";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { type FleetVehicle } from "@/data/fleetData";
+import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
 
 interface SyncStatus {
   dataMode: 'live' | 'cached' | 'empty';
@@ -712,6 +713,28 @@ export default function ActiveVehicles() {
                           </div>
                           <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
+                          
+                          {/* Holman Status Badge */}
+                          <div className="flex items-center gap-2 mt-2">
+                            <span 
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getHolmanStatus(vehicle.statusCode).bgColor} ${getHolmanStatus(vehicle.statusCode).color} border ${getHolmanStatus(vehicle.statusCode).borderColor}`}
+                              data-testid={`holman-status-${vehicle.vin}`}
+                            >
+                              {getHolmanStatus(vehicle.statusCode).label}
+                            </span>
+                            
+                            {/* BYOV/Fleet Badge */}
+                            <span 
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getVehicleOwnership(vehicle.vehicleNumber).bgColor} ${getVehicleOwnership(vehicle.vehicleNumber).color} border ${getVehicleOwnership(vehicle.vehicleNumber).borderColor}`}
+                              data-testid={`ownership-${vehicle.vin}`}
+                            >
+                              {getVehicleOwnership(vehicle.vehicleNumber).type === 'BYOV' ? (
+                                <><Truck className="h-3 w-3 mr-1" />BYOV</>
+                              ) : (
+                                <>Fleet</>
+                              )}
+                            </span>
+                          </div>
                         </div>
                         
                         <div className="space-y-1">
