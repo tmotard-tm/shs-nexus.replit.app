@@ -5363,28 +5363,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   app.get("/api/holman/fleet-vehicles", requireAuth, async (req: any, res) => {
     try {
-      // forceRefresh=true calls live API, otherwise use fast cache-first approach
-      const { pageNumber = '1', pageSize = '500', enrichTpms = 'false', forceRefresh = 'false' } = req.query;
-      const useCacheFirst = forceRefresh !== 'true';
+      const { pageNumber = '1', pageSize = '500' } = req.query;
       
-      console.log(`[Holman Fleet] Fetching vehicles (cacheFirst: ${useCacheFirst})...`);
+      console.log('[Holman Fleet] Fetching live vehicles from Holman API...');
       
       const result = await holmanVehicleSyncService.fetchActiveVehicles({
         page: parseInt(pageNumber as string),
         pageSize: parseInt(pageSize as string),
-        cacheFirst: useCacheFirst,
       });
 
       console.log(`[Holman Fleet] Returned ${result.vehicles.length} vehicles (mode: ${result.syncStatus.dataMode})`);
       
-      // Optionally enrich with TPMS assigned tech data (default: false for speed)
-      // TPMS data is now cached in the database for fast retrieval
+      // Always enrich with TPMS assigned tech data
       let vehicles = result.vehicles;
-      if (enrichTpms === 'true' && vehicles.length > 0) {
-        console.log('[Holman Fleet] Enriching vehicles with TPMS tech assignments (live lookup)...');
+      if (vehicles.length > 0) {
+        console.log('[Holman Fleet] Enriching vehicles with TPMS tech assignments...');
         vehicles = await holmanVehicleSyncService.enrichWithTPMSData(vehicles);
-        // Save enriched TPMS data back to cache for future fast loads
-        await holmanVehicleSyncService.saveTPMSDataToCache(vehicles);
       }
       
       res.json({

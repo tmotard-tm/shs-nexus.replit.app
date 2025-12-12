@@ -59,15 +59,8 @@ class HolmanVehicleSyncService {
     page?: number;
     pageSize?: number;
     statusCode?: number;
-    cacheFirst?: boolean; // If true, return cached data immediately (fast), otherwise fetch live
   } = {}): Promise<SyncResult> {
-    const { page = 1, pageSize = 500, statusCode = 1, cacheFirst = false } = options;
-
-    // Cache-first mode: return cached data immediately for fast page loads
-    if (cacheFirst) {
-      console.log('[HolmanSync] Cache-first mode: returning cached data immediately');
-      return this.getCachedVehicles(page, pageSize, statusCode, 'Using cached data for fast load');
-    }
+    const { page = 1, pageSize = 500, statusCode = 1 } = options;
 
     if (!holmanApiService.isConfigured()) {
       console.log('[HolmanSync] API not configured, falling back to cache');

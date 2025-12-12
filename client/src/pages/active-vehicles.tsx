@@ -224,16 +224,7 @@ export default function ActiveVehicles() {
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  onClick={async () => {
-                    try {
-                      const response = await fetch('/api/holman/fleet-vehicles?forceRefresh=true', { credentials: 'include' });
-                      if (response.ok) {
-                        refetch();
-                      }
-                    } catch (e) {
-                      console.error('Failed to retry sync', e);
-                    }
-                  }}
+                  onClick={() => refetch()}
                   disabled={isFetching}
                   className="border-amber-500 text-amber-700 hover:bg-amber-100"
                   data-testid="button-retry-sync"
@@ -260,46 +251,17 @@ export default function ActiveVehicles() {
 
           {/* Main Content */}
           {!isLoading && <div className="space-y-6">
-            {/* Refresh Buttons */}
-            <div className="flex justify-end gap-2">
+            {/* Refresh Button */}
+            <div className="flex justify-end">
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={async () => {
-                  try {
-                    const response = await fetch('/api/holman/fleet-vehicles?forceRefresh=true', { credentials: 'include' });
-                    if (response.ok) {
-                      refetch();
-                    }
-                  } catch (e) {
-                    console.error('Failed to refresh from Holman', e);
-                  }
-                }}
+                onClick={() => refetch()}
                 disabled={isFetching}
                 data-testid="button-refresh-vehicles"
               >
                 {isFetching ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                Refresh from Holman
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={async () => {
-                  try {
-                    const response = await fetch('/api/holman/fleet-vehicles?forceRefresh=true&enrichTpms=true', { credentials: 'include' });
-                    if (response.ok) {
-                      refetch();
-                    }
-                  } catch (e) {
-                    console.error('Failed to refresh TPMS data', e);
-                  }
-                }}
-                disabled={isFetching}
-                className="border-purple-500 text-purple-700 hover:bg-purple-50 dark:border-purple-400 dark:text-purple-400"
-                data-testid="button-refresh-tpms"
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh TPMS Data
+                Refresh Data
               </Button>
             </div>
 
