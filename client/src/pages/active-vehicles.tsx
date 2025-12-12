@@ -579,10 +579,13 @@ export default function ActiveVehicles() {
               
               <div className="grid gap-4">
                 {filteredVehicles.map((vehicle) => {
-                  // Check for assignment mismatch: both have IDs but they don't match
+                  // Check for assignment mismatch:
+                  // 1. Both have IDs but they don't match, OR
+                  // 2. Holman has ID but TPMS doesn't (data inconsistency)
                   const holmanId = vehicle.holmanTechAssigned?.trim() || '';
                   const tpmsId = vehicle.tpmsAssignedTechId?.trim() || '';
-                  const hasMismatch = holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase();
+                  const hasMismatch = (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) ||
+                                      (holmanId && !tpmsId);
                   
                   return (
                   <Card 
@@ -594,7 +597,11 @@ export default function ActiveVehicles() {
                       {hasMismatch && (
                         <div className="mb-3 p-2 bg-orange-100 dark:bg-orange-900 rounded-md flex items-center gap-2">
                           <AlertTriangle className="h-4 w-4 text-orange-600" />
-                          <span className="text-sm font-medium text-orange-700 dark:text-orange-300">Assignment Mismatch: Holman ID ({holmanId}) does not match TPMS ID ({tpmsId})</span>
+                          <span className="text-sm font-medium text-orange-700 dark:text-orange-300">
+                            Assignment Mismatch: {holmanId && !tpmsId 
+                              ? `Holman has tech (${holmanId}) but TPMS has no assignment` 
+                              : `Holman ID (${holmanId}) does not match TPMS ID (${tpmsId})`}
+                          </span>
                         </div>
                       )}
                       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
