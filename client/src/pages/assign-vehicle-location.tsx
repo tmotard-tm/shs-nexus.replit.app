@@ -15,8 +15,56 @@ import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User, Databas
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-import { getAvailableVehicles, getBrandingOptions, getInteriorOptions, getTuneStatusOptions, getUnassignedVehicles, type FleetVehicle } from "@/data/fleetData";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
+import { useQuery } from "@tanstack/react-query";
+
+// FleetVehicle type from Holman API
+interface FleetVehicle {
+  id: string;
+  vehicleNumber: string;
+  vin: string;
+  licensePlate: string;
+  licenseState: string;
+  makeName: string;
+  modelName: string;
+  modelYear: number;
+  color: string;
+  fuelType: string;
+  engineSize: string;
+  driverName: string;
+  driverEmail: string;
+  driverPhone: string;
+  city: string;
+  state: string;
+  zip: string;
+  address: string;
+  region: string;
+  division: string;
+  district: string;
+  inServiceDate: string;
+  outOfServiceDate: string;
+  odometer: number;
+  odometerDate: string;
+  regRenewalDate: string;
+  deliveryDate: string;
+  branding: string;
+  interior: string;
+  tuneStatus: string;
+  holmanTechAssigned?: string;
+  holmanTechName?: string;
+  tpmsAssignedTechId?: string;
+  tpmsAssignedTechName?: string;
+  dataSource: string;
+}
+
+interface FleetVehiclesResponse {
+  success: boolean;
+  vehicles: FleetVehicle[];
+  syncStatus: {
+    dataMode: string;
+    totalVehicles: number;
+  };
+}
 
 export default function AssignVehicleLocation() {
   const { toast } = useToast();
@@ -66,6 +114,24 @@ export default function AssignVehicleLocation() {
   const [techLookupQuery, setTechLookupQuery] = useState("");
   const [isLookingUpTech, setIsLookingUpTech] = useState(false);
   const [techLookupResult, setTechLookupResult] = useState<any>(null);
+
+  // Fetch vehicles from Holman API
+  const { data: apiResponse, isLoading: vehiclesLoading } = useQuery<FleetVehiclesResponse>({
+    queryKey: ['/api/holman/fleet-vehicles'],
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+  // Get all vehicles from API response
+  const allVehicles = apiResponse?.vehicles || [];
+  
+  // Unassigned vehicles = no TPMS assignment (TPMS determines assignment status)
+  const unassignedVehicles = allVehicles.filter(v => !v.tpmsAssignedTechId);
+  
+  // Get filter options from actual data
+  const getBrandingOptions = () => Array.from(new Set(allVehicles.map(v => v.branding))).filter(Boolean).sort();
+  const getInteriorOptions = () => Array.from(new Set(allVehicles.map(v => v.interior))).filter(Boolean).sort();
+  const getTuneStatusOptions = () => Array.from(new Set(allVehicles.map(v => v.tuneStatus))).filter(Boolean).sort();
 
   // Real data from CSV
   const employees = [
@@ -198,7 +264,6 @@ export default function AssignVehicleLocation() {
     return Math.abs(num1 - num2);
   };
 
-  const unassignedVehicles = getUnassignedVehicles();
   let filteredVehicles = unassignedVehicles.filter(vehicle => {
     const matchesSearch = !searchQuery || 
       vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -532,12 +597,12 @@ export default function AssignVehicleLocation() {
                 <CardContent>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-                      <p className="text-3xl font-bold text-green-600 dark:text-green-400" data-testid="text-assigned-vehicles-count">{getAvailableVehicles().length}</p>
+                      <p className="text-3xl font-bold text-green-600 dark:text-green-400" data-testid="text-assigned-vehicles-count">{allVehicles.filter(v => v.tpmsAssignedTechId).length}</p>
                       <p className="text-sm text-green-700 dark:text-green-300">Assigned Vehicles</p>
-                      <p className="text-xs text-muted-foreground mt-1">Currently in use</p>
+                      <p className="text-xs text-muted-foreground mt-1">Currently in use (TPMS)</p>
                     </div>
                     <div className="text-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
-                      <p className="text-3xl font-bold text-orange-600 dark:text-orange-400" data-testid="text-unassigned-vehicles-count">{getUnassignedVehicles().length}</p>
+                      <p className="text-3xl font-bold text-orange-600 dark:text-orange-400" data-testid="text-unassigned-vehicles-count">{unassignedVehicles.length}</p>
                       <p className="text-sm text-orange-700 dark:text-orange-300">Unassigned Vehicles</p>
                       <p className="text-xs text-muted-foreground mt-1">Available for assignment</p>
                     </div>
@@ -610,10 +675,10 @@ export default function AssignVehicleLocation() {
                           </div>
                         </div>
                         
-                        {vehicle.odometerDelivery > 0 && (
+                        {vehicle.odometer > 0 && (
                           <div className="mt-2 pt-2 border-t">
                             <p className="text-xs text-muted-foreground">
-                              Odometer: {vehicle.odometerDelivery.toLocaleString()} miles
+                              Odometer: {vehicle.odometer.toLocaleString()} miles
                             </p>
                           </div>
                         )}
