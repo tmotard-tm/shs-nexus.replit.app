@@ -6,7 +6,8 @@ import {
   Truck, 
   Map, 
   BarChart3,
-  MapPin
+  MapPin,
+  Loader2
 } from 'lucide-react';
 import { FilteredMap } from '@/components/vehicle-map-filters';
 import { HawaiiMap } from '@/components/hawaii-map';
@@ -64,7 +65,11 @@ export default function AnalyticsBoard() {
             >
               <CardContent className="flex flex-col items-center text-center p-4">
                 <Car className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                <p className="text-lg font-bold text-foreground" data-testid="text-vehicles-count">{allVehicles.length}</p>
+                {vehiclesLoading ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                ) : (
+                  <p className="text-lg font-bold text-foreground" data-testid="text-vehicles-count">{allVehicles.length}</p>
+                )}
                 <p className="text-sm text-muted-foreground">Active Vehicles</p>
               </CardContent>
             </Card>
@@ -76,7 +81,11 @@ export default function AnalyticsBoard() {
             >
               <CardContent className="flex flex-col items-center text-center p-4">
                 <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                <p className="text-lg font-bold text-foreground" data-testid="text-assigned-count">{assignedVehicles.length}</p>
+                {vehiclesLoading ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                ) : (
+                  <p className="text-lg font-bold text-foreground" data-testid="text-assigned-count">{assignedVehicles.length}</p>
+                )}
                 <p className="text-sm text-muted-foreground">Assigned Vehicles</p>
               </CardContent>
             </Card>
@@ -88,7 +97,11 @@ export default function AnalyticsBoard() {
             >
               <CardContent className="flex flex-col items-center text-center p-4">
                 <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                <p className="text-lg font-bold text-foreground" data-testid="text-unassigned-count">{unassignedVehicles.length}</p>
+                {vehiclesLoading ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                ) : (
+                  <p className="text-lg font-bold text-foreground" data-testid="text-unassigned-count">{unassignedVehicles.length}</p>
+                )}
                 <p className="text-sm text-muted-foreground">Unassigned Vehicles</p>
               </CardContent>
             </Card>
