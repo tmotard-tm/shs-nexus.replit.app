@@ -589,18 +589,21 @@ export default function ActiveVehicles() {
                           </div>
                           <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
-                          <div className="flex items-center gap-2 mt-2">
-                            {!vehicle.outOfServiceDate ? (
-                              <>
-                                <CheckCircle className="h-4 w-4 text-green-500" />
-                                <span className="text-sm font-medium text-green-600" data-testid="status-assigned">Assigned</span>
-                              </>
-                            ) : (
-                              <>
-                                <XCircle className="h-4 w-4 text-red-500" />
-                                <span className="text-sm font-medium text-red-600" data-testid="status-unassigned">Unassigned</span>
-                              </>
-                            )}
+                          <div className="mt-2">
+                            <p className="text-xs text-muted-foreground mb-1">Holman Assignment Status:</p>
+                            <div className="flex items-center gap-2">
+                              {!vehicle.outOfServiceDate ? (
+                                <>
+                                  <CheckCircle className="h-4 w-4 text-green-500" />
+                                  <span className="text-sm font-medium text-green-600" data-testid="status-assigned">Assigned</span>
+                                </>
+                              ) : (
+                                <>
+                                  <XCircle className="h-4 w-4 text-red-500" />
+                                  <span className="text-sm font-medium text-red-600" data-testid="status-unassigned">Unassigned</span>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
                         
@@ -619,19 +622,32 @@ export default function ActiveVehicles() {
                           <p className="text-xs text-muted-foreground">Tune: {vehicle.tuneStatus}</p>
                         </div>
                         
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Assigned Tech</span>
+                        <div className="space-y-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-blue-500" />
+                              <span className="text-xs font-medium text-blue-600">Holman Tech Assigned</span>
+                            </div>
+                            {vehicle.holmanTechAssigned ? (
+                              <p className="text-sm ml-6" data-testid={`holman-tech-${vehicle.vin}`}>{vehicle.holmanTechAssigned}</p>
+                            ) : (
+                              <p className="text-xs text-muted-foreground ml-6">None</p>
+                            )}
                           </div>
-                          {vehicle.tpmsAssignedTechName ? (
-                            <>
-                              <p className="text-sm" data-testid={`tech-name-${vehicle.vin}`}>{vehicle.tpmsAssignedTechName}</p>
-                              <p className="text-xs text-muted-foreground" data-testid={`tech-id-${vehicle.vin}`}>ID: {vehicle.tpmsAssignedTechId}</p>
-                            </>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">No tech assigned</p>
-                          )}
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-purple-500" />
+                              <span className="text-xs font-medium text-purple-600">TPMS Assigned Tech</span>
+                            </div>
+                            {vehicle.tpmsAssignedTechName ? (
+                              <>
+                                <p className="text-sm ml-6" data-testid={`tpms-tech-name-${vehicle.vin}`}>{vehicle.tpmsAssignedTechName}</p>
+                                <p className="text-xs text-muted-foreground ml-6" data-testid={`tpms-tech-id-${vehicle.vin}`}>ID: {vehicle.tpmsAssignedTechId}</p>
+                              </>
+                            ) : (
+                              <p className="text-xs text-muted-foreground ml-6">None</p>
+                            )}
+                          </div>
                         </div>
                         
                         <div className="space-y-1">

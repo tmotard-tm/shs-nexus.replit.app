@@ -1140,6 +1140,7 @@ export const holmanVehiclesCache = pgTable("holman_vehicles_cache", {
   branding: text("branding"),
   interior: text("interior"),
   tuneStatus: text("tune_status"),
+  holmanTechAssigned: text("holman_tech_assigned"), // clientData2 from Holman - enterprise ID of assigned tech
   dataSource: text("data_source").default("holman"), // holman, tpms, manual
   isActive: boolean("is_active").default(true),
   rawData: jsonb("raw_data"), // Store original API response

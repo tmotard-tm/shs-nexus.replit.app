@@ -31,6 +31,7 @@ interface FleetVehicle {
   branding: string;
   interior: string;
   tuneStatus: string;
+  holmanTechAssigned: string; // clientData2 from Holman - enterprise ID of assigned tech
   dataSource: string;
   tpmsAssignedTechId?: string;
   tpmsAssignedTechName?: string;
@@ -238,6 +239,7 @@ class HolmanVehicleSyncService {
         branding: v.branding || 'Standard',
         interior: v.interior || 'Standard',
         tuneStatus: v.tuneStatus || 'Tuned',
+        holmanTechAssigned: v.clientData2 || '', // Enterprise ID of Holman-assigned tech
         dataSource: 'holman',
         isActive: true,
         rawData: v,
@@ -427,6 +429,7 @@ class HolmanVehicleSyncService {
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',
       tuneStatus: v.tuneStatus || 'Tuned',
+      holmanTechAssigned: v.clientData2 || '', // Enterprise ID of Holman-assigned tech
       dataSource: 'holman',
     };
   }
@@ -459,6 +462,7 @@ class HolmanVehicleSyncService {
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',
       tuneStatus: v.tuneStatus || 'Tuned',
+      holmanTechAssigned: v.holmanTechAssigned || '', // Enterprise ID of Holman-assigned tech
       dataSource: v.dataSource || 'cached',
     };
   }
