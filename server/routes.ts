@@ -5365,7 +5365,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('[Holman Fleet] Fetching vehicles with cache fallback...');
       
-      const { pageNumber = '1', pageSize = '500', enrichTpms = 'true' } = req.query;
+      // enrichTpms defaults to 'false' for fast loading - TPMS data is cached in DB
+      const { pageNumber = '1', pageSize = '500', enrichTpms = 'false' } = req.query;
       
       const result = await holmanVehicleSyncService.fetchActiveVehicles({
         page: parseInt(pageNumber as string),
@@ -5374,11 +5375,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`[Holman Fleet] Returned ${result.vehicles.length} vehicles (mode: ${result.syncStatus.dataMode})`);
       
-      // Optionally enrich with TPMS assigned tech data (default: true)
+      // Optionally enrich with TPMS assigned tech data (default: false for speed)
+      // TPMS data is now cached in the database for fast retrieval
       let vehicles = result.vehicles;
       if (enrichTpms === 'true' && vehicles.length > 0) {
-        console.log('[Holman Fleet] Enriching vehicles with TPMS tech assignments...');
+        console.log('[Holman Fleet] Enriching vehicles with TPMS tech assignments (live lookup)...');
         vehicles = await holmanVehicleSyncService.enrichWithTPMSData(vehicles);
+        // Save enriched TPMS data back to cache for future fast loads
+        await holmanVehicleSyncService.saveTPMSDataToCache(vehicles);
       }
       
       res.json({

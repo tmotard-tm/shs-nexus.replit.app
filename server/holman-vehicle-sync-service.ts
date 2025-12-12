@@ -468,7 +468,37 @@ class HolmanVehicleSyncService {
       holmanTechAssigned: v.holmanTechAssigned || '', // Enterprise ID of Holman-assigned tech
       holmanTechName: v.holmanTechName || '', // Tech name from Holman
       dataSource: v.dataSource || 'cached',
+      // Include cached TPMS data for fast loading
+      tpmsAssignedTechId: v.tpmsAssignedTechId || '',
+      tpmsAssignedTechName: v.tpmsAssignedTechName || '',
     };
+  }
+
+  // Save TPMS enriched data back to cache for future fast loads
+  async saveTPMSDataToCache(vehicles: FleetVehicle[]): Promise<void> {
+    const now = new Date();
+    let updated = 0;
+    
+    for (const v of vehicles) {
+      if (v.tpmsAssignedTechId || v.tpmsAssignedTechName) {
+        try {
+          await db
+            .update(holmanVehiclesCache)
+            .set({
+              tpmsAssignedTechId: v.tpmsAssignedTechId || null,
+              tpmsAssignedTechName: v.tpmsAssignedTechName || null,
+              tpmsLastSyncAt: now,
+              updatedAt: now,
+            })
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, v.vehicleNumber));
+          updated++;
+        } catch (error) {
+          // Silently continue
+        }
+      }
+    }
+    
+    console.log(`[HolmanSync] Saved TPMS data to cache for ${updated} vehicles`);
   }
 
   // Enrich vehicles with TPMS assigned tech info

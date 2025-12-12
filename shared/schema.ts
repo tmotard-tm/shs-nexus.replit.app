@@ -1142,6 +1142,9 @@ export const holmanVehiclesCache = pgTable("holman_vehicles_cache", {
   tuneStatus: text("tune_status"),
   holmanTechAssigned: text("holman_tech_assigned"), // clientData2 from Holman - enterprise ID of assigned tech
   holmanTechName: text("holman_tech_name"), // Tech name from Holman (firstName + lastName)
+  tpmsAssignedTechId: text("tpms_assigned_tech_id"), // Cached TPMS tech enterprise ID
+  tpmsAssignedTechName: text("tpms_assigned_tech_name"), // Cached TPMS tech name
+  tpmsLastSyncAt: timestamp("tpms_last_sync_at"), // When TPMS data was last refreshed
   dataSource: text("data_source").default("holman"), // holman, tpms, manual
   isActive: boolean("is_active").default(true),
   rawData: jsonb("raw_data"), // Store original API response
