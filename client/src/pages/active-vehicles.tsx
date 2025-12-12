@@ -60,6 +60,7 @@ export default function ActiveVehicles() {
   const [holmanTechFilter, setHolmanTechFilter] = useState("all");
   const [tpmsTechFilter, setTpmsTechFilter] = useState("all");
   const [mismatchFilter, setMismatchFilter] = useState("all");
+  const [vehicleProgramFilter, setVehicleProgramFilter] = useState("all");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   
   // Fetch vehicles from Holman API
@@ -85,7 +86,8 @@ export default function ActiveVehicles() {
   const activeFiltersCount = [
     brandingFilter, interiorFilter, tuneStatusFilter, makeFilter, modelFilter,
     colorFilter, stateFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
-    yearFilter, cityFilter, assignmentStatusFilter, holmanTechFilter, tpmsTechFilter, mismatchFilter
+    yearFilter, cityFilter, assignmentStatusFilter, holmanTechFilter, tpmsTechFilter, mismatchFilter,
+    vehicleProgramFilter
   ].filter(filter => filter !== "all").length;
 
   // Check if we should filter vehicles based on URL parameter
@@ -178,10 +180,17 @@ export default function ActiveVehicles() {
       (mismatchFilter === "mismatch" && vehicleHasMismatch) ||
       (mismatchFilter === "match" && !vehicleHasMismatch);
     
+    // Vehicle Program filter (BYOV vs Fleet)
+    const ownership = getVehicleOwnership(vehicle.vehicleNumber);
+    const matchesVehicleProgram = vehicleProgramFilter === "all" ||
+      (vehicleProgramFilter === "byov" && ownership.type === 'BYOV') ||
+      (vehicleProgramFilter === "fleet" && ownership.type === 'Fleet');
+    
     return matchesSearch && matchesBranding && matchesInterior && matchesTuneStatus &&
            matchesMake && matchesModel && matchesColor && matchesState && matchesLicenseState &&
            matchesRegion && matchesDivision && matchesDistrict && matchesYear && matchesCity && 
-           matchesAssignmentStatus && matchesHolmanTech && matchesTpmsTech && matchesMismatch;
+           matchesAssignmentStatus && matchesHolmanTech && matchesTpmsTech && matchesMismatch &&
+           matchesVehicleProgram;
   });
 
   return (
@@ -391,7 +400,21 @@ export default function ActiveVehicles() {
                         {/* Service & Configuration Filters */}
                         <div className="space-y-3">
                           <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Configuration</h4>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Vehicle Program</Label>
+                              <Select value={vehicleProgramFilter} onValueChange={setVehicleProgramFilter} data-testid="select-vehicle-program-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All programs</SelectItem>
+                                  <SelectItem value="fleet">Fleet</SelectItem>
+                                  <SelectItem value="byov">BYOV</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
                             <div className="space-y-1">
                               <Label className="text-xs">Branding</Label>
                               <Select value={brandingFilter} onValueChange={setBrandingFilter} data-testid="select-branding-filter">
