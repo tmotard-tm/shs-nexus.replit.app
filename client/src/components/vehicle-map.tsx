@@ -1,12 +1,34 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter, ZoomIn, ZoomOut, RotateCcw, Compass } from "lucide-react";
-import { activeVehicles, type FleetVehicle } from "@/data/fleetData";
+import { MapPin, Car, Truck, CheckCircle, XCircle, X, Filter, ZoomIn, ZoomOut, RotateCcw, Compass, RefreshCw } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/skeleton";
 import L from "leaflet";
+
+interface FleetVehicle {
+  vin: string;
+  vehicleNumber: string;
+  makeName: string;
+  modelName: string;
+  modelYear: number;
+  color: string;
+  licensePlate: string;
+  licenseState: string;
+  city: string;
+  state: string;
+  region?: string;
+  branding: string;
+  interior: string;
+  tuneStatus: string;
+  odometerDelivery?: number;
+  deliveryAddress?: string;
+  outOfServiceDate?: string | null;
+  tpmsAssignedTechId?: string | null;
+}
 
 interface VehicleMapProps {
   open: boolean;
@@ -69,12 +91,19 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   const leafletMapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<L.LayerGroup | null>(null);
 
-  // Assign vehicle status based on various conditions
+  // Fetch vehicles from Holman API
+  const { data: holmanVehicles = [], isLoading, refetch } = useQuery<FleetVehicle[]>({
+    queryKey: ['/api/fleet-vehicles'],
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Assign vehicle status based on TPMS assignment status
   const getVehicleStatus = (vehicle: FleetVehicle) => {
-    if (vehicle.outOfServiceDate) return "auction";
     if (vehicle.tuneStatus === "Needs Repair") return "maintenance"; 
     if (vehicle.tuneStatus === "Declined") return "declined";
-    if (!vehicle.outOfServiceDate && vehicle.branding === "Sears") return "assigned";
+    // Use TPMS assignment status instead of outOfServiceDate
+    if (vehicle.tpmsAssignedTechId) return "assigned";
     if (vehicle.branding === "Reserved") return "reserved";
     return "available";
   };
@@ -89,7 +118,8 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
     let baseLng = stateCoord.lng;
     
     // Add randomization based on delivery address to spread vehicles within the state
-    const addressHash = vehicle.deliveryAddress.split('').reduce((hash, char) => {
+    const addressStr = vehicle.deliveryAddress || vehicle.vin || '';
+    const addressHash = addressStr.split('').reduce((hash, char) => {
       return char.charCodeAt(0) + ((hash << 5) - hash);
     }, 0);
     
@@ -107,7 +137,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
   };
 
   // Process vehicles with validated coordinates
-  const vehiclePositions = activeVehicles
+  const vehiclePositions = useMemo(() => holmanVehicles
     .map(vehicle => {
       const position = getDeliveryAddressPosition(vehicle);
       const status = getVehicleStatus(vehicle);
@@ -131,25 +161,25 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
       status: string;
       id: string;
       label: string;
-    })[];
+    })[], [holmanVehicles]);
 
   // Apply filters
-  const filteredVehicles = vehiclePositions.filter(vehicle => {
+  const filteredVehicles = useMemo(() => vehiclePositions.filter(vehicle => {
     if (statusFilter !== "all" && vehicle.status !== statusFilter) return false;
     if (brandingFilter !== "all" && vehicle.branding !== brandingFilter) return false;
     if (regionFilter !== "all" && vehicle.region !== regionFilter) return false;
     return true;
-  });
+  }), [vehiclePositions, statusFilter, brandingFilter, regionFilter]);
 
   // Group vehicles by status for counts
-  const statusCounts = Object.keys(vehicleStatuses).reduce((acc, status) => {
+  const statusCounts = useMemo(() => Object.keys(vehicleStatuses).reduce((acc, status) => {
     acc[status] = filteredVehicles.filter(v => v.status === status).length;
     return acc;
-  }, {} as Record<string, number>);
+  }, {} as Record<string, number>), [filteredVehicles]);
 
   // Get unique values for filters (filter out empty/null values)
-  const brandingOptions = Array.from(new Set(activeVehicles.map(v => v.branding).filter(b => b && b.trim()))).sort();
-  const regionOptions = Array.from(new Set(activeVehicles.map(v => v.region).filter(r => r && r.trim()))).sort();
+  const brandingOptions = useMemo(() => Array.from(new Set(holmanVehicles.map(v => v.branding).filter(b => b && b.trim()))).sort(), [holmanVehicles]);
+  const regionOptions = useMemo(() => Array.from(new Set(holmanVehicles.map(v => v.region).filter((r): r is string => !!r && r.trim() !== ''))).sort(), [holmanVehicles]);
 
   // Initialize OpenStreetMap
   useEffect(() => {
