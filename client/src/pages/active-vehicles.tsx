@@ -51,10 +51,14 @@ export default function ActiveVehicles() {
   const [stateFilter, setStateFilter] = useState("all");
   const [licenseStateFilter, setLicenseStateFilter] = useState("all");
   const [regionFilter, setRegionFilter] = useState("all");
+  const [divisionFilter, setDivisionFilter] = useState("all");
   const [districtFilter, setDistrictFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
   const [assignmentStatusFilter, setAssignmentStatusFilter] = useState("all");
+  const [holmanTechFilter, setHolmanTechFilter] = useState("all");
+  const [tpmsTechFilter, setTpmsTechFilter] = useState("all");
+  const [mismatchFilter, setMismatchFilter] = useState("all");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   
   // Fetch vehicles from Holman API
@@ -79,8 +83,8 @@ export default function ActiveVehicles() {
   // Count active filters
   const activeFiltersCount = [
     brandingFilter, interiorFilter, tuneStatusFilter, makeFilter, modelFilter,
-    colorFilter, stateFilter, licenseStateFilter, regionFilter, districtFilter,
-    yearFilter, cityFilter, assignmentStatusFilter
+    colorFilter, stateFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
+    yearFilter, cityFilter, assignmentStatusFilter, holmanTechFilter, tpmsTechFilter, mismatchFilter
   ].filter(filter => filter !== "all").length;
 
   // Check if we should filter vehicles based on URL parameter
@@ -109,12 +113,15 @@ export default function ActiveVehicles() {
       states: unique(allVehicles.map(v => v.state)),
       licenseStates: unique(allVehicles.map(v => v.licenseState)),
       regions: unique(allVehicles.map(v => v.region)),
+      divisions: unique(allVehicles.map(v => v.division || '')),
       districts: unique(allVehicles.map(v => v.district)),
       cities: unique(allVehicles.map(v => v.city)),
       years: uniqueNum(allVehicles.map(v => v.modelYear)),
       brandings: unique(allVehicles.map(v => v.branding)),
       interiors: unique(allVehicles.map(v => v.interior)),
       tuneStatuses: unique(allVehicles.map(v => v.tuneStatus)),
+      holmanTechs: unique(allVehicles.map(v => v.holmanTechAssigned || '').filter(Boolean)),
+      tpmsTechs: unique(allVehicles.map(v => v.tpmsAssignedTechId || '').filter(Boolean)),
     };
   }, [allVehicles]);
 
@@ -136,6 +143,7 @@ export default function ActiveVehicles() {
     const matchesState = stateFilter === "all" || vehicle.state === stateFilter;
     const matchesLicenseState = licenseStateFilter === "all" || vehicle.licenseState === licenseStateFilter;
     const matchesRegion = regionFilter === "all" || vehicle.region === regionFilter;
+    const matchesDivision = divisionFilter === "all" || vehicle.division === divisionFilter;
     const matchesDistrict = districtFilter === "all" || vehicle.district === districtFilter;
     const matchesYear = yearFilter === "all" || vehicle.modelYear.toString() === yearFilter;
     const matchesCity = cityFilter === "all" || vehicle.city === cityFilter;
@@ -143,9 +151,29 @@ export default function ActiveVehicles() {
       (assignmentStatusFilter === "assigned" && !vehicle.outOfServiceDate) ||
       (assignmentStatusFilter === "unassigned" && vehicle.outOfServiceDate);
     
+    // Holman tech filter
+    const matchesHolmanTech = holmanTechFilter === "all" || 
+      (holmanTechFilter === "unassigned" && !vehicle.holmanTechAssigned) ||
+      vehicle.holmanTechAssigned === holmanTechFilter;
+    
+    // TPMS tech filter  
+    const matchesTpmsTech = tpmsTechFilter === "all" || 
+      (tpmsTechFilter === "unassigned" && !vehicle.tpmsAssignedTechId) ||
+      vehicle.tpmsAssignedTechId === tpmsTechFilter;
+    
+    // Mismatch filter
+    const holmanId = vehicle.holmanTechAssigned?.trim() || '';
+    const tpmsId = vehicle.tpmsAssignedTechId?.trim() || '';
+    const vehicleHasMismatch = (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) ||
+                               (holmanId && !tpmsId);
+    const matchesMismatch = mismatchFilter === "all" || 
+      (mismatchFilter === "mismatch" && vehicleHasMismatch) ||
+      (mismatchFilter === "match" && !vehicleHasMismatch);
+    
     return matchesSearch && matchesBranding && matchesInterior && matchesTuneStatus &&
            matchesMake && matchesModel && matchesColor && matchesState && matchesLicenseState &&
-           matchesRegion && matchesDistrict && matchesYear && matchesCity && matchesAssignmentStatus;
+           matchesRegion && matchesDivision && matchesDistrict && matchesYear && matchesCity && 
+           matchesAssignmentStatus && matchesHolmanTech && matchesTpmsTech && matchesMismatch;
   });
 
   return (
@@ -488,6 +516,21 @@ export default function ActiveVehicles() {
                             </div>
                             
                             <div className="space-y-1">
+                              <Label className="text-xs">Division</Label>
+                              <Select value={divisionFilter} onValueChange={setDivisionFilter} data-testid="select-division-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All divisions</SelectItem>
+                                  {filterOptions.divisions.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
                               <Label className="text-xs">District</Label>
                               <Select value={districtFilter} onValueChange={setDistrictFilter} data-testid="select-district-filter">
                                 <SelectTrigger className="h-8">
@@ -498,6 +541,58 @@ export default function ActiveVehicles() {
                                   {filterOptions.districts.map(option => (
                                     <SelectItem key={option} value={option}>{option}</SelectItem>
                                   ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Tech Assignment Filters */}
+                        <div className="space-y-3">
+                          <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Tech Assignment</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Holman Tech ID</Label>
+                              <Select value={holmanTechFilter} onValueChange={setHolmanTechFilter} data-testid="select-holman-tech-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All techs</SelectItem>
+                                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                                  {filterOptions.holmanTechs.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">TPMS Tech ID</Label>
+                              <Select value={tpmsTechFilter} onValueChange={setTpmsTechFilter} data-testid="select-tpms-tech-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All techs</SelectItem>
+                                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                                  {filterOptions.tpmsTechs.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">Assignment Match</Label>
+                              <Select value={mismatchFilter} onValueChange={setMismatchFilter} data-testid="select-mismatch-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All vehicles</SelectItem>
+                                  <SelectItem value="mismatch">Mismatch Only</SelectItem>
+                                  <SelectItem value="match">Matched Only</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>
@@ -524,10 +619,14 @@ export default function ActiveVehicles() {
                                   setStateFilter("all");
                                   setLicenseStateFilter("all");
                                   setRegionFilter("all");
+                                  setDivisionFilter("all");
                                   setDistrictFilter("all");
                                   setYearFilter("all");
                                   setCityFilter("all");
                                   setAssignmentStatusFilter("all");
+                                  setHolmanTechFilter("all");
+                                  setTpmsTechFilter("all");
+                                  setMismatchFilter("all");
                                 }}
                                 data-testid="button-clear-filters"
                               >
