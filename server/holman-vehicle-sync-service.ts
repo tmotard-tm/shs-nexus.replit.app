@@ -232,8 +232,8 @@ class HolmanVehicleSyncService {
         city: v.city,
         state: v.stateProvince || v.state,
         region: v.clientData3 || v.region || '', // clientData3 from Holman (e.g., "890")
-        division: v.prefix || v.division || '', // prefix/division from Holman (e.g., "01")
-        district: v.district || '',
+        division: v.division || '', // division from Holman (e.g., "01")
+        district: v.prefix || v.district || '', // prefix from Holman (e.g., "7084")
         inServiceDate: v.onRoadDate || v.deliveryDate || v.inServiceDate,
         outOfServiceDate: v.outOfServiceDate,
         odometer: v.odometer || 0,
@@ -424,8 +424,8 @@ class HolmanVehicleSyncService {
       city: v.city || '',
       state: v.stateProvince || v.state || '',
       region: v.clientData3 || v.region || '', // clientData3 from Holman (e.g., "890")
-      division: v.prefix || v.division || '', // prefix/division from Holman (e.g., "01")
-      district: v.district || '',
+      division: v.division || '', // division from Holman (e.g., "01")
+      district: v.prefix || v.district || '', // prefix from Holman (e.g., "7084")
       inServiceDate: v.onRoadDate || v.deliveryDate || v.inServiceDate || '',
       outOfServiceDate: v.outOfServiceDate || '',
       odometer: v.odometer || 0,
