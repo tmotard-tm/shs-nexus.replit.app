@@ -63,66 +63,65 @@ class HolmanVehicleSyncService {
     pageSize?: number;
     statusCode?: number;
   } = {}): Promise<SyncResult> {
-    const { page = 1, pageSize = 500, statusCode = 1 } = options;
+    const { pageSize = 500, statusCode = 1 } = options;
 
     if (!holmanApiService.isConfigured()) {
       console.log('[HolmanSync] API not configured, falling back to cache');
-      return this.getCachedVehicles(page, pageSize, statusCode, 'API credentials not configured');
+      return this.getCachedVehicles(1, pageSize, statusCode, 'API credentials not configured');
     }
 
     this.lastSyncAttempt = new Date();
 
     try {
-      console.log('[HolmanSync] Attempting live fetch from Holman API');
+      console.log('[HolmanSync] Attempting live fetch from Holman API (all pages)');
       
-      // Use the simple getVehicles method that works on integrations page
-      // Status codes: 1 = active, 2 = ordered/in-transit (same as integrations page)
-      const apiResponse = await holmanApiService.getVehicles(
-        '2B56',           // lesseeCode
-        '1,2',            // statusCodes - matches what integrations page uses
-        undefined,        // soldDateCode
-        page,
-        pageSize
-      );
+      // Fetch ALL pages from Holman API
+      let allVehicleData: any[] = [];
+      let currentPage = 1;
+      let totalCount = 0;
+      let hasMorePages = true;
       
-      // Extract vehicles array from response object - can be in 'data' or 'items' property
-      const vehicleData = (apiResponse as any)?.items || apiResponse?.data || [];
-      
-      console.log('[HolmanSync] Extracted vehicles:', {
-        count: vehicleData.length,
-        totalCount: apiResponse?.totalCount,
-        firstVehicleKeys: vehicleData[0] ? Object.keys(vehicleData[0]).join(', ') : 'N/A',
-        firstVehicleSample: vehicleData[0] ? JSON.stringify(vehicleData[0]).substring(0, 500) : 'N/A'
-      });
-      
-      if (!vehicleData || vehicleData.length === 0) {
-        console.log('[HolmanSync] No vehicles returned from API, falling back to cache');
-        return this.getCachedVehicles(page, pageSize, statusCode, 'No vehicles returned from API');
-      }
-
-      console.log(`[HolmanSync] Got ${vehicleData.length} vehicles from Holman API (total: ${apiResponse?.totalCount || vehicleData.length})`);
-
-      // Log unique divisions to understand data structure
-      const uniqueDivisions = [...new Set(vehicleData.map((v: any) => v.division || 'undefined'))];
-      console.log(`[HolmanSync] Unique divisions in Holman data:`, uniqueDivisions);
-      
-      // Log BYOV vehicles (88xxx) to see what division they have
-      const byovVehicles = vehicleData.filter((v: any) => {
-        const vNum = (v.holmanVehicleNumber || v.vehicleNumber || '').replace(/^0+/, '');
-        return vNum.startsWith('88');
-      });
-      if (byovVehicles.length > 0) {
-        console.log(`[HolmanSync] Found ${byovVehicles.length} BYOV vehicles (88xxx):`, 
-          byovVehicles.slice(0, 5).map((v: any) => ({
-            num: v.holmanVehicleNumber || v.vehicleNumber,
-            division: v.division,
-            prefix: v.prefix
-          }))
+      while (hasMorePages) {
+        console.log(`[HolmanSync] Fetching page ${currentPage}...`);
+        
+        const apiResponse = await holmanApiService.getVehicles(
+          '2B56',           // lesseeCode
+          '1,2',            // statusCodes - matches what integrations page uses
+          undefined,        // soldDateCode
+          currentPage,
+          pageSize
         );
+        
+        const vehicleData = (apiResponse as any)?.items || apiResponse?.data || [];
+        totalCount = apiResponse?.totalCount || 0;
+        
+        if (currentPage === 1) {
+          console.log('[HolmanSync] First page response:', {
+            count: vehicleData.length,
+            totalCount: totalCount,
+            firstVehicleKeys: vehicleData[0] ? Object.keys(vehicleData[0]).slice(0, 10).join(', ') + '...' : 'N/A',
+          });
+        }
+        
+        if (!vehicleData || vehicleData.length === 0) {
+          hasMorePages = false;
+        } else {
+          allVehicleData = allVehicleData.concat(vehicleData);
+          const totalPages = Math.ceil(totalCount / pageSize);
+          hasMorePages = currentPage < totalPages;
+          currentPage++;
+        }
+      }
+      
+      console.log(`[HolmanSync] Fetched ${allVehicleData.length} total vehicles from ${currentPage - 1} pages (API total: ${totalCount})`);
+      
+      if (allVehicleData.length === 0) {
+        console.log('[HolmanSync] No vehicles returned from API, falling back to cache');
+        return this.getCachedVehicles(1, pageSize, statusCode, 'No vehicles returned from API');
       }
 
       // Filter to only divisions 01 and RF - other divisions are not relevant for this application
-      const filteredVehicleData = vehicleData.filter((v: any) => {
+      const filteredVehicleData = allVehicleData.filter((v: any) => {
         const division = v.division || v.prefix || '';
         return ALLOWED_DIVISIONS.includes(division);
       });
@@ -138,7 +137,7 @@ class HolmanVehicleSyncService {
       this.lastSuccessfulSync = new Date();
 
       const pendingCount = await this.getPendingChangeCount();
-      const totalCount = filteredVehicleData.length;
+      const finalCount = filteredVehicleData.length;
 
       return {
         success: true,
@@ -148,21 +147,21 @@ class HolmanVehicleSyncService {
           isStale: false,
           lastSyncAt: this.lastSuccessfulSync.toISOString(),
           pendingChangeCount: pendingCount,
-          totalVehicles: totalCount,
+          totalVehicles: finalCount,
           apiAvailable: true,
           errorMessage: null,
         },
         pagination: {
-          page,
-          pageSize,
-          totalCount,
-          totalPages: Math.ceil(totalCount / pageSize),
+          page: 1,
+          pageSize: finalCount,
+          totalCount: finalCount,
+          totalPages: 1,
         },
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('[HolmanSync] Live fetch failed:', errorMessage);
-      return this.getCachedVehicles(page, pageSize, statusCode, errorMessage);
+      return this.getCachedVehicles(1, pageSize, statusCode, errorMessage);
     }
   }
 
