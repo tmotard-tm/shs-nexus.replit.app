@@ -629,16 +629,22 @@ export default function ActiveVehicles() {
                         </div>
                       </div>
                       
-                      <div className="mt-4 pt-4 border-t grid grid-cols-1 md:grid-cols-4 gap-4 text-xs text-muted-foreground">
+                      <div className="mt-4 pt-4 border-t grid grid-cols-1 md:grid-cols-5 gap-4 text-xs text-muted-foreground">
                         {vehicle.deliveryDate && (
                           <div className="flex items-center gap-2">
                             <Calendar className="h-3 w-3" />
                             <span>Acquired: {vehicle.deliveryDate}</span>
                           </div>
                         )}
+                        {vehicle.regRenewalDate && (
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-3 w-3" />
+                            <span>Reg Renewal: {vehicle.regRenewalDate}</span>
+                          </div>
+                        )}
                         {(vehicle.odometer && vehicle.odometer > 0) ? (
                           <div>
-                            <span>Odometer: {vehicle.odometer.toLocaleString()} miles</span>
+                            <span>Odometer: {vehicle.odometer.toLocaleString()} miles{vehicle.odometerDate ? ` (${vehicle.odometerDate})` : ''}</span>
                           </div>
                         ) : vehicle.odometerDelivery > 0 ? (
                           <div>
