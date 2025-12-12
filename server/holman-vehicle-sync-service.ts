@@ -493,12 +493,19 @@ class HolmanVehicleSyncService {
             
             if (!strippedNumber) return vehicle;
             
-            // Try without leading zeros first (most common case)
-            let result = await tpmsService.lookupByTruckNumber(strippedNumber);
+            // TPMS truck numbers are typically 6 digits with leading zeros
+            const paddedNumber = strippedNumber.padStart(6, '0');
             
-            // If that fails and the original had leading zeros, try with original format
-            if (!result.success && originalNumber !== strippedNumber) {
-              console.log(`[HolmanSync] TPMS lookup failed for ${strippedNumber}, trying original format ${originalNumber}`);
+            // Try 6-digit padded format first (TPMS standard format)
+            let result = await tpmsService.lookupByTruckNumber(paddedNumber);
+            
+            // If that fails, try without leading zeros
+            if (!result.success && paddedNumber !== strippedNumber) {
+              result = await tpmsService.lookupByTruckNumber(strippedNumber);
+            }
+            
+            // If still fails, try original Holman format
+            if (!result.success && originalNumber !== paddedNumber && originalNumber !== strippedNumber) {
               result = await tpmsService.lookupByTruckNumber(originalNumber);
             }
             
