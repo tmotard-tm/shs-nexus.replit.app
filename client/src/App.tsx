@@ -90,7 +90,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
-      <Route path="/analytics">
+      <Route path="/fleet-distribution">
         <ProtectedRoute>
           <MainContent>
             <AnalyticsBoard />

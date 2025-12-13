@@ -116,9 +116,9 @@ export const PAGES: PageDefinition[] = [
   },
   {
     key: "vehicleAssignmentDash",
-    label: "Vehicle Assignment Dashboard",
-    description: "Vehicle assignment overview",
-    path: "/analytics",
+    label: "Fleet Distribution",
+    description: "Fleet distribution overview",
+    path: "/fleet-distribution",
     icon: Activity,
     category: "dashboards",
     permissionKey: "vehicleAssignmentDash",
