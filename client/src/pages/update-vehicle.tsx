@@ -952,15 +952,31 @@ export default function UpdateVehicle() {
               )}
               
               <div className="grid gap-4">
-                {filteredVehicles.map((vehicle) => (
+                {filteredVehicles.map((vehicle) => {
+                  const holmanId = vehicle.holmanTechAssigned?.trim() || '';
+                  const tpmsId = vehicle.tpmsAssignedTechId?.trim() || '';
+                  const hasMismatch = (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) ||
+                                      (holmanId && !tpmsId);
+                  
+                  return (
                   <Card 
                     key={vehicle.vin} 
-                    className="cursor-pointer hover:shadow-md transition-all duration-200"
+                    className={`cursor-pointer hover:shadow-md transition-all duration-200 ${hasMismatch ? 'border-2 border-orange-500 bg-orange-50 dark:bg-orange-950' : ''}`}
                     onClick={() => handleVehicleSelect(vehicle)}
                     data-testid={`card-vehicle-${vehicle.vin}`}
                   >
                     <CardContent className="p-4">
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      {hasMismatch && (
+                        <div className="mb-3 p-2 bg-orange-100 dark:bg-orange-900 rounded-md flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 text-orange-600" />
+                          <span className="text-sm font-medium text-orange-700 dark:text-orange-300">
+                            Assignment Mismatch: {holmanId && !tpmsId 
+                              ? `Holman has tech (${holmanId}) but TPMS has no assignment` 
+                              : `Holman ID (${holmanId}) does not match TPMS ID (${tpmsId})`}
+                          </span>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
                             <Car className="h-4 w-4 text-muted-foreground" />
@@ -969,7 +985,7 @@ export default function UpdateVehicle() {
                           <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
                           
-                          {/* Holman Status & Ownership Badges */}
+                          {/* Holman Status Badge */}
                           <div className="flex items-center gap-2 mt-2">
                             <span 
                               className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getHolmanStatus(vehicle.statusCode).bgColor} ${getHolmanStatus(vehicle.statusCode).color} border ${getHolmanStatus(vehicle.statusCode).borderColor}`}
@@ -977,6 +993,8 @@ export default function UpdateVehicle() {
                             >
                               {getHolmanStatus(vehicle.statusCode).label}
                             </span>
+                            
+                            {/* BYOV/Fleet Badge */}
                             <span 
                               className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getVehicleOwnership(vehicle.vehicleNumber).bgColor} ${getVehicleOwnership(vehicle.vehicleNumber).color} border ${getVehicleOwnership(vehicle.vehicleNumber).borderColor}`}
                               data-testid={`ownership-${vehicle.vin}`}
@@ -987,21 +1005,6 @@ export default function UpdateVehicle() {
                                 <>Fleet</>
                               )}
                             </span>
-                          </div>
-                          
-                          {/* TPMS determines assignment status */}
-                          <div className="flex items-center gap-2 mt-1">
-                            {vehicle.tpmsAssignedTechId ? (
-                              <>
-                                <CheckCircle className="h-4 w-4 text-green-500" />
-                                <span className="text-sm font-medium text-green-600" data-testid="status-assigned">Assigned (TPMS)</span>
-                              </>
-                            ) : (
-                              <>
-                                <XCircle className="h-4 w-4 text-red-500" />
-                                <span className="text-sm font-medium text-red-600" data-testid="status-unassigned">Unassigned</span>
-                              </>
-                            )}
                           </div>
                         </div>
                         
@@ -1020,18 +1023,104 @@ export default function UpdateVehicle() {
                           <p className="text-xs text-muted-foreground">Tune: {vehicle.tuneStatus}</p>
                         </div>
                         
+                        <div className="space-y-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-blue-500" />
+                              <span className="text-xs font-medium text-blue-600">Holman Tech Assigned</span>
+                              {vehicle.holmanTechAssigned ? (
+                                <span className="flex items-center gap-1 text-xs text-green-600">
+                                  <CheckCircle className="h-3 w-3" />
+                                  Assigned
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-xs text-red-600">
+                                  <XCircle className="h-3 w-3" />
+                                  Unassigned
+                                </span>
+                              )}
+                            </div>
+                            {vehicle.holmanTechAssigned || vehicle.holmanTechName ? (
+                              <>
+                                <p className="text-sm ml-6" data-testid={`holman-tech-name-${vehicle.vin}`}>{vehicle.holmanTechName || 'N/A'}</p>
+                                <p className="text-xs text-muted-foreground ml-6" data-testid={`holman-tech-id-${vehicle.vin}`}>ID: {vehicle.holmanTechAssigned || 'N/A'}</p>
+                              </>
+                            ) : (
+                              <p className="text-xs text-muted-foreground ml-6">None</p>
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-purple-500" />
+                              <span className="text-xs font-medium text-purple-600">TPMS Assigned Tech</span>
+                              {vehicle.tpmsAssignedTechId ? (
+                                <span className="flex items-center gap-1 text-xs text-green-600">
+                                  <CheckCircle className="h-3 w-3" />
+                                  Assigned
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-xs text-red-600">
+                                  <XCircle className="h-3 w-3" />
+                                  Unassigned
+                                </span>
+                              )}
+                            </div>
+                            {vehicle.tpmsAssignedTechId ? (
+                              <>
+                                <p className="text-sm ml-6" data-testid={`tpms-tech-name-${vehicle.vin}`}>{vehicle.tpmsAssignedTechName || 'N/A'}</p>
+                                <p className="text-xs text-muted-foreground ml-6" data-testid={`tpms-tech-id-${vehicle.vin}`}>ID: {vehicle.tpmsAssignedTechId}</p>
+                              </>
+                            ) : (
+                              <p className="text-xs text-muted-foreground ml-6">None</p>
+                            )}
+                          </div>
+                        </div>
+                        
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
                             <MapPin className="h-4 w-4 text-muted-foreground" />
                             <span className="text-sm">{vehicle.city}, {vehicle.state} {vehicle.zip}</span>
                           </div>
-                          <p className="text-xs text-muted-foreground">Region: {vehicle.region}</p>
-                          <p className="text-xs text-muted-foreground">District: {vehicle.district}</p>
+                          <p className="text-xs text-muted-foreground">Region: {vehicle.region || 'N/A'}</p>
+                          <p className="text-xs text-muted-foreground">Division: {vehicle.division || 'N/A'}</p>
+                          <p className="text-xs text-muted-foreground">District: {vehicle.district || 'N/A'}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-4 pt-4 border-t grid grid-cols-1 md:grid-cols-5 gap-4 text-xs text-muted-foreground">
+                        {vehicle.deliveryDate && (
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-3 w-3" />
+                            <span>Acquired: {vehicle.deliveryDate}</span>
+                          </div>
+                        )}
+                        {vehicle.regRenewalDate && (
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-3 w-3" />
+                            <span>Reg Renewal: {vehicle.regRenewalDate}</span>
+                          </div>
+                        )}
+                        {(vehicle.odometer && vehicle.odometer > 0) ? (
+                          <div>
+                            <span>Odometer: {vehicle.odometer.toLocaleString()} miles</span>
+                          </div>
+                        ) : null}
+                        {vehicle.remainingBookValue && vehicle.remainingBookValue > 0 && (
+                          <div>
+                            <span>Book Value: ${vehicle.remainingBookValue.toLocaleString()}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <Database className="h-3 w-3" />
+                          <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium" data-testid={`source-${vehicle.vin}`}>
+                            {vehicle.dataSource || 'Holman'}
+                          </span>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  );
+                })}
                 
                 {filteredVehicles.length === 0 && (
                   <Card>
