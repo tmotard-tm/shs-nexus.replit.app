@@ -141,7 +141,7 @@ class HolmanVehicleSyncService {
           lesseeCode: '2B56',
           pageNumber: currentPage,
           pageSize,
-          lastChangeRecordId: useIncremental ? syncState?.lastChangeRecordId : undefined,
+          lastChangeRecordId: useIncremental ? (syncState?.lastChangeRecordId || undefined) : undefined,
         });
         
         const vehicleData = apiResponse?.data || [];
