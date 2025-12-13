@@ -49,11 +49,35 @@ import {
   CalendarIcon,
   Download,
   FileSpreadsheet,
-  FileText
+  FileText,
+  Truck,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  RefreshCw,
+  AlertCircle
 } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import type { ActivityLog, User } from "@shared/schema";
+
+interface SubmissionLog {
+  id: string;
+  holmanVehicleNumber: string;
+  submissionId: string | null;
+  action: string;
+  enterpriseId: string | null;
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  errorMessage: string | null;
+}
 
 const ACTION_ICONS: Record<string, any> = {
   login_success: LogIn,
@@ -133,6 +157,15 @@ export default function ActivityLogs() {
   const [toDate, setToDate] = useState<Date | undefined>(undefined);
   const [isExporting, setIsExporting] = useState(false);
 
+  // Submission tracking state
+  const [submissionOpen, setSubmissionOpen] = useState(true);
+  const [subStatusFilter, setSubStatusFilter] = useState("all");
+  const [subActionFilter, setSubActionFilter] = useState("all");
+  const [subVehicleSearch, setSubVehicleSearch] = useState("");
+  const [subFromDate, setSubFromDate] = useState<Date | undefined>(undefined);
+  const [subToDate, setSubToDate] = useState<Date | undefined>(undefined);
+  const [isSubExporting, setIsSubExporting] = useState(false);
+
   // Redirect non-superadmin users
   useEffect(() => {
     if (user && user.role !== "superadmin") {
@@ -154,6 +187,30 @@ export default function ActivityLogs() {
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
   });
+
+  // Build submission query params
+  const submissionQueryParams = new URLSearchParams();
+  if (subStatusFilter !== "all") submissionQueryParams.set("status", subStatusFilter);
+  if (subActionFilter !== "all") submissionQueryParams.set("action", subActionFilter);
+  if (subVehicleSearch) submissionQueryParams.set("vehicleNumber", subVehicleSearch);
+  if (subFromDate) submissionQueryParams.set("startDate", subFromDate.toISOString());
+  if (subToDate) submissionQueryParams.set("endDate", subToDate.toISOString());
+
+  // Fetch submission tracking logs
+  const { data: submissionData, isLoading: submissionsLoading, refetch: refetchSubmissions } = useQuery<{
+    success: boolean;
+    submissions: SubmissionLog[];
+    count: number;
+  }>({
+    queryKey: ["/api/holman/submissions/logs", subStatusFilter, subActionFilter, subVehicleSearch, subFromDate?.toISOString(), subToDate?.toISOString()],
+    queryFn: async () => {
+      const response = await fetch(`/api/holman/submissions/logs?${submissionQueryParams.toString()}`);
+      if (!response.ok) throw new Error("Failed to fetch submissions");
+      return response.json();
+    },
+  });
+
+  const submissions = submissionData?.submissions || [];
 
   // Create a map of user IDs to usernames for display
   const userMap = users.reduce((acc, u) => {
@@ -339,6 +396,160 @@ export default function ActivityLogs() {
       });
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  // Format duration from milliseconds
+  const formatDuration = (ms: number | null): string => {
+    if (ms === null || ms === undefined) return "-";
+    if (ms < 1000) return `${ms}ms`;
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return `${hours}h ${remainingMinutes}m`;
+  };
+
+  // Get status badge color for submissions
+  const getSubmissionStatusBadge = (status: string) => {
+    const statusColors: Record<string, string> = {
+      pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100",
+      processing: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
+      completed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+      failed: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
+    };
+    const statusIcons: Record<string, any> = {
+      pending: Clock,
+      processing: RefreshCw,
+      completed: CheckCircle,
+      failed: AlertCircle,
+    };
+    const Icon = statusIcons[status] || Clock;
+    return (
+      <Badge variant="outline" className={`${statusColors[status] || "bg-gray-100 text-gray-800"} flex items-center gap-1`}>
+        <Icon className="h-3 w-3" />
+        <span className="capitalize">{status}</span>
+      </Badge>
+    );
+  };
+
+  // Clear submission date filters
+  const clearSubDateFilters = () => {
+    setSubFromDate(undefined);
+    setSubToDate(undefined);
+  };
+
+  // Export submissions to CSV
+  const exportSubmissionsToCSV = () => {
+    setIsSubExporting(true);
+    try {
+      const headers = ["Vehicle #", "Action", "Tech ID", "Status", "Started", "Completed", "Duration", "Error"];
+      const rows = submissions.map(sub => [
+        sub.holmanVehicleNumber,
+        sub.action,
+        sub.enterpriseId || "-",
+        sub.status,
+        formatTimestamp(sub.createdAt),
+        sub.completedAt ? formatTimestamp(sub.completedAt) : "-",
+        formatDuration(sub.durationMs),
+        sub.errorMessage || ""
+      ]);
+
+      const csvContent = [
+        headers.join(","),
+        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      ].join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `holman-submissions-${format(new Date(), "yyyy-MM-dd")}.csv`);
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast({
+        title: "Export Complete",
+        description: `Exported ${submissions.length} submission records to CSV`,
+      });
+    } catch (error) {
+      toast({
+        title: "Export Failed",
+        description: "Failed to export submission logs to CSV",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubExporting(false);
+    }
+  };
+
+  // Export submissions to XLSX
+  const exportSubmissionsToXLSX = async () => {
+    setIsSubExporting(true);
+    try {
+      const ExcelJS = await import("exceljs");
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Holman Submissions");
+
+      worksheet.columns = [
+        { header: "Vehicle #", key: "vehicle", width: 15 },
+        { header: "Action", key: "action", width: 12 },
+        { header: "Tech ID", key: "techId", width: 15 },
+        { header: "Status", key: "status", width: 12 },
+        { header: "Started", key: "started", width: 20 },
+        { header: "Completed", key: "completed", width: 20 },
+        { header: "Duration", key: "duration", width: 12 },
+        { header: "Error", key: "error", width: 40 },
+      ];
+
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
+      };
+
+      submissions.forEach(sub => {
+        worksheet.addRow({
+          vehicle: sub.holmanVehicleNumber,
+          action: sub.action,
+          techId: sub.enterpriseId || "-",
+          status: sub.status,
+          started: formatTimestamp(sub.createdAt),
+          completed: sub.completedAt ? formatTimestamp(sub.completedAt) : "-",
+          duration: formatDuration(sub.durationMs),
+          error: sub.errorMessage || "",
+        });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `holman-submissions-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast({
+        title: "Export Complete",
+        description: `Exported ${submissions.length} submission records to Excel`,
+      });
+    } catch (error) {
+      toast({
+        title: "Export Failed",
+        description: "Failed to export submission logs to Excel",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubExporting(false);
     }
   };
 
@@ -646,6 +857,211 @@ export default function ActivityLogs() {
             )}
           </CardContent>
         </Card>
+
+        {/* Holman Submission Tracking Card */}
+        <Collapsible open={submissionOpen} onOpenChange={setSubmissionOpen}>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CollapsibleTrigger asChild>
+                <div className="flex items-center gap-2 cursor-pointer hover:opacity-80">
+                  <Truck className="h-5 w-5" />
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      Holman Submission Tracking
+                      {submissionOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </CardTitle>
+                    <CardDescription>
+                      Vehicle assignment sync history - {submissions.length} records
+                    </CardDescription>
+                  </div>
+                </div>
+              </CollapsibleTrigger>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => refetchSubmissions()}
+                  disabled={submissionsLoading}
+                  data-testid="button-refresh-submissions"
+                >
+                  <RefreshCw className={`h-4 w-4 ${submissionsLoading ? 'animate-spin' : ''}`} />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" disabled={isSubExporting || submissions.length === 0} data-testid="button-export-submissions">
+                      <Download className="mr-2 h-4 w-4" />
+                      {isSubExporting ? "Exporting..." : "Export"}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={exportSubmissionsToCSV} data-testid="menu-export-submissions-csv">
+                      <FileText className="mr-2 h-4 w-4" />
+                      Export as CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={exportSubmissionsToXLSX} data-testid="menu-export-submissions-xlsx">
+                      <FileSpreadsheet className="mr-2 h-4 w-4" />
+                      Export as Excel (XLSX)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </CardHeader>
+            <CollapsibleContent>
+              <CardContent className="space-y-4">
+                {/* Submission Filters */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search vehicle #..."
+                      value={subVehicleSearch}
+                      onChange={(e) => setSubVehicleSearch(e.target.value)}
+                      className="pl-9"
+                      data-testid="input-sub-vehicle-search"
+                    />
+                  </div>
+
+                  <Select value={subStatusFilter} onValueChange={setSubStatusFilter}>
+                    <SelectTrigger data-testid="select-sub-status">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="processing">Processing</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={subActionFilter} onValueChange={setSubActionFilter}>
+                    <SelectTrigger data-testid="select-sub-action">
+                      <SelectValue placeholder="Action" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Actions</SelectItem>
+                      <SelectItem value="assign">Assign</SelectItem>
+                      <SelectItem value="unassign">Unassign</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <div className="flex items-center gap-2">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start text-left font-normal"
+                          data-testid="button-sub-from-date"
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {subFromDate ? format(subFromDate, "MMM dd") : "From"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={subFromDate}
+                          onSelect={setSubFromDate}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start text-left font-normal"
+                          data-testid="button-sub-to-date"
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {subToDate ? format(subToDate, "MMM dd") : "To"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={subToDate}
+                          onSelect={setSubToDate}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    {(subFromDate || subToDate) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearSubDateFilters}
+                        data-testid="button-clear-sub-dates"
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Submission Table */}
+                {submissionsLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  </div>
+                ) : submissions.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No submission records found matching your filters.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[100px]">Vehicle #</TableHead>
+                          <TableHead className="w-[80px]">Action</TableHead>
+                          <TableHead className="w-[100px]">Tech ID</TableHead>
+                          <TableHead className="w-[100px]">Status</TableHead>
+                          <TableHead className="w-[160px]">Started</TableHead>
+                          <TableHead className="w-[160px]">Completed</TableHead>
+                          <TableHead className="w-[80px]">Duration</TableHead>
+                          <TableHead>Error</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {submissions.map((sub) => (
+                          <TableRow key={sub.id} data-testid={`row-submission-${sub.id}`}>
+                            <TableCell className="font-mono text-sm font-medium">
+                              {sub.holmanVehicleNumber}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={sub.action === 'assign' ? 'default' : 'secondary'} className="capitalize">
+                                {sub.action}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">
+                              {sub.enterpriseId || "-"}
+                            </TableCell>
+                            <TableCell>
+                              {getSubmissionStatusBadge(sub.status)}
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">
+                              {formatTimestamp(sub.createdAt)}
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">
+                              {sub.completedAt ? formatTimestamp(sub.completedAt) : "-"}
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">
+                              {formatDuration(sub.durationMs)}
+                            </TableCell>
+                            <TableCell className="max-w-xs truncate text-red-600" title={sub.errorMessage || ""}>
+                              {sub.errorMessage || "-"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
       </div>
     </div>
   );
