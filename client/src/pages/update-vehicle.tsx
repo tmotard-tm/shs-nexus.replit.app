@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TopBar } from "@/components/layout/top-bar";
@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User, AlertCircle, Loader2, RefreshCw, Truck } from "lucide-react";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User, AlertCircle, Loader2, RefreshCw, Truck, AlertTriangle, Database } from "lucide-react";
 import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
 import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
@@ -142,9 +142,15 @@ export default function UpdateVehicle() {
   const [stateFilter, setStateFilter] = useState("all");
   const [licenseStateFilter, setLicenseStateFilter] = useState("all");
   const [regionFilter, setRegionFilter] = useState("all");
+  const [divisionFilter, setDivisionFilter] = useState("all");
   const [districtFilter, setDistrictFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
+  const [assignmentStatusFilter, setAssignmentStatusFilter] = useState("all");
+  const [holmanTechFilter, setHolmanTechFilter] = useState("all");
+  const [tpmsTechFilter, setTpmsTechFilter] = useState("all");
+  const [mismatchFilter, setMismatchFilter] = useState("all");
+  const [vehicleProgramFilter, setVehicleProgramFilter] = useState("all");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
@@ -250,25 +256,29 @@ export default function UpdateVehicle() {
     });
   };
   
-  // Generate filter options from actual data
-  const unique = (arr: (string | undefined)[]) => Array.from(new Set(arr.filter(Boolean))).sort() as string[];
-  const uniqueNum = (arr: (number | undefined)[]) => Array.from(new Set(arr.filter((n): n is number => typeof n === 'number' && n > 0))).sort((a, b) => b - a);
-  
-  const filterOptions = {
-    makes: unique(holmanVehicles.map(v => v.makeName)),
-    models: unique(holmanVehicles.map(v => v.modelName)),
-    colors: unique(holmanVehicles.map(v => v.color)),
-    states: unique(holmanVehicles.map(v => v.state)),
-    licenseStates: unique(holmanVehicles.map(v => v.licenseState)),
-    regions: unique(holmanVehicles.map(v => v.region)),
-    divisions: unique(holmanVehicles.map(v => v.division)),
-    districts: unique(holmanVehicles.map(v => v.district)),
-    cities: unique(holmanVehicles.map(v => v.city)),
-    years: uniqueNum(holmanVehicles.map(v => v.modelYear)),
-    brandings: unique(holmanVehicles.map(v => v.branding)),
-    interiors: unique(holmanVehicles.map(v => v.interior)),
-    tuneStatuses: unique(holmanVehicles.map(v => v.tuneStatus)),
-  };
+  // Generate filter options dynamically from the loaded data
+  const filterOptions = useMemo(() => {
+    const unique = (arr: string[]) => Array.from(new Set(arr.filter(Boolean))).sort();
+    const uniqueNum = (arr: number[]) => Array.from(new Set(arr.filter(n => n > 0))).sort((a, b) => b - a);
+    
+    return {
+      makes: unique(holmanVehicles.map(v => v.makeName)),
+      models: unique(holmanVehicles.map(v => v.modelName)),
+      colors: unique(holmanVehicles.map(v => v.color)),
+      states: unique(holmanVehicles.map(v => v.state)),
+      licenseStates: unique(holmanVehicles.map(v => v.licenseState)),
+      regions: unique(holmanVehicles.map(v => v.region)),
+      divisions: unique(holmanVehicles.map(v => v.division || '')),
+      districts: unique(holmanVehicles.map(v => v.district)),
+      cities: unique(holmanVehicles.map(v => v.city)),
+      years: uniqueNum(holmanVehicles.map(v => v.modelYear)),
+      brandings: unique(holmanVehicles.map(v => v.branding)),
+      interiors: unique(holmanVehicles.map(v => v.interior)),
+      tuneStatuses: unique(holmanVehicles.map(v => v.tuneStatus)),
+      holmanTechs: unique(holmanVehicles.map(v => v.holmanTechAssigned || '').filter(Boolean)),
+      tpmsTechs: unique(holmanVehicles.map(v => v.tpmsAssignedTechId || '').filter(Boolean)),
+    };
+  }, [holmanVehicles]);
 
   const regions = [
     "Northeast",
@@ -357,19 +367,25 @@ export default function UpdateVehicle() {
   // Count active filters
   const activeFiltersCount = [
     brandingFilter, interiorFilter, tuneStatusFilter, makeFilter, modelFilter,
-    colorFilter, stateFilter, licenseStateFilter, regionFilter, districtFilter,
-    yearFilter, cityFilter
+    colorFilter, stateFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
+    yearFilter, cityFilter, assignmentStatusFilter, holmanTechFilter, tpmsTechFilter, mismatchFilter,
+    vehicleProgramFilter
   ].filter(filter => filter !== "all").length;
 
   const baseVehicles = holmanVehicles;
   const filteredVehicles = baseVehicles.filter(vehicle => {
+    const searchLower = searchQuery.toLowerCase().trim();
+    const searchNoLeadingZeros = searchLower.replace(/^0+/, '');
+    const vehicleNumNoLeadingZeros = (vehicle.vehicleNumber || '').replace(/^0+/, '').toLowerCase();
+    
     const matchesSearch = !searchQuery || 
-      vehicle.vin.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vehicle.vehicleNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vehicle.licensePlate.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vehicle.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (vehicle.deliveryAddress || '').toLowerCase().includes(searchQuery.toLowerCase());
+      (vehicle.vin || '').toLowerCase().includes(searchLower) ||
+      (vehicle.vehicleNumber || '').toLowerCase().includes(searchLower) ||
+      vehicleNumNoLeadingZeros.includes(searchNoLeadingZeros) ||
+      (vehicle.licensePlate || '').toLowerCase().includes(searchLower) ||
+      `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchLower) ||
+      (vehicle.city || '').toLowerCase().includes(searchLower) ||
+      (vehicle.deliveryAddress || '').toLowerCase().includes(searchLower);
     
     const matchesBranding = brandingFilter === "all" || vehicle.branding === brandingFilter;
     const matchesInterior = interiorFilter === "all" || vehicle.interior === interiorFilter;
@@ -380,13 +396,46 @@ export default function UpdateVehicle() {
     const matchesState = stateFilter === "all" || vehicle.state === stateFilter;
     const matchesLicenseState = licenseStateFilter === "all" || vehicle.licenseState === licenseStateFilter;
     const matchesRegion = regionFilter === "all" || vehicle.region === regionFilter;
+    const matchesDivision = divisionFilter === "all" || vehicle.division === divisionFilter;
     const matchesDistrict = districtFilter === "all" || vehicle.district === districtFilter;
     const matchesYear = yearFilter === "all" || vehicle.modelYear.toString() === yearFilter;
     const matchesCity = cityFilter === "all" || vehicle.city === cityFilter;
     
+    // Assignment status is determined by TPMS, not Holman
+    const matchesAssignmentStatus = assignmentStatusFilter === "all" || 
+      (assignmentStatusFilter === "assigned" && vehicle.tpmsAssignedTechId) ||
+      (assignmentStatusFilter === "unassigned" && !vehicle.tpmsAssignedTechId);
+    
+    // Holman tech filter
+    const matchesHolmanTech = holmanTechFilter === "all" || 
+      (holmanTechFilter === "unassigned" && !vehicle.holmanTechAssigned) ||
+      vehicle.holmanTechAssigned === holmanTechFilter;
+    
+    // TPMS tech filter  
+    const matchesTpmsTech = tpmsTechFilter === "all" || 
+      (tpmsTechFilter === "unassigned" && !vehicle.tpmsAssignedTechId) ||
+      vehicle.tpmsAssignedTechId === tpmsTechFilter;
+    
+    // Mismatch filter
+    const holmanId = vehicle.holmanTechAssigned?.trim() || '';
+    const tpmsId = vehicle.tpmsAssignedTechId?.trim() || '';
+    const vehicleHasMismatch = (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) ||
+                               (holmanId && !tpmsId);
+    const matchesMismatch = mismatchFilter === "all" || 
+      (mismatchFilter === "mismatch" && vehicleHasMismatch) ||
+      (mismatchFilter === "match" && !vehicleHasMismatch);
+    
+    // Vehicle Program filter (BYOV vs Fleet)
+    const ownership = getVehicleOwnership(vehicle.vehicleNumber);
+    const matchesVehicleProgram = vehicleProgramFilter === "all" ||
+      (vehicleProgramFilter === "byov" && ownership.type === 'BYOV') ||
+      (vehicleProgramFilter === "fleet" && ownership.type === 'Fleet');
+    
     return matchesSearch && matchesBranding && matchesInterior && matchesTuneStatus &&
            matchesMake && matchesModel && matchesColor && matchesState && matchesLicenseState &&
-           matchesRegion && matchesDistrict && matchesYear && matchesCity;
+           matchesRegion && matchesDivision && matchesDistrict && matchesYear && matchesCity && 
+           matchesAssignmentStatus && matchesHolmanTech && matchesTpmsTech && matchesMismatch &&
+           matchesVehicleProgram;
   });
 
   const handleVehicleSelect = (vehicle: FleetVehicle) => {
