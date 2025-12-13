@@ -56,7 +56,9 @@ import {
   Clock,
   RefreshCw,
   AlertCircle,
-  Eye
+  Eye,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import {
   Collapsible,
@@ -159,6 +161,8 @@ const ACTION_TYPE_OPTIONS = [
   { value: "password_reset_admin", label: "Password Reset" },
 ];
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
+
 export default function ActivityLogs() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
@@ -170,6 +174,11 @@ export default function ActivityLogs() {
   const [fromDate, setFromDate] = useState<Date | undefined>(undefined);
   const [toDate, setToDate] = useState<Date | undefined>(undefined);
   const [isExporting, setIsExporting] = useState(false);
+  
+  // Activity Log collapsible and pagination state
+  const [activityLogOpen, setActivityLogOpen] = useState(true);
+  const [logPage, setLogPage] = useState(1);
+  const [logPageSize, setLogPageSize] = useState(100);
 
   // Submission tracking state
   const [submissionOpen, setSubmissionOpen] = useState(true);
@@ -180,6 +189,8 @@ export default function ActivityLogs() {
   const [subToDate, setSubToDate] = useState<Date | undefined>(undefined);
   const [isSubExporting, setIsSubExporting] = useState(false);
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionLog | null>(null);
+  const [subPage, setSubPage] = useState(1);
+  const [subPageSize, setSubPageSize] = useState(100);
 
   // Redirect non-superadmin users
   useEffect(() => {
@@ -266,6 +277,29 @@ export default function ActivityLogs() {
 
     return matchesSearch && matchesEntityType && matchesActionType && matchesUser && matchesDateRange;
   });
+
+  // Pagination calculations for Activity Logs
+  const totalLogPages = Math.ceil(filteredLogs.length / logPageSize);
+  const paginatedLogs = filteredLogs.slice((logPage - 1) * logPageSize, logPage * logPageSize);
+  const logStartIndex = (logPage - 1) * logPageSize + 1;
+  const logEndIndex = Math.min(logPage * logPageSize, filteredLogs.length);
+
+  // Pagination calculations for Submissions
+  const totalSubPages = Math.ceil(submissions.length / subPageSize);
+  const paginatedSubmissions = submissions.slice((subPage - 1) * subPageSize, subPage * subPageSize);
+  const subStartIndex = (subPage - 1) * subPageSize + 1;
+  const subEndIndex = Math.min(subPage * subPageSize, submissions.length);
+
+  // Reset page when filters change
+  const handleLogPageSizeChange = (newSize: number) => {
+    setLogPageSize(newSize);
+    setLogPage(1);
+  };
+
+  const handleSubPageSizeChange = (newSize: number) => {
+    setSubPageSize(newSize);
+    setSubPage(1);
+  };
 
   const handleBackClick = () => {
     setLocation("/");
@@ -787,91 +821,144 @@ export default function ActivityLogs() {
         </Card>
 
         {/* Logs Table */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Activity className="h-5 w-5" />
-                Activity Log
-              </CardTitle>
-              <CardDescription>
-                Showing {filteredLogs.length} of {logs.length} log entries
-              </CardDescription>
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" disabled={isExporting || filteredLogs.length === 0} data-testid="button-export">
-                  <Download className="mr-2 h-4 w-4" />
-                  {isExporting ? "Exporting..." : "Export"}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={exportToCSV} data-testid="menu-export-csv">
-                  <FileText className="mr-2 h-4 w-4" />
-                  Export as CSV
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={exportToXLSX} data-testid="menu-export-xlsx">
-                  <FileSpreadsheet className="mr-2 h-4 w-4" />
-                  Export as Excel (XLSX)
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              </div>
-            ) : filteredLogs.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                No activity logs found matching your filters.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[120px]">Date</TableHead>
-                      <TableHead className="w-[100px]">Time</TableHead>
-                      <TableHead className="w-[120px]">User</TableHead>
-                      <TableHead className="w-[180px]">Action</TableHead>
-                      <TableHead className="w-[100px]">Entity Type</TableHead>
-                      <TableHead>Details</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredLogs.map((log) => (
-                      <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
-                        <TableCell className="font-mono text-sm">
-                          {formatDate(log.createdAt)}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {formatTime(log.createdAt)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary">
-                            {log.userId === "system"
-                              ? "System"
-                              : userMap[log.userId] || log.userId}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{getActionBadge(log.action)}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="capitalize">
-                            {log.entityType}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="max-w-md truncate" title={log.details || ""}>
-                          {log.details || "-"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <Collapsible open={activityLogOpen} onOpenChange={setActivityLogOpen}>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CollapsibleTrigger asChild>
+                <div className="flex items-center gap-2 cursor-pointer hover:opacity-80">
+                  <Activity className="h-5 w-5" />
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      Activity Log
+                      {activityLogOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </CardTitle>
+                    <CardDescription>
+                      Showing {filteredLogs.length > 0 ? `${logStartIndex}-${logEndIndex} of ` : ""}{filteredLogs.length} log entries
+                    </CardDescription>
+                  </div>
+                </div>
+              </CollapsibleTrigger>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" disabled={isExporting || filteredLogs.length === 0} data-testid="button-export">
+                    <Download className="mr-2 h-4 w-4" />
+                    {isExporting ? "Exporting..." : "Export"}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportToCSV} data-testid="menu-export-csv">
+                    <FileText className="mr-2 h-4 w-4" />
+                    Export as CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportToXLSX} data-testid="menu-export-xlsx">
+                    <FileSpreadsheet className="mr-2 h-4 w-4" />
+                    Export as Excel (XLSX)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </CardHeader>
+            <CollapsibleContent>
+              <CardContent>
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  </div>
+                ) : filteredLogs.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No activity logs found matching your filters.
+                  </div>
+                ) : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[120px]">Date</TableHead>
+                            <TableHead className="w-[100px]">Time</TableHead>
+                            <TableHead className="w-[120px]">User</TableHead>
+                            <TableHead className="w-[180px]">Action</TableHead>
+                            <TableHead className="w-[100px]">Entity Type</TableHead>
+                            <TableHead>Details</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {paginatedLogs.map((log) => (
+                            <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
+                              <TableCell className="font-mono text-sm">
+                                {formatDate(log.createdAt)}
+                              </TableCell>
+                              <TableCell className="font-mono text-sm">
+                                {formatTime(log.createdAt)}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="secondary">
+                                  {log.userId === "system"
+                                    ? "System"
+                                    : userMap[log.userId] || log.userId}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>{getActionBadge(log.action)}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="capitalize">
+                                  {log.entityType}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="max-w-md truncate" title={log.details || ""}>
+                                {log.details || "-"}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    {/* Pagination Controls */}
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">Records per page:</span>
+                        <Select value={logPageSize.toString()} onValueChange={(v) => handleLogPageSizeChange(Number(v))}>
+                          <SelectTrigger className="w-[80px]" data-testid="select-log-page-size">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PAGE_SIZE_OPTIONS.map((size) => (
+                              <SelectItem key={size} value={size.toString()}>
+                                {size}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">
+                          Page {logPage} of {totalLogPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setLogPage((p) => Math.max(1, p - 1))}
+                          disabled={logPage <= 1}
+                          data-testid="button-log-prev-page"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setLogPage((p) => Math.min(totalLogPages, p + 1))}
+                          disabled={logPage >= totalLogPages}
+                          data-testid="button-log-next-page"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
 
         {/* Holman Submission Tracking Card */}
         <Collapsible open={submissionOpen} onOpenChange={setSubmissionOpen}>
@@ -1024,65 +1111,109 @@ export default function ActivityLogs() {
                     No submission records found matching your filters.
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[100px]">Vehicle #</TableHead>
-                          <TableHead className="w-[80px]">Action</TableHead>
-                          <TableHead className="w-[100px]">Tech ID</TableHead>
-                          <TableHead className="w-[100px]">Status</TableHead>
-                          <TableHead className="w-[160px]">Started</TableHead>
-                          <TableHead className="w-[160px]">Completed</TableHead>
-                          <TableHead className="w-[80px]">Duration</TableHead>
-                          <TableHead>Error</TableHead>
-                          <TableHead className="w-[60px]">Details</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {submissions.map((sub) => (
-                          <TableRow key={sub.id} data-testid={`row-submission-${sub.id}`}>
-                            <TableCell className="font-mono text-sm font-medium">
-                              {sub.holmanVehicleNumber}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={sub.action === 'assign' ? 'default' : 'secondary'} className="capitalize">
-                                {sub.action}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="font-mono text-sm">
-                              {sub.enterpriseId || "-"}
-                            </TableCell>
-                            <TableCell>
-                              {getSubmissionStatusBadge(sub.status)}
-                            </TableCell>
-                            <TableCell className="font-mono text-sm">
-                              {formatTimestamp(sub.createdAt)}
-                            </TableCell>
-                            <TableCell className="font-mono text-sm">
-                              {sub.completedAt ? formatTimestamp(sub.completedAt) : "-"}
-                            </TableCell>
-                            <TableCell className="font-mono text-sm">
-                              {formatDuration(sub.durationMs)}
-                            </TableCell>
-                            <TableCell className="max-w-xs truncate text-red-600" title={sub.errorMessage || ""}>
-                              {sub.errorMessage || "-"}
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setSelectedSubmission(sub)}
-                                data-testid={`button-details-${sub.id}`}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
+                  <>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[100px]">Vehicle #</TableHead>
+                            <TableHead className="w-[80px]">Action</TableHead>
+                            <TableHead className="w-[100px]">Tech ID</TableHead>
+                            <TableHead className="w-[100px]">Status</TableHead>
+                            <TableHead className="w-[160px]">Started</TableHead>
+                            <TableHead className="w-[160px]">Completed</TableHead>
+                            <TableHead className="w-[80px]">Duration</TableHead>
+                            <TableHead>Error</TableHead>
+                            <TableHead className="w-[60px]">Details</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {paginatedSubmissions.map((sub) => (
+                            <TableRow key={sub.id} data-testid={`row-submission-${sub.id}`}>
+                              <TableCell className="font-mono text-sm font-medium">
+                                {sub.holmanVehicleNumber}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={sub.action === 'assign' ? 'default' : 'secondary'} className="capitalize">
+                                  {sub.action}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-mono text-sm">
+                                {sub.enterpriseId || "-"}
+                              </TableCell>
+                              <TableCell>
+                                {getSubmissionStatusBadge(sub.status)}
+                              </TableCell>
+                              <TableCell className="font-mono text-sm">
+                                {formatTimestamp(sub.createdAt)}
+                              </TableCell>
+                              <TableCell className="font-mono text-sm">
+                                {sub.completedAt ? formatTimestamp(sub.completedAt) : "-"}
+                              </TableCell>
+                              <TableCell className="font-mono text-sm">
+                                {formatDuration(sub.durationMs)}
+                              </TableCell>
+                              <TableCell className="max-w-xs truncate text-red-600" title={sub.errorMessage || ""}>
+                                {sub.errorMessage || "-"}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setSelectedSubmission(sub)}
+                                  data-testid={`button-details-${sub.id}`}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    {/* Pagination Controls */}
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">Records per page:</span>
+                        <Select value={subPageSize.toString()} onValueChange={(v) => handleSubPageSizeChange(Number(v))}>
+                          <SelectTrigger className="w-[80px]" data-testid="select-sub-page-size">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PAGE_SIZE_OPTIONS.map((size) => (
+                              <SelectItem key={size} value={size.toString()}>
+                                {size}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">
+                          {submissions.length > 0 ? `${subStartIndex}-${subEndIndex} of ${submissions.length}` : "0 records"} | Page {subPage} of {totalSubPages || 1}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setSubPage((p) => Math.max(1, p - 1))}
+                          disabled={subPage <= 1}
+                          data-testid="button-sub-prev-page"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setSubPage((p) => Math.min(totalSubPages, p + 1))}
+                          disabled={subPage >= totalSubPages}
+                          data-testid="button-sub-next-page"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </>
                 )}
               </CardContent>
             </CollapsibleContent>
