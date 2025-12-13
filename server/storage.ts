@@ -231,6 +231,7 @@ export interface IStorage {
   getEmployeesNeedingOffboarding(daysBack?: number): Promise<AllTech[]>;
   markEmployeeOffboardingCreated(employeeId: string, taskId: string): Promise<AllTech | undefined>;
   upsertAllTech(tech: InsertAllTech): Promise<AllTech>;
+  bulkUpsertAllTechs(techs: InsertAllTech[]): Promise<number>;
   updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined>;
 
   // Sync Logs Module
@@ -1151,6 +1152,10 @@ export class MemStorage implements IStorage {
   }
 
   async upsertAllTech(_tech: InsertAllTech): Promise<AllTech> {
+    throw new Error("All techs not implemented in memory storage - use database storage");
+  }
+
+  async bulkUpsertAllTechs(_techs: InsertAllTech[]): Promise<number> {
     throw new Error("All techs not implemented in memory storage - use database storage");
   }
 
@@ -3186,6 +3191,33 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return result[0];
+  }
+
+  async bulkUpsertAllTechs(techs: InsertAllTech[]): Promise<number> {
+    if (techs.length === 0) return 0;
+    
+    const result = await db.insert(allTechs)
+      .values(techs)
+      .onConflictDoUpdate({
+        target: allTechs.employeeId,
+        set: {
+          techRacfid: sql`excluded.tech_racfid`,
+          techName: sql`excluded.tech_name`,
+          firstName: sql`excluded.first_name`,
+          lastName: sql`excluded.last_name`,
+          jobTitle: sql`excluded.job_title`,
+          districtNo: sql`excluded.district_no`,
+          planningAreaName: sql`excluded.planning_area_name`,
+          employmentStatus: sql`excluded.employment_status`,
+          effectiveDate: sql`excluded.effective_date`,
+          lastDayWorked: sql`excluded.last_day_worked`,
+          syncedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      })
+      .returning({ id: allTechs.id });
+    
+    return result.length;
   }
 
   async updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined> {

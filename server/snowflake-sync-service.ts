@@ -437,14 +437,28 @@ export class SnowflakeSyncService {
         FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS
       `;
 
-      const rows = await snowflake.executeQuery(query) as SnowflakeAllTechRow[];
-      console.log(`[Sync] Retrieved ${rows.length} tech records`);
+      const rawRows = await snowflake.executeQuery(query) as SnowflakeAllTechRow[];
+      console.log(`[Sync] Retrieved ${rawRows.length} tech records from Snowflake`);
 
-      for (const row of rows) {
+      // Deduplicate by employee ID (keep last occurrence)
+      const dedupeMap = new Map<string, SnowflakeAllTechRow>();
+      for (const row of rawRows) {
+        dedupeMap.set(row.EMPL_ID, row);
+      }
+      const rows = Array.from(dedupeMap.values());
+      console.log(`[Sync] After deduplication: ${rows.length} unique employees`);
+
+      // Process in batches of 500 for much faster performance
+      const BATCH_SIZE = 500;
+      const totalBatches = Math.ceil(rows.length / BATCH_SIZE);
+      console.log(`[Sync] Processing ${rows.length} records in ${totalBatches} batches of ${BATCH_SIZE}...`);
+
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const batch = rows.slice(i, i + BATCH_SIZE);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        
         try {
-          const existingTech = await storage.getAllTechByEmployeeId(row.EMPL_ID);
-
-          const techData: InsertAllTech = {
+          const techDataBatch: InsertAllTech[] = batch.map(row => ({
             employeeId: row.EMPL_ID,
             techRacfid: row.ENTERPRISE_ID || '',
             techName: row.FULL_NAME || 'Unknown',
@@ -456,22 +470,15 @@ export class SnowflakeSyncService {
             employmentStatus: row.EMPLOYMENT_STATUS || null,
             effectiveDate: this.formatDateForDB(row.EFFDT ?? null),
             lastDayWorked: this.formatDateForDB(row.DATE_LAST_WORKED ?? null),
-            // Preserve existing offboarding tracking if updating
-            offboardingTaskCreated: existingTech?.offboardingTaskCreated ?? false,
-            offboardingTaskId: existingTech?.offboardingTaskId ?? null,
-          };
+          }));
 
-          await storage.upsertAllTech(techData);
-          result.recordsProcessed++;
-
-          if (existingTech) {
-            result.recordsUpdated++;
-          } else {
-            result.recordsCreated++;
-          }
+          const upsertedCount = await storage.bulkUpsertAllTechs(techDataBatch);
+          result.recordsProcessed += upsertedCount;
+          
+          console.log(`[Sync] Batch ${batchNum}/${totalBatches}: processed ${upsertedCount} records`);
         } catch (error: any) {
-          console.error(`[Sync] Error processing tech ${row.EMPL_ID}:`, error.message);
-          result.errors.push(`Error processing ${row.EMPL_ID}: ${error.message}`);
+          console.error(`[Sync] Error processing batch ${batchNum}:`, error.message);
+          result.errors.push(`Error processing batch ${batchNum}: ${error.message}`);
         }
       }
 
