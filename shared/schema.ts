@@ -383,7 +383,7 @@ export const allTechs = pgTable("all_techs", {
 // Sync Log for tracking Snowflake sync history
 export const syncLogs = pgTable("sync_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  syncType: text("sync_type").notNull(), // termed_techs, all_techs
+  syncType: text("sync_type").notNull(), // termed_techs, all_techs, truck_inventory
   status: text("status").notNull().default("pending"), // pending, running, completed, failed
   startedAt: timestamp("started_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
@@ -393,6 +393,46 @@ export const syncLogs = pgTable("sync_logs", {
   queueItemsCreated: integer("queue_items_created").default(0),
   errorMessage: text("error_message"),
   triggeredBy: text("triggered_by"), // scheduler, manual, api
+});
+
+// Truck Inventory from Snowflake PISR_SKU_DETAIL - parts/inventory on each truck
+export const truckInventory = pgTable("truck_inventory", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Core fields from Snowflake query
+  extractDate: date("extract_date").notNull(), // EXTRACT_DATE
+  district: varchar("district", { length: 10 }).notNull(), // LPAD(DISTRICT,7,0)
+  truck: varchar("truck", { length: 10 }).notNull(), // LPAD(TRUCK,6,0)
+  techId: varchar("tech_id", { length: 10 }), // LPAD(TECH_ID,7,0)
+  enterpriseId: varchar("enterprise_id", { length: 20 }), // UPPER(ENTERPRISE_ID)
+  div: varchar("div", { length: 10 }),
+  pls: varchar("pls", { length: 20 }),
+  partNo: text("part_no"), // PART_NO
+  partDesc: text("part_desc"), // PART_DESC
+  sku: varchar("sku", { length: 50 }), // SKU
+  nsAvgCost: decimal("ns_avg_cost", { precision: 12, scale: 4 }), // AVG_COST AS NS_AVG_COST
+  imCost: decimal("im_cost", { precision: 12, scale: 4 }), // COST AS IM_COST
+  sell: decimal("sell", { precision: 12, scale: 4 }), // SELL
+  bin: varchar("bin", { length: 20 }), // BIN
+  qty: integer("qty").notNull().default(0), // QTY
+  truckstockAddDate: date("truckstock_add_date"), // TRUCKSTOCK_ADD_DATE
+  truckstockChangeDate: date("truckstock_change_date"), // TRUCKSTOCK_CHANGE_DATE
+  extNsAvgCost: decimal("ext_ns_avg_cost", { precision: 14, scale: 4 }), // QTY * AVG_COST
+  extImCost: decimal("ext_im_cost", { precision: 14, scale: 4 }), // QTY * COST
+  productCategory: text("product_category"), // PRODUCT_CATEGORY (joined from MSL/PC)
+  // Sync tracking
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    // Composite unique constraint for truck+sku+bin per extract date
+    uniqueSkuIdx: index("truck_inventory_unique_idx").on(table.truck, table.sku, table.bin, table.extractDate),
+    truckIdx: index("truck_inventory_truck_idx").on(table.truck),
+    enterpriseIdIdx: index("truck_inventory_enterprise_id_idx").on(table.enterpriseId),
+    districtIdx: index("truck_inventory_district_idx").on(table.district),
+    extractDateIdx: index("truck_inventory_extract_date_idx").on(table.extractDate),
+    productCategoryIdx: index("truck_inventory_product_category_idx").on(table.productCategory),
+  };
 });
 
 // Tech-Vehicle Assignments from TPMS (links technicians to their assigned trucks)
@@ -563,6 +603,13 @@ export const insertAllTechSchema = createInsertSchema(allTechs).omit({
 export const insertSyncLogSchema = createInsertSchema(syncLogs).omit({
   id: true,
   startedAt: true,
+});
+
+export const insertTruckInventorySchema = createInsertSchema(truckInventory).omit({
+  id: true,
+  syncedAt: true,
+  createdAt: true,
+  updatedAt: true,
 });
 
 export const insertTechVehicleAssignmentSchema = createInsertSchema(techVehicleAssignments).omit({
@@ -771,6 +818,8 @@ export type AllTech = typeof allTechs.$inferSelect;
 export type InsertAllTech = z.infer<typeof insertAllTechSchema>;
 export type SyncLog = typeof syncLogs.$inferSelect;
 export type InsertSyncLog = z.infer<typeof insertSyncLogSchema>;
+export type TruckInventory = typeof truckInventory.$inferSelect;
+export type InsertTruckInventory = z.infer<typeof insertTruckInventorySchema>;
 export type TechVehicleAssignment = typeof techVehicleAssignments.$inferSelect;
 export type InsertTechVehicleAssignment = z.infer<typeof insertTechVehicleAssignmentSchema>;
 export type TechVehicleAssignmentHistory = typeof techVehicleAssignmentHistory.$inferSelect;

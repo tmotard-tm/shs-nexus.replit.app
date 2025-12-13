@@ -26,6 +26,8 @@ import {
   type InsertAllTech,
   type SyncLog,
   type InsertSyncLog,
+  type TruckInventory,
+  type InsertTruckInventory,
   type TechVehicleAssignment,
   type InsertTechVehicleAssignment,
   type TechVehicleAssignmentHistory,
@@ -57,6 +59,7 @@ import {
   termedTechs,
   allTechs,
   syncLogs,
+  truckInventory,
   techVehicleAssignments,
   techVehicleAssignmentHistory,
   tpmsCachedAssignments,
@@ -240,6 +243,14 @@ export interface IStorage {
   getLatestSyncLog(syncType: string): Promise<SyncLog | undefined>;
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
   updateSyncLog(id: string, updates: Partial<SyncLog>): Promise<SyncLog | undefined>;
+
+  // Truck Inventory Module (Snowflake sync)
+  getTruckInventory(truck: string): Promise<TruckInventory[]>;
+  getTruckInventoryByEnterpriseId(enterpriseId: string): Promise<TruckInventory[]>;
+  getTruckInventoryByDistrict(district: string): Promise<TruckInventory[]>;
+  getLatestTruckInventoryExtractDate(): Promise<string | null>;
+  bulkUpsertTruckInventory(items: InsertTruckInventory[]): Promise<number>;
+  clearTruckInventoryByExtractDate(extractDate: string): Promise<number>;
 
   // Tech Vehicle Assignments Module
   getTechVehicleAssignment(id: string): Promise<TechVehicleAssignment | undefined>;
@@ -1182,6 +1193,31 @@ export class MemStorage implements IStorage {
 
   async updateSyncLog(_id: string, _updates: Partial<SyncLog>): Promise<SyncLog | undefined> {
     return undefined; // Not implemented in memory storage
+  }
+
+  // Truck Inventory Module - Stub implementation for MemStorage
+  async getTruckInventory(_truck: string): Promise<TruckInventory[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async getTruckInventoryByEnterpriseId(_enterpriseId: string): Promise<TruckInventory[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async getTruckInventoryByDistrict(_district: string): Promise<TruckInventory[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async getLatestTruckInventoryExtractDate(): Promise<string | null> {
+    return null; // Not implemented in memory storage
+  }
+
+  async bulkUpsertTruckInventory(_items: InsertTruckInventory[]): Promise<number> {
+    throw new Error("Truck inventory not implemented in memory storage - use database storage");
+  }
+
+  async clearTruckInventoryByExtractDate(_extractDate: string): Promise<number> {
+    return 0; // Not implemented in memory storage
   }
 
   // Tech Vehicle Assignments Module - Stub implementation for MemStorage
