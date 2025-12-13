@@ -6,8 +6,6 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { HawaiiMap } from './hawaii-map';
-import { PuertoRicoMap } from './puerto-rico-map';
 import { expandedCityCoordinates } from '@/data/expanded-city-coordinates';
 
 interface FilteredMapProps {
@@ -290,11 +288,6 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
           />
         </div>
         
-        {/* Hawaii and Puerto Rico Maps */}
-        <div className="grid grid-cols-2 gap-4">
-          <HawaiiMap filteredVehicles={filteredVehicles} />
-          <PuertoRicoMap filteredVehicles={filteredVehicles} />
-        </div>
       </div>
     </div>
   );
