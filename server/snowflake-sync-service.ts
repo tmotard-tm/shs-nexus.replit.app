@@ -28,6 +28,8 @@ interface SnowflakeAllTechRow {
   DISTRICT_NO?: string;
   PLANNING_AREA_NM?: string;
   EMPLOYMENT_STATUS?: string;
+  EFFDT?: string; // Effective date - used to identify termed employees
+  DATE_LAST_WORKED?: string; // Last day worked for termed employees
 }
 
 interface SkippedEmployee {
@@ -496,7 +498,9 @@ export class SnowflakeSyncService {
           JOB_TITLE,
           DISTRICT_NO,
           PLANNING_AREA_NM,
-          EMPLOYMENT_STATUS
+          EMPLOYMENT_STATUS,
+          EFFDT,
+          DATE_LAST_WORKED
         FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS
       `;
 
@@ -517,6 +521,11 @@ export class SnowflakeSyncService {
             districtNo: row.DISTRICT_NO || null,
             planningAreaName: row.PLANNING_AREA_NM || null,
             employmentStatus: row.EMPLOYMENT_STATUS || null,
+            effectiveDate: this.formatDateForDB(row.EFFDT ?? null),
+            lastDayWorked: this.formatDateForDB(row.DATE_LAST_WORKED ?? null),
+            // Preserve existing offboarding tracking if updating
+            offboardingTaskCreated: existingTech?.offboardingTaskCreated ?? false,
+            offboardingTaskId: existingTech?.offboardingTaskId ?? null,
           };
 
           await storage.upsertAllTech(techData);
