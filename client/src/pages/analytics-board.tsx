@@ -12,6 +12,7 @@ import {
 import { FilteredMap } from '@/components/vehicle-map-filters';
 import { HawaiiMap } from '@/components/hawaii-map';
 import { PuertoRicoMap } from '@/components/puerto-rico-map';
+import { AlaskaMap } from '@/components/alaska-map';
 import { type FleetVehicle } from '@/data/fleetData';
 
 interface FleetVehiclesResponse {
@@ -141,8 +142,22 @@ export default function AnalyticsBoard() {
               </Card>
             </div>
             
-            {/* Hawaii and Puerto Rico Mini Maps */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+            {/* Alaska, Hawaii, and Puerto Rico Mini Maps */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+              <Card className="bg-card">
+                <CardHeader>
+                  <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <MapPin className="h-5 w-5" />
+                    Alaska Operations
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px]">
+                    <AlaskaMap key="alaska-map" filteredVehicles={mapVehicleData} />
+                  </div>
+                </CardContent>
+              </Card>
+              
               <Card className="bg-card">
                 <CardHeader>
                   <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
@@ -151,7 +166,7 @@ export default function AnalyticsBoard() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-[400px]">
+                  <div className="h-[300px]">
                     <HawaiiMap key="hawaii-map" filteredVehicles={mapVehicleData} />
                   </div>
                 </CardContent>
@@ -165,7 +180,7 @@ export default function AnalyticsBoard() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-[400px]">
+                  <div className="h-[300px]">
                     <PuertoRicoMap key="pr-map" filteredVehicles={mapVehicleData} />
                   </div>
                 </CardContent>

@@ -85,8 +85,19 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
     if (!isOpen || !mapRef.current || mapInstance.current) return;
 
     try {
-      // Create Leaflet map
-      const map = L.map(mapRef.current).setView([39.8, -98.5], 4);
+      // Continental US bounds (excluding Alaska and Hawaii)
+      const continentalUSBounds = L.latLngBounds(
+        L.latLng(24.396308, -125.0), // Southwest corner
+        L.latLng(49.384358, -66.93457) // Northeast corner
+      );
+
+      // Create Leaflet map limited to Continental US
+      const map = L.map(mapRef.current, {
+        maxBounds: continentalUSBounds,
+        maxBoundsViscosity: 1.0,
+        minZoom: 4,
+        maxZoom: 18
+      }).setView([39.8, -98.5], 4);
       
       // Add OpenStreetMap tiles
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
