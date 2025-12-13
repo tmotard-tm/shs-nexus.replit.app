@@ -5445,6 +5445,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update vehicle assignment in Holman based on TPMS data
+  const { holmanAssignmentUpdateService } = await import("./holman-assignment-update-service");
+
+  app.post("/api/holman/assignments/update", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber, enterpriseId } = req.body;
+      
+      if (!vehicleNumber || !enterpriseId) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Vehicle number and enterprise ID are required' 
+        });
+      }
+      
+      console.log(`[API] Holman assignment update requested: vehicle=${vehicleNumber}, tech=${enterpriseId}`);
+      const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
+        vehicleNumber,
+        enterpriseId
+      );
+      
+      if (result.success) {
+        res.json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error: any) {
+      console.error('[API] Holman assignment update error:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message 
+      });
+    }
+  });
+
+  // Bulk update vehicle assignments
+  app.post("/api/holman/assignments/update-bulk", requireAuth, async (req: any, res) => {
+    try {
+      const { updates } = req.body;
+      
+      if (!updates || !Array.isArray(updates) || updates.length === 0) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Updates array is required' 
+        });
+      }
+      
+      console.log(`[API] Bulk Holman assignment update: ${updates.length} vehicles`);
+      const results = await holmanAssignmentUpdateService.updateMultipleVehicleAssignments(updates);
+      
+      const successCount = results.filter(r => r.success).length;
+      const failCount = results.filter(r => !r.success).length;
+      
+      res.json({
+        success: failCount === 0,
+        totalUpdates: updates.length,
+        successCount,
+        failCount,
+        results
+      });
+    } catch (error: any) {
+      console.error('[API] Bulk Holman assignment update error:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message 
+      });
+    }
+  });
+
   console.log("Registering Snowflake API routes...");
   const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
 

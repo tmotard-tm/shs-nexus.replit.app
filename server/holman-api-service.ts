@@ -244,6 +244,14 @@ export class HolmanApiService {
     );
   }
 
+  async submitVehicleArray(vehicleDataArray: Partial<HolmanVehicle>[]): Promise<any> {
+    return this.makeRequest(
+      '/vehicles/submit',
+      'POST',
+      vehicleDataArray
+    );
+  }
+
   // Helper to process vehicle result and build garaging address
   private processVehicleResult(matchingVehicle: any): {
     success: boolean;
