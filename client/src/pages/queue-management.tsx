@@ -651,10 +651,10 @@ export default function UnifiedQueueManagement() {
     }));
   };
 
-  // Check if a status section is expanded (default to expanded)
+  // Check if a status section is expanded (default to collapsed)
   const isStatusSectionExpanded = (module: QueueModule, status: string) => {
     const key = `${module}-${status}`;
-    return expandedStatusSections[key] !== false;
+    return expandedStatusSections[key] === true;
   };
 
   const filteredItems = getFilteredItems(queueItems);
@@ -994,7 +994,7 @@ export default function UnifiedQueueManagement() {
               selectedModules.map((module) => {
                 const moduleItems = filteredItems.filter(item => item.module === module);
                 const statusCounts = getModuleStatusCounts(filteredItems, module);
-                const isExpanded = expandedQueues[module] !== false; // Default to expanded
+                const isExpanded = expandedQueues[module] === true; // Default to collapsed
                 
                 return (
                   <Card key={module} className="overflow-hidden">
