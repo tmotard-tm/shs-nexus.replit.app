@@ -54,9 +54,9 @@ export default function AnalyticsBoard() {
           </p>
         </div>
 
-        {/* Vehicle Statistics Section */}
+        {/* Fleet Statistics Section */}
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4 text-foreground">Vehicle Statistics</h2>
+          <h2 className="text-xl font-semibold mb-4 text-foreground">Fleet Statistics</h2>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card 
               className="bg-card cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
@@ -70,7 +70,7 @@ export default function AnalyticsBoard() {
                 ) : (
                   <p className="text-lg font-bold text-foreground" data-testid="text-vehicles-count">{allVehicles.length}</p>
                 )}
-                <p className="text-sm text-muted-foreground">Active Vehicles</p>
+                <p className="text-sm text-muted-foreground">Active Fleet</p>
               </CardContent>
             </Card>
             
@@ -86,7 +86,7 @@ export default function AnalyticsBoard() {
                 ) : (
                   <p className="text-lg font-bold text-foreground" data-testid="text-assigned-count">{assignedVehicles.length}</p>
                 )}
-                <p className="text-sm text-muted-foreground">Assigned Vehicles</p>
+                <p className="text-sm text-muted-foreground">Assigned Fleet</p>
               </CardContent>
             </Card>
             
@@ -102,7 +102,7 @@ export default function AnalyticsBoard() {
                 ) : (
                   <p className="text-lg font-bold text-foreground" data-testid="text-unassigned-count">{unassignedVehicles.length}</p>
                 )}
-                <p className="text-sm text-muted-foreground">Unassigned Vehicles</p>
+                <p className="text-sm text-muted-foreground">Unassigned Fleet</p>
               </CardContent>
             </Card>
             
@@ -114,7 +114,7 @@ export default function AnalyticsBoard() {
               <CardContent className="flex flex-col items-center text-center p-4">
                 <Map className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
                 <p className="text-lg font-bold text-foreground" data-testid="text-summary-button">SUMMARY</p>
-                <p className="text-sm text-muted-foreground">View All Vehicles</p>
+                <p className="text-sm text-muted-foreground">View All Fleet</p>
               </CardContent>
             </Card>
           </div>
