@@ -56,7 +56,6 @@ export default function AnalyticsBoard() {
 
         {/* Fleet Statistics Section */}
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4 text-foreground">Fleet Statistics</h2>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card 
               className="bg-card cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
