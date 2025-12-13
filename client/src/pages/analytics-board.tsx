@@ -49,9 +49,6 @@ export default function AnalyticsBoard() {
             </div>
             <h1 className="text-3xl font-bold text-foreground">Fleet Distribution</h1>
           </div>
-          <p className="text-muted-foreground max-w-2xl mx-auto">
-            Monitor performance, track metrics, and gain insights across all departments and operations.
-          </p>
         </div>
 
         {/* Fleet Statistics Section */}
