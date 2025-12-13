@@ -192,6 +192,28 @@ export default function ActivityLogs() {
   const [subPage, setSubPage] = useState(1);
   const [subPageSize, setSubPageSize] = useState(100);
 
+  // Field-by-field test state
+  const [fieldTestOpen, setFieldTestOpen] = useState(true);
+  const [fieldTestVehicle, setFieldTestVehicle] = useState("06534");
+  const [fieldTestValue, setFieldTestValue] = useState("TEST");
+  const [fieldTestUseSpace, setFieldTestUseSpace] = useState(false);
+  const [fieldTestRunning, setFieldTestRunning] = useState(false);
+  const [fieldTestResults, setFieldTestResults] = useState<{
+    vehicleNumber: string;
+    useSpace: boolean;
+    testValue: string;
+    results: Array<{
+      fieldName: string;
+      fieldValue: string | null;
+      durationMs: number;
+      success: boolean;
+      error?: string;
+    }>;
+    totalDurationMs: number;
+    slowestField?: string;
+    fastestField?: string;
+  } | null>(null);
+
   // Redirect non-superadmin users
   useEffect(() => {
     if (user && user.role !== "superadmin") {
@@ -299,6 +321,57 @@ export default function ActivityLogs() {
   const handleSubPageSizeChange = (newSize: number) => {
     setSubPageSize(newSize);
     setSubPage(1);
+  };
+
+  const runFieldByFieldTest = async () => {
+    if (!fieldTestVehicle) {
+      toast({
+        title: "Error",
+        description: "Please enter a vehicle number",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setFieldTestRunning(true);
+    setFieldTestResults(null);
+
+    try {
+      const response = await fetch("/api/holman/field-test/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vehicleNumber: fieldTestVehicle,
+          useSpace: fieldTestUseSpace,
+          testValue: fieldTestValue,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setFieldTestResults(data);
+        refetchSubmissions();
+        toast({
+          title: "Field Test Complete",
+          description: `Tested ${data.results.length} fields in ${(data.totalDurationMs / 1000).toFixed(1)}s`,
+        });
+      } else {
+        toast({
+          title: "Test Failed",
+          description: data.error || "Unknown error",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Test Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setFieldTestRunning(false);
+    }
   };
 
   const handleBackClick = () => {
@@ -1214,6 +1287,151 @@ export default function ActivityLogs() {
                       </div>
                     </div>
                   </>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+
+        {/* Field-by-Field Test Card */}
+        <Collapsible open={fieldTestOpen} onOpenChange={setFieldTestOpen}>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CollapsibleTrigger asChild>
+                <div className="flex items-center gap-2 cursor-pointer hover:opacity-80">
+                  <Clock className="h-5 w-5" />
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      Field-by-Field Performance Test
+                      {fieldTestOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </CardTitle>
+                    <CardDescription>
+                      Debug slow Holman syncs by testing each field individually
+                    </CardDescription>
+                  </div>
+                </div>
+              </CollapsibleTrigger>
+            </CardHeader>
+            <CollapsibleContent>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Vehicle Number</label>
+                    <Input
+                      value={fieldTestVehicle}
+                      onChange={(e) => setFieldTestVehicle(e.target.value)}
+                      placeholder="06534"
+                      className="w-32"
+                      data-testid="input-field-test-vehicle"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Test Value</label>
+                    <Input
+                      value={fieldTestValue}
+                      onChange={(e) => setFieldTestValue(e.target.value)}
+                      placeholder="TEST"
+                      className="w-32"
+                      data-testid="input-field-test-value"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="useSpace"
+                      checked={fieldTestUseSpace}
+                      onChange={(e) => setFieldTestUseSpace(e.target.checked)}
+                      className="h-4 w-4"
+                      data-testid="checkbox-use-space"
+                    />
+                    <label htmlFor="useSpace" className="text-sm">
+                      Use space (" ") instead of null
+                    </label>
+                  </div>
+                  <Button
+                    onClick={runFieldByFieldTest}
+                    disabled={fieldTestRunning || !fieldTestVehicle}
+                    data-testid="button-run-field-test"
+                  >
+                    {fieldTestRunning ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Testing...
+                      </>
+                    ) : (
+                      <>
+                        <PlayCircle className="h-4 w-4 mr-2" />
+                        Run Field Test
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {fieldTestResults && (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      <div className="bg-muted p-2 rounded">
+                        <span className="text-muted-foreground">Total Time:</span>{" "}
+                        <span className="font-mono font-bold">{(fieldTestResults.totalDurationMs / 1000).toFixed(1)}s</span>
+                      </div>
+                      <div className="bg-green-100 dark:bg-green-900 p-2 rounded">
+                        <span className="text-muted-foreground">Fastest:</span>{" "}
+                        <span className="font-mono font-bold">{fieldTestResults.fastestField}</span>
+                      </div>
+                      <div className="bg-red-100 dark:bg-red-900 p-2 rounded">
+                        <span className="text-muted-foreground">Slowest:</span>{" "}
+                        <span className="font-mono font-bold">{fieldTestResults.slowestField}</span>
+                      </div>
+                    </div>
+
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Field</TableHead>
+                          <TableHead>Value</TableHead>
+                          <TableHead>Duration</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {fieldTestResults.results
+                          .sort((a, b) => b.durationMs - a.durationMs)
+                          .map((result, index) => (
+                            <TableRow
+                              key={result.fieldName}
+                              className={
+                                result.fieldName === fieldTestResults.slowestField
+                                  ? "bg-red-50 dark:bg-red-950"
+                                  : result.fieldName === fieldTestResults.fastestField
+                                  ? "bg-green-50 dark:bg-green-950"
+                                  : ""
+                              }
+                            >
+                              <TableCell className="font-mono text-sm">{result.fieldName}</TableCell>
+                              <TableCell className="font-mono text-sm">{result.fieldValue || "(null)"}</TableCell>
+                              <TableCell>
+                                <span className={`font-mono ${result.durationMs > 3000 ? "text-red-600 font-bold" : result.durationMs > 1000 ? "text-yellow-600" : "text-green-600"}`}>
+                                  {(result.durationMs / 1000).toFixed(2)}s
+                                </span>
+                              </TableCell>
+                              <TableCell>
+                                {result.success ? (
+                                  <Badge variant="outline" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100">
+                                    <CheckCircle className="h-3 w-3 mr-1" />
+                                    Success
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100">
+                                    <XCircle className="h-3 w-3 mr-1" />
+                                    Failed
+                                  </Badge>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </CollapsibleContent>
