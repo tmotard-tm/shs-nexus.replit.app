@@ -11,6 +11,8 @@ import { PreviewRoleProvider } from "@/hooks/use-preview-role";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { OnboardingProvider } from "@/hooks/use-onboarding";
 import { Sidebar } from "@/components/layout/sidebar";
+import { StatusBarProvider } from "@/components/status-bar";
+import { BackgroundSyncManager } from "@/components/background-sync-manager";
 import { OnboardingOverlay } from "@/components/onboarding-overlay";
 import { PreviewModeBanner } from "@/components/preview-mode-banner";
 import NotFound from "@/pages/not-found";
@@ -379,17 +381,20 @@ function App() {
       <TooltipProvider>
         <ThemeProvider>
           <AuthProvider>
-            <PreviewRoleProvider>
-              <PermissionsProvider>
-                <SidebarProvider>
-                  <OnboardingProvider>
-                    <Toaster />
-                    <OnboardingOverlay />
-                    <Router />
-                  </OnboardingProvider>
-                </SidebarProvider>
-              </PermissionsProvider>
-            </PreviewRoleProvider>
+            <StatusBarProvider>
+              <PreviewRoleProvider>
+                <PermissionsProvider>
+                  <SidebarProvider>
+                    <OnboardingProvider>
+                      <Toaster />
+                      <OnboardingOverlay />
+                      <BackgroundSyncManager />
+                      <Router />
+                    </OnboardingProvider>
+                  </SidebarProvider>
+                </PermissionsProvider>
+              </PreviewRoleProvider>
+            </StatusBarProvider>
           </AuthProvider>
         </ThemeProvider>
       </TooltipProvider>
