@@ -570,6 +570,39 @@ export class HolmanApiService {
     );
   }
 
+  async getSubmissionStatus(submissionId: string): Promise<{
+    success: boolean;
+    status?: string;
+    message?: string;
+    error?: string;
+    rawResponse?: any;
+  }> {
+    try {
+      console.log('[Holman] Checking submission status for:', submissionId);
+      
+      // Try the submissions endpoint - common pattern for async APIs
+      const response = await this.makeRequest<any>(
+        `/vehicles/submissions/${submissionId}`,
+        'GET'
+      );
+      
+      console.log('[Holman] Submission status response:', response);
+      
+      return {
+        success: true,
+        status: response.status || response.state || 'unknown',
+        message: response.message || response.description,
+        rawResponse: response,
+      };
+    } catch (error: any) {
+      console.error('[Holman] Error checking submission status:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to check submission status',
+      };
+    }
+  }
+
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
       const token = await this.getAccessToken();

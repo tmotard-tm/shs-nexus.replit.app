@@ -1209,3 +1209,34 @@ export const holmanSyncStatusSchema = z.object({
 });
 
 export type HolmanSyncStatus = z.infer<typeof holmanSyncStatusSchema>;
+
+// Holman Submission Tracking - tracks async submission status tokens
+export const holmanSubmissions = pgTable("holman_submissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  holmanVehicleNumber: text("holman_vehicle_number").notNull(),
+  submissionId: text("submission_id"), // Token from Holman API response
+  correlationId: text("correlation_id"), // x-correlation-id used in request
+  action: text("action").notNull(), // 'assign' or 'unassign'
+  enterpriseId: text("enterprise_id"), // Tech ID if assigning
+  status: text("status").notNull().default("pending"), // pending, processing, completed, failed
+  payload: jsonb("payload"), // The request payload sent
+  response: jsonb("response"), // The response received
+  lastCheckedAt: timestamp("last_checked_at"),
+  completedAt: timestamp("completed_at"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdBy: text("created_by"), // User who initiated
+}, (table) => ({
+  vehicleIdx: index("submissions_vehicle_idx").on(table.holmanVehicleNumber),
+  statusIdx: index("submissions_status_idx").on(table.status),
+}));
+
+export const insertHolmanSubmissionSchema = createInsertSchema(holmanSubmissions).omit({
+  id: true,
+  createdAt: true,
+  lastCheckedAt: true,
+  completedAt: true,
+});
+
+export type HolmanSubmission = typeof holmanSubmissions.$inferSelect;
+export type InsertHolmanSubmission = z.infer<typeof insertHolmanSubmissionSchema>;
