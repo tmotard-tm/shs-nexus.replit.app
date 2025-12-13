@@ -538,7 +538,7 @@ class HolmanVehicleSyncService {
     console.log(`[HolmanSync] Saved TPMS data to cache for ${updated} vehicles`);
   }
 
-  // Enrich vehicles with TPMS assigned tech info
+  // Enrich vehicles with TPMS assigned tech info - uses cached data first to avoid rate limiting
   async enrichWithTPMSData(vehicles: FleetVehicle[]): Promise<FleetVehicle[]> {
     const tpmsService = getTPMSService();
     
@@ -547,57 +547,107 @@ class HolmanVehicleSyncService {
       return vehicles;
     }
 
-    console.log(`[HolmanSync] Enriching ${vehicles.length} vehicles with TPMS data`);
+    console.log(`[HolmanSync] Enriching ${vehicles.length} vehicles with TPMS data (cache-first approach)`);
     
-    // Process in batches to avoid overwhelming TPMS API
-    const batchSize = 10;
-    const enrichedVehicles: FleetVehicle[] = [];
+    // Build a map of vehicle number variations to original vehicle
+    const vehicleMap = new Map<string, { vehicle: FleetVehicle; variations: string[] }>();
+    const allTruckNumbers: string[] = [];
     
-    for (let i = 0; i < vehicles.length; i += batchSize) {
-      const batch = vehicles.slice(i, i + batchSize);
+    for (const vehicle of vehicles) {
+      const originalNumber = vehicle.vehicleNumber;
+      const strippedNumber = originalNumber.replace(/^0+/, '');
       
-      const enrichedBatch = await Promise.all(
-        batch.map(async (vehicle) => {
-          try {
-            const originalNumber = vehicle.vehicleNumber;
-            const strippedNumber = originalNumber.replace(/^0+/, '');
-            
-            if (!strippedNumber) return vehicle;
-            
-            // TPMS truck numbers are typically 6 digits with leading zeros
-            const paddedNumber = strippedNumber.padStart(6, '0');
-            
-            // Try 6-digit padded format first (TPMS standard format)
-            let result = await tpmsService.lookupByTruckNumber(paddedNumber);
-            
-            // If that fails, try without leading zeros
-            if (!result.success && paddedNumber !== strippedNumber) {
-              result = await tpmsService.lookupByTruckNumber(strippedNumber);
+      if (!strippedNumber) continue;
+      
+      // TPMS truck numbers are typically 6 digits with leading zeros
+      const paddedNumber = strippedNumber.padStart(6, '0');
+      
+      // Track all variations to try
+      const variations = [paddedNumber];
+      if (strippedNumber !== paddedNumber) variations.push(strippedNumber);
+      if (originalNumber !== paddedNumber && originalNumber !== strippedNumber) {
+        variations.push(originalNumber);
+      }
+      
+      vehicleMap.set(originalNumber, { vehicle, variations });
+      allTruckNumbers.push(...variations);
+    }
+    
+    // First, batch lookup all cached data - this is fast and doesn't hit rate limits
+    const cachedData = await tpmsService.batchLookupByTruckNumbers(allTruckNumbers);
+    
+    let cacheHits = 0;
+    let apiCalls = 0;
+    let apiFailures = 0;
+    const enrichedVehicles: FleetVehicle[] = [];
+    const uncachedVehicles: Array<{ vehicle: FleetVehicle; variations: string[] }> = [];
+    
+    // Process vehicles - use cached data when available
+    for (const [originalNumber, { vehicle, variations }] of Array.from(vehicleMap.entries())) {
+      let found = false;
+      
+      // Check all variations in cache
+      for (const truckNo of variations) {
+        const cached = cachedData.get(truckNo);
+        if (cached && cached.techInfo) {
+          enrichedVehicles.push({
+            ...vehicle,
+            tpmsAssignedTechId: cached.techInfo.ldapId || '',
+            tpmsAssignedTechName: `${cached.techInfo.firstName || ''} ${cached.techInfo.lastName || ''}`.trim(),
+          });
+          cacheHits++;
+          found = true;
+          break;
+        }
+      }
+      
+      if (!found) {
+        uncachedVehicles.push({ vehicle, variations });
+      }
+    }
+    
+    // For uncached vehicles, try API calls (with rate limit protection)
+    // Only do a limited number of API calls per request to avoid rate limiting
+    const maxApiCalls = Math.min(50, uncachedVehicles.length);
+    const vehiclesToTryApi = uncachedVehicles.slice(0, maxApiCalls);
+    const vehiclesToSkip = uncachedVehicles.slice(maxApiCalls);
+    
+    // Process API calls in small batches
+    const batchSize = 5;
+    for (let i = 0; i < vehiclesToTryApi.length; i += batchSize) {
+      const batch = vehiclesToTryApi.slice(i, i + batchSize);
+      
+      const batchResults = await Promise.all(
+        batch.map(async ({ vehicle, variations }) => {
+          for (const truckNo of variations) {
+            try {
+              apiCalls++;
+              const result = await tpmsService.lookupByTruckNumber(truckNo);
+              
+              if (result.success && result.data) {
+                return {
+                  ...vehicle,
+                  tpmsAssignedTechId: result.data.ldapId || '',
+                  tpmsAssignedTechName: `${result.data.firstName || ''} ${result.data.lastName || ''}`.trim(),
+                };
+              }
+            } catch (error) {
+              apiFailures++;
             }
-            
-            // If still fails, try original Holman format
-            if (!result.success && originalNumber !== paddedNumber && originalNumber !== strippedNumber) {
-              result = await tpmsService.lookupByTruckNumber(originalNumber);
-            }
-            
-            if (result.success && result.data) {
-              return {
-                ...vehicle,
-                tpmsAssignedTechId: result.data.ldapId || '',
-                tpmsAssignedTechName: `${result.data.firstName || ''} ${result.data.lastName || ''}`.trim(),
-              };
-            }
-          } catch (error) {
-            // Silently continue if lookup fails
           }
           return vehicle;
         })
       );
       
-      enrichedVehicles.push(...enrichedBatch);
+      enrichedVehicles.push(...batchResults);
     }
     
-    console.log(`[HolmanSync] Enrichment complete for ${enrichedVehicles.length} vehicles`);
+    // Add vehicles that were skipped due to rate limit protection
+    for (const { vehicle } of vehiclesToSkip) {
+      enrichedVehicles.push(vehicle);
+    }
+    
+    console.log(`[HolmanSync] Enrichment complete: ${cacheHits} cache hits, ${apiCalls} API calls (${apiFailures} failed), ${vehiclesToSkip.length} skipped`);
     return enrichedVehicles;
   }
 }
