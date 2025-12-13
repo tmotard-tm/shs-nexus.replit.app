@@ -1196,11 +1196,14 @@ export const holmanVehiclesCache = pgTable("holman_vehicles_cache", {
   rawData: jsonb("raw_data"), // Store original API response
   lastHolmanSyncAt: timestamp("last_holman_sync_at"),
   lastLocalUpdateAt: timestamp("last_local_update_at"),
+  lastChangeDate: timestamp("last_change_date"), // Holman's lastChangeDate field for this vehicle
+  lastChangeRecordId: text("last_change_record_id"), // Holman's lastChangeRecordId for tracking changes
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
   statusIdx: index("holman_cache_status_idx").on(table.statusCode),
   activeIdx: index("holman_cache_active_idx").on(table.isActive),
+  lastChangeRecordIdIdx: index("holman_cache_last_change_record_id_idx").on(table.lastChangeRecordId),
 }));
 
 export const insertHolmanVehicleCacheSchema = createInsertSchema(holmanVehiclesCache).omit({
@@ -1212,6 +1215,31 @@ export const insertHolmanVehicleCacheSchema = createInsertSchema(holmanVehiclesC
 export type HolmanVehicleCache = typeof holmanVehiclesCache.$inferSelect;
 export type InsertHolmanVehicleCache = z.infer<typeof insertHolmanVehicleCacheSchema>;
 
+// Holman Sync State - tracks incremental sync position for efficient change-only fetching
+export const holmanSyncState = pgTable("holman_sync_state", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  syncType: text("sync_type").notNull().unique(), // 'vehicles', 'contacts', 'maintenance'
+  lastChangeRecordId: text("last_change_record_id"), // The lastChangeRecordId from Holman's pageInfo
+  lastChangeDate: timestamp("last_change_date"), // The most recent lastChangeDate seen
+  lastFullSyncAt: timestamp("last_full_sync_at"), // When we last did a full sync (no filter)
+  lastIncrementalSyncAt: timestamp("last_incremental_sync_at"), // When we last did an incremental sync
+  totalRecordsSynced: integer("total_records_synced").default(0),
+  incrementalRecordsSynced: integer("incremental_records_synced").default(0), // Records from last incremental
+  status: text("status").notNull().default("idle"), // idle, syncing, failed
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertHolmanSyncStateSchema = createInsertSchema(holmanSyncState).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type HolmanSyncState = typeof holmanSyncState.$inferSelect;
+export type InsertHolmanSyncState = z.infer<typeof insertHolmanSyncStateSchema>;
+
 // Change log for offline updates that need to sync back to Holman
 export const vehicleChangeLog = pgTable("vehicle_change_log", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1219,15 +1247,20 @@ export const vehicleChangeLog = pgTable("vehicle_change_log", {
   changeType: text("change_type").notNull(), // create, update, delete
   payload: jsonb("payload").notNull(), // The change data to send to Holman
   userId: text("user_id"), // Who made the change
-  status: text("status").notNull().default("pending"), // pending, applied, failed
+  status: text("status").notNull().default("pending"), // pending, applied, failed, verified
   attemptCount: integer("attempt_count").default(0),
   lastAttemptAt: timestamp("last_attempt_at"),
   appliedAt: timestamp("applied_at"),
   errorMessage: text("error_message"),
+  preChangeRecordId: text("pre_change_record_id"), // lastChangeRecordId before our POST
+  postChangeRecordId: text("post_change_record_id"), // lastChangeRecordId after verification
+  holmanProcessed: boolean("holman_processed").default(false), // True when Holman shows our change
+  verifiedAt: timestamp("verified_at"), // When we confirmed Holman processed the change
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
   statusIdx: index("change_log_status_idx").on(table.status),
   vehicleIdx: index("change_log_vehicle_idx").on(table.holmanVehicleNumber),
+  holmanProcessedIdx: index("change_log_holman_processed_idx").on(table.holmanProcessed),
 }));
 
 export const insertVehicleChangeLogSchema = createInsertSchema(vehicleChangeLog).omit({
@@ -1237,6 +1270,9 @@ export const insertVehicleChangeLogSchema = createInsertSchema(vehicleChangeLog)
   lastAttemptAt: true,
   appliedAt: true,
   errorMessage: true,
+  postChangeRecordId: true,
+  holmanProcessed: true,
+  verifiedAt: true,
 });
 
 export type VehicleChangeLog = typeof vehicleChangeLog.$inferSelect;
