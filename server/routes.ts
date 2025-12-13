@@ -5514,6 +5514,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Holman Submission Tracking Endpoints
+  const { holmanSubmissionService } = await import("./holman-submission-service");
+
+  // Get pending submissions for a vehicle
+  app.get("/api/holman/submissions/vehicle/:vehicleNumber", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber } = req.params;
+      const pendingOnly = req.query.pendingOnly === 'true';
+      
+      const submissions = pendingOnly 
+        ? await holmanSubmissionService.getPendingSubmissionsForVehicle(vehicleNumber)
+        : await holmanSubmissionService.getSubmissionsByVehicle(vehicleNumber);
+      
+      res.json({ success: true, submissions });
+    } catch (error: any) {
+      console.error('[API] Get submissions error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Get all pending submissions
+  app.get("/api/holman/submissions/pending", requireAuth, async (req: any, res) => {
+    try {
+      const submissions = await holmanSubmissionService.getAllPendingSubmissions();
+      res.json({ success: true, submissions, count: submissions.length });
+    } catch (error: any) {
+      console.error('[API] Get pending submissions error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Poll/check status of pending submissions
+  app.post("/api/holman/submissions/poll", requireAuth, async (req: any, res) => {
+    try {
+      const result = await holmanSubmissionService.pollPendingSubmissions();
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error('[API] Poll submissions error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Mark submissions as completed for a vehicle (when mismatch is resolved)
+  app.post("/api/holman/submissions/vehicle/:vehicleNumber/complete", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber } = req.params;
+      const count = await holmanSubmissionService.markAsCompleted(vehicleNumber);
+      res.json({ success: true, completedCount: count });
+    } catch (error: any) {
+      console.error('[API] Complete submissions error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   console.log("Registering Snowflake API routes...");
   const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
 

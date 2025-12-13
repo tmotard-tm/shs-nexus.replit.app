@@ -1,5 +1,6 @@
 import { getTPMSService } from './tpms-service';
 import { holmanApiService } from './holman-api-service';
+import { holmanSubmissionService } from './holman-submission-service';
 
 interface TechAddress {
   addressType: 'PRIMARY' | 'RE_ASSORTMENT' | 'DROP_RETURN' | 'ALTERNATE';
@@ -209,6 +210,20 @@ class HolmanAssignmentUpdateService {
       const message = enterpriseId 
         ? 'Vehicle assignment updated successfully in Holman'
         : 'Vehicle unassigned successfully in Holman (technician data cleared)';
+
+      // Save submission to database for tracking
+      try {
+        await holmanSubmissionService.createSubmission({
+          holmanVehicleNumber: payload.holmanVehicleNumber,
+          action: enterpriseId ? 'assign' : 'unassign',
+          enterpriseId: enterpriseId || null,
+          submissionId,
+          payload,
+          response,
+        });
+      } catch (dbError: any) {
+        console.error(`[HolmanAssignmentUpdate] Failed to save submission to DB:`, dbError);
+      }
 
       return {
         success: true,
