@@ -576,6 +576,8 @@ class HolmanVehicleSyncService {
     // First, batch lookup all cached data - this is fast and doesn't hit rate limits
     const cachedData = await tpmsService.batchLookupByTruckNumbers(allTruckNumbers);
     
+    console.log(`[HolmanSync-TPMS] Batch lookup returned ${cachedData.size} entries for ${allTruckNumbers.length} truck numbers`);
+    
     let cacheHits = 0;
     let apiCalls = 0;
     let apiFailures = 0;
@@ -606,11 +608,15 @@ class HolmanVehicleSyncService {
       }
     }
     
+    console.log(`[HolmanSync-TPMS] Cache results: ${cacheHits} hits, ${uncachedVehicles.length} uncached`);
+    
     // For uncached vehicles, try API calls (with rate limit protection)
     // Only do a limited number of API calls per request to avoid rate limiting
     const maxApiCalls = Math.min(50, uncachedVehicles.length);
     const vehiclesToTryApi = uncachedVehicles.slice(0, maxApiCalls);
     const vehiclesToSkip = uncachedVehicles.slice(maxApiCalls);
+    
+    console.log(`[HolmanSync-TPMS] Will try API for ${vehiclesToTryApi.length} vehicles, skip ${vehiclesToSkip.length}`);
     
     // Process API calls in small batches
     const batchSize = 5;
