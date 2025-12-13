@@ -227,6 +227,9 @@ export interface IStorage {
   getAllTechByEmployeeId(employeeId: string): Promise<AllTech | undefined>;
   getAllTechByTechRacfid(techRacfid: string): Promise<AllTech | undefined>;
   getAllTechs(): Promise<AllTech[]>;
+  getTermedEmployeesFromRoster(daysBack?: number): Promise<AllTech[]>;
+  getEmployeesNeedingOffboarding(daysBack?: number): Promise<AllTech[]>;
+  markEmployeeOffboardingCreated(employeeId: string, taskId: string): Promise<AllTech | undefined>;
   upsertAllTech(tech: InsertAllTech): Promise<AllTech>;
   updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined>;
 
@@ -1133,6 +1136,18 @@ export class MemStorage implements IStorage {
 
   async getAllTechs(): Promise<AllTech[]> {
     return []; // Not implemented in memory storage
+  }
+
+  async getTermedEmployeesFromRoster(_daysBack?: number): Promise<AllTech[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async getEmployeesNeedingOffboarding(_daysBack?: number): Promise<AllTech[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async markEmployeeOffboardingCreated(_employeeId: string, _taskId: string): Promise<AllTech | undefined> {
+    return undefined; // Not implemented in memory storage
   }
 
   async upsertAllTech(_tech: InsertAllTech): Promise<AllTech> {
@@ -3113,6 +3128,42 @@ export class DatabaseStorage implements IStorage {
 
   async getAllTechs(): Promise<AllTech[]> {
     return await db.select().from(allTechs).orderBy(allTechs.techName);
+  }
+
+  async getTermedEmployeesFromRoster(daysBack: number = 30): Promise<AllTech[]> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+    const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+    
+    return await db.select().from(allTechs)
+      .where(sql`${allTechs.effectiveDate} >= ${cutoffDateStr}`)
+      .orderBy(desc(allTechs.effectiveDate));
+  }
+
+  async getEmployeesNeedingOffboarding(daysBack: number = 30): Promise<AllTech[]> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+    const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+    
+    return await db.select().from(allTechs)
+      .where(and(
+        sql`${allTechs.effectiveDate} >= ${cutoffDateStr}`,
+        eq(allTechs.offboardingTaskCreated, false)
+      ))
+      .orderBy(desc(allTechs.effectiveDate));
+  }
+
+  async markEmployeeOffboardingCreated(employeeId: string, taskId: string): Promise<AllTech | undefined> {
+    const result = await db.update(allTechs)
+      .set({
+        offboardingTaskCreated: true,
+        offboardingTaskId: taskId,
+        processedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(allTechs.employeeId, employeeId))
+      .returning();
+    return result[0];
   }
 
   async upsertAllTech(tech: InsertAllTech): Promise<AllTech> {

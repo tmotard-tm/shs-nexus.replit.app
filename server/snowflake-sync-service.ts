@@ -2,21 +2,7 @@ import { getSnowflakeService, isSnowflakeConfigured } from './snowflake-service'
 import { getTPMSService } from './tpms-service';
 import { storage } from './storage';
 import { randomUUID } from 'crypto';
-import type { InsertTermedTech, InsertAllTech, InsertQueueItem } from '@shared/schema';
-
-interface SnowflakeTermedTechRow {
-  EMPL_ID: string;
-  ENTERPRISE_ID: string;
-  FULL_NAME: string;
-  DATE_LAST_WORKED: string | null;
-  FIRST_NAME?: string;
-  LAST_NAME?: string;
-  JOB_TITLE?: string;
-  DISTRICT_NO?: string;
-  PLANNING_AREA_NM?: string;
-  EMPLOYMENT_STATUS?: string;
-  EFFDT?: string;
-}
+import type { InsertAllTech, InsertQueueItem } from '@shared/schema';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -76,11 +62,9 @@ export class SnowflakeSyncService {
       duration: 0,
     };
 
-    if (!isSnowflakeConfigured()) {
-      result.errors.push('Snowflake is not configured');
-      result.duration = Date.now() - startTime;
-      return result;
-    }
+    // Note: Snowflake configuration is no longer required for this function
+    // as it reads from the unified all_techs table (populated by syncAllTechs).
+    // We only check if there's data in all_techs to process.
 
     let syncLog;
     try {
@@ -97,66 +81,15 @@ export class SnowflakeSyncService {
     }
 
     try {
-      const snowflake = getSnowflakeService();
-      await snowflake.connect();
-
-      console.log('[Sync] Fetching termed techs from Snowflake...');
-      const query = `
-        SELECT 
-          EMPL_ID,
-          ENTERPRISE_ID,
-          FULL_NAME,
-          DATE_LAST_WORKED,
-          FIRST_NAME,
-          LAST_NAME,
-          JOB_TITLE,
-          DISTRICT_NO,
-          PLANNING_AREA_NM,
-          EMPLOYMENT_STATUS,
-          EFFDT
-        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_TERMED_TECHS_LAST30
-      `;
-
-      const rows = await snowflake.executeQuery(query) as SnowflakeTermedTechRow[];
-      console.log(`[Sync] Retrieved ${rows.length} termed tech records`);
-
-      for (const row of rows) {
-        try {
-          const existingTech = await storage.getTermedTechByEmployeeId(row.EMPL_ID);
-
-          const techData: InsertTermedTech = {
-            employeeId: row.EMPL_ID,
-            techRacfid: row.ENTERPRISE_ID || '',
-            techName: row.FULL_NAME || 'Unknown',
-            lastDayWorked: this.formatDateForDB(row.DATE_LAST_WORKED),
-            firstName: row.FIRST_NAME ?? null,
-            lastName: row.LAST_NAME ?? null,
-            jobTitle: row.JOB_TITLE ?? null,
-            districtNo: row.DISTRICT_NO ?? null,
-            planningAreaName: row.PLANNING_AREA_NM ?? null,
-            employmentStatus: row.EMPLOYMENT_STATUS ?? null,
-            effectiveDate: this.formatDateForDB(row.EFFDT ?? null),
-            offboardingTaskCreated: existingTech?.offboardingTaskCreated ?? false,
-            offboardingTaskId: existingTech?.offboardingTaskId ?? null,
-          };
-
-          await storage.upsertTermedTech(techData);
-          result.recordsProcessed++;
-
-          if (existingTech) {
-            result.recordsUpdated++;
-          } else {
-            result.recordsCreated++;
-          }
-        } catch (error: any) {
-          console.error(`[Sync] Error processing tech ${row.EMPL_ID}:`, error.message);
-          result.errors.push(`Error processing ${row.EMPL_ID}: ${error.message}`);
-        }
-      }
-
-      console.log('[Sync] Creating offboarding queue items for new termed techs...');
-      const techsNeedingOffboarding = await storage.getTermedTechsNeedingOffboarding();
-      console.log(`[Sync] Found ${techsNeedingOffboarding.length} techs needing offboarding tasks`);
+      // The unified all_techs table should already be populated with effectiveDate and lastDayWorked
+      // from the syncAllTechs function. This function now just creates offboarding tasks
+      // for employees with recent termination dates (effectiveDate within last 30 days).
+      console.log('[Sync] Finding employees needing offboarding from unified roster...');
+      
+      // Use unified all_techs table - filter by effectiveDate >= CURRENT_DATE - 30 and offboardingTaskCreated = false
+      const techsNeedingOffboarding = await storage.getEmployeesNeedingOffboarding(30);
+      result.recordsProcessed = techsNeedingOffboarding.length;
+      console.log(`[Sync] Found ${techsNeedingOffboarding.length} employees needing offboarding tasks (from unified roster)`);
 
       // Initialize TPMS service for truck lookups
       const tpmsService = getTPMSService();
@@ -405,9 +338,9 @@ export class SnowflakeSyncService {
             console.log(`[Sync] Created Day 0 task: ${task.step} for ${tech.techName} in ${task.department} queue`);
           }
 
-          // Mark the termed tech as having offboarding tasks created
+          // Mark the employee as having offboarding tasks created (uses unified all_techs table)
           if (firstCreatedItemId) {
-            await storage.markTermedTechOffboardingCreated(tech.employeeId, firstCreatedItemId);
+            await storage.markEmployeeOffboardingCreated(tech.employeeId, firstCreatedItemId);
           }
           
           console.log(`[Sync] Created ${day0Tasks.length} Day 0 offboarding tasks for ${tech.techName} (${tech.employeeId})${truckInfo.truckNo ? ` with truck ${truckInfo.truckNo}` : ''}`);

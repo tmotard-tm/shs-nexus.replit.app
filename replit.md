@@ -37,12 +37,19 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
 **Template Management System**: Added comprehensive template management system for superadmin users (September 2025). Provides full CRUD operations for workflow templates across all departments with security-first implementation including server-side ID generation, field whitelisting, and multi-layer access control.
 
 **Snowflake Sync System** (November 2025, updated December 2025): Automated daily sync at 5am EST from Snowflake data warehouse for technician management:
-- `DRIVELINE_TERMED_TECHS_LAST30`: Tracks terminated technicians from the last 30 days, automatically creates offboarding queue items in the Fleet department
-- `DRIVELINE_ALL_TECHS`: Complete technician roster for lookup and reference
-- Database tables: `termed_techs`, `all_techs`, `sync_logs` track sync status and offboarding task creation
+- **Unified Employee Data**: Single `all_techs` table as the source of truth for all employee data
+- `DRIVELINE_ALL_TECHS`: Complete technician roster with EFFDT (effective date) and DATE_LAST_WORKED fields
+- **Terminated Employee Detection**: Employees with `effectiveDate` within the last 30 days are automatically identified as recently terminated
+- **Offboarding Tracking**: The `all_techs` table includes offboarding tracking fields: `offboardingTaskCreated`, `offboardingTaskId`, `processedAt`
+- Database tables: `all_techs`, `sync_logs` track sync status and offboarding task creation (deprecated `termed_techs` table still exists but is no longer used)
 - Manual sync available via superadmin UI at /snowflake-integration or /tech-roster pages
 - **Production Scheduling**: Uses Replit Scheduled Deployments (see Production Configuration below)
 - **Development Scheduling**: Uses setInterval (only when NODE_ENV=development)
+- **API Endpoints**:
+  - GET `/api/termed-techs` - Returns employees with effectiveDate within last 30 days (supports `daysBack` query param)
+  - GET `/api/all-techs` - Returns all employees from unified roster
+  - POST `/api/snowflake/sync/all-techs` - Syncs employee roster from Snowflake
+  - POST `/api/snowflake/sync/termed-techs` - Creates offboarding tasks for recently terminated employees
 
 **TPMS API Integration** (November 2025): Live integration with TPMS (Tire Pressure Monitoring System) API for technician-vehicle assignments:
 - Fetches real-time truck assignments by Enterprise ID via `/api/tpms/truck/:enterpriseId`

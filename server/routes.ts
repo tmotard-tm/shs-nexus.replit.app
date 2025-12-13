@@ -5837,10 +5837,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get termed techs list
+  // Get termed techs list (now sourced from unified all_techs table by filtering on effectiveDate)
   app.get("/api/termed-techs", requireAuth, async (req: any, res) => {
     try {
-      const techs = await storage.getTermedTechs();
+      const daysBack = parseInt(req.query.daysBack as string) || 30;
+      const techs = await storage.getTermedEmployeesFromRoster(daysBack);
       res.json(techs);
     } catch (error: any) {
       console.error("Error getting termed techs:", error);
@@ -5859,18 +5860,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Look up a termed tech by employee ID (for auto-filling dates)
+  // Look up a termed tech by employee ID (for auto-filling dates) - now uses unified all_techs table
   app.get("/api/termed-techs/lookup/:employeeId", requireAuth, async (req: any, res) => {
     try {
       const { employeeId } = req.params;
-      const termedTechs = await storage.getTermedTechs();
-      const termedTech = termedTechs.find(t => t.employeeId === employeeId);
+      // Look up from all_techs table which now has effectiveDate and lastDayWorked fields
+      const tech = await storage.getAllTechByEmployeeId(employeeId);
       
-      if (termedTech) {
+      if (tech && tech.effectiveDate) {
         res.json({
           found: true,
-          effectiveDate: termedTech.effectiveDate,
-          lastDayWorked: termedTech.lastDayWorked
+          effectiveDate: tech.effectiveDate,
+          lastDayWorked: tech.lastDayWorked,
+          techName: tech.techName,
+          techRacfid: tech.techRacfid,
+          employmentStatus: tech.employmentStatus,
         });
       } else {
         res.json({ found: false });

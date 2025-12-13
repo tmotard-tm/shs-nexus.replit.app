@@ -260,20 +260,20 @@ export default function SnowflakeIntegration() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
-              Sync Termed Employees
+              Create Offboarding Tasks
             </CardTitle>
             <CardDescription>
-              Sync terminated employees from Snowflake and create offboarding queue items
+              Create offboarding queue items for recently terminated employees
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              This will fetch the latest terminated employee data from the DRIVELINE_TERMED_TECHS_LAST30 table 
+              This will identify recently terminated employees (effective date within last 30 days) from the unified employee roster
               and create Day 0 offboarding tasks in NTAO, Assets, Fleet, and Inventory queues.
             </p>
             <Button
               onClick={() => syncTermedTechsMutation.mutate()}
-              disabled={!status?.configured || syncTermedTechsMutation.isPending}
+              disabled={syncTermedTechsMutation.isPending}
               data-testid="button-sync-termed-techs"
             >
               {syncTermedTechsMutation.isPending ? (
