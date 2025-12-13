@@ -38,8 +38,11 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
     mapRef.current.innerHTML = '';
 
     try {
-      // Create Hawaii-focused map
-      const map = L.map(mapRef.current).setView([21.3099, -157.8581], 8);
+      // Create Hawaii-focused map with min zoom to prevent zooming out too far
+      const map = L.map(mapRef.current, {
+        minZoom: 6,
+        maxZoom: 18
+      }).setView([20.5, -157.0], 7);
       
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
@@ -51,7 +54,7 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
       // Ensure proper sizing within wrapper
       setTimeout(() => {
         mapInstance.current?.invalidateSize();
-        mapInstance.current?.setView([21.3099, -157.8581], 7);
+        mapInstance.current?.setView([20.5, -157.0], 7);
       }, 100);
 
     } catch (error) {
@@ -124,7 +127,7 @@ export function HawaiiMap({ filteredVehicles }: HawaiiMapProps) {
   }, [hawaiiVehicles]);
 
   return (
-    <div className="map-wrapper">
+    <div className="relative w-full h-full">
       <div 
         ref={mapRef} 
         className="absolute inset-0"

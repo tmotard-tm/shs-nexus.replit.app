@@ -38,8 +38,11 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
     mapRef.current.innerHTML = '';
 
     try {
-      // Create Puerto Rico-focused map
-      const map = L.map(mapRef.current).setView([18.4655, -66.1057], 9);
+      // Create Puerto Rico-focused map with min zoom to prevent zooming out too far
+      const map = L.map(mapRef.current, {
+        minZoom: 8,
+        maxZoom: 18
+      }).setView([18.2208, -66.5901], 9);
       
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
@@ -51,7 +54,7 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
       // Ensure proper sizing within wrapper
       setTimeout(() => {
         mapInstance.current?.invalidateSize();
-        mapInstance.current?.setView([18.4655, -66.1057], 9);
+        mapInstance.current?.setView([18.2208, -66.5901], 9);
       }, 100);
 
     } catch (error) {
@@ -124,7 +127,7 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
   }, [puertoRicoVehicles]);
 
   return (
-    <div className="map-wrapper">
+    <div className="relative w-full h-full">
       <div 
         ref={mapRef} 
         className="absolute inset-0"
