@@ -214,6 +214,36 @@ export default function UpdateVehicle() {
 
   const holmanVehicles: FleetVehicle[] = fleetResponse?.vehicles || [];
 
+  // Fetch pending Holman submissions for status tracking
+  interface HolmanSubmission {
+    id: string;
+    holmanVehicleNumber: string;
+    submissionId: string | null;
+    action: string;
+    enterpriseId: string | null;
+    status: string;
+    createdAt: string;
+  }
+  
+  const { data: pendingSubmissionsData } = useQuery<{ success: boolean; submissions: HolmanSubmission[] }>({
+    queryKey: ['/api/holman/submissions/pending'],
+    refetchInterval: 30000, // Auto-refresh every 30 seconds
+  });
+
+  // Create a map of vehicle numbers with pending submissions
+  const pendingSubmissionsMap = useMemo(() => {
+    const map = new Map<string, HolmanSubmission>();
+    if (pendingSubmissionsData?.submissions) {
+      for (const sub of pendingSubmissionsData.submissions) {
+        // Store by vehicle number (handle both padded and unpadded)
+        const paddedNum = sub.holmanVehicleNumber.padStart(6, '0');
+        map.set(paddedNum, sub);
+        map.set(sub.holmanVehicleNumber, sub);
+      }
+    }
+    return map;
+  }, [pendingSubmissionsData]);
+
   // Mutation to sync vehicle assignment to Holman based on TPMS data
   const syncToHolmanMutation = useMutation({
     mutationFn: async ({ vehicleNumber, enterpriseId }: { vehicleNumber: string; enterpriseId?: string | null }) => {
@@ -223,12 +253,13 @@ export default function UpdateVehicle() {
     onSuccess: (data: any) => {
       const isUnassign = !data.payload?.clientData2;
       toast({
-        title: isUnassign ? "Vehicle Unassigned in Holman" : "Holman Update Successful",
+        title: isUnassign ? "Vehicle Unassigned in Holman" : "Holman Sync Started",
         description: isUnassign 
           ? `Vehicle ${data.holmanVehicleNumber} has been unassigned in Holman (technician data cleared)`
-          : `Vehicle ${data.holmanVehicleNumber} has been updated in Holman with TPMS assignment data`,
+          : `Vehicle ${data.holmanVehicleNumber} sync initiated. Status will update when complete.`,
       });
       queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/holman/submissions/pending'] });
     },
     onError: (error: any) => {
       toast({
@@ -951,16 +982,29 @@ export default function UpdateVehicle() {
                   const tpmsId = vehicle.tpmsAssignedTechId?.trim() || '';
                   const hasMismatch = (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) ||
                                       (holmanId && !tpmsId);
+                  const pendingSubmission = pendingSubmissionsMap.get(vehicle.vehicleNumber) || 
+                                           pendingSubmissionsMap.get(vehicle.vehicleNumber?.padStart(6, '0') || '');
                   
                   return (
                   <Card 
                     key={vehicle.vin} 
-                    className={`cursor-pointer hover:shadow-md transition-all duration-200 ${hasMismatch ? 'border-2 border-orange-500 bg-orange-50 dark:bg-orange-950' : ''}`}
+                    className={`cursor-pointer hover:shadow-md transition-all duration-200 ${hasMismatch && !pendingSubmission ? 'border-2 border-orange-500 bg-orange-50 dark:bg-orange-950' : ''} ${pendingSubmission ? 'border-2 border-blue-500 bg-blue-50 dark:bg-blue-950' : ''}`}
                     onClick={() => handleVehicleSelect(vehicle)}
                     data-testid={`card-vehicle-${vehicle.vin}`}
                   >
                     <CardContent className="p-4">
-                      {hasMismatch && (
+                      {pendingSubmission && (
+                        <div className="mb-3 p-2 bg-blue-100 dark:bg-blue-900 rounded-md flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+                          <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                            Holman Sync Pending: {pendingSubmission.action === 'assign' 
+                              ? `Assigning tech ${pendingSubmission.enterpriseId}` 
+                              : 'Unassigning technician'} 
+                            {pendingSubmission.status === 'processing' && ' (Processing...)'}
+                          </span>
+                        </div>
+                      )}
+                      {hasMismatch && !pendingSubmission && (
                         <div className="mb-3 p-2 bg-orange-100 dark:bg-orange-900 rounded-md flex items-center gap-2">
                           <AlertTriangle className="h-4 w-4 text-orange-600" />
                           <span className="text-sm font-medium text-orange-700 dark:text-orange-300">
