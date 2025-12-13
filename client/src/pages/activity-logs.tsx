@@ -1314,6 +1314,18 @@ export default function ActivityLogs() {
             </CardHeader>
             <CollapsibleContent>
               <CardContent className="space-y-4">
+                <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mb-4">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="font-medium text-yellow-800 dark:text-yellow-200">Warning: Destructive Test</p>
+                      <p className="text-yellow-700 dark:text-yellow-300">
+                        This test will send individual field updates to Holman with other fields set to null. 
+                        Only use on designated test vehicles (e.g., 06534). Each submission is logged in the tracking table below.
+                      </p>
+                    </div>
+                  </div>
+                </div>
                 <div className="flex flex-wrap items-end gap-4">
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Vehicle Number</label>
@@ -1349,8 +1361,13 @@ export default function ActivityLogs() {
                     </label>
                   </div>
                   <Button
-                    onClick={runFieldByFieldTest}
+                    onClick={() => {
+                      if (window.confirm(`This will run ${19} field tests on vehicle ${fieldTestVehicle}. Each test overwrites data. Continue?`)) {
+                        runFieldByFieldTest();
+                      }
+                    }}
                     disabled={fieldTestRunning || !fieldTestVehicle}
+                    variant="destructive"
                     data-testid="button-run-field-test"
                   >
                     {fieldTestRunning ? (
