@@ -152,6 +152,7 @@ export default function UpdateVehicle() {
   const [mismatchFilter, setMismatchFilter] = useState("all");
   const [vehicleProgramFilter, setVehicleProgramFilter] = useState("all");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [isBulkSyncing, setIsBulkSyncing] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [vehicleUpdateData, setVehicleUpdateData] = useState({
@@ -921,6 +922,72 @@ export default function UpdateVehicle() {
                   >
                     <RefreshCw className={`h-4 w-4 mr-1 ${isLoadingHolman ? 'animate-spin' : ''}`} />
                     Refresh
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={async () => {
+                      const mismatchedVehicles = holmanVehicles.filter(v => 
+                        v.tpmsAssignedTechId && 
+                        v.holmanTechAssigned !== v.tpmsAssignedTechId
+                      );
+                      
+                      if (mismatchedVehicles.length === 0) {
+                        toast({
+                          title: "No Mismatches Found",
+                          description: "All vehicles are already in sync with TPMS data.",
+                        });
+                        return;
+                      }
+                      
+                      setIsBulkSyncing(true);
+                      try {
+                        const updates = mismatchedVehicles.map(v => ({
+                          holmanVehicleNumber: v.vehicleNumber,
+                          enterpriseId: v.tpmsAssignedTechId,
+                        }));
+                        
+                        const response = await apiRequest('POST', '/api/holman/assignments/update-bulk', { updates });
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                          toast({
+                            title: "Bulk Sync Complete",
+                            description: `Successfully synced ${result.successCount} vehicles to Holman.`,
+                          });
+                          refetchHolman();
+                        } else {
+                          toast({
+                            title: "Bulk Sync Partial",
+                            description: `${result.successCount} succeeded, ${result.failCount} failed.`,
+                            variant: "destructive",
+                          });
+                        }
+                      } catch (error) {
+                        toast({
+                          title: "Bulk Sync Failed",
+                          description: "Failed to sync vehicles to Holman.",
+                          variant: "destructive",
+                        });
+                      } finally {
+                        setIsBulkSyncing(false);
+                      }
+                    }}
+                    disabled={isBulkSyncing || isLoadingHolman}
+                    className="h-8"
+                    data-testid="button-bulk-sync-holman"
+                  >
+                    {isBulkSyncing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                        Syncing...
+                      </>
+                    ) : (
+                      <>
+                        <Database className="h-4 w-4 mr-1" />
+                        Bulk Sync to Holman
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>
