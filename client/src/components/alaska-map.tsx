@@ -64,6 +64,21 @@ export function AlaskaMap({ filteredVehicles }: AlaskaMapProps) {
     };
   }, []);
 
+  // Handle resize to keep map properly sized
+  useEffect(() => {
+    if (!mapRef.current || !mapInstance.current) return;
+    
+    const resizeObserver = new ResizeObserver(() => {
+      mapInstance.current?.invalidateSize();
+    });
+    
+    resizeObserver.observe(mapRef.current);
+    
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   useEffect(() => {
     if (!mapInstance.current || !markersLayerRef.current) return;
 

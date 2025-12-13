@@ -134,8 +134,8 @@ export default function AnalyticsBoard() {
                 <CardHeader>
                   <CardTitle className="text-lg font-semibold text-foreground">Continental United States Fleet Distribution</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="h-[600px]">
+                <CardContent className="p-4 overflow-hidden">
+                  <div className="h-[500px] lg:h-[550px]">
                     <FilteredMap isOpen={true} />
                   </div>
                 </CardContent>

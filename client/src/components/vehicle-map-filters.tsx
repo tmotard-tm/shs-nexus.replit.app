@@ -126,6 +126,21 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
     updateMarkers();
   }, [filters, isOpen]);
 
+  // Handle resize to keep map properly sized
+  useEffect(() => {
+    if (!mapRef.current || !mapInstance.current) return;
+    
+    const resizeObserver = new ResizeObserver(() => {
+      mapInstance.current?.invalidateSize();
+    });
+    
+    resizeObserver.observe(mapRef.current);
+    
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [isOpen]);
+
   // Function to update markers
   const updateMarkers = () => {
     if (!mapInstance.current) return;
@@ -189,9 +204,9 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
   };
 
   return (
-    <div className="flex gap-4">
+    <div className="flex flex-col lg:flex-row gap-4 h-full">
       {/* Filter Sidebar */}
-      <Card className="w-64 flex-shrink-0">
+      <Card className="w-full lg:w-56 flex-shrink-0">
         <CardHeader>
           <CardTitle className="text-sm">Filter Options</CardTitle>
         </CardHeader>
@@ -284,21 +299,17 @@ export function FilteredMap({ isOpen }: FilteredMapProps) {
       </Card>
       
       {/* Multi-Region Maps */}
-      <div className="flex-1 space-y-4">
+      <div className="flex-1 min-w-0 overflow-hidden">
         {/* Main Continental US Map */}
-        <div className="bg-gray-100 rounded-lg overflow-hidden">
+        <div className="bg-gray-100 rounded-lg overflow-hidden h-full">
           <div className="bg-gray-800 text-white px-3 py-1 text-sm font-medium">
             Continental United States
           </div>
           <div 
             ref={mapRef} 
-            style={{ 
-              height: '400px',
-              width: '100%'
-            }}
+            className="w-full h-[calc(100%-28px)]"
           />
         </div>
-        
       </div>
     </div>
   );

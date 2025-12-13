@@ -69,6 +69,21 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
     };
   }, []);
 
+  // Handle resize to keep map properly sized
+  useEffect(() => {
+    if (!mapRef.current || !mapInstance.current) return;
+    
+    const resizeObserver = new ResizeObserver(() => {
+      mapInstance.current?.invalidateSize();
+    });
+    
+    resizeObserver.observe(mapRef.current);
+    
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   // Update markers when data changes
   useEffect(() => {
     if (!mapInstance.current || !markersLayerRef.current) return;
