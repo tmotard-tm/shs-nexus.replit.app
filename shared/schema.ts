@@ -436,6 +436,43 @@ export const techVehicleAssignmentHistory = pgTable("tech_vehicle_assignment_his
   };
 });
 
+// TPMS Cached Assignments - Caches successful TPMS API responses for fallback when API is rate-limited
+export const tpmsCachedAssignments = pgTable("tpms_cached_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Lookup key - the enterprise ID or truck number used to query TPMS
+  lookupKey: varchar("lookup_key", { length: 50 }).notNull().unique(), // Enterprise ID or Truck Number
+  lookupType: text("lookup_type").notNull().default("enterprise_id"), // 'enterprise_id' or 'truck_number'
+  // Cached TPMS response data
+  truckNo: varchar("truck_no", { length: 20 }),
+  enterpriseId: varchar("enterprise_id", { length: 20 }),
+  techId: varchar("tech_id", { length: 20 }),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  districtNo: varchar("district_no"),
+  contactNo: varchar("contact_no", { length: 30 }),
+  email: text("email"),
+  // Full TPMS response stored as JSON for complete data access
+  rawResponse: text("raw_response"), // JSON string of full TechInfoResponse
+  // Cache status tracking
+  status: text("status").notNull().default("live"), // 'live', 'cached', 'stale', 'error'
+  lastSuccessAt: timestamp("last_success_at"), // When API last returned success
+  lastAttemptAt: timestamp("last_attempt_at"), // When we last tried the API
+  lastErrorCode: integer("last_error_code"), // HTTP status code of last error
+  lastErrorMessage: text("last_error_message"), // Error message from last failure
+  failureCount: integer("failure_count").notNull().default(0), // Consecutive failure count
+  // Timestamps
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    lookupKeyIdx: index("tpms_cache_lookup_key_idx").on(table.lookupKey),
+    enterpriseIdIdx: index("tpms_cache_enterprise_id_idx").on(table.enterpriseId),
+    truckNoIdx: index("tpms_cache_truck_no_idx").on(table.truckNo),
+    statusIdx: index("tpms_cache_status_idx").on(table.status),
+    lastSuccessAtIdx: index("tpms_cache_last_success_idx").on(table.lastSuccessAt),
+  };
+});
+
 // Password validation schema
 export const passwordValidationSchema = z.string()
   .min(10, "Password must be at least 10 characters long. Consider using a passphrase for better security.")
@@ -527,6 +564,12 @@ export const insertTechVehicleAssignmentSchema = createInsertSchema(techVehicleA
 export const insertTechVehicleAssignmentHistorySchema = createInsertSchema(techVehicleAssignmentHistory).omit({
   id: true,
   createdAt: true,
+});
+
+export const insertTpmsCachedAssignmentSchema = createInsertSchema(tpmsCachedAssignments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
 });
 
 // API endpoint validation schemas
@@ -722,6 +765,8 @@ export type TechVehicleAssignment = typeof techVehicleAssignments.$inferSelect;
 export type InsertTechVehicleAssignment = z.infer<typeof insertTechVehicleAssignmentSchema>;
 export type TechVehicleAssignmentHistory = typeof techVehicleAssignmentHistory.$inferSelect;
 export type InsertTechVehicleAssignmentHistory = z.infer<typeof insertTechVehicleAssignmentHistorySchema>;
+export type TpmsCachedAssignment = typeof tpmsCachedAssignments.$inferSelect;
+export type InsertTpmsCachedAssignment = z.infer<typeof insertTpmsCachedAssignmentSchema>;
 
 // Combined queue item with module information for unified queue access
 export type CombinedQueueItem = QueueItem & {

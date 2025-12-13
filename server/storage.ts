@@ -30,6 +30,8 @@ import {
   type InsertTechVehicleAssignment,
   type TechVehicleAssignmentHistory,
   type InsertTechVehicleAssignmentHistory,
+  type TpmsCachedAssignment,
+  type InsertTpmsCachedAssignment,
   type IntegrationDataSource,
   type InsertIntegrationDataSource,
   type DataSourceField,
@@ -57,6 +59,7 @@ import {
   syncLogs,
   techVehicleAssignments,
   techVehicleAssignmentHistory,
+  tpmsCachedAssignments,
   integrationDataSources,
   dataSourceFields,
   mappingSets,
@@ -246,6 +249,16 @@ export interface IStorage {
   // Tech Vehicle Assignment History Module
   getTechVehicleAssignmentHistory(techRacfid: string): Promise<TechVehicleAssignmentHistory[]>;
   createTechVehicleAssignmentHistory(history: InsertTechVehicleAssignmentHistory): Promise<TechVehicleAssignmentHistory>;
+
+  // TPMS Cached Assignments Module (API response caching with fallback)
+  getTpmsCachedAssignment(lookupKey: string): Promise<TpmsCachedAssignment | undefined>;
+  getTpmsCachedAssignmentByEnterpriseId(enterpriseId: string): Promise<TpmsCachedAssignment | undefined>;
+  getTpmsCachedAssignmentByTruckNo(truckNo: string): Promise<TpmsCachedAssignment | undefined>;
+  getAllTpmsCachedAssignments(): Promise<TpmsCachedAssignment[]>;
+  upsertTpmsCachedAssignment(data: InsertTpmsCachedAssignment): Promise<TpmsCachedAssignment>;
+  updateTpmsCachedAssignment(lookupKey: string, updates: Partial<TpmsCachedAssignment>): Promise<TpmsCachedAssignment | undefined>;
+  markTpmsCacheError(lookupKey: string, errorCode: number, errorMessage: string): Promise<TpmsCachedAssignment | undefined>;
+  getStaleTPMSCache(maxAgeHours?: number): Promise<TpmsCachedAssignment[]>;
 
   // Field Mapping Module
   getIntegrationDataSources(): Promise<IntegrationDataSource[]>;
@@ -1187,6 +1200,39 @@ export class MemStorage implements IStorage {
 
   async createTechVehicleAssignmentHistory(_history: InsertTechVehicleAssignmentHistory): Promise<TechVehicleAssignmentHistory> {
     throw new Error("Tech vehicle assignment history not implemented in memory storage - use database storage");
+  }
+
+  // TPMS Cached Assignments Module - Stub implementation for MemStorage
+  async getTpmsCachedAssignment(_lookupKey: string): Promise<TpmsCachedAssignment | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getTpmsCachedAssignmentByEnterpriseId(_enterpriseId: string): Promise<TpmsCachedAssignment | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getTpmsCachedAssignmentByTruckNo(_truckNo: string): Promise<TpmsCachedAssignment | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getAllTpmsCachedAssignments(): Promise<TpmsCachedAssignment[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async upsertTpmsCachedAssignment(_data: InsertTpmsCachedAssignment): Promise<TpmsCachedAssignment> {
+    throw new Error("TPMS cache not implemented in memory storage - use database storage");
+  }
+
+  async updateTpmsCachedAssignment(_lookupKey: string, _updates: Partial<TpmsCachedAssignment>): Promise<TpmsCachedAssignment | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async markTpmsCacheError(_lookupKey: string, _errorCode: number, _errorMessage: string): Promise<TpmsCachedAssignment | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getStaleTPMSCache(_maxAgeHours?: number): Promise<TpmsCachedAssignment[]> {
+    return []; // Not implemented in memory storage
   }
 
   // Activity Logs
@@ -3197,6 +3243,93 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return result[0];
+  }
+
+  // TPMS Cached Assignments Module
+  async getTpmsCachedAssignment(lookupKey: string): Promise<TpmsCachedAssignment | undefined> {
+    const result = await db.select().from(tpmsCachedAssignments)
+      .where(eq(tpmsCachedAssignments.lookupKey, lookupKey.toUpperCase()))
+      .limit(1);
+    return result[0];
+  }
+
+  async getTpmsCachedAssignmentByEnterpriseId(enterpriseId: string): Promise<TpmsCachedAssignment | undefined> {
+    const result = await db.select().from(tpmsCachedAssignments)
+      .where(eq(tpmsCachedAssignments.enterpriseId, enterpriseId.toUpperCase()))
+      .limit(1);
+    return result[0];
+  }
+
+  async getTpmsCachedAssignmentByTruckNo(truckNo: string): Promise<TpmsCachedAssignment | undefined> {
+    const result = await db.select().from(tpmsCachedAssignments)
+      .where(eq(tpmsCachedAssignments.truckNo, truckNo))
+      .limit(1);
+    return result[0];
+  }
+
+  async getAllTpmsCachedAssignments(): Promise<TpmsCachedAssignment[]> {
+    return await db.select().from(tpmsCachedAssignments)
+      .orderBy(desc(tpmsCachedAssignments.lastSuccessAt));
+  }
+
+  async upsertTpmsCachedAssignment(data: InsertTpmsCachedAssignment): Promise<TpmsCachedAssignment> {
+    const lookupKey = data.lookupKey.toUpperCase();
+    const existing = await this.getTpmsCachedAssignment(lookupKey);
+    
+    if (existing) {
+      const result = await db.update(tpmsCachedAssignments)
+        .set({
+          ...data,
+          lookupKey,
+          enterpriseId: data.enterpriseId?.toUpperCase(),
+          updatedAt: new Date(),
+        })
+        .where(eq(tpmsCachedAssignments.lookupKey, lookupKey))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(tpmsCachedAssignments)
+        .values({
+          ...data,
+          lookupKey,
+          enterpriseId: data.enterpriseId?.toUpperCase(),
+        })
+        .returning();
+      return result[0];
+    }
+  }
+
+  async updateTpmsCachedAssignment(lookupKey: string, updates: Partial<TpmsCachedAssignment>): Promise<TpmsCachedAssignment | undefined> {
+    const result = await db.update(tpmsCachedAssignments)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(tpmsCachedAssignments.lookupKey, lookupKey.toUpperCase()))
+      .returning();
+    return result[0];
+  }
+
+  async markTpmsCacheError(lookupKey: string, errorCode: number, errorMessage: string): Promise<TpmsCachedAssignment | undefined> {
+    const existing = await this.getTpmsCachedAssignment(lookupKey);
+    const currentFailures = existing?.failureCount || 0;
+    
+    const result = await db.update(tpmsCachedAssignments)
+      .set({
+        status: 'error',
+        lastAttemptAt: new Date(),
+        lastErrorCode: errorCode,
+        lastErrorMessage: errorMessage,
+        failureCount: currentFailures + 1,
+        updatedAt: new Date(),
+      })
+      .where(eq(tpmsCachedAssignments.lookupKey, lookupKey.toUpperCase()))
+      .returning();
+    return result[0];
+  }
+
+  async getStaleTPMSCache(maxAgeHours: number = 24): Promise<TpmsCachedAssignment[]> {
+    const cutoffDate = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+    return await db.select().from(tpmsCachedAssignments)
+      .where(sql`${tpmsCachedAssignments.lastSuccessAt} < ${cutoffDate} OR ${tpmsCachedAssignments.lastSuccessAt} IS NULL`)
+      .orderBy(tpmsCachedAssignments.lastSuccessAt);
   }
 
   // Requests
