@@ -1,4 +1,5 @@
 import { storage } from './storage';
+import type { InsertTpmsCachedAssignment } from '@shared/schema';
 
 interface TPMSToken {
   token: string;
@@ -51,6 +52,14 @@ export interface TruckLookupResult {
   truckNo?: string;
   techInfo?: TechInfoResponse;
   error?: string;
+  source?: 'live' | 'cached'; // Indicates whether data came from API or cache
+  cacheAge?: number; // Age of cached data in hours
+}
+
+export interface CachedTechInfo {
+  techInfo: TechInfoResponse;
+  source: 'live' | 'cached';
+  cacheAge?: number;
 }
 
 class TPMSService {
@@ -80,7 +89,6 @@ class TPMSService {
     }
 
     console.log('[TPMS] Fetching new auth token...');
-    console.log('[TPMS] Auth endpoint URL:', this.authEndpoint);
 
     if (!this.authEndpoint || !this.basicAuthCredential) {
       throw new Error('TPMS authentication not configured. Please set TPMS_AUTH_ENDPOINT and TPMS_AUTHORIZATION.');
@@ -90,7 +98,6 @@ class TPMSService {
       const authHeader = this.basicAuthCredential.startsWith('Basic ') 
         ? this.basicAuthCredential 
         : `Basic ${this.basicAuthCredential}`;
-      console.log('[TPMS] Using auth header format:', authHeader.substring(0, 15) + '...');
       
       const response = await fetch(this.authEndpoint, {
         method: 'GET',
@@ -105,8 +112,6 @@ class TPMSService {
       }
 
       const xmlText = await response.text();
-      console.log('[TPMS] Auth response received, parsing XML...');
-      
       const token = this.extractTokenFromXml(xmlText);
       
       if (!token) {
@@ -146,6 +151,7 @@ class TPMSService {
     return null;
   }
 
+  // Raw API call - does not use cache
   async getTechInfo(enterpriseId: string): Promise<TechInfoResponse> {
     if (!enterpriseId) {
       throw new Error('Enterprise ID is required');
@@ -157,74 +163,235 @@ class TPMSService {
     const baseUrl = this.apiEndpoint.endsWith('/') ? this.apiEndpoint.slice(0, -1) : this.apiEndpoint;
     const url = `${baseUrl}/techinfo/${cleanId}`;
     console.log(`[TPMS] Fetching tech info for: ${cleanId}`);
-    console.log(`[TPMS] Tech info URL: ${url}`);
 
-    try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-      });
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Tech info request failed: ${response.status} - ${errorText}`);
-      }
-
-      const data: TechInfoResponse = await response.json();
-      
-      if (data.messages && !data.messages.includes('SUCCESS')) {
-        throw new Error(`TPMS error: ${data.messages.join(', ')}`);
-      }
-
-      console.log(`[TPMS] Tech info retrieved successfully for ${cleanId}, Truck: ${data.truckNo || 'N/A'}`);
-      return data;
-    } catch (error: any) {
-      console.error(`[TPMS] Error fetching tech info for ${cleanId}:`, error.message);
+    if (!response.ok) {
+      const errorText = await response.text();
+      const error = new Error(`Tech info request failed: ${response.status} - ${errorText}`);
+      (error as any).statusCode = response.status;
       throw error;
     }
+
+    const data: TechInfoResponse = await response.json();
+    
+    if (data.messages && !data.messages.includes('SUCCESS')) {
+      throw new Error(`TPMS error: ${data.messages.join(', ')}`);
+    }
+
+    console.log(`[TPMS] Tech info retrieved successfully for ${cleanId}, Truck: ${data.truckNo || 'N/A'}`);
+    return data;
+  }
+
+  // Cache a successful TPMS response
+  private async cacheTPMSResponse(lookupKey: string, lookupType: 'enterprise_id' | 'truck_number', techInfo: TechInfoResponse): Promise<void> {
+    try {
+      const cacheData: InsertTpmsCachedAssignment = {
+        lookupKey: lookupKey.toUpperCase(),
+        lookupType,
+        truckNo: techInfo.truckNo?.trim() || null,
+        enterpriseId: techInfo.ldapId?.toUpperCase() || null,
+        techId: techInfo.techId || null,
+        firstName: techInfo.firstName || null,
+        lastName: techInfo.lastName || null,
+        districtNo: techInfo.districtNo || null,
+        contactNo: techInfo.contactNo || null,
+        email: techInfo.email || null,
+        rawResponse: JSON.stringify(techInfo),
+        status: 'live',
+        lastSuccessAt: new Date(),
+        lastAttemptAt: new Date(),
+        failureCount: 0,
+      };
+      
+      await storage.upsertTpmsCachedAssignment(cacheData);
+      console.log(`[TPMS-Cache] Cached successful response for ${lookupKey}`);
+    } catch (error: any) {
+      console.error(`[TPMS-Cache] Error caching response for ${lookupKey}:`, error.message);
+    }
+  }
+
+  // Get tech info with caching - tries API first, falls back to cache on failure
+  async getTechInfoWithCache(enterpriseId: string): Promise<CachedTechInfo | null> {
+    const cleanId = enterpriseId.trim().toUpperCase();
+    
+    try {
+      // Try live API first
+      const techInfo = await this.getTechInfo(cleanId);
+      
+      // Cache the successful response
+      await this.cacheTPMSResponse(cleanId, 'enterprise_id', techInfo);
+      
+      return {
+        techInfo,
+        source: 'live',
+      };
+    } catch (error: any) {
+      const statusCode = (error as any).statusCode || 0;
+      console.warn(`[TPMS-Cache] API failed for ${cleanId} (status: ${statusCode}), checking cache...`);
+      
+      // Record the error in cache
+      const existingCache = await storage.getTpmsCachedAssignment(cleanId);
+      if (existingCache) {
+        await storage.markTpmsCacheError(cleanId, statusCode, error.message);
+      }
+      
+      // Look for cached data - try by lookupKey first, then by enterpriseId
+      let cached = await storage.getTpmsCachedAssignment(cleanId);
+      if (!cached) {
+        cached = await storage.getTpmsCachedAssignmentByEnterpriseId(cleanId);
+      }
+      
+      if (cached && cached.rawResponse) {
+        try {
+          const techInfo: TechInfoResponse = JSON.parse(cached.rawResponse);
+          const cacheAge = cached.lastSuccessAt 
+            ? Math.round((Date.now() - new Date(cached.lastSuccessAt).getTime()) / (1000 * 60 * 60))
+            : undefined;
+          
+          console.log(`[TPMS-Cache] Returning cached data for ${cleanId} (age: ${cacheAge}h)`);
+          return {
+            techInfo,
+            source: 'cached',
+            cacheAge,
+          };
+        } catch (parseError) {
+          console.error(`[TPMS-Cache] Failed to parse cached data for ${cleanId}`);
+        }
+      }
+      
+      console.warn(`[TPMS-Cache] No cached data available for ${cleanId}`);
+      return null;
+    }
+  }
+
+  // Get cached data by truck number
+  async getCachedByTruckNo(truckNo: string): Promise<CachedTechInfo | null> {
+    const cached = await storage.getTpmsCachedAssignmentByTruckNo(truckNo);
+    
+    if (cached && cached.rawResponse) {
+      try {
+        const techInfo: TechInfoResponse = JSON.parse(cached.rawResponse);
+        const cacheAge = cached.lastSuccessAt 
+          ? Math.round((Date.now() - new Date(cached.lastSuccessAt).getTime()) / (1000 * 60 * 60))
+          : undefined;
+        
+        return {
+          techInfo,
+          source: 'cached',
+          cacheAge,
+        };
+      } catch (parseError) {
+        console.error(`[TPMS-Cache] Failed to parse cached data for truck ${truckNo}`);
+      }
+    }
+    
+    return null;
   }
 
   async lookupTruckByEnterpriseId(enterpriseId: string): Promise<TruckLookupResult> {
-    try {
-      const techInfo = await this.getTechInfo(enterpriseId);
-      
+    const result = await this.getTechInfoWithCache(enterpriseId);
+    
+    if (result) {
       return {
         success: true,
-        truckNo: techInfo.truckNo?.trim() || undefined,
-        techInfo,
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message,
+        truckNo: result.techInfo.truckNo?.trim() || undefined,
+        techInfo: result.techInfo,
+        source: result.source,
+        cacheAge: result.cacheAge,
       };
     }
+    
+    return {
+      success: false,
+      error: 'Unable to retrieve tech info from API or cache',
+    };
   }
 
-  async lookupByTruckNumber(truckNumber: string): Promise<{ success: boolean; data?: TechInfoResponse; message?: string }> {
+  async lookupByTruckNumber(truckNumber: string): Promise<{ success: boolean; data?: TechInfoResponse; message?: string; source?: 'live' | 'cached' }> {
     const cleanTruckNo = truckNumber.trim();
     console.log(`[TPMS] Looking up tech by truck number: ${cleanTruckNo}`);
     
     try {
-      // Use the same endpoint as Enterprise ID - TPMS API auto-detects the input type
+      // Try live API first
       const techInfo = await this.getTechInfo(cleanTruckNo);
+      
+      // Cache the successful response
+      await this.cacheTPMSResponse(cleanTruckNo, 'truck_number', techInfo);
       
       console.log(`[TPMS] Tech found for truck ${cleanTruckNo}: ${techInfo.firstName} ${techInfo.lastName}`);
       return {
         success: true,
         data: techInfo,
+        source: 'live',
       };
     } catch (error: any) {
-      console.error(`[TPMS] Error looking up truck ${cleanTruckNo}:`, error.message);
+      console.warn(`[TPMS-Cache] API failed for truck ${cleanTruckNo}, checking cache...`);
+      
+      // Try cached data
+      const cached = await this.getCachedByTruckNo(cleanTruckNo);
+      if (cached) {
+        console.log(`[TPMS-Cache] Returning cached data for truck ${cleanTruckNo}`);
+        return {
+          success: true,
+          data: cached.techInfo,
+          source: 'cached',
+        };
+      }
+      
       return {
         success: false,
         message: `No Employee found for ${cleanTruckNo}`,
       };
     }
+  }
+
+  // Batch lookup for multiple truck numbers - uses cache primarily to avoid rate limiting
+  async batchLookupByTruckNumbers(truckNumbers: string[]): Promise<Map<string, CachedTechInfo | null>> {
+    const results = new Map<string, CachedTechInfo | null>();
+    
+    // First, get all cached data
+    const allCached = await storage.getAllTpmsCachedAssignments();
+    const cacheByTruck = new Map<string, typeof allCached[0]>();
+    
+    for (const cached of allCached) {
+      if (cached.truckNo) {
+        cacheByTruck.set(cached.truckNo, cached);
+      }
+    }
+    
+    // For each truck number, return cached data if available
+    for (const truckNo of truckNumbers) {
+      const cached = cacheByTruck.get(truckNo);
+      
+      if (cached && cached.rawResponse) {
+        try {
+          const techInfo: TechInfoResponse = JSON.parse(cached.rawResponse);
+          const cacheAge = cached.lastSuccessAt 
+            ? Math.round((Date.now() - new Date(cached.lastSuccessAt).getTime()) / (1000 * 60 * 60))
+            : undefined;
+          
+          results.set(truckNo, {
+            techInfo,
+            source: 'cached',
+            cacheAge,
+          });
+        } catch {
+          results.set(truckNo, null);
+        }
+      } else {
+        results.set(truckNo, null);
+      }
+    }
+    
+    return results;
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
@@ -236,7 +403,7 @@ class TPMSService {
         };
       }
 
-      const token = await this.getToken();
+      await this.getToken();
       
       return {
         success: true,
@@ -253,6 +420,20 @@ class TPMSService {
   isConfigured(): boolean {
     return !!(this.authEndpoint && this.apiEndpoint && this.basicAuthCredential);
   }
+
+  // Get cache statistics
+  async getCacheStats(): Promise<{ total: number; live: number; cached: number; error: number; stale: number }> {
+    const allCached = await storage.getAllTpmsCachedAssignments();
+    const stale = await storage.getStaleTPMSCache(24);
+    
+    return {
+      total: allCached.length,
+      live: allCached.filter(c => c.status === 'live').length,
+      cached: allCached.filter(c => c.status === 'cached').length,
+      error: allCached.filter(c => c.status === 'error').length,
+      stale: stale.length,
+    };
+  }
 }
 
 let tpmsServiceInstance: TPMSService | null = null;
@@ -267,3 +448,5 @@ export function getTPMSService(): TPMSService {
 export function resetTPMSService(): void {
   tpmsServiceInstance = null;
 }
+
+export type { TechInfoResponse, TechAddress };
