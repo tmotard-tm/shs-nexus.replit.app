@@ -6,7 +6,7 @@ import { holmanApiService } from "./holman-api-service";
 export class HolmanSubmissionService {
   async createSubmission(data: {
     holmanVehicleNumber: string;
-    action: 'assign' | 'unassign';
+    action: 'assign' | 'unassign' | 'field_test';
     enterpriseId?: string | null;
     submissionId?: string | null;
     correlationId?: string | null;

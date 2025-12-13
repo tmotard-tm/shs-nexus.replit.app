@@ -260,6 +260,192 @@ class HolmanAssignmentUpdateService {
 
     return results;
   }
+
+  async testSingleFieldUpdate(
+    vehicleNumber: string,
+    fieldName: string,
+    fieldValue: string | null,
+    useSpace: boolean = false
+  ): Promise<{
+    success: boolean;
+    fieldName: string;
+    fieldValue: string | null;
+    durationMs: number;
+    submissionId?: string;
+    error?: string;
+    response?: any;
+  }> {
+    const paddedVehicleNumber = vehicleNumber.padStart(6, '0');
+    const startTime = Date.now();
+    
+    const actualValue = useSpace && fieldValue === null ? ' ' : fieldValue;
+    
+    const basePayload: HolmanAssignmentPayload = {
+      lesseeCode: this.LESSEE_CODE,
+      holmanVehicleNumber: paddedVehicleNumber,
+      email: this.FLEET_EMAIL,
+      firstName: null,
+      lastName: null,
+      clientData1: null,
+      clientData2: null,
+      clientData3: '890',
+      clientData4: null,
+      clientData5: null,
+      clientData6: null,
+      clientData7: null,
+      assignedStatusCode: 'A',
+      prefix: null,
+      addressLine1: null,
+      addressLine2: null,
+      addressLine3: null,
+      city: null,
+      stateProvince: null,
+      zipPostalCode: null,
+      homePhone: null,
+      workPhone: null,
+      workPhoneExtension: null,
+      cellPhone: null,
+    };
+
+    (basePayload as any)[fieldName] = actualValue;
+
+    console.log(`[FieldTest] Testing field "${fieldName}" = "${actualValue}" for vehicle ${paddedVehicleNumber}`);
+
+    try {
+      const response = await holmanApiService.submitVehicleArray([basePayload]);
+      const durationMs = Date.now() - startTime;
+      const submissionId = response?.submissionId || response?.id || null;
+
+      await holmanSubmissionService.createSubmission({
+        holmanVehicleNumber: paddedVehicleNumber,
+        action: 'field_test',
+        enterpriseId: `FIELD_TEST:${fieldName}`,
+        submissionId,
+        payload: basePayload,
+        response,
+      });
+
+      console.log(`[FieldTest] Field "${fieldName}" completed in ${durationMs}ms`);
+
+      return {
+        success: true,
+        fieldName,
+        fieldValue: actualValue,
+        durationMs,
+        submissionId,
+        response,
+      };
+    } catch (error: any) {
+      const durationMs = Date.now() - startTime;
+      console.error(`[FieldTest] Field "${fieldName}" failed after ${durationMs}ms:`, error);
+
+      return {
+        success: false,
+        fieldName,
+        fieldValue: actualValue,
+        durationMs,
+        error: error.message || 'Unknown error',
+      };
+    }
+  }
+
+  async runFieldByFieldTest(
+    vehicleNumber: string,
+    useSpace: boolean = false,
+    testValue: string = 'TEST'
+  ): Promise<{
+    vehicleNumber: string;
+    useSpace: boolean;
+    testValue: string;
+    results: Array<{
+      fieldName: string;
+      fieldValue: string | null;
+      durationMs: number;
+      success: boolean;
+      error?: string;
+    }>;
+    totalDurationMs: number;
+    slowestField?: string;
+    fastestField?: string;
+  }> {
+    const testableFields = [
+      'firstName',
+      'lastName',
+      'clientData1',
+      'clientData2',
+      'clientData4',
+      'clientData5',
+      'clientData6',
+      'clientData7',
+      'prefix',
+      'addressLine1',
+      'addressLine2',
+      'addressLine3',
+      'city',
+      'stateProvince',
+      'zipPostalCode',
+      'homePhone',
+      'workPhone',
+      'workPhoneExtension',
+      'cellPhone',
+    ];
+
+    const results: Array<{
+      fieldName: string;
+      fieldValue: string | null;
+      durationMs: number;
+      success: boolean;
+      error?: string;
+    }> = [];
+
+    const totalStart = Date.now();
+
+    console.log(`[FieldTest] Starting field-by-field test for vehicle ${vehicleNumber}`);
+    console.log(`[FieldTest] Using ${useSpace ? 'space (" ")' : 'null'} for empty values`);
+    console.log(`[FieldTest] Test value: "${testValue}"`);
+
+    for (const fieldName of testableFields) {
+      const result = await this.testSingleFieldUpdate(
+        vehicleNumber,
+        fieldName,
+        testValue,
+        useSpace
+      );
+
+      results.push({
+        fieldName: result.fieldName,
+        fieldValue: result.fieldValue,
+        durationMs: result.durationMs,
+        success: result.success,
+        error: result.error,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    const totalDurationMs = Date.now() - totalStart;
+
+    const successfulResults = results.filter(r => r.success);
+    const slowestField = successfulResults.length > 0
+      ? successfulResults.reduce((a, b) => a.durationMs > b.durationMs ? a : b).fieldName
+      : undefined;
+    const fastestField = successfulResults.length > 0
+      ? successfulResults.reduce((a, b) => a.durationMs < b.durationMs ? a : b).fieldName
+      : undefined;
+
+    console.log(`[FieldTest] Completed all fields in ${totalDurationMs}ms`);
+    console.log(`[FieldTest] Slowest: ${slowestField}, Fastest: ${fastestField}`);
+
+    return {
+      vehicleNumber,
+      useSpace,
+      testValue,
+      results,
+      totalDurationMs,
+      slowestField,
+      fastestField,
+    };
+  }
 }
 
 export const holmanAssignmentUpdateService = new HolmanAssignmentUpdateService();

@@ -5589,6 +5589,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Field-by-field test endpoints for debugging slow Holman syncs
+  app.post("/api/holman/field-test/single", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber, fieldName, fieldValue, useSpace } = req.body;
+      
+      if (!vehicleNumber || !fieldName) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'vehicleNumber and fieldName are required' 
+        });
+      }
+      
+      console.log(`[API] Single field test: vehicle=${vehicleNumber}, field=${fieldName}, useSpace=${useSpace}`);
+      const result = await holmanAssignmentUpdateService.testSingleFieldUpdate(
+        vehicleNumber,
+        fieldName,
+        fieldValue ?? null,
+        useSpace === true
+      );
+      
+      res.json({ success: true, result });
+    } catch (error: any) {
+      console.error('[API] Single field test error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/holman/field-test/run", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber, useSpace, testValue } = req.body;
+      
+      if (!vehicleNumber) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'vehicleNumber is required' 
+        });
+      }
+      
+      console.log(`[API] Running field-by-field test for vehicle=${vehicleNumber}, useSpace=${useSpace}, testValue=${testValue}`);
+      const result = await holmanAssignmentUpdateService.runFieldByFieldTest(
+        vehicleNumber,
+        useSpace === true,
+        testValue || 'TEST'
+      );
+      
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error('[API] Field-by-field test error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   console.log("Registering Snowflake API routes...");
   const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
 
