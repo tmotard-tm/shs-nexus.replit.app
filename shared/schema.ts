@@ -344,7 +344,8 @@ export const termedTechs = pgTable("termed_techs", {
   };
 });
 
-// All Technicians from Snowflake DRIVELINE_ALL_TECHS view (complete roster)
+// All Technicians from Snowflake - unified employee roster with termination tracking
+// Termed employees are identified by effectiveDate >= CURRENT_DATE - 30 days
 export const allTechs = pgTable("all_techs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   // Core fields
@@ -358,6 +359,13 @@ export const allTechs = pgTable("all_techs", {
   districtNo: varchar("district_no"),
   planningAreaName: text("planning_area_name"),
   employmentStatus: varchar("employment_status", { length: 5 }),
+  // Termination tracking fields (for identifying termed employees)
+  effectiveDate: date("effective_date"), // EFFDT - used to filter termed employees
+  lastDayWorked: date("last_day_worked"), // DATE_LAST_WORKED
+  // Offboarding tracking (previously only in termed_techs)
+  offboardingTaskCreated: boolean("offboarding_task_created").notNull().default(false),
+  offboardingTaskId: varchar("offboarding_task_id"), // Reference to queue_items.id
+  processedAt: timestamp("processed_at"), // When offboarding was fully processed
   // Sync tracking
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -367,6 +375,8 @@ export const allTechs = pgTable("all_techs", {
     employeeIdIdx: index("all_techs_employee_id_idx").on(table.employeeId),
     techRacfidIdx: index("all_techs_tech_racfid_idx").on(table.techRacfid),
     employmentStatusIdx: index("all_techs_employment_status_idx").on(table.employmentStatus),
+    effectiveDateIdx: index("all_techs_effective_date_idx").on(table.effectiveDate),
+    offboardingTaskCreatedIdx: index("all_techs_offboarding_task_created_idx").on(table.offboardingTaskCreated),
   };
 });
 
