@@ -574,6 +574,239 @@ export default function UpdateVehicle() {
                           </div>
                         </div>
                         
+                        {/* Service & Configuration Filters */}
+                        <div className="space-y-3">
+                          <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Configuration</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Vehicle Program</Label>
+                              <Select value={vehicleProgramFilter} onValueChange={setVehicleProgramFilter} data-testid="select-vehicle-program-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All programs</SelectItem>
+                                  <SelectItem value="fleet">Fleet</SelectItem>
+                                  <SelectItem value="byov">BYOV</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">Branding</Label>
+                              <Select value={brandingFilter} onValueChange={setBrandingFilter} data-testid="select-branding-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All branding</SelectItem>
+                                  {filterOptions.brandings.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">Interior</Label>
+                              <Select value={interiorFilter} onValueChange={setInteriorFilter} data-testid="select-interior-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All interiors</SelectItem>
+                                  {filterOptions.interiors.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">Tune Status</Label>
+                              <Select value={tuneStatusFilter} onValueChange={setTuneStatusFilter} data-testid="select-tune-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All tune statuses</SelectItem>
+                                  {filterOptions.tuneStatuses.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Location Filters */}
+                        <div className="space-y-3">
+                          <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Location</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">City</Label>
+                              <Select value={cityFilter} onValueChange={setCityFilter} data-testid="select-city-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All cities</SelectItem>
+                                  {filterOptions.cities.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">State</Label>
+                              <Select value={stateFilter} onValueChange={setStateFilter} data-testid="select-state-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All states</SelectItem>
+                                  {filterOptions.states.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">Region</Label>
+                              <Select value={regionFilter} onValueChange={setRegionFilter} data-testid="select-region-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All regions</SelectItem>
+                                  {filterOptions.regions.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">Division</Label>
+                              <Select value={divisionFilter} onValueChange={setDivisionFilter} data-testid="select-division-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All divisions</SelectItem>
+                                  {filterOptions.divisions.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">District</Label>
+                              <Select value={districtFilter} onValueChange={setDistrictFilter} data-testid="select-district-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All districts</SelectItem>
+                                  {filterOptions.districts.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">License State</Label>
+                              <Select value={licenseStateFilter} onValueChange={setLicenseStateFilter} data-testid="select-license-state-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All license states</SelectItem>
+                                  {filterOptions.licenseStates.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Assignment Status Filter */}
+                        <div className="space-y-3">
+                          <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Assignment Status</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Assignment Status (TPMS)</Label>
+                              <Select value={assignmentStatusFilter} onValueChange={setAssignmentStatusFilter} data-testid="select-assignment-status-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All vehicles</SelectItem>
+                                  <SelectItem value="assigned">Assigned Only</SelectItem>
+                                  <SelectItem value="unassigned">Unassigned Only</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Tech Assignment Filters */}
+                        <div className="space-y-3">
+                          <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Tech Assignment</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Holman Tech ID</Label>
+                              <Select value={holmanTechFilter} onValueChange={setHolmanTechFilter} data-testid="select-holman-tech-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All techs</SelectItem>
+                                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                                  {filterOptions.holmanTechs.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">TPMS Tech ID</Label>
+                              <Select value={tpmsTechFilter} onValueChange={setTpmsTechFilter} data-testid="select-tpms-tech-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All techs</SelectItem>
+                                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                                  {filterOptions.tpmsTechs.map(option => (
+                                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-1">
+                              <Label className="text-xs">Assignment Match</Label>
+                              <Select value={mismatchFilter} onValueChange={setMismatchFilter} data-testid="select-mismatch-filter">
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="All" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All vehicles</SelectItem>
+                                  <SelectItem value="mismatch">Mismatch Only</SelectItem>
+                                  <SelectItem value="match">Matched Only</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                        
                         {/* Action Buttons */}
                         <div className="flex justify-between items-center pt-2 border-t">
                           <span className="text-sm text-muted-foreground">
@@ -594,9 +827,15 @@ export default function UpdateVehicle() {
                                   setStateFilter("all");
                                   setLicenseStateFilter("all");
                                   setRegionFilter("all");
+                                  setDivisionFilter("all");
                                   setDistrictFilter("all");
                                   setYearFilter("all");
                                   setCityFilter("all");
+                                  setAssignmentStatusFilter("all");
+                                  setHolmanTechFilter("all");
+                                  setTpmsTechFilter("all");
+                                  setMismatchFilter("all");
+                                  setVehicleProgramFilter("all");
                                 }}
                                 data-testid="button-clear-filters"
                               >
