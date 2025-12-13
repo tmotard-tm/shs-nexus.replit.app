@@ -61,6 +61,26 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
   - REST API at `/api/vehicle-assignments/*` for CRUD operations
 - Key field mappings: TPMS truckNo ↔ Holman vehicleNumber (leading zeros ignored)
 
+**Holman Assignment Sync** (December 2025): Sync TPMS technician data to Holman to fix assignment mismatches:
+- **Purpose**: When TPMS and Holman assignment data don't match, update Holman records with TPMS tech data
+- **API Endpoints**:
+  - POST `/api/holman/assignments/update` - Update single vehicle with TPMS tech data
+  - POST `/api/holman/assignments/update-bulk` - Bulk update multiple vehicles
+- **Payload Fields** (matches Python script pattern):
+  - lesseeCode: "2B56"
+  - holmanVehicleNumber: padded to 6 digits
+  - email: "FLEET_SUPPORT@TRANSFORMCO.COM"
+  - firstName, lastName: from TPMS techinfo
+  - clientData1: last name (truncated to 12 chars)
+  - clientData2: enterprise ID
+  - clientData3: "890"
+  - assignedStatusCode: "A" for fleet, "D" for BYOV (vehicle numbers starting with 88)
+  - prefix: district (last 4 digits)
+  - addressLine1, addressLine2, city, stateProvince, zipPostalCode: from TPMS primary address
+  - workPhone: from TPMS contact number
+- **UI**: "Sync to Holman" button on Update Vehicle page dialog
+- **Service**: `server/holman-assignment-update-service.ts`
+
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
