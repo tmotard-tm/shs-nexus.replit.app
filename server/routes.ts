@@ -5568,6 +5568,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get all submissions with filters for activity logs
+  app.get("/api/holman/submissions/logs", requireAuth, async (req: any, res) => {
+    try {
+      const { status, action, vehicleNumber, startDate, endDate, limit } = req.query;
+      
+      const filters: any = {};
+      if (status) filters.status = status;
+      if (action) filters.action = action;
+      if (vehicleNumber) filters.vehicleNumber = vehicleNumber;
+      if (startDate) filters.startDate = new Date(startDate);
+      if (endDate) filters.endDate = new Date(endDate);
+      if (limit) filters.limit = parseInt(limit, 10);
+      
+      const submissions = await holmanSubmissionService.getAllSubmissions(filters);
+      res.json({ success: true, submissions, count: submissions.length });
+    } catch (error: any) {
+      console.error('[API] Get submission logs error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   console.log("Registering Snowflake API routes...");
   const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
 

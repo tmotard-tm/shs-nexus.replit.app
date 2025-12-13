@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { holmanSubmissions, type HolmanSubmission, type InsertHolmanSubmission } from "@shared/schema";
-import { eq, and, inArray, desc } from "drizzle-orm";
+import { eq, and, inArray, desc, gte, lte, like, sql } from "drizzle-orm";
 import { holmanApiService } from "./holman-api-service";
 
 export class HolmanSubmissionService {
@@ -159,6 +159,58 @@ export class HolmanSubmissionService {
     }
     
     return count;
+  }
+
+  async getAllSubmissions(filters?: {
+    status?: string;
+    action?: string;
+    vehicleNumber?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+  }): Promise<(HolmanSubmission & { durationMs?: number | null })[]> {
+    const conditions = [];
+    
+    if (filters?.status && filters.status !== 'all') {
+      conditions.push(eq(holmanSubmissions.status, filters.status));
+    }
+    
+    if (filters?.action && filters.action !== 'all') {
+      conditions.push(eq(holmanSubmissions.action, filters.action));
+    }
+    
+    if (filters?.vehicleNumber) {
+      conditions.push(like(holmanSubmissions.holmanVehicleNumber, `%${filters.vehicleNumber}%`));
+    }
+    
+    if (filters?.startDate) {
+      conditions.push(gte(holmanSubmissions.createdAt, filters.startDate));
+    }
+    
+    if (filters?.endDate) {
+      conditions.push(lte(holmanSubmissions.createdAt, filters.endDate));
+    }
+    
+    const query = db.select()
+      .from(holmanSubmissions)
+      .orderBy(desc(holmanSubmissions.createdAt));
+    
+    if (conditions.length > 0) {
+      query.where(and(...conditions));
+    }
+    
+    if (filters?.limit) {
+      query.limit(filters.limit);
+    }
+    
+    const results = await query;
+    
+    return results.map(sub => ({
+      ...sub,
+      durationMs: sub.completedAt && sub.createdAt 
+        ? new Date(sub.completedAt).getTime() - new Date(sub.createdAt).getTime()
+        : null,
+    }));
   }
 }
 
