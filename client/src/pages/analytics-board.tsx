@@ -47,7 +47,7 @@ export default function AnalyticsBoard() {
             <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 flex items-center justify-center">
               <BarChart3 className="h-6 w-6 text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-foreground">Analytics Dashboard</h1>
+            <h1 className="text-3xl font-bold text-foreground">Fleet Distribution</h1>
           </div>
           <p className="text-muted-foreground max-w-2xl mx-auto">
             Monitor performance, track metrics, and gain insights across all departments and operations.
