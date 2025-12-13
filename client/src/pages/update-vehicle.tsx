@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -206,6 +207,48 @@ export default function UpdateVehicle() {
   });
 
   const holmanVehicles: FleetVehicle[] = fleetResponse?.vehicles || [];
+
+  // Mutation to sync vehicle assignment to Holman based on TPMS data
+  const syncToHolmanMutation = useMutation({
+    mutationFn: async ({ vehicleNumber, enterpriseId }: { vehicleNumber: string; enterpriseId: string }) => {
+      const response = await apiRequest('POST', '/api/holman/assignments/update', { vehicleNumber, enterpriseId });
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Holman Update Successful",
+        description: `Vehicle ${data.holmanVehicleNumber} has been updated in Holman with TPMS assignment data`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Holman Update Failed",
+        description: error.message || "Failed to update vehicle assignment in Holman",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSyncToHolman = () => {
+    if (!selectedVehicle) return;
+    
+    const enterpriseId = selectedVehicle.tpmsAssignedTechId || employeeData.enterpriseId;
+    
+    if (!enterpriseId) {
+      toast({
+        title: "Missing Enterprise ID",
+        description: "Please enter an Enterprise ID or select a vehicle with a TPMS assigned technician",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    syncToHolmanMutation.mutate({
+      vehicleNumber: selectedVehicle.vehicleNumber,
+      enterpriseId,
+    });
+  };
   
   // Generate filter options from actual data
   const unique = (arr: (string | undefined)[]) => Array.from(new Set(arr.filter(Boolean))).sort() as string[];
@@ -1118,6 +1161,26 @@ export default function UpdateVehicle() {
                       data-testid="button-cancel-update"
                     >
                       Cancel
+                    </Button>
+                    <Button 
+                      type="button"
+                      variant="secondary"
+                      className="flex-1"
+                      onClick={handleSyncToHolman}
+                      disabled={syncToHolmanMutation.isPending}
+                      data-testid="button-sync-to-holman"
+                    >
+                      {syncToHolmanMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Sync to Holman
+                        </>
+                      )}
                     </Button>
                     <Button 
                       type="submit" 
