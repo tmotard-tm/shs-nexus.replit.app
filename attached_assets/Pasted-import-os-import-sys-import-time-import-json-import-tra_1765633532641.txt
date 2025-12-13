@@ -1,0 +1,526 @@
+import os
+import sys
+import time
+import json
+import traceback
+import requests
+import snowflake.connector
+from typing import Any, Dict, List, Optional
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
+
+# ---------------- Utilities ----------------
+
+def _normalize_sf_account(val: str) -> str:
+    """
+    Accepts either an account locator (xy12345 or xy12345.us-east-1) or a full hostname
+    (xy12345.us-east-1.snowflakecomputing.com) and returns a connector-friendly value.
+    """
+    if not val:
+        return val
+    v = val.strip().lower()
+    if v.startswith("https://"):
+        v = v[8:]
+    if v.startswith("http://"):
+        v = v[7:]
+    suffixes = (
+        ".snowflakecomputing.com",
+        ".privatelink.snowflakecomputing.com",
+    )
+    for s in suffixes:
+        if v.endswith(s):
+            v = v[: -len(s)]
+            break
+    return v.strip().strip("/")
+
+def _fail_and_pause(msg: str, code: int = 2) -> None:
+    # Modified: exit immediately with no prompt/pause
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+def _debug_env():
+    if os.getenv("DEBUG_ENV", "false").lower() != "true":
+        return
+    def mask(s):
+        if not s:
+            return "MISSING"
+        return s[:4] + "..." if len(s) > 4 else "****"
+    print("== ENV DEBUG ==")
+    for k in ["HOLMAN_ENV","HOLMAN_CLIENT_ID","HOLMAN_CLIENT_SECRET","HOLMAN_LESSEE_CODE",
+              "SNOWFLAKE_ACCOUNT","SNOWFLAKE_USER","SNOWFLAKE_ROLE",
+              "SNOWFLAKE_WAREHOUSE","SNOWFLAKE_DATABASE","SNOWFLAKE_SCHEMA",
+              "SNOWFLAKE_PRIVATE_KEY_PATH","BATCH_SIZE","POLL_STATUS","STATUS_TIMEOUT_SEC"]:
+        v = os.getenv(k)
+        if k in ("HOLMAN_CLIENT_SECRET",):
+            print(f"{k}={'set' if v else 'MISSING'}")
+        else:
+            print(f"{k}={mask(v)}")
+    print("===============")
+
+# ---------------- Configuration ----------------
+
+ENV = os.getenv("HOLMAN_ENV", "qa").strip().lower()
+if ENV not in {"qa", "prod"}:
+    _fail_and_pause("HOLMAN_ENV must be 'qa' or 'prod'")
+
+BASE = "https://api.stg.holman.solutions" if ENV == "qa" else "https://api.holman.solutions"
+TOKEN_URL = f"{BASE}/sso/sts/connect/token"
+SUBMIT_URL = f"{BASE}/CustomerDataAPI/vehicles/submit"
+STATUS_URL = f"{BASE}/CustomerDataAPI/submission/status"
+
+CLIENT_ID = os.getenv("HOLMAN_CLIENT_ID")
+CLIENT_SECRET = os.getenv("HOLMAN_CLIENT_SECRET")
+if not CLIENT_ID or not CLIENT_SECRET:
+    _fail_and_pause("Set HOLMAN_CLIENT_ID and HOLMAN_CLIENT_SECRET")
+
+# Static lessee code (env, defaults to 2B56)
+LESSEE_CODE = (os.getenv("HOLMAN_LESSEE_CODE", "2B56") or "2B56").strip()
+
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))  # future-proof; we post single records
+POLL_STATUS = os.getenv("POLL_STATUS", "false").lower() == "true"
+STATUS_TIMEOUT_SEC = int(os.getenv("STATUS_TIMEOUT_SEC", "300"))
+
+# Snowflake env
+SF_ACCOUNT  = _normalize_sf_account(os.getenv("SNOWFLAKE_ACCOUNT", ""))
+SF_USER     = os.getenv("SNOWFLAKE_USER")
+SF_ROLE     = os.getenv("SNOWFLAKE_ROLE")
+SF_WAREHOUSE= os.getenv("SNOWFLAKE_WAREHOUSE")
+SF_DATABASE = os.getenv("SNOWFLAKE_DATABASE")
+SF_SCHEMA   = os.getenv("SNOWFLAKE_SCHEMA")
+SF_KEY_PATH = os.getenv("SNOWFLAKE_PRIVATE_KEY_PATH")
+
+for k, v in {
+    "SNOWFLAKE_ACCOUNT": SF_ACCOUNT,
+    "SNOWFLAKE_USER": SF_USER,
+    "SNOWFLAKE_ROLE": SF_ROLE,
+    "SNOWFLAKE_WAREHOUSE": SF_WAREHOUSE,
+    "SNOWFLAKE_DATABASE": SF_DATABASE,
+    "SNOWFLAKE_SCHEMA": SF_SCHEMA,
+    "SNOWFLAKE_PRIVATE_KEY_PATH": SF_KEY_PATH,
+}.items():
+    if not v:
+        _fail_and_pause(f"Missing env var: {k}")
+
+# ---------------- SQL Strings (closed properly) ----------------
+
+CREATE_LOG_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS HOLMAN_API_LOG (
+  LOG_ID NUMBER AUTOINCREMENT,
+  TS TIMESTAMP_LTZ DEFAULT CURRENT_TIMESTAMP(),
+  ENDPOINT STRING,
+  HTTP_STATUS NUMBER,
+  SUBMISSION_ID STRING,
+  LESSEE_CODE STRING,
+  HOLMAN_VEHICLE_NUMBER STRING,
+  DURATION_MS NUMBER,
+  REQUEST_JSON VARIANT,
+  RESPONSE_JSON VARIANT,
+  ERROR_TEXT STRING
+)
+"""
+
+# Snowflake source query: lesseeCode is NOT here; we inject it from env
+SQL_SOURCE = r"""
+SELECT 
+--	    '2B56' AS lesseeCode,
+        HOLMAN_VEHICLE_NUMBER AS "holmanVehicleNumber",
+        'FLEET_SUPPORT@TRANSFORMCO.COM' AS "email",
+        FIRST_NAME_ AS "firstName",
+        LAST_NAME_ AS "lastName",
+        left(LAST_NAME_,12) AS "clientData1",
+        ENTERPRISE_ID AS "clientData2",
+        '890' AS "clientData3",
+        NULL AS "clientData4",
+        NULL AS "clientData5",
+        NULL AS "clientData6",
+        NULL AS "clientData7",
+        CASE 
+        	WHEN HOLMAN_VEHICLE_NUMBER LIKE ('088%') OR HOLMAN_VEHICLE_NUMBER LIKE ('88%') THEN 'D'
+        	ELSE 'A' END AS "assignedStatusCode",
+        RIGHT(DISTRICT,4) AS "prefix",
+        TRIM(REGEXP_REPLACE(REGEXP_REPLACE(PRIMARY_ADDR_1, '[^\\w\\s]', ''),/*Remove symbols*/'\\s+', ' '/*Collapse multiple spaces*/)) AS "addressLine1",
+        TRIM(REGEXP_REPLACE(REGEXP_REPLACE(PRIMARY_ADDR_2, '[^\\w\\s]', ''),/*Remove symbols*/'\\s+', ' '/*Collapse multiple spaces*/)) AS "addressLine2",
+        NULL AS "addressLine3",
+        PRIMARY_CITY AS "city",
+        PRIMARY_STATE AS "stateProvince",
+        PRIMARY_ZIP AS "zipPostalCode",
+        NULL AS "homePhone",
+        MOBILEPHONENUMBER AS "workPhone",
+        NULL AS "workPhoneExtension",
+        NULL AS "cellPhone",
+        NULL AS "auxData1",
+        NULL AS "auxData2",
+        NULL AS "auxData3",
+        NULL AS "auxData4",
+        NULL AS "auxData5",
+        NULL AS "auxData6",
+        NULL AS "auxData7",
+        NULL AS "auxData8",
+        NULL AS "auxData9",
+        NULL AS "auxData10",
+        NULL AS "auxData11",
+        NULL AS "auxData12",
+        NULL AS "auxData13",
+        NULL AS "auxData14"
+FROM 
+	(WITH 
+	
+	TPMS AS 
+		(SELECT 	
+			*
+		FROM 
+			PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT),
+	
+	HOLMAN AS
+		(SELECT
+			*
+		FROM
+			PARTS_SUPPLYCHAIN.FLEET.HOLMAN_VEHICLES
+		WHERE
+			STATUS_CODE < 3
+		AND DIVISION IN ('01','RF'))
+			
+	SELECT 
+	    TPMS.TRUCK_NO,
+	    TPMS.DISTRICT,
+	    TPMS.TECH_NO,
+	    TPMS.ENTERPRISE_ID,
+	    TPMS.FIRST_NAME AS FIRST_NAME_,
+	    TPMS.LAST_NAME AS LAST_NAME_,
+	    TPMS.STATUS,
+	    UPPER(TPMS.PRIMARYADDR1) AS PRIMARY_ADDR_1,
+	    UPPER(TPMS.PRIMARYADDR2) AS PRIMARY_ADDR_2,
+	    UPPER(TPMS.PRIMARYCITY) AS PRIMARY_CITY,
+	    UPPER(TPMS.PRIMARYSTATE) AS PRIMARY_STATE,
+	    TPMS.PRIMARYZIP AS PRIMARY_ZIP,
+	    TPMS.MOBILEPHONENUMBER,
+	    (TPMS.ENTERPRISE_ID = HOLMAN.CLIENT_DATA2 
+	        OR (TPMS.ENTERPRISE_ID IS NULL AND HOLMAN.CLIENT_DATA2 IS NULL)) AS ENT_MATCH,
+	    (TPMS.DISTRICT = LPAD(HOLMAN.PREFIX,7,0)
+	        OR (TPMS.DISTRICT IS NULL AND HOLMAN.PREFIX IS NULL)) AS DISTRICT_MATCH,
+	    (HOLMAN.EMAIL = 'FLEET_SUPPORT@TRANSFORMCO.COM') AS PROPER_EMAIL,
+	    (TPMS.LAST_NAME = HOLMAN.CLIENT_DATA1 
+	        OR (TPMS.LAST_NAME IS NULL AND HOLMAN.CLIENT_DATA1 IS NULL)) AS DRIVER_LAST_NAME_MATCH,
+	    (TPMS.FIRST_NAME = HOLMAN.FIRST_NAME 
+	        OR (TPMS.FIRST_NAME IS NULL AND HOLMAN.FIRST_NAME IS NULL)) AS FIRST_NAME_MATCH,
+	    (TPMS.LAST_NAME = HOLMAN.LAST_NAME 
+	        OR (TPMS.LAST_NAME IS NULL AND HOLMAN.LAST_NAME IS NULL)) AS LAST_NAME_MATCH,
+	    (UPPER(TPMS.PRIMARYADDR1) = UPPER(HOLMAN.ADDRESS_LINE1) 
+	        OR (TPMS.PRIMARYADDR1 IS NULL AND HOLMAN.ADDRESS_LINE1 IS NULL)) AS ADDRESS_LN_1_MATCH,
+	    (UPPER(TPMS.PRIMARYADDR2) = UPPER(HOLMAN.ADDRESS_LINE2) 
+	        OR (TPMS.PRIMARYADDR2 IS NULL AND HOLMAN.ADDRESS_LINE2 IS NULL)) AS ADDRESS_LN_2_MATCH,
+	    (UPPER(TPMS.PRIMARYCITY) = UPPER(HOLMAN.CITY) 
+	        OR (TPMS.PRIMARYCITY IS NULL AND HOLMAN.CITY IS NULL)) AS CITY_MATCH,
+	    (UPPER(TPMS.PRIMARYSTATE) = UPPER(HOLMAN.STATE_PROVINCE) 
+	        OR (TPMS.PRIMARYSTATE IS NULL AND HOLMAN.STATE_PROVINCE IS NULL)) AS STATE_MATCH,
+	    (TPMS.PRIMARYZIP = HOLMAN.ZIP_POSTAL_CODE 
+	        OR (TPMS.PRIMARYZIP IS NULL AND HOLMAN.ZIP_POSTAL_CODE IS NULL)) AS ZIPCODE_MATCH,
+	    (HOLMAN.WORK_PHONE = TPMS.MOBILEPHONENUMBER 
+	        OR (HOLMAN.WORK_PHONE IS NULL AND TPMS.MOBILEPHONENUMBER IS NULL)) AS PHONE_MATCH,
+	    CASE 
+	        WHEN ENT_MATCH = TRUE 
+		         AND DISTRICT_MATCH = TRUE 
+		         AND PROPER_EMAIL = TRUE 
+		         AND ASSIGNED_STATUS IS NOT NULL 
+	        THEN 'CLEAR' 
+	        ELSE 'NEEDS WORK' 
+	    	END AS OVERALL_STATUS,
+	    CASE 
+	        WHEN ENT_MATCH = TRUE 
+		         AND DISTRICT_MATCH = TRUE 
+		         AND PROPER_EMAIL = TRUE 
+		         AND DRIVER_LAST_NAME_MATCH = TRUE 
+		         AND FIRST_NAME_MATCH = TRUE 
+		         AND LAST_NAME_MATCH = TRUE 
+		         AND ADDRESS_LN_1_MATCH = TRUE 
+		         AND ADDRESS_LN_2_MATCH = TRUE 
+		         AND CITY_MATCH = TRUE 
+		         AND STATE_MATCH = TRUE 
+		         AND ZIPCODE_MATCH = TRUE 
+		         --AND PHONE_MATCH = TRUE 
+	        THEN 'GOOD' 
+	        ELSE 'REVIEW' 
+	    	END AS VALIDATION_STATUS,
+	    HOLMAN.*
+	
+	FROM
+		HOLMAN
+		
+	FULL JOIN
+		TPMS
+	ON
+		LPAD(HOLMAN.HOLMAN_VEHICLE_NUMBER,6,0) = LPAD(TPMS.TRUCK_NO,6,0)
+		
+	WHERE 
+		TRUCK_NO IS NOT NULL AND (ENT_MATCH = false or ENT_MATCH is NULL and HOLMAN_VEHICLE_NUMBER is not null))	--Needs assignment updated in Holman;
+"""
+
+# ---------------- Helpers ----------------
+
+def load_private_key_der_no_passphrase(pem_path: str) -> bytes:
+    with open(pem_path, "rb") as f:
+        pem = f.read()
+    pkey = serialization.load_pem_private_key(pem, password=None, backend=default_backend())
+    # Snowflake connector expects DER-encoded PKCS8
+    return pkey.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+def sf_connect():
+    pkb = load_private_key_der_no_passphrase(SF_KEY_PATH)
+    conn = snowflake.connector.connect(
+        account=SF_ACCOUNT,      # e.g., xy12345 or xy12345.us-east-1
+        user=SF_USER,
+        role=SF_ROLE,
+        warehouse=SF_WAREHOUSE,
+        database=SF_DATABASE,
+        schema=SF_SCHEMA,
+        private_key=pkb,
+    )
+    return conn
+
+def get_token() -> str:
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    r = requests.post(TOKEN_URL, data=data, headers=headers, timeout=60)
+    r.raise_for_status()
+    j = r.json()
+    tok = j.get("access_token")
+    if not tok:
+        raise RuntimeError(f"No access_token in token response: {j}")
+    return tok
+
+def norm_cell(v: Optional[Any]):
+    """Normalize general stringish cells to None when blank/NULL text."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s == "" or s.lower() == "null":
+        return None
+    return s
+
+def hvn_str(val) -> Optional[str]:
+    """Return HVN exactly as provided; no padding, no stripping."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if s == "" or s.lower() == "null":
+        return None
+    return s  # <-- do not modify
+
+# Only fields that come from SQL (lesseeCode is injected)
+FIELDS_FROM_SQL = [
+    "holmanVehicleNumber","email","firstName","lastName",
+    "clientData1","clientData2","clientData3","clientData4","clientData5","clientData6","clientData7",
+    "assignedStatusCode","prefix",
+    "addressLine1","addressLine2","addressLine3","city","stateProvince","zipPostalCode",
+    "homePhone","workPhone","workPhoneExtension","cellPhone",
+    "auxData1","auxData2","auxData3","auxData4","auxData5","auxData6","auxData7",
+    "auxData8","auxData9","auxData10","auxData11","auxData12","auxData13","auxData14",
+]
+
+def row_to_payload(row: Dict[str, Any]) -> Dict[str, Any]:
+    # Inject static lesseeCode and include SQL-provided fields
+    payload = {"lesseeCode": LESSEE_CODE}
+    payload["holmanVehicleNumber"] = hvn_str(row.get("holmanVehicleNumber"))
+    for k in FIELDS_FROM_SQL:
+        if k == "holmanVehicleNumber":
+            continue
+        payload[k] = norm_cell(row.get(k))
+    return payload
+
+def post_submit(token: str, item: Dict[str, Any]) -> requests.Response:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    # Holman submit expects an array, even for single record
+    return requests.post(SUBMIT_URL, headers=headers, json=[item], timeout=120)
+
+def poll_status(token: str, submission_id: Optional[str], timeout_sec: int) -> Dict[str, Any]:
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {"submissionId": submission_id} if submission_id else None
+    start = time.time()
+    while True:
+        r = requests.get(STATUS_URL, headers=headers, params=params, timeout=60)
+        r.raise_for_status()
+        try:
+            j = r.json()
+        except Exception:
+            j = {"raw_text": r.text}
+        result_text = (j.get("result_text") or j.get("resultText") or "").strip().lower()
+        if result_text == "complete":
+            return j
+        if time.time() - start > timeout_sec:
+            return {"timeout": True, "last_status": j}
+        time.sleep(5)
+
+def sf_log(
+    cur,
+    endpoint: str,
+    http_status: Optional[int],
+    submission_id: Optional[str],
+    lessee_code: Optional[str],
+    holman_vehicle_number: Optional[str],
+    duration_ms: Optional[int],
+    request_obj: Dict[str, Any],
+    response_obj: Dict[str, Any],
+    error_text: Optional[str],
+):
+    sql = """
+        INSERT INTO PARTS_SUPPLYCHAIN.FLEET.HOLMAN_TPMS_UPDATES_API_LOG
+        (ENDPOINT, HTTP_STATUS, SUBMISSION_ID, LESSEE_CODE, HOLMAN_VEHICLE_NUMBER,
+         DURATION_MS, REQUEST_JSON, RESPONSE_JSON, ERROR_TEXT)
+        SELECT %s, %s, %s, %s, %s, %s, PARSE_JSON(%s), PARSE_JSON(%s), %s
+    """
+    cur.execute(
+        sql,
+        (
+            endpoint,
+            http_status,
+            submission_id,
+            lessee_code,
+            holman_vehicle_number,
+            duration_ms,
+            json.dumps(request_obj),
+            json.dumps(response_obj),
+            error_text,
+        ),
+    )
+
+# ---------------- Main ----------------
+
+def main():
+    _debug_env()
+
+    # Connect to Snowflake
+    conn = sf_connect()
+    cur = conn.cursor()
+    try:
+        # Create local log table (optional safety)
+        cur.execute(CREATE_LOG_TABLE_SQL)
+
+        # Pull rows to update
+        print("Running source query...")
+        cur.execute(SQL_SOURCE)
+        cols = [c[0] for c in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        if not rows:
+            print("No rows returned by the SQL.")
+            return
+
+        # Build payloads (always include listed fields; blanks => null)
+        records_raw = [row_to_payload(r) for r in rows]
+
+        # Filter invalid identifiers (and show count)
+        records: List[Dict[str, Any]] = []
+        skipped = 0
+        for rec in records_raw:
+            hvn = rec.get("holmanVehicleNumber")
+            if hvn is None or str(hvn).strip() == "":
+                skipped += 1
+                print("SKIP: missing holmanVehicleNumber for a row; not sending this record.")
+                continue
+            records.append(rec)
+
+        print(f"Prepared {len(records)} records. Skipped {skipped} due to missing identifier.")
+        if not records:
+            print("No valid records to submit.")
+            return
+
+        # Preview first payload
+        print("Sample payload (first record):")
+        try:
+            print(json.dumps(records[0], indent=2))
+        except Exception:
+            print(str(records[0])[:500])
+
+        # Prepare Holman token
+        token = get_token()
+        print(f"Auth OK to Holman ({ENV}).")
+
+        # Submit one-by-one (safer; clearer errors)
+        for idx, rec in enumerate(records, start=1):
+            lessee = LESSEE_CODE
+            hvn    = rec.get("holmanVehicleNumber")
+
+            t0 = time.time()
+            http_status = None
+            submission_id = None
+            req_obj = rec
+            resp_obj: Dict[str, Any] = {}
+            error_text = None
+
+            try:
+                resp = post_submit(token, rec)
+                http_status = resp.status_code
+                try:
+                    resp_obj = resp.json()
+                except Exception:
+                    resp_obj = {"raw_text": resp.text}
+
+                if isinstance(resp_obj, dict):
+                    for k in ("submissionId", "submission_id", "id"):
+                        if k in resp_obj:
+                            submission_id = str(resp_obj[k])
+                            break
+
+                if POLL_STATUS:
+                    status = poll_status(token, submission_id, timeout_sec=STATUS_TIMEOUT_SEC)
+                    resp_obj["status_poll"] = status
+
+                resp.raise_for_status()
+
+            except Exception as e:
+                error_text = f"{type(e).__name__}: {e}"
+
+            duration_ms = int((time.time() - t0) * 1000)
+
+            # Log to Snowflake (your target table)
+            sf_log(
+                cur=cur,
+                endpoint=SUBMIT_URL,
+                http_status=http_status,
+                submission_id=submission_id,
+                lessee_code=lessee,
+                holman_vehicle_number=hvn,
+                duration_ms=duration_ms,
+                request_obj=req_obj,
+                response_obj=resp_obj,
+                error_text=error_text
+            )
+            conn.commit()
+
+            print(f"Sent {idx}/{len(records)} hvn={hvn}: status={http_status}, submission_id={submission_id}, ms={duration_ms}")
+
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+if __name__ == "__main__":
+    try:
+        main()
+        print("\nDone.")
+    except SystemExit:
+        raise
+    except Exception:
+        print("\nERROR:\n")
+        traceback.print_exc()
+    finally:
+        # Modified: no final input/pause; exit immediately
+        pass
