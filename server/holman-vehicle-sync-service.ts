@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { holmanVehiclesCache, vehicleChangeLog, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus } from "@shared/schema";
+import { holmanVehiclesCache, vehicleChangeLog, holmanSyncState, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus, HolmanSyncState } from "@shared/schema";
 import { eq, sql, and, desc, inArray } from "drizzle-orm";
 
 // Only divisions 01 and RF are relevant for this application
@@ -57,6 +57,224 @@ interface SyncResult {
 class HolmanVehicleSyncService {
   private lastSyncAttempt: Date | null = null;
   private lastSuccessfulSync: Date | null = null;
+
+  // Get or create sync state for vehicles
+  async getSyncState(): Promise<HolmanSyncState | null> {
+    const [state] = await db
+      .select()
+      .from(holmanSyncState)
+      .where(eq(holmanSyncState.syncType, 'vehicles'))
+      .limit(1);
+    return state || null;
+  }
+
+  // Update sync state after a successful sync
+  async updateSyncState(params: {
+    lastChangeRecordId?: string;
+    lastChangeDate?: Date;
+    isFullSync?: boolean;
+    recordsSynced: number;
+  }): Promise<void> {
+    const now = new Date();
+    const existingState = await this.getSyncState();
+    
+    if (existingState) {
+      await db
+        .update(holmanSyncState)
+        .set({
+          lastChangeRecordId: params.lastChangeRecordId || existingState.lastChangeRecordId,
+          lastChangeDate: params.lastChangeDate || existingState.lastChangeDate,
+          lastFullSyncAt: params.isFullSync ? now : existingState.lastFullSyncAt,
+          lastIncrementalSyncAt: params.isFullSync ? existingState.lastIncrementalSyncAt : now,
+          totalRecordsSynced: params.isFullSync ? params.recordsSynced : existingState.totalRecordsSynced,
+          incrementalRecordsSynced: params.isFullSync ? 0 : params.recordsSynced,
+          status: 'idle',
+          errorMessage: null,
+          updatedAt: now,
+        })
+        .where(eq(holmanSyncState.syncType, 'vehicles'));
+    } else {
+      await db.insert(holmanSyncState).values({
+        syncType: 'vehicles',
+        lastChangeRecordId: params.lastChangeRecordId,
+        lastChangeDate: params.lastChangeDate,
+        lastFullSyncAt: params.isFullSync ? now : null,
+        lastIncrementalSyncAt: params.isFullSync ? null : now,
+        totalRecordsSynced: params.recordsSynced,
+        incrementalRecordsSynced: params.isFullSync ? 0 : params.recordsSynced,
+        status: 'idle',
+      });
+    }
+    
+    console.log(`[HolmanSync] Updated sync state: ${params.recordsSynced} records, lastChangeRecordId=${params.lastChangeRecordId || 'N/A'}`);
+  }
+
+  // Perform incremental sync using lastChangeRecordId to only fetch changed records
+  async fetchChangedVehicles(forceFullSync: boolean = false): Promise<{
+    success: boolean;
+    recordsFetched: number;
+    recordsUpdated: number;
+    isFullSync: boolean;
+    lastChangeRecordId?: string;
+    error?: string;
+  }> {
+    if (!holmanApiService.isConfigured()) {
+      return { success: false, recordsFetched: 0, recordsUpdated: 0, isFullSync: false, error: 'API not configured' };
+    }
+
+    const syncState = await this.getSyncState();
+    const useIncremental = !forceFullSync && syncState?.lastChangeRecordId;
+    
+    console.log(`[HolmanSync] Starting ${useIncremental ? 'incremental' : 'full'} sync${useIncremental ? ` from lastChangeRecordId=${syncState?.lastChangeRecordId}` : ''}`);
+
+    try {
+      let allVehicleData: any[] = [];
+      let currentPage = 1;
+      let lastChangeRecordId: string | undefined;
+      const pageSize = 500;
+      
+      while (true) {
+        console.log(`[HolmanSync] Fetching page ${currentPage}...`);
+        
+        // Use custom-query with lastChangeRecordId for incremental sync
+        const apiResponse = await holmanApiService.queryVehiclesCustom({
+          lesseeCode: '2B56',
+          pageNumber: currentPage,
+          pageSize,
+          lastChangeRecordId: useIncremental ? syncState?.lastChangeRecordId : undefined,
+        });
+        
+        const vehicleData = apiResponse?.data || [];
+        const pageInfo = (apiResponse as any)?.pageInfo;
+        
+        // Capture the lastChangeRecordId from pageInfo for next sync
+        if (pageInfo?.lastChangeRecordId) {
+          lastChangeRecordId = pageInfo.lastChangeRecordId;
+        }
+        
+        if (currentPage === 1) {
+          console.log('[HolmanSync] First page response:', {
+            count: vehicleData.length,
+            totalCount: apiResponse?.totalCount || 0,
+            pageInfo: pageInfo,
+          });
+        }
+        
+        if (!vehicleData || vehicleData.length === 0) break;
+        
+        allVehicleData = allVehicleData.concat(vehicleData);
+        
+        const totalPages = pageInfo?.totalPages || Math.ceil((apiResponse?.totalCount || 0) / pageSize);
+        if (currentPage >= totalPages) break;
+        currentPage++;
+      }
+      
+      console.log(`[HolmanSync] Fetched ${allVehicleData.length} vehicles from ${currentPage} pages`);
+      
+      // Filter to only divisions 01 and RF
+      const filteredVehicles = allVehicleData.filter((v: any) => {
+        const division = v.division || v.prefix || '';
+        return ALLOWED_DIVISIONS.includes(division);
+      });
+      
+      console.log(`[HolmanSync] Filtered to ${filteredVehicles.length} vehicles in allowed divisions`);
+      
+      // Update cache with change tracking info
+      await this.updateCacheWithChangeTracking(filteredVehicles);
+      
+      // Update sync state
+      await this.updateSyncState({
+        lastChangeRecordId,
+        isFullSync: !useIncremental,
+        recordsSynced: filteredVehicles.length,
+      });
+      
+      this.lastSuccessfulSync = new Date();
+      
+      return {
+        success: true,
+        recordsFetched: allVehicleData.length,
+        recordsUpdated: filteredVehicles.length,
+        isFullSync: !useIncremental,
+        lastChangeRecordId,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[HolmanSync] Sync failed:', errorMsg);
+      return { success: false, recordsFetched: 0, recordsUpdated: 0, isFullSync: !useIncremental, error: errorMsg };
+    }
+  }
+
+  // Update cache with change tracking fields
+  private async updateCacheWithChangeTracking(vehicles: any[]): Promise<void> {
+    const now = new Date();
+    
+    for (const v of vehicles) {
+      const vehicleNumber = v.holmanVehicleNumber?.toString() || v.clientVehicleNumber?.toString() || v.vehicleNumber?.toString();
+      if (!vehicleNumber) continue;
+      
+      // Parse lastChangeDate from Holman response
+      let lastChangeDate: Date | null = null;
+      if (v.lastChangeDate) {
+        try {
+          lastChangeDate = new Date(v.lastChangeDate);
+        } catch {
+          // Keep null if parsing fails
+        }
+      }
+      
+      const cacheData: InsertHolmanVehicleCache = {
+        holmanVehicleNumber: vehicleNumber,
+        statusCode: v.statusCode || v.status_code,
+        vin: v.vin,
+        licensePlate: v.licensePlate,
+        licenseState: v.tagStateProvince || v.licenseState,
+        makeName: v.makeVin || v.makeClient || v.makeName,
+        modelName: v.modelVin || v.modelClient || v.modelName,
+        modelYear: v.modelYear || v.year,
+        color: v.exteriorColor || v.color,
+        fuelType: v.fuelType || v.fuelTypeDescription,
+        engineSize: v.engineType || v.engineSize,
+        driverName: v.firstName && v.lastName ? `${v.firstName} ${v.lastName}`.trim() : (v.driverName || ''),
+        driverEmail: v.email || v.driverEmail,
+        driverPhone: v.cellPhone || v.workPhone || v.homePhone || v.driverPhone,
+        city: v.city,
+        state: v.stateProvince || v.state,
+        region: v.clientData3 || v.region || '',
+        division: v.division || '',
+        district: v.prefix || v.district || '',
+        inServiceDate: v.onRoadDate || v.deliveryDate || v.inServiceDate,
+        outOfServiceDate: v.outOfServiceDate,
+        odometer: v.odometer || 0,
+        odometerDate: v.odometerDate || '',
+        regRenewalDate: v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || '',
+        branding: v.branding || 'Standard',
+        interior: v.interior || 'Standard',
+        tuneStatus: v.tuneStatus || 'Tuned',
+        holmanTechAssigned: v.clientData2 || '',
+        holmanTechName: v.firstName && v.lastName ? `${v.firstName} ${v.lastName}`.trim() : (v.driverName || ''),
+        dataSource: 'holman',
+        isActive: true,
+        rawData: v,
+        lastHolmanSyncAt: now,
+        lastChangeDate: lastChangeDate,
+        lastChangeRecordId: v.lastChangeRecordId?.toString(),
+      };
+      
+      await db
+        .insert(holmanVehiclesCache)
+        .values(cacheData)
+        .onConflictDoUpdate({
+          target: holmanVehiclesCache.holmanVehicleNumber,
+          set: {
+            ...cacheData,
+            updatedAt: now,
+          },
+        });
+    }
+    
+    console.log(`[HolmanSync] Updated cache with change tracking for ${vehicles.length} vehicles`);
+  }
 
   async fetchActiveVehicles(options: {
     page?: number;
@@ -304,6 +522,13 @@ class HolmanVehicleSyncService {
     payload: any,
     userId?: string
   ): Promise<VehicleChangeLog> {
+    // Get current lastChangeRecordId for this vehicle before making changes
+    const [cachedVehicle] = await db
+      .select({ lastChangeRecordId: holmanVehiclesCache.lastChangeRecordId })
+      .from(holmanVehiclesCache)
+      .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicleNumber))
+      .limit(1);
+    
     const [change] = await db
       .insert(vehicleChangeLog)
       .values({
@@ -312,11 +537,80 @@ class HolmanVehicleSyncService {
         payload,
         userId,
         status: 'pending',
+        preChangeRecordId: cachedVehicle?.lastChangeRecordId || null,
       })
       .returning();
 
-    console.log(`[HolmanSync] Queued ${changeType} change for vehicle ${vehicleNumber}`);
+    console.log(`[HolmanSync] Queued ${changeType} change for vehicle ${vehicleNumber} (preChangeRecordId=${cachedVehicle?.lastChangeRecordId || 'N/A'})`);
     return change;
+  }
+
+  // Verify if Holman has processed our pending updates by checking if lastChangeRecordId changed
+  async verifyPendingUpdates(): Promise<{
+    verified: number;
+    stillPending: number;
+    results: Array<{ id: string; vehicleNumber: string; status: 'verified' | 'pending' | 'error'; message?: string }>;
+  }> {
+    const appliedChanges = await db
+      .select()
+      .from(vehicleChangeLog)
+      .where(and(
+        eq(vehicleChangeLog.status, 'applied'),
+        eq(vehicleChangeLog.holmanProcessed, false)
+      ))
+      .orderBy(vehicleChangeLog.appliedAt)
+      .limit(20);
+
+    let verified = 0;
+    let stillPending = 0;
+    const results: Array<{ id: string; vehicleNumber: string; status: 'verified' | 'pending' | 'error'; message?: string }> = [];
+
+    for (const change of appliedChanges) {
+      try {
+        // Fetch current vehicle data from Holman
+        const vehicleResult = await holmanApiService.findVehicleByNumber(change.holmanVehicleNumber);
+        
+        if (!vehicleResult.success) {
+          results.push({ id: change.id, vehicleNumber: change.holmanVehicleNumber, status: 'error', message: vehicleResult.error });
+          continue;
+        }
+
+        // Get the updated vehicle's lastChangeRecordId from cache after refresh
+        const [cachedVehicle] = await db
+          .select({ lastChangeRecordId: holmanVehiclesCache.lastChangeRecordId })
+          .from(holmanVehiclesCache)
+          .where(eq(holmanVehiclesCache.holmanVehicleNumber, change.holmanVehicleNumber))
+          .limit(1);
+
+        const currentRecordId = cachedVehicle?.lastChangeRecordId;
+        const preRecordId = change.preChangeRecordId;
+
+        // If lastChangeRecordId changed from what we recorded before our POST, Holman processed something
+        if (currentRecordId && preRecordId && currentRecordId !== preRecordId) {
+          await db
+            .update(vehicleChangeLog)
+            .set({
+              holmanProcessed: true,
+              postChangeRecordId: currentRecordId,
+              verifiedAt: new Date(),
+              status: 'verified',
+            })
+            .where(eq(vehicleChangeLog.id, change.id));
+          
+          verified++;
+          results.push({ id: change.id, vehicleNumber: change.holmanVehicleNumber, status: 'verified', message: `Changed from ${preRecordId} to ${currentRecordId}` });
+        } else {
+          stillPending++;
+          results.push({ id: change.id, vehicleNumber: change.holmanVehicleNumber, status: 'pending', message: 'No change detected yet' });
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        results.push({ id: change.id, vehicleNumber: change.holmanVehicleNumber, status: 'error', message: errorMsg });
+      }
+    }
+
+    console.log(`[HolmanSync] Verified ${verified} updates, ${stillPending} still pending`);
+    return { verified, stillPending, results };
   }
 
   async processPendingChanges(): Promise<{ processed: number; failed: number }> {

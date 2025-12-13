@@ -5445,6 +5445,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get incremental sync state
+  app.get("/api/holman/fleet-vehicles/sync-state", requireAuth, async (req: any, res) => {
+    try {
+      const state = await holmanVehicleSyncService.getSyncState();
+      res.json({
+        success: true,
+        syncState: state,
+        hasState: !!state,
+        canIncrementalSync: !!state?.lastChangeRecordId,
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Trigger incremental sync (only fetches changed records)
+  app.post("/api/holman/fleet-vehicles/incremental-sync", requireAuth, async (req: any, res) => {
+    try {
+      const { forceFullSync = false } = req.body;
+      console.log(`[Holman Fleet] Incremental sync triggered (forceFullSync=${forceFullSync})`);
+      const result = await holmanVehicleSyncService.fetchChangedVehicles(forceFullSync);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Verify if pending updates have been processed by Holman
+  app.post("/api/holman/fleet-vehicles/verify-updates", requireAuth, async (req: any, res) => {
+    try {
+      console.log('[Holman Fleet] Verifying pending updates');
+      const result = await holmanVehicleSyncService.verifyPendingUpdates();
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Update vehicle assignment in Holman based on TPMS data
   const { holmanAssignmentUpdateService } = await import("./holman-assignment-update-service");
 
