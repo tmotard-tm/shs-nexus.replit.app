@@ -55,13 +55,22 @@ import {
   ChevronUp,
   Clock,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Eye
 } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import type { ActivityLog, User } from "@shared/schema";
@@ -70,13 +79,18 @@ interface SubmissionLog {
   id: string;
   holmanVehicleNumber: string;
   submissionId: string | null;
+  correlationId: string | null;
   action: string;
   enterpriseId: string | null;
   status: string;
   createdAt: string;
   completedAt: string | null;
+  lastCheckedAt: string | null;
   durationMs: number | null;
   errorMessage: string | null;
+  payload: any | null;
+  response: any | null;
+  createdBy: string | null;
 }
 
 const ACTION_ICONS: Record<string, any> = {
@@ -165,6 +179,7 @@ export default function ActivityLogs() {
   const [subFromDate, setSubFromDate] = useState<Date | undefined>(undefined);
   const [subToDate, setSubToDate] = useState<Date | undefined>(undefined);
   const [isSubExporting, setIsSubExporting] = useState(false);
+  const [selectedSubmission, setSelectedSubmission] = useState<SubmissionLog | null>(null);
 
   // Redirect non-superadmin users
   useEffect(() => {
@@ -1021,6 +1036,7 @@ export default function ActivityLogs() {
                           <TableHead className="w-[160px]">Completed</TableHead>
                           <TableHead className="w-[80px]">Duration</TableHead>
                           <TableHead>Error</TableHead>
+                          <TableHead className="w-[60px]">Details</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1052,6 +1068,16 @@ export default function ActivityLogs() {
                             <TableCell className="max-w-xs truncate text-red-600" title={sub.errorMessage || ""}>
                               {sub.errorMessage || "-"}
                             </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedSubmission(sub)}
+                                data-testid={`button-details-${sub.id}`}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -1062,6 +1088,108 @@ export default function ActivityLogs() {
             </CollapsibleContent>
           </Card>
         </Collapsible>
+
+        {/* Submission Details Dialog */}
+        <Dialog open={!!selectedSubmission} onOpenChange={(open) => !open && setSelectedSubmission(null)}>
+          <DialogContent className="max-w-3xl max-h-[90vh]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Truck className="h-5 w-5" />
+                Submission Details
+              </DialogTitle>
+              <DialogDescription>
+                Vehicle #{selectedSubmission?.holmanVehicleNumber} - {selectedSubmission?.action?.toUpperCase()}
+              </DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="max-h-[70vh]">
+              <div className="space-y-4 pr-4">
+                {/* Basic Info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Vehicle Number</label>
+                    <p className="font-mono text-sm">{selectedSubmission?.holmanVehicleNumber}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Action</label>
+                    <p className="capitalize">{selectedSubmission?.action}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Tech Enterprise ID</label>
+                    <p className="font-mono text-sm">{selectedSubmission?.enterpriseId || "-"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Status</label>
+                    <div className="mt-1">{selectedSubmission && getSubmissionStatusBadge(selectedSubmission.status)}</div>
+                  </div>
+                </div>
+
+                {/* IDs */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Submission ID</label>
+                    <p className="font-mono text-xs break-all">{selectedSubmission?.submissionId || "-"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Correlation ID</label>
+                    <p className="font-mono text-xs break-all">{selectedSubmission?.correlationId || "-"}</p>
+                  </div>
+                </div>
+
+                {/* Timestamps */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Created At</label>
+                    <p className="font-mono text-sm">{selectedSubmission?.createdAt ? formatTimestamp(selectedSubmission.createdAt) : "-"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Completed At</label>
+                    <p className="font-mono text-sm">{selectedSubmission?.completedAt ? formatTimestamp(selectedSubmission.completedAt) : "-"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Last Checked At</label>
+                    <p className="font-mono text-sm">{selectedSubmission?.lastCheckedAt ? formatTimestamp(selectedSubmission.lastCheckedAt) : "-"}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Duration</label>
+                    <p className="font-mono text-sm">{formatDuration(selectedSubmission?.durationMs ?? null)}</p>
+                  </div>
+                </div>
+
+                {/* Created By */}
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Created By</label>
+                  <p className="text-sm">{selectedSubmission?.createdBy || "-"}</p>
+                </div>
+
+                {/* Error Message */}
+                {selectedSubmission?.errorMessage && (
+                  <div>
+                    <label className="text-sm font-medium text-red-600">Error Message</label>
+                    <p className="text-sm text-red-600 bg-red-50 dark:bg-red-950 p-2 rounded mt-1">
+                      {selectedSubmission.errorMessage}
+                    </p>
+                  </div>
+                )}
+
+                {/* Payload */}
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Request Payload</label>
+                  <pre className="text-xs bg-muted p-2 rounded mt-1 overflow-x-auto max-h-48">
+                    {selectedSubmission?.payload ? JSON.stringify(selectedSubmission.payload, null, 2) : "No payload data"}
+                  </pre>
+                </div>
+
+                {/* Response */}
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Response</label>
+                  <pre className="text-xs bg-muted p-2 rounded mt-1 overflow-x-auto max-h-48">
+                    {selectedSubmission?.response ? JSON.stringify(selectedSubmission.response, null, 2) : "No response data"}
+                  </pre>
+                </div>
+              </div>
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
