@@ -43,6 +43,7 @@ import {
   Eye
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PAGES, CATEGORIES, getPagesByCategory, type PageCategory } from "@shared/page-registry";
 
 type NavItem = {
   name: string;
@@ -102,65 +103,42 @@ export function Sidebar() {
   if (!user) return null;
 
   const getNavigationForRole = (userRole: string, perms: RolePermissionSettings) => {
-    const baseItems = {
-      home: { name: "Home", href: "/", icon: Home, category: "main" },
-      dashboard: { name: "Dashboard", href: "/dashboard", icon: BarChart3, category: "dashboards" },
-      analytics: { name: "Vehicle Assignment Dash", href: "/analytics", icon: Activity, category: "dashboards" },
-      operations: { name: "Operations Dashboard", href: "/operations", icon: BarChart3, category: "dashboards" },
-      queueManagement: { name: "Queue Management", href: "/queue-management", icon: Clock, category: "queues" },
-      ntaoQueue: { name: "NTAO Queue", href: "/ntao-queue", icon: Clock, category: "queues" },
-      assetsQueue: { name: "Assets Queue", href: "/assets-queue", icon: Clock, category: "queues" },
-      inventoryQueue: { name: "Inventory Queue", href: "/inventory-queue", icon: Clock, category: "queues" },
-      fleetQueue: { name: "Fleet Queue", href: "/fleet-queue", icon: Clock, category: "queues" },
-      storageSpots: { name: "Storage Spots", href: "/storage-spots", icon: MapPin, category: "management" },
-      requests: { name: "Requests", href: "/requests", icon: FileText, category: "management" },
-      approvals: { name: "Approvals", href: "/approvals", icon: CheckCircle, category: "management" },
-      apiManagement: { name: "Integrations", href: "/integrations", icon: Settings, category: "management" },
-      userManagement: { name: "User Management", href: "/users", icon: Users, category: "management" },
-      templateManagement: { name: "Templates", href: "/templates", icon: FileCode, category: "management" },
-      rolePermissions: { name: "Role Permissions", href: "/role-permissions", icon: Shield, category: "management" },
-      vehicleAssignments: { name: "Vehicle Assignments", href: "/vehicle-assignments", icon: Truck, category: "management" },
-      activityLogs: { name: "Activity Logs", href: "/activity", icon: Activity, category: "activity" },
-      changePassword: { name: "Change Password", href: "/change-password", icon: Key, category: "account" },
-    };
-
-    const sidebarPerms = perms?.sidebar;
     const result: NavItem[] = [];
     
     if (perms?.homePage) {
-      result.push(baseItems.home);
+      result.push({ name: "Home", href: "/", icon: Home, category: "main" });
     }
     
-    if (sidebarPerms?.dashboards?.enabled) {
-      if (sidebarPerms.dashboards.dashboard) result.push(baseItems.dashboard);
-      if (sidebarPerms.dashboards.vehicleAssignmentDash) result.push(baseItems.analytics);
-      if (sidebarPerms.dashboards.operationsDash) result.push(baseItems.operations);
-    }
+    const sidebarPerms = perms?.sidebar;
     
-    if (sidebarPerms?.queues?.enabled) {
-      if (sidebarPerms.queues.queueManagement) result.push(baseItems.queueManagement);
-      if (sidebarPerms.queues.ntaoQueue) result.push(baseItems.ntaoQueue);
-      if (sidebarPerms.queues.assetsQueue) result.push(baseItems.assetsQueue);
-      if (sidebarPerms.queues.inventoryQueue) result.push(baseItems.inventoryQueue);
-      if (sidebarPerms.queues.fleetQueue) result.push(baseItems.fleetQueue);
-    }
-    
-    if (sidebarPerms?.management?.enabled) {
-      if (sidebarPerms.management.storageSpots) result.push(baseItems.storageSpots);
-      if (sidebarPerms.management.approvals) result.push(baseItems.approvals);
-      if (sidebarPerms.management.integrations) result.push(baseItems.apiManagement);
-      if (sidebarPerms.management.userManagement) result.push(baseItems.userManagement);
-      if (sidebarPerms.management.templateManagement) result.push(baseItems.templateManagement);
-      if (sidebarPerms.management.rolePermissions) result.push(baseItems.rolePermissions);
-      if (sidebarPerms.management.vehicleAssignments) result.push(baseItems.vehicleAssignments);
-    }
-    
-    if (sidebarPerms?.activities?.enabled) {
-      if (sidebarPerms.activities.activityLogs) result.push(baseItems.activityLogs);
-    }
-    
-    if (sidebarPerms?.account?.enabled) {
-      if (sidebarPerms.account.changePassword) result.push(baseItems.changePassword);
+    for (const category of CATEGORIES) {
+      const categoryPerms = sidebarPerms?.[category.permissionKey as keyof typeof sidebarPerms] as any;
+      
+      if (typeof categoryPerms === 'boolean') {
+        if (categoryPerms) {
+          const pagesInCategory = getPagesByCategory(category.key);
+          for (const page of pagesInCategory) {
+            result.push({
+              name: page.label,
+              href: page.path,
+              icon: page.icon,
+              category: category.key,
+            });
+          }
+        }
+      } else if (categoryPerms?.enabled) {
+        const pagesInCategory = getPagesByCategory(category.key);
+        for (const page of pagesInCategory) {
+          if (categoryPerms[page.permissionKey]) {
+            result.push({
+              name: page.label,
+              href: page.path,
+              icon: page.icon,
+              category: category.key,
+            });
+          }
+        }
+      }
     }
     
     return result;
@@ -192,8 +170,9 @@ export function Sidebar() {
       dashboards: { name: "Dashboards", icon: BarChart3 },
       queues: { name: "Queues", icon: Clock },
       management: { name: "Management", icon: Settings },
-      activity: { name: "Activity", icon: Activity },
+      activities: { name: "Activity", icon: Activity },
       account: { name: "Account", icon: Key },
+      helpAndTutorial: { name: "Help", icon: HelpCircle },
     };
 
     const categories: NavCategory[] = Object.entries(categoryMap)
