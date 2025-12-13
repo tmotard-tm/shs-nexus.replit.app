@@ -197,7 +197,7 @@ export default function ActivityLogs() {
   if (subToDate) submissionQueryParams.set("endDate", subToDate.toISOString());
 
   // Fetch submission tracking logs
-  const { data: submissionData, isLoading: submissionsLoading, refetch: refetchSubmissions } = useQuery<{
+  const { data: submissionData, isLoading: submissionsLoading, isFetching: submissionsFetching, refetch: refetchSubmissions } = useQuery<{
     success: boolean;
     submissions: SubmissionLog[];
     count: number;
@@ -881,10 +881,10 @@ export default function ActivityLogs() {
                   variant="ghost"
                   size="icon"
                   onClick={() => refetchSubmissions()}
-                  disabled={submissionsLoading}
+                  disabled={submissionsFetching}
                   data-testid="button-refresh-submissions"
                 >
-                  <RefreshCw className={`h-4 w-4 ${submissionsLoading ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`h-4 w-4 ${submissionsFetching ? 'animate-spin' : ''}`} />
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
