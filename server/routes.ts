@@ -5452,17 +5452,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { vehicleNumber, enterpriseId } = req.body;
       
-      if (!vehicleNumber || !enterpriseId) {
+      if (!vehicleNumber) {
         return res.status(400).json({ 
           success: false, 
-          error: 'Vehicle number and enterprise ID are required' 
+          error: 'Vehicle number is required' 
         });
       }
       
-      console.log(`[API] Holman assignment update requested: vehicle=${vehicleNumber}, tech=${enterpriseId}`);
+      const action = enterpriseId ? `tech=${enterpriseId}` : 'UNASSIGN';
+      console.log(`[API] Holman assignment update requested: vehicle=${vehicleNumber}, ${action}`);
       const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
         vehicleNumber,
-        enterpriseId
+        enterpriseId || null
       );
       
       if (result.success) {

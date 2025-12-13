@@ -124,55 +124,97 @@ class HolmanAssignmentUpdateService {
     };
   }
 
+  private buildUnassignPayload(vehicleNumber: string): HolmanAssignmentPayload {
+    const paddedVehicleNumber = vehicleNumber.padStart(6, '0');
+    
+    return {
+      lesseeCode: this.LESSEE_CODE,
+      holmanVehicleNumber: paddedVehicleNumber,
+      email: this.FLEET_EMAIL,
+      firstName: null,
+      lastName: null,
+      clientData1: null,
+      clientData2: null,
+      clientData3: '890',
+      clientData4: null,
+      clientData5: null,
+      clientData6: null,
+      clientData7: null,
+      assignedStatusCode: 'D',
+      prefix: null,
+      addressLine1: null,
+      addressLine2: null,
+      addressLine3: null,
+      city: null,
+      stateProvince: null,
+      zipPostalCode: null,
+      homePhone: null,
+      workPhone: null,
+      workPhoneExtension: null,
+      cellPhone: null,
+    };
+  }
+
   async updateVehicleAssignment(
     vehicleNumber: string,
-    enterpriseId: string
+    enterpriseId?: string | null
   ): Promise<UpdateResult> {
-    console.log(`[HolmanAssignmentUpdate] Starting update for vehicle ${vehicleNumber} with tech ${enterpriseId}`);
+    console.log(`[HolmanAssignmentUpdate] Starting update for vehicle ${vehicleNumber} with tech ${enterpriseId || 'UNASSIGN'}`);
 
     try {
-      const tpmsService = getTPMSService();
-      const techInfo = await tpmsService.getTechInfo(enterpriseId);
-      console.log(`[HolmanAssignmentUpdate] Got TPMS tech info:`, {
-        firstName: techInfo.firstName,
-        lastName: techInfo.lastName,
-        techId: techInfo.techId,
-        districtNo: techInfo.districtNo,
-        truckNo: techInfo.truckNo,
-      });
+      let payload: HolmanAssignmentPayload;
 
-      const primaryAddress = techInfo.addresses?.find((a: TechAddress) => a.addressType === 'PRIMARY');
+      if (!enterpriseId) {
+        console.log(`[HolmanAssignmentUpdate] No enterprise ID - building unassign payload`);
+        payload = this.buildUnassignPayload(vehicleNumber);
+      } else {
+        const tpmsService = getTPMSService();
+        const techInfo = await tpmsService.getTechInfo(enterpriseId);
+        console.log(`[HolmanAssignmentUpdate] Got TPMS tech info:`, {
+          firstName: techInfo.firstName,
+          lastName: techInfo.lastName,
+          techId: techInfo.techId,
+          districtNo: techInfo.districtNo,
+          truckNo: techInfo.truckNo,
+        });
+
+        const primaryAddress = techInfo.addresses?.find((a: TechAddress) => a.addressType === 'PRIMARY');
+        
+        const techData: TPMSTechData = {
+          enterpriseId: techInfo.ldapId || enterpriseId,
+          firstName: techInfo.firstName,
+          lastName: techInfo.lastName,
+          techId: techInfo.techId,
+          districtNo: techInfo.districtNo,
+          truckNo: techInfo.truckNo,
+          primaryAddress: primaryAddress ? {
+            addrLine1: primaryAddress.addrLine1,
+            addrLine2: primaryAddress.addrLine2,
+            city: primaryAddress.city,
+            stateCd: primaryAddress.stateCd,
+            zipCd: primaryAddress.zipCd,
+          } : undefined,
+          mobilePhone: techInfo.contactNo,
+        };
+
+        payload = this.buildPayload(vehicleNumber, techData);
+      }
       
-      const techData: TPMSTechData = {
-        enterpriseId: techInfo.ldapId || enterpriseId,
-        firstName: techInfo.firstName,
-        lastName: techInfo.lastName,
-        techId: techInfo.techId,
-        districtNo: techInfo.districtNo,
-        truckNo: techInfo.truckNo,
-        primaryAddress: primaryAddress ? {
-          addrLine1: primaryAddress.addrLine1,
-          addrLine2: primaryAddress.addrLine2,
-          city: primaryAddress.city,
-          stateCd: primaryAddress.stateCd,
-          zipCd: primaryAddress.zipCd,
-        } : undefined,
-        mobilePhone: techInfo.contactNo,
-      };
-
-      const payload = this.buildPayload(vehicleNumber, techData);
       console.log(`[HolmanAssignmentUpdate] Built payload:`, JSON.stringify(payload, null, 2));
 
       const response = await holmanApiService.submitVehicleArray([payload]);
       console.log(`[HolmanAssignmentUpdate] Holman response:`, response);
 
       const submissionId = response?.submissionId || response?.id || null;
+      const message = enterpriseId 
+        ? 'Vehicle assignment updated successfully in Holman'
+        : 'Vehicle unassigned successfully in Holman (technician data cleared)';
 
       return {
         success: true,
         holmanVehicleNumber: payload.holmanVehicleNumber,
         submissionId,
-        message: 'Vehicle assignment updated successfully in Holman',
+        message,
         payload,
         response,
       };

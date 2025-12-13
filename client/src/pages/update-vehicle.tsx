@@ -216,14 +216,17 @@ export default function UpdateVehicle() {
 
   // Mutation to sync vehicle assignment to Holman based on TPMS data
   const syncToHolmanMutation = useMutation({
-    mutationFn: async ({ vehicleNumber, enterpriseId }: { vehicleNumber: string; enterpriseId: string }) => {
+    mutationFn: async ({ vehicleNumber, enterpriseId }: { vehicleNumber: string; enterpriseId?: string | null }) => {
       const response = await apiRequest('POST', '/api/holman/assignments/update', { vehicleNumber, enterpriseId });
       return response.json();
     },
     onSuccess: (data: any) => {
+      const isUnassign = !data.payload?.clientData2;
       toast({
-        title: "Holman Update Successful",
-        description: `Vehicle ${data.holmanVehicleNumber} has been updated in Holman with TPMS assignment data`,
+        title: isUnassign ? "Vehicle Unassigned in Holman" : "Holman Update Successful",
+        description: isUnassign 
+          ? `Vehicle ${data.holmanVehicleNumber} has been unassigned in Holman (technician data cleared)`
+          : `Vehicle ${data.holmanVehicleNumber} has been updated in Holman with TPMS assignment data`,
       });
       queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
     },
@@ -239,16 +242,7 @@ export default function UpdateVehicle() {
   const handleSyncToHolman = () => {
     if (!selectedVehicle) return;
     
-    const enterpriseId = selectedVehicle.tpmsAssignedTechId || employeeData.enterpriseId;
-    
-    if (!enterpriseId) {
-      toast({
-        title: "Missing Enterprise ID",
-        description: "Please enter an Enterprise ID or select a vehicle with a TPMS assigned technician",
-        variant: "destructive",
-      });
-      return;
-    }
+    const enterpriseId = selectedVehicle.tpmsAssignedTechId || employeeData.enterpriseId || null;
     
     syncToHolmanMutation.mutate({
       vehicleNumber: selectedVehicle.vehicleNumber,
