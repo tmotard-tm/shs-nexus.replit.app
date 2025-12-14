@@ -5406,6 +5406,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Lightweight counts-only endpoint (reads from cache, very fast)
+  app.get("/api/holman/fleet-vehicles/counts", requireAuth, async (req: any, res) => {
+    try {
+      const counts = await holmanVehicleSyncService.getCachedCounts();
+      res.json(counts);
+    } catch (error: any) {
+      console.error("Error fetching fleet counts:", error);
+      res.status(500).json({ 
+        success: false, 
+        total: 0,
+        assigned: 0,
+        unassigned: 0,
+        message: error.message 
+      });
+    }
+  });
+
   // Manual sync endpoint
   app.post("/api/holman/fleet-vehicles/sync", requireAuth, async (req: any, res) => {
     try {

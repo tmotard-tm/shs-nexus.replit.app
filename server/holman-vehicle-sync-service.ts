@@ -707,6 +707,38 @@ class HolmanVehicleSyncService {
     return true;
   }
 
+  async getCachedCounts(): Promise<{ success: boolean; total: number; assigned: number; unassigned: number }> {
+    try {
+      // Get total count
+      const [totalResult] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(holmanVehiclesCache)
+        .where(eq(holmanVehiclesCache.isActive, true));
+
+      // Get assigned count (has TPMS tech assigned)
+      const [assignedResult] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(holmanVehiclesCache)
+        .where(and(
+          eq(holmanVehiclesCache.isActive, true),
+          sql`${holmanVehiclesCache.tpmsAssignedTechId} IS NOT NULL AND ${holmanVehiclesCache.tpmsAssignedTechId} != ''`
+        ));
+
+      const total = totalResult?.count || 0;
+      const assigned = assignedResult?.count || 0;
+
+      return {
+        success: true,
+        total,
+        assigned,
+        unassigned: total - assigned,
+      };
+    } catch (error) {
+      console.error('[HolmanSync] Error getting cached counts:', error);
+      return { success: false, total: 0, assigned: 0, unassigned: 0 };
+    }
+  }
+
   async getSyncStatus(): Promise<HolmanSyncStatus> {
     const pendingCount = await this.getPendingChangeCount();
     
