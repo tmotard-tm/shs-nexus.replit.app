@@ -21,29 +21,20 @@ interface FleetVehiclesResponse {
   vehicles: FleetVehicle[];
 }
 
-interface FleetCountsResponse {
-  success: boolean;
-  total: number;
-  assigned: number;
-  unassigned: number;
-}
-
 export default function AnalyticsBoard() {
   const [, setLocation] = useLocation();
   
-  // Fast lightweight counts query (reads from database cache)
-  const { data: counts, isLoading: countsLoading } = useQuery<FleetCountsResponse>({
-    queryKey: ['/api/holman/fleet-vehicles/counts'],
-    staleTime: 60 * 1000, // 1 minute cache
-  });
-
-  // Full vehicles data for the map (loads in background)
-  const { data: apiResponse } = useQuery<FleetVehiclesResponse>({
+  // Full vehicles data for counts and map
+  const { data: apiResponse, isLoading: vehiclesLoading } = useQuery<FleetVehiclesResponse>({
     queryKey: ['/api/holman/fleet-vehicles'],
     staleTime: 5 * 60 * 1000,
   });
 
   const allVehicles = apiResponse?.vehicles || [];
+  
+  // TPMS assignment determines if vehicle is assigned (accurate from live enrichment)
+  const assignedVehicles = allVehicles.filter(v => v.tpmsAssignedTechId);
+  const unassignedVehicles = allVehicles.filter(v => !v.tpmsAssignedTechId);
 
   // Use Holman fleet data for maps
   const mapVehicleData = allVehicles;
@@ -71,10 +62,10 @@ export default function AnalyticsBoard() {
             >
               <CardContent className="flex flex-col items-center text-center p-4">
                 <Car className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                {countsLoading ? (
+                {vehiclesLoading ? (
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 ) : (
-                  <p className="text-lg font-bold text-foreground" data-testid="text-vehicles-count">{counts?.total || 0}</p>
+                  <p className="text-lg font-bold text-foreground" data-testid="text-vehicles-count">{allVehicles.length}</p>
                 )}
                 <p className="text-sm text-muted-foreground">Active Fleet</p>
               </CardContent>
@@ -87,10 +78,10 @@ export default function AnalyticsBoard() {
             >
               <CardContent className="flex flex-col items-center text-center p-4">
                 <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                {countsLoading ? (
+                {vehiclesLoading ? (
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 ) : (
-                  <p className="text-lg font-bold text-foreground" data-testid="text-assigned-count">{counts?.assigned || 0}</p>
+                  <p className="text-lg font-bold text-foreground" data-testid="text-assigned-count">{assignedVehicles.length}</p>
                 )}
                 <p className="text-sm text-muted-foreground">Assigned Fleet</p>
               </CardContent>
@@ -103,10 +94,10 @@ export default function AnalyticsBoard() {
             >
               <CardContent className="flex flex-col items-center text-center p-4">
                 <Truck className="h-6 w-6 mb-2" style={{ color: '#01effc', filter: 'drop-shadow(1px 0 0 black) drop-shadow(-1px 0 0 black) drop-shadow(0 1px 0 black) drop-shadow(0 -1px 0 black)' }} />
-                {countsLoading ? (
+                {vehiclesLoading ? (
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 ) : (
-                  <p className="text-lg font-bold text-foreground" data-testid="text-unassigned-count">{counts?.unassigned || 0}</p>
+                  <p className="text-lg font-bold text-foreground" data-testid="text-unassigned-count">{unassignedVehicles.length}</p>
                 )}
                 <p className="text-sm text-muted-foreground">Unassigned Fleet</p>
               </CardContent>
