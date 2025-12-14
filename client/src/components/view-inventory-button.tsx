@@ -152,9 +152,11 @@ export function ViewInventoryButton({
         const pieces = inventory.totalPieces || 0;
         const costValue = formatCurrency(inventory.totalAvgCost);
         return (
-          <div className="flex items-center gap-3 text-left min-w-[180px]">
+          <div className="flex items-center gap-3 text-left min-w-[220px]">
             <Package className="h-4 w-4 flex-shrink-0" />
             <div className="flex items-center gap-2 text-xs">
+              <span className="font-medium">View Inventory</span>
+              <span className="text-muted-foreground">•</span>
               <span className="font-medium">{pieces.toLocaleString()} pcs</span>
               <span className="text-muted-foreground">•</span>
               <span className="font-medium">{costValue}</span>
