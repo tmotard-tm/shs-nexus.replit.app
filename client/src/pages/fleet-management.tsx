@@ -23,7 +23,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { type FleetVehicle } from "@/data/fleetData";
-import { getVehicleOwnership, getHolmanStatus } from "@/lib/vehicle-utils";
+import { getVehicleOwnership } from "@/lib/vehicle-utils";
 import { DataSourceIndicator, calculateZipDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
 
 interface FleetVehiclesResponse {
@@ -918,7 +918,6 @@ export default function FleetManagement() {
                   {sortedVehicles.slice(0, 99).map((vehicle) => {
                     const assignStatus = getAssignmentStatus(vehicle);
                     const ownership = getVehicleOwnership(vehicle.vehicleNumber);
-                    const holmanStatus = getHolmanStatus((vehicle as any).statusCode);
                     const distanceScore = (vehicle as any).distanceScore;
                     const distanceInfo = distanceScore ? getDistanceLabel(distanceScore) : null;
                     const hasMismatch = assignStatus.status === 'mismatch';
@@ -951,8 +950,8 @@ export default function FleetManagement() {
                               </div>
                             </div>
                             <div className="flex flex-col gap-1 items-end">
-                              <Badge className={holmanStatus.bgColor + ' ' + holmanStatus.color + ' border ' + holmanStatus.borderColor + ' text-xs'}>
-                                {holmanStatus.label}
+                              <Badge className={assignStatus.color + ' border text-xs'}>
+                                {assignStatus.label}
                               </Badge>
                               <Badge variant="outline" className="text-xs">
                                 {ownership.type}
