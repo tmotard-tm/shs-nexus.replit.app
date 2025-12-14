@@ -12,12 +12,18 @@ import { useQuery } from "@tanstack/react-query";
 
 interface FleetVehicle {
   tpmsAssignedTechId?: string;
+  holmanTechAssigned?: string;
   [key: string]: any;
 }
 
 interface FleetVehiclesResponse {
   success: boolean;
   vehicles: FleetVehicle[];
+}
+
+// Helper to check if a vehicle is assigned (has a tech via TPMS or Holman)
+function isVehicleAssigned(vehicle: FleetVehicle): boolean {
+  return !!(vehicle.tpmsAssignedTechId || vehicle.holmanTechAssigned);
 }
 
 export default function AssistanceSelection() {
@@ -34,9 +40,9 @@ export default function AssistanceSelection() {
   });
 
   const allVehicles = apiResponse?.vehicles || [];
-  // TPMS assignment determines if vehicle is assigned
-  const assignedVehicles = allVehicles.filter(v => v.tpmsAssignedTechId);
-  const unassignedVehicles = allVehicles.filter(v => !v.tpmsAssignedTechId);
+  // Vehicle is assigned if it has a tech assigned via TPMS or Holman
+  const assignedVehicles = allVehicles.filter(isVehicleAssigned);
+  const unassignedVehicles = allVehicles.filter(v => !isVehicleAssigned(v));
 
   const allWorkflowOptions = [
     { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-600 hover:bg-gray-700", action: () => setLocation("/queue-management"), permissionKey: "taskQueue" as const },
