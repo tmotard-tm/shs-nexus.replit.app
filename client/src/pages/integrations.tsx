@@ -700,41 +700,6 @@ export default function Integrations() {
                   </CardContent>
                 </Card>
 
-                {/* Sync Termed Employees */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Users className="h-4 w-4" />
-                      Sync Termed Employees
-                    </CardTitle>
-                    <CardDescription>
-                      Sync terminated employees from Snowflake and create offboarding queue items
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      Fetches terminated employee data from the DRIVELINE_TERMED_TECHS_LAST30 table and creates Day 0 offboarding tasks distributed across NTAO, Assets, Fleet, and Inventory queues.
-                    </p>
-                    <Button
-                      onClick={() => syncTermedTechsMutation.mutate()}
-                      disabled={!snowflakeStatus?.configured || syncTermedTechsMutation.isPending}
-                      data-testid="button-sync-termed-techs"
-                    >
-                      {syncTermedTechsMutation.isPending ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Syncing Employees...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                          Sync Termed Employees
-                        </>
-                      )}
-                    </Button>
-                  </CardContent>
-                </Card>
-
                 {/* Sync History */}
                 <Card>
                   <CardHeader className="pb-3">
