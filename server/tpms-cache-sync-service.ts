@@ -118,7 +118,8 @@ class TpmsCacheSyncService {
         for (const chunk of chunks) {
           await Promise.all(
             chunk.map(async (tech) => {
-              const enterpriseId = tech.employeeId?.toUpperCase();
+              // Use tech_racfid (LDAP ID) for TPMS lookups, not employee_id (numeric)
+              const enterpriseId = tech.techRacfid?.trim().toUpperCase();
               
               if (!enterpriseId) {
                 this.progress.skipped++;
