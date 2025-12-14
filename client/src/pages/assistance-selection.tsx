@@ -48,7 +48,7 @@ export default function AssistanceSelection() {
     { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-600 hover:bg-gray-700", action: () => setLocation("/queue-management"), permissionKey: "taskQueue" as const },
     { value: "offboarding", label: "Offboarding", icon: UserMinus, color: "bg-red-600 hover:bg-red-700", action: () => setLocation("/offboard-technician"), permissionKey: "offboarding" as const },
     { value: "onboarding", label: "Onboarding", icon: UserPlus, color: "bg-purple-600 hover:bg-purple-700", action: () => setLocation("/onboard-hire"), permissionKey: "onboarding" as const },
-    { value: "assign-vehicle", label: "Assign or Update Vehicle", icon: MapPin, color: "bg-green-600 hover:bg-green-700", action: () => setIsAssignUpdateDialogOpen(true), permissionKey: "assignVehicle" as const },
+    { value: "assign-vehicle", label: "Fleet Management", icon: MapPin, color: "bg-green-600 hover:bg-green-700", action: () => setLocation("/fleet-management"), permissionKey: "assignVehicle" as const },
     { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-600 hover:bg-blue-700", action: () => setLocation("/create-vehicle-location"), permissionKey: "createVehicle" as const },
   ];
 
