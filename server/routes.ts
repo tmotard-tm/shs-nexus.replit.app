@@ -392,7 +392,18 @@ async function requireAuth(req: any, res: any, next: any): Promise<any> {
       return res.status(401).json({ message: "Session expired" });
     }
     
-    req.user = { id: session.userId, username: session.username };
+    // Fetch full user data to get role and other fields
+    const user = await storage.getUserById(session.userId);
+    if (!user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+    
+    req.user = { 
+      id: user.id, 
+      username: user.username, 
+      role: user.role,
+      departments: user.departments
+    };
     
     return next();
   } catch (error) {
