@@ -15,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, 
-  UserX, History, AlertTriangle, User, Package
+  UserX, History, AlertTriangle, User, Package, Car, X, Gauge
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
@@ -23,7 +23,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { type FleetVehicle } from "@/data/fleetData";
-import { getVehicleOwnership } from "@/lib/vehicle-utils";
+import { getVehicleOwnership, getHolmanStatus } from "@/lib/vehicle-utils";
 import { DataSourceIndicator, calculateZipDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
 
 interface FleetVehiclesResponse {
@@ -57,11 +57,35 @@ export default function FleetManagement() {
   // Search and filters state
   const [searchQuery, setSearchQuery] = useState("");
   const [targetZipcode, setTargetZipcode] = useState("");
-  const [regionFilter, setRegionFilter] = useState("all");
-  const [districtFilter, setDistrictFilter] = useState("all");
-  const [assignmentStatusFilter, setAssignmentStatusFilter] = useState("all");
+  
+  // Vehicle Details filters
+  const [makeFilter, setMakeFilter] = useState("all");
+  const [modelFilter, setModelFilter] = useState("all");
+  const [yearFilter, setYearFilter] = useState("all");
+  const [colorFilter, setColorFilter] = useState("all");
+  
+  // Configuration filters
   const [vehicleProgramFilter, setVehicleProgramFilter] = useState("all");
+  const [brandingFilter, setBrandingFilter] = useState("all");
+  const [interiorFilter, setInteriorFilter] = useState("all");
+  const [tuneStatusFilter, setTuneStatusFilter] = useState("all");
+  
+  // Assignment Status filter
+  const [assignmentStatusFilter, setAssignmentStatusFilter] = useState("all");
+  
+  // Location filters
+  const [stateFilter, setStateFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
+  const [licenseStateFilter, setLicenseStateFilter] = useState("all");
+  const [regionFilter, setRegionFilter] = useState("all");
+  const [divisionFilter, setDivisionFilter] = useState("all");
+  const [districtFilter, setDistrictFilter] = useState("all");
+  
+  // Tech Assignment filters
+  const [holmanTechFilter, setHolmanTechFilter] = useState("all");
+  const [tpmsTechFilter, setTpmsTechFilter] = useState("all");
   const [mismatchFilter, setMismatchFilter] = useState("all");
+  
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   
   // Quick lookup state
@@ -121,20 +145,38 @@ export default function FleetManagement() {
   // Generate filter options from data
   const filterOptions = useMemo(() => {
     const unique = (arr: string[]) => Array.from(new Set(arr.filter(Boolean))).sort();
+    const uniqueNum = (arr: number[]) => Array.from(new Set(arr.filter(n => n > 0))).sort((a, b) => b - a);
+    
     return {
+      makes: unique(allVehicles.map(v => v.makeName)),
+      models: unique(allVehicles.map(v => v.modelName)),
+      colors: unique(allVehicles.map(v => v.color)),
+      years: uniqueNum(allVehicles.map(v => v.modelYear)),
+      states: unique(allVehicles.map(v => v.state)),
+      licenseStates: unique(allVehicles.map(v => v.licenseState)),
       regions: unique(allVehicles.map(v => v.region)),
+      divisions: unique(allVehicles.map(v => v.division || '')),
       districts: unique(allVehicles.map(v => v.district)),
+      cities: unique(allVehicles.map(v => v.city)),
+      brandings: unique(allVehicles.map(v => v.branding)),
+      interiors: unique(allVehicles.map(v => v.interior)),
+      tuneStatuses: unique(allVehicles.map(v => v.tuneStatus)),
+      holmanTechs: unique(allVehicles.map(v => v.holmanTechAssigned || '').filter(Boolean)),
+      tpmsTechs: unique(allVehicles.map(v => v.tpmsAssignedTechId || '').filter(Boolean)),
     };
   }, [allVehicles]);
 
   // Count active filters
   const activeFiltersCount = [
-    regionFilter, districtFilter, assignmentStatusFilter, 
-    vehicleProgramFilter, mismatchFilter
+    makeFilter, modelFilter, yearFilter, colorFilter,
+    vehicleProgramFilter, brandingFilter, interiorFilter, tuneStatusFilter,
+    assignmentStatusFilter,
+    stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
+    holmanTechFilter, tpmsTechFilter, mismatchFilter
   ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0);
 
   // Apply filters
-  let filteredVehicles = useMemo(() => {
+  const filteredVehicles = useMemo(() => {
     return allVehicles.filter(vehicle => {
       const searchLower = searchQuery.toLowerCase().trim();
       const searchNoLeadingZeros = searchLower.replace(/^0+/, '');
@@ -153,17 +195,41 @@ export default function FleetManagement() {
         (vehicle.holmanTechName || '').toLowerCase().includes(searchLower) ||
         (vehicle.city || '').toLowerCase().includes(searchLower);
       
-      const matchesRegion = regionFilter === "all" || vehicle.region === regionFilter;
-      const matchesDistrict = districtFilter === "all" || vehicle.district === districtFilter;
+      // Vehicle Details filters
+      const matchesMake = makeFilter === "all" || vehicle.makeName === makeFilter;
+      const matchesModel = modelFilter === "all" || vehicle.modelName === modelFilter;
+      const matchesYear = yearFilter === "all" || vehicle.modelYear.toString() === yearFilter;
+      const matchesColor = colorFilter === "all" || vehicle.color === colorFilter;
       
-      const matchesAssignment = assignmentStatusFilter === "all" || 
-        (assignmentStatusFilter === "assigned" && vehicle.tpmsAssignedTechId) ||
-        (assignmentStatusFilter === "unassigned" && !vehicle.tpmsAssignedTechId);
-      
+      // Configuration filters
       const ownership = getVehicleOwnership(vehicle.vehicleNumber);
       const matchesProgram = vehicleProgramFilter === "all" ||
         (vehicleProgramFilter === "byov" && ownership.type === 'BYOV') ||
         (vehicleProgramFilter === "fleet" && ownership.type === 'Fleet');
+      const matchesBranding = brandingFilter === "all" || vehicle.branding === brandingFilter;
+      const matchesInterior = interiorFilter === "all" || vehicle.interior === interiorFilter;
+      const matchesTuneStatus = tuneStatusFilter === "all" || vehicle.tuneStatus === tuneStatusFilter;
+      
+      // Assignment Status filter
+      const matchesAssignment = assignmentStatusFilter === "all" || 
+        (assignmentStatusFilter === "assigned" && vehicle.tpmsAssignedTechId) ||
+        (assignmentStatusFilter === "unassigned" && !vehicle.tpmsAssignedTechId);
+      
+      // Location filters
+      const matchesState = stateFilter === "all" || vehicle.state === stateFilter;
+      const matchesCity = cityFilter === "all" || vehicle.city === cityFilter;
+      const matchesLicenseState = licenseStateFilter === "all" || vehicle.licenseState === licenseStateFilter;
+      const matchesRegion = regionFilter === "all" || vehicle.region === regionFilter;
+      const matchesDivision = divisionFilter === "all" || vehicle.division === divisionFilter;
+      const matchesDistrict = districtFilter === "all" || vehicle.district === districtFilter;
+      
+      // Tech Assignment filters
+      const matchesHolmanTech = holmanTechFilter === "all" || 
+        (holmanTechFilter === "unassigned" && !vehicle.holmanTechAssigned) ||
+        vehicle.holmanTechAssigned === holmanTechFilter;
+      const matchesTpmsTech = tpmsTechFilter === "all" || 
+        (tpmsTechFilter === "unassigned" && !vehicle.tpmsAssignedTechId) ||
+        vehicle.tpmsAssignedTechId === tpmsTechFilter;
       
       const holmanId = vehicle.holmanTechAssigned?.trim() || '';
       const tpmsId = vehicle.tpmsAssignedTechId?.trim() || '';
@@ -173,10 +239,17 @@ export default function FleetManagement() {
         (mismatchFilter === "mismatch" && hasMismatch) ||
         (mismatchFilter === "match" && !hasMismatch);
       
-      return matchesSearch && matchesRegion && matchesDistrict && 
-             matchesAssignment && matchesProgram && matchesMismatch;
+      return matchesSearch && matchesMake && matchesModel && matchesYear && matchesColor &&
+             matchesProgram && matchesBranding && matchesInterior && matchesTuneStatus &&
+             matchesAssignment &&
+             matchesState && matchesCity && matchesLicenseState && matchesRegion && matchesDivision && matchesDistrict &&
+             matchesHolmanTech && matchesTpmsTech && matchesMismatch;
     });
-  }, [allVehicles, searchQuery, regionFilter, districtFilter, assignmentStatusFilter, vehicleProgramFilter, mismatchFilter]);
+  }, [allVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
+      vehicleProgramFilter, brandingFilter, interiorFilter, tuneStatusFilter,
+      assignmentStatusFilter,
+      stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
+      holmanTechFilter, tpmsTechFilter, mismatchFilter]);
 
   // Sort by zip distance if target provided
   const sortedVehicles = useMemo(() => {
@@ -221,10 +294,23 @@ export default function FleetManagement() {
   const clearAllFilters = () => {
     setSearchQuery("");
     setTargetZipcode("");
-    setRegionFilter("all");
-    setDistrictFilter("all");
-    setAssignmentStatusFilter("all");
+    setMakeFilter("all");
+    setModelFilter("all");
+    setYearFilter("all");
+    setColorFilter("all");
     setVehicleProgramFilter("all");
+    setBrandingFilter("all");
+    setInteriorFilter("all");
+    setTuneStatusFilter("all");
+    setAssignmentStatusFilter("all");
+    setStateFilter("all");
+    setCityFilter("all");
+    setLicenseStateFilter("all");
+    setRegionFilter("all");
+    setDivisionFilter("all");
+    setDistrictFilter("all");
+    setHolmanTechFilter("all");
+    setTpmsTechFilter("all");
     setMismatchFilter("all");
   };
 
@@ -233,18 +319,18 @@ export default function FleetManagement() {
     const tpmsId = vehicle.tpmsAssignedTechId?.trim();
     
     if (tpmsId && holmanId && tpmsId.toLowerCase() === holmanId.toLowerCase()) {
-      return { status: 'synced', label: 'Synced', color: 'bg-green-100 text-green-800' };
+      return { status: 'synced', label: 'Synced', color: 'bg-green-100 text-green-800 border-green-300', cardBorder: 'border-green-500', cardBg: 'bg-green-50 dark:bg-green-950/20' };
     }
     if (tpmsId && !holmanId) {
-      return { status: 'pending', label: 'Pending Sync', color: 'bg-yellow-100 text-yellow-800' };
+      return { status: 'pending', label: 'Pending Sync', color: 'bg-yellow-100 text-yellow-800 border-yellow-300', cardBorder: 'border-yellow-500', cardBg: 'bg-yellow-50 dark:bg-yellow-950/20' };
     }
     if (holmanId && !tpmsId) {
-      return { status: 'mismatch', label: 'Mismatch', color: 'bg-red-100 text-red-800' };
+      return { status: 'mismatch', label: 'Mismatch', color: 'bg-red-100 text-red-800 border-red-300', cardBorder: 'border-red-500', cardBg: 'bg-red-50 dark:bg-red-950/20' };
     }
     if (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) {
-      return { status: 'mismatch', label: 'Mismatch', color: 'bg-red-100 text-red-800' };
+      return { status: 'mismatch', label: 'Mismatch', color: 'bg-red-100 text-red-800 border-red-300', cardBorder: 'border-red-500', cardBg: 'bg-red-50 dark:bg-red-950/20' };
     }
-    return { status: 'unassigned', label: 'Unassigned', color: 'bg-gray-100 text-gray-800' };
+    return { status: 'unassigned', label: 'Unassigned', color: 'bg-gray-100 text-gray-800 border-gray-300', cardBorder: 'border-gray-300', cardBg: '' };
   };
 
   // Stats
@@ -278,7 +364,7 @@ export default function FleetManagement() {
                   <p className="text-2xl font-bold" data-testid="text-total-vehicles">{allVehicles.length}</p>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/10">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-green-600">Assigned</CardTitle>
                 </CardHeader>
@@ -286,20 +372,20 @@ export default function FleetManagement() {
                   <p className="text-2xl font-bold text-green-600" data-testid="text-assigned-count">{assignedCount}</p>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="border-orange-200 bg-orange-50/50 dark:bg-orange-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-600">Unassigned</CardTitle>
+                  <CardTitle className="text-sm font-medium text-orange-600">Unassigned</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold text-gray-600" data-testid="text-unassigned-count">{unassignedCount}</p>
+                  <p className="text-2xl font-bold text-orange-600" data-testid="text-unassigned-count">{unassignedCount}</p>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="border-red-200 bg-red-50/50 dark:bg-red-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-amber-600">Mismatches</CardTitle>
+                  <CardTitle className="text-sm font-medium text-red-600">Mismatches</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold text-amber-600" data-testid="text-mismatch-count">{mismatchCount}</p>
+                  <p className="text-2xl font-bold text-red-600" data-testid="text-mismatch-count">{mismatchCount}</p>
                 </CardContent>
               </Card>
             </div>
@@ -437,6 +523,17 @@ export default function FleetManagement() {
                       className="pl-9"
                       data-testid="input-search"
                     />
+                    {searchQuery && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0"
+                        onClick={() => setSearchQuery("")}
+                        data-testid="button-clear-search"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <div className="flex-1">
@@ -466,85 +563,327 @@ export default function FleetManagement() {
                   </div>
                 </div>
 
-                {/* Filters Panel */}
+                {/* Expanded Filters Panel */}
                 <Collapsible open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
-                  <CollapsibleContent>
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-4 bg-muted/50 rounded-lg">
-                      <div>
-                        <Label className="text-xs">Region</Label>
-                        <Select value={regionFilter} onValueChange={setRegionFilter}>
-                          <SelectTrigger data-testid="select-region">
-                            <SelectValue placeholder="All Regions" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Regions</SelectItem>
-                            {filterOptions.regions.map(r => (
-                              <SelectItem key={r} value={r}>{r}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label className="text-xs">District</Label>
-                        <Select value={districtFilter} onValueChange={setDistrictFilter}>
-                          <SelectTrigger data-testid="select-district">
-                            <SelectValue placeholder="All Districts" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Districts</SelectItem>
-                            {filterOptions.districts.map(d => (
-                              <SelectItem key={d} value={d}>{d}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label className="text-xs">Assignment</Label>
-                        <Select value={assignmentStatusFilter} onValueChange={setAssignmentStatusFilter}>
-                          <SelectTrigger data-testid="select-assignment">
-                            <SelectValue placeholder="All" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All</SelectItem>
-                            <SelectItem value="assigned">Assigned</SelectItem>
-                            <SelectItem value="unassigned">Unassigned</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label className="text-xs">Program</Label>
-                        <Select value={vehicleProgramFilter} onValueChange={setVehicleProgramFilter}>
-                          <SelectTrigger data-testid="select-program">
-                            <SelectValue placeholder="All" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All</SelectItem>
-                            <SelectItem value="fleet">Fleet</SelectItem>
-                            <SelectItem value="byov">BYOV</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label className="text-xs">Sync Status</Label>
-                        <Select value={mismatchFilter} onValueChange={setMismatchFilter}>
-                          <SelectTrigger data-testid="select-mismatch">
-                            <SelectValue placeholder="All" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All</SelectItem>
-                            <SelectItem value="mismatch">Mismatches Only</SelectItem>
-                            <SelectItem value="match">Synced Only</SelectItem>
-                          </SelectContent>
-                        </Select>
+                  <CollapsibleContent className="space-y-4 mt-4">
+                    {/* Vehicle Details Filters */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Vehicle Details</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Make</Label>
+                          <Select value={makeFilter} onValueChange={setMakeFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-make-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All makes</SelectItem>
+                              {filterOptions.makes.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">Model</Label>
+                          <Select value={modelFilter} onValueChange={setModelFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-model-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All models</SelectItem>
+                              {filterOptions.models.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">Year</Label>
+                          <Select value={yearFilter} onValueChange={setYearFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-year-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All years</SelectItem>
+                              {filterOptions.years.map(option => (
+                                <SelectItem key={option.toString()} value={option.toString()}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">Color</Label>
+                          <Select value={colorFilter} onValueChange={setColorFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-color-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All colors</SelectItem>
+                              {filterOptions.colors.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                     </div>
-                    {activeFiltersCount > 0 && (
-                      <div className="flex justify-end mt-2">
-                        <Button variant="ghost" size="sm" onClick={clearAllFilters} data-testid="button-clear-filters">
-                          Clear All Filters
-                        </Button>
+                    
+                    {/* Configuration Filters */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Configuration</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Vehicle Program</Label>
+                          <Select value={vehicleProgramFilter} onValueChange={setVehicleProgramFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-vehicle-program-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All programs</SelectItem>
+                              <SelectItem value="fleet">Fleet</SelectItem>
+                              <SelectItem value="byov">BYOV</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">Branding</Label>
+                          <Select value={brandingFilter} onValueChange={setBrandingFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-branding-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All branding</SelectItem>
+                              {filterOptions.brandings.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">Interior</Label>
+                          <Select value={interiorFilter} onValueChange={setInteriorFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-interior-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All interiors</SelectItem>
+                              {filterOptions.interiors.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">Tune Status</Label>
+                          <Select value={tuneStatusFilter} onValueChange={setTuneStatusFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-tune-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All tune statuses</SelectItem>
+                              {filterOptions.tuneStatuses.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
-                    )}
+                    </div>
+                    
+                    {/* Assignment Status Filter */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Assignment Status</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Status</Label>
+                          <Select value={assignmentStatusFilter} onValueChange={setAssignmentStatusFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-assignment-status-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All vehicles</SelectItem>
+                              <SelectItem value="assigned">Assigned</SelectItem>
+                              <SelectItem value="unassigned">Unassigned</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Location Filters */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Location</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">State</Label>
+                          <Select value={stateFilter} onValueChange={setStateFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-state-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All states</SelectItem>
+                              {filterOptions.states.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">City</Label>
+                          <Select value={cityFilter} onValueChange={setCityFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-city-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All cities</SelectItem>
+                              {filterOptions.cities.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">License State</Label>
+                          <Select value={licenseStateFilter} onValueChange={setLicenseStateFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-license-state-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All license states</SelectItem>
+                              {filterOptions.licenseStates.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">Region</Label>
+                          <Select value={regionFilter} onValueChange={setRegionFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-region-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All regions</SelectItem>
+                              {filterOptions.regions.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">Division</Label>
+                          <Select value={divisionFilter} onValueChange={setDivisionFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-division-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All divisions</SelectItem>
+                              {filterOptions.divisions.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">District</Label>
+                          <Select value={districtFilter} onValueChange={setDistrictFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-district-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All districts</SelectItem>
+                              {filterOptions.districts.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Tech Assignment Filters */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Tech Assignment</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Holman Tech ID</Label>
+                          <Select value={holmanTechFilter} onValueChange={setHolmanTechFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-holman-tech-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All techs</SelectItem>
+                              <SelectItem value="unassigned">Unassigned</SelectItem>
+                              {filterOptions.holmanTechs.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">TPMS Tech ID</Label>
+                          <Select value={tpmsTechFilter} onValueChange={setTpmsTechFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-tpms-tech-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All techs</SelectItem>
+                              <SelectItem value="unassigned">Unassigned</SelectItem>
+                              {filterOptions.tpmsTechs.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <Label className="text-xs">Assignment Match</Label>
+                          <Select value={mismatchFilter} onValueChange={setMismatchFilter}>
+                            <SelectTrigger className="h-8" data-testid="select-mismatch-filter">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All vehicles</SelectItem>
+                              <SelectItem value="mismatch">Mismatch Only</SelectItem>
+                              <SelectItem value="match">Matched Only</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Filter Actions */}
+                    <div className="flex justify-between items-center pt-2 border-t">
+                      <span className="text-sm text-muted-foreground">
+                        {activeFiltersCount > 0 ? `${activeFiltersCount} filter(s) active` : 'No filters applied'}
+                      </span>
+                      <div className="flex gap-2">
+                        {activeFiltersCount > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={clearAllFilters}
+                            data-testid="button-clear-filters"
+                          >
+                            <X className="h-4 w-4 mr-1" />
+                            Clear Filters
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   </CollapsibleContent>
                 </Collapsible>
 
@@ -554,152 +893,166 @@ export default function FleetManagement() {
               </CardContent>
             </Card>
 
-            {/* Vehicle Table */}
-            <Card>
-              <CardContent className="p-0">
-                {isLoading ? (
-                  <div className="p-6 space-y-4">
-                    <Skeleton className="h-10 w-full" />
-                    {[1, 2, 3, 4, 5].map(i => (
-                      <Skeleton key={i} className="h-16 w-full" />
-                    ))}
-                  </div>
-                ) : sortedVehicles.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center p-8 text-center">
-                    <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-                    <h3 className="font-semibold text-lg">No Vehicles Found</h3>
-                    <p className="text-muted-foreground">
-                      {searchQuery || activeFiltersCount > 0 
-                        ? "No vehicles match your current filters" 
-                        : "No vehicles available"}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b bg-muted/50">
-                          <th className="text-left p-3 font-medium">Truck #</th>
-                          <th className="text-left p-3 font-medium">Vehicle</th>
-                          <th className="text-left p-3 font-medium">Location</th>
-                          <th className="text-left p-3 font-medium">TPMS Tech</th>
-                          <th className="text-left p-3 font-medium">Holman Tech</th>
-                          <th className="text-left p-3 font-medium">Status</th>
-                          {targetZipcode && <th className="text-left p-3 font-medium">Distance</th>}
-                          <th className="text-left p-3 font-medium">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedVehicles.slice(0, 100).map((vehicle) => {
-                          const assignStatus = getAssignmentStatus(vehicle);
-                          const ownership = getVehicleOwnership(vehicle.vehicleNumber);
-                          const distanceScore = (vehicle as any).distanceScore;
-                          const distanceInfo = distanceScore ? getDistanceLabel(distanceScore) : null;
+            {/* Vehicle Cards Grid */}
+            {isLoading ? (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {[1, 2, 3, 4, 5, 6].map(i => (
+                  <Skeleton key={i} className="h-64 w-full" />
+                ))}
+              </div>
+            ) : sortedVehicles.length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center p-8 text-center">
+                  <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="font-semibold text-lg">No Vehicles Found</h3>
+                  <p className="text-muted-foreground">
+                    {searchQuery || activeFiltersCount > 0 
+                      ? "No vehicles match your current filters" 
+                      : "No vehicles available"}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {sortedVehicles.slice(0, 99).map((vehicle) => {
+                    const assignStatus = getAssignmentStatus(vehicle);
+                    const ownership = getVehicleOwnership(vehicle.vehicleNumber);
+                    const holmanStatus = getHolmanStatus((vehicle as any).statusCode);
+                    const distanceScore = (vehicle as any).distanceScore;
+                    const distanceInfo = distanceScore ? getDistanceLabel(distanceScore) : null;
+                    const hasMismatch = assignStatus.status === 'mismatch';
+                    
+                    return (
+                      <Card 
+                        key={vehicle.vin} 
+                        className={`cursor-pointer hover:shadow-md transition-shadow ${assignStatus.cardBorder} ${assignStatus.cardBg} border-2`}
+                        onClick={() => setSelectedVehicle(vehicle)}
+                        data-testid={`card-vehicle-${vehicle.vehicleNumber}`}
+                      >
+                        <CardContent className="p-4 space-y-3">
+                          {/* Mismatch Warning Banner */}
+                          {hasMismatch && (
+                            <div className="p-2 bg-red-100 dark:bg-red-900 rounded-md flex items-center gap-2">
+                              <AlertTriangle className="h-4 w-4 text-red-600" />
+                              <span className="text-xs font-medium text-red-700 dark:text-red-300">
+                                Assignment Mismatch
+                              </span>
+                            </div>
+                          )}
                           
-                          return (
-                            <tr 
-                              key={vehicle.vin} 
-                              className="border-b hover:bg-muted/30 transition-colors cursor-pointer"
-                              onClick={() => setSelectedVehicle(vehicle)}
-                              data-testid={`row-vehicle-${vehicle.vehicleNumber}`}
-                            >
-                              <td className="p-3">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono font-semibold">{vehicle.vehicleNumber}</span>
-                                  <Badge variant="outline" className="text-xs">
-                                    {ownership.type}
-                                  </Badge>
-                                </div>
-                              </td>
-                              <td className="p-3 text-sm">
-                                <div>{vehicle.modelYear} {vehicle.makeName} {vehicle.modelName}</div>
-                                <div className="text-xs text-muted-foreground">{vehicle.licensePlate}</div>
-                              </td>
-                              <td className="p-3 text-sm">
-                                <div>{vehicle.city}, {vehicle.state}</div>
-                                <div className="text-xs text-muted-foreground">{vehicle.zip}</div>
-                              </td>
-                              <td className="p-3">
-                                {vehicle.tpmsAssignedTechId ? (
-                                  <div className="text-sm">
-                                    <div className="font-mono">{vehicle.tpmsAssignedTechId}</div>
-                                    {vehicle.tpmsAssignedTechName && (
-                                      <div className="text-xs text-muted-foreground">{vehicle.tpmsAssignedTechName}</div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-muted-foreground text-sm">-</span>
-                                )}
-                              </td>
-                              <td className="p-3">
-                                {vehicle.holmanTechAssigned ? (
-                                  <div className="text-sm">
-                                    <div className="font-mono">{vehicle.holmanTechAssigned}</div>
-                                    {vehicle.holmanTechName && (
-                                      <div className="text-xs text-muted-foreground">{vehicle.holmanTechName}</div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-muted-foreground text-sm">-</span>
-                                )}
-                              </td>
-                              <td className="p-3">
-                                <Badge className={assignStatus.color}>{assignStatus.label}</Badge>
-                              </td>
-                              {targetZipcode && (
-                                <td className="p-3">
-                                  {distanceInfo && (
-                                    <span className={`text-sm ${distanceInfo.color}`}>{distanceInfo.label}</span>
-                                  )}
-                                </td>
+                          {/* Header: Vehicle Info + Badges */}
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-2">
+                              <Car className="h-5 w-5 text-muted-foreground" />
+                              <div>
+                                <p className="font-semibold text-sm">{vehicle.modelYear} {vehicle.makeName} {vehicle.modelName}</p>
+                                <p className="text-xs text-muted-foreground font-mono">#{vehicle.vehicleNumber}</p>
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-1 items-end">
+                              <Badge className={holmanStatus.bgColor + ' ' + holmanStatus.color + ' border ' + holmanStatus.borderColor + ' text-xs'}>
+                                {holmanStatus.label}
+                              </Badge>
+                              <Badge variant="outline" className="text-xs">
+                                {ownership.type}
+                              </Badge>
+                            </div>
+                          </div>
+                          
+                          {/* VIN */}
+                          <div className="text-xs text-muted-foreground">
+                            <span className="font-medium">VIN:</span> <span className="font-mono">{vehicle.vin}</span>
+                          </div>
+                          
+                          {/* Tech Assignment Section */}
+                          <div className="grid grid-cols-2 gap-2 pt-2 border-t">
+                            {/* Holman Tech */}
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1">
+                                <Truck className="h-3 w-3 text-blue-600" />
+                                <span className="text-xs font-medium text-blue-600">Holman Tech</span>
+                              </div>
+                              {vehicle.holmanTechAssigned ? (
+                                <>
+                                  <p className="text-sm font-medium">{vehicle.holmanTechName || 'N/A'}</p>
+                                  <p className="text-xs text-muted-foreground font-mono">{vehicle.holmanTechAssigned}</p>
+                                </>
+                              ) : (
+                                <p className="text-xs text-orange-600 flex items-center gap-1">
+                                  <XCircle className="h-3 w-3" />
+                                  Unassigned
+                                </p>
                               )}
-                              <td className="p-3">
-                                <div className="flex gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => { e.stopPropagation(); setSelectedVehicle(vehicle); }}
-                                    title="View Details"
-                                    data-testid={`button-view-${vehicle.vehicleNumber}`}
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                  <ViewInventoryButton vehicleNumber={vehicle.vehicleNumber} size="sm" variant="ghost" className="h-8 px-2" />
-                                  {assignStatus.status === 'mismatch' && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        syncToHolmanMutation.mutate({
-                                          vehicleNumber: vehicle.vehicleNumber,
-                                          enterpriseId: vehicle.tpmsAssignedTechId || null,
-                                        });
-                                      }}
-                                      disabled={syncToHolmanMutation.isPending}
-                                      title="Sync to Holman"
-                                      className="text-amber-600 hover:text-amber-700"
-                                      data-testid={`button-sync-${vehicle.vehicleNumber}`}
-                                    >
-                                      <RefreshCw className={`h-4 w-4 ${syncToHolmanMutation.isPending ? 'animate-spin' : ''}`} />
-                                    </Button>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    {sortedVehicles.length > 100 && (
-                      <div className="p-4 text-center text-sm text-muted-foreground border-t">
-                        Showing first 100 of {sortedVehicles.length} vehicles. Use filters to narrow results.
-                      </div>
-                    )}
+                            </div>
+                            
+                            {/* TPMS Tech */}
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1">
+                                <Link2 className="h-3 w-3 text-purple-600" />
+                                <span className="text-xs font-medium text-purple-600">TPMS Tech</span>
+                              </div>
+                              {vehicle.tpmsAssignedTechId ? (
+                                <>
+                                  <p className="text-sm font-medium">{vehicle.tpmsAssignedTechName || 'N/A'}</p>
+                                  <p className="text-xs text-muted-foreground font-mono">{vehicle.tpmsAssignedTechId}</p>
+                                </>
+                              ) : (
+                                <p className="text-xs text-orange-600 flex items-center gap-1">
+                                  <XCircle className="h-3 w-3" />
+                                  Unassigned
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Location & Odometer */}
+                          <div className="grid grid-cols-2 gap-2 pt-2 border-t text-xs">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1 text-muted-foreground">
+                                <MapPin className="h-3 w-3" />
+                                <span>Location</span>
+                              </div>
+                              <p className="font-medium">{vehicle.city}, {vehicle.state}</p>
+                              <p className="text-muted-foreground">{vehicle.region} / {vehicle.district}</p>
+                              {distanceInfo && (
+                                <p className={`text-xs ${distanceInfo.color}`}>{distanceInfo.label}</p>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1 text-muted-foreground">
+                                <Gauge className="h-3 w-3" />
+                                <span>Odometer</span>
+                              </div>
+                              <p className="font-medium">{vehicle.odometer?.toLocaleString() || 'N/A'} mi</p>
+                            </div>
+                          </div>
+                          
+                          {/* Status Badge + Action */}
+                          <div className="flex items-center justify-between pt-2 border-t">
+                            <Badge className={assignStatus.color + ' border text-xs'}>
+                              {assignStatus.label}
+                            </Badge>
+                            <ViewInventoryButton 
+                              vehicleNumber={vehicle.vehicleNumber} 
+                              size="sm" 
+                              variant="ghost" 
+                              className="h-7 text-xs"
+                            />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+                
+                {sortedVehicles.length > 99 && (
+                  <div className="p-4 text-center text-sm text-muted-foreground border rounded-lg">
+                    Showing first 99 of {sortedVehicles.length} vehicles. Use filters to narrow results.
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </>
+            )}
           </div>
         </div>
       </main>
@@ -749,6 +1102,14 @@ export default function FleetManagement() {
                     <div>
                       <Label className="text-xs text-muted-foreground">Region / District</Label>
                       <p>{selectedVehicle.region} / {selectedVehicle.district}</p>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Odometer</Label>
+                      <p>{selectedVehicle.odometer?.toLocaleString() || 'N/A'} miles</p>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Color</Label>
+                      <p>{selectedVehicle.color || 'N/A'}</p>
                     </div>
                   </div>
                 </div>
