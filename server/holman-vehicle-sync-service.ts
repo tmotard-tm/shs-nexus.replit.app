@@ -980,7 +980,42 @@ class HolmanVehicleSyncService {
     }
     
     console.log(`[HolmanSync] Enrichment complete: ${cacheHits} cache hits, ${apiCalls} API calls (${apiFailures} failed), ${vehiclesToSkip.length} skipped`);
+    
+    // Persist TPMS assignments back to the cache for accurate counts
+    await this.updateCacheTPMSAssignments(enrichedVehicles);
+    
     return enrichedVehicles;
+  }
+
+  private async updateCacheTPMSAssignments(vehicles: FleetVehicle[]): Promise<void> {
+    try {
+      const vehiclesWithTPMS = vehicles.filter(v => v.tpmsAssignedTechId);
+      if (vehiclesWithTPMS.length === 0) return;
+
+      console.log(`[HolmanSync] Updating cache with ${vehiclesWithTPMS.length} TPMS assignments`);
+
+      // Batch update in chunks of 100
+      const chunkSize = 100;
+      for (let i = 0; i < vehiclesWithTPMS.length; i += chunkSize) {
+        const chunk = vehiclesWithTPMS.slice(i, i + chunkSize);
+        
+        await Promise.all(chunk.map(async (vehicle) => {
+          const paddedVehicleNumber = vehicle.vehicleNumber.padStart(6, '0');
+          await db
+            .update(holmanVehiclesCache)
+            .set({
+              tpmsAssignedTechId: vehicle.tpmsAssignedTechId,
+              tpmsAssignedTechName: vehicle.tpmsAssignedTechName,
+              updatedAt: new Date(),
+            })
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicleNumber));
+        }));
+      }
+
+      console.log(`[HolmanSync] Cache updated with TPMS assignments`);
+    } catch (error) {
+      console.error('[HolmanSync] Error updating cache with TPMS data:', error);
+    }
   }
 }
 
