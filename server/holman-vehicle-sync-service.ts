@@ -348,11 +348,20 @@ class HolmanVehicleSyncService {
 
       const fleetVehicles = filteredVehicleData.map((v: any) => this.transformToFleetVehicle(v));
 
-      // Only cache vehicles from allowed divisions
-      await this.updateCache(filteredVehicleData);
-      await this.processPendingChanges();
-
       this.lastSuccessfulSync = new Date();
+
+      // Cache update happens in background to avoid request timeout
+      // Using Promise.resolve().then() to ensure it runs after response is sent
+      Promise.resolve().then(async () => {
+        try {
+          console.log('[HolmanSync] Starting background cache update...');
+          await this.updateCache(filteredVehicleData);
+          await this.processPendingChanges();
+          console.log('[HolmanSync] Background cache update completed');
+        } catch (err) {
+          console.error('[HolmanSync] Background cache update failed:', err);
+        }
+      });
 
       const pendingCount = await this.getPendingChangeCount();
       const finalCount = filteredVehicleData.length;
