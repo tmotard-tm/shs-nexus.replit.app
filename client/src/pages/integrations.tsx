@@ -661,184 +661,39 @@ export default function Integrations() {
                 </div>
               </div>
               <CollapsibleContent className="mt-2 ml-4 border-l-2 border-blue-500/20 pl-4 space-y-4">
-                {/* SQL Query */}
+                {/* Truck Inventory Sync */}
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-base">SQL Query</CardTitle>
-                    <CardDescription>Execute SQL queries against Snowflake</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <Label htmlFor="sql-query">SQL Query</Label>
-                      <Textarea
-                        id="sql-query"
-                        value={sqlQuery}
-                        onChange={(e) => setSqlQuery(e.target.value)}
-                        onKeyDown={handleTabKey}
-                        placeholder="Enter your SQL query here..."
-                        className="font-mono min-h-[120px]"
-                        data-testid="textarea-sql-query"
-                      />
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Truck className="h-4 w-4" />
+                          Truck Inventory
+                        </CardTitle>
+                        <CardDescription>
+                          Sync truck inventory data from Snowflake for vehicle-level inventory lookups
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Button 
+                          onClick={() => syncTruckInventoryMutation.mutate()}
+                          disabled={syncTruckInventoryMutation.isPending || !snowflakeStatus?.configured}
+                          variant="outline"
+                          size="sm"
+                          data-testid="button-sync-truck-inventory"
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1 ${syncTruckInventoryMutation.isPending ? 'animate-spin' : ''}`} />
+                          {syncTruckInventoryMutation.isPending ? 'Syncing...' : 'Sync Inventory'}
+                        </Button>
+                      </div>
                     </div>
-                    <Button
-                      onClick={handleExecuteQuery}
-                      disabled={!snowflakeStatus?.configured || executeQueryMutation.isPending}
-                      data-testid="button-execute-query"
-                    >
-                      {executeQueryMutation.isPending ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Executing...
-                        </>
-                      ) : (
-                        <>
-                          <Play className="mr-2 h-4 w-4" />
-                          Execute Query
-                        </>
-                      )}
-                    </Button>
-                  </CardContent>
-                </Card>
-
-                {/* Sync History */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <History className="h-4 w-4" />
-                      Sync History
-                    </CardTitle>
-                    <CardDescription>
-                      View recent synchronization activity and results
-                    </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {syncLogsLoading ? (
-                      <div className="flex items-center justify-center py-6">
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                      </div>
-                    ) : syncLogs.length === 0 ? (
-                      <div className="text-center py-6 text-muted-foreground text-sm">
-                        No sync history available yet.
-                      </div>
-                    ) : (
-                      <div className="rounded-md border overflow-auto max-h-[300px]">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Type</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead>Started</TableHead>
-                              <TableHead>Duration</TableHead>
-                              <TableHead>Records</TableHead>
-                              <TableHead>Queue Items</TableHead>
-                              <TableHead>Source</TableHead>
-                              <TableHead>Errors</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {syncLogs.slice(0, 20).map((log) => {
-                              const startTime = new Date(log.startedAt);
-                              const endTime = log.completedAt ? new Date(log.completedAt) : null;
-                              const duration = endTime 
-                                ? Math.round((endTime.getTime() - startTime.getTime()) / 1000)
-                                : null;
-                              
-                              return (
-                                <TableRow key={log.id} data-testid={`row-sync-${log.id}`}>
-                                  <TableCell>
-                                    <Badge variant="outline" className="font-mono text-xs">
-                                      {log.syncType === 'termed_techs' ? 'Termed' : 'All Techs'}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Badge 
-                                      variant={
-                                        log.status === 'completed' ? 'default' :
-                                        log.status === 'failed' ? 'destructive' :
-                                        log.status === 'running' ? 'secondary' : 'outline'
-                                      }
-                                      className="flex items-center gap-1 w-fit text-xs"
-                                    >
-                                      {log.status === 'completed' && <CheckCircle className="h-3 w-3" />}
-                                      {log.status === 'failed' && <XCircle className="h-3 w-3" />}
-                                      {log.status === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
-                                      {log.status}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell className="text-xs">
-                                    {format(startTime, 'MMM d, h:mm a')}
-                                  </TableCell>
-                                  <TableCell className="text-xs">
-                                    {duration !== null ? `${duration}s` : '-'}
-                                  </TableCell>
-                                  <TableCell className="text-xs font-mono">
-                                    {log.recordsProcessed || 0}
-                                  </TableCell>
-                                  <TableCell className="text-xs font-mono">
-                                    {log.queueItemsCreated || 0}
-                                  </TableCell>
-                                  <TableCell>
-                                    <Badge variant="outline" className="text-xs">
-                                      {log.triggeredBy || 'unknown'}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    {log.errorMessage ? (
-                                      <div className="flex items-center gap-1 text-destructive">
-                                        <AlertTriangle className="h-3 w-3 flex-shrink-0" />
-                                        <span className="text-xs max-w-[150px] truncate" title={log.errorMessage}>
-                                          {log.errorMessage}
-                                        </span>
-                                      </div>
-                                    ) : (
-                                      <span className="text-muted-foreground text-xs">-</span>
-                                    )}
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
+                    <p className="text-sm text-muted-foreground">
+                      Click "Sync Inventory" to load the latest truck inventory data. This enables the "View Inventory" feature on vehicle pages.
+                    </p>
                   </CardContent>
                 </Card>
-
-                {/* Query Results */}
-                {queryResults && queryResults.length > 0 && (
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base">Query Results</CardTitle>
-                      <CardDescription>{queryResults.length} row(s) returned</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="rounded-md border overflow-auto max-h-[300px]">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              {Object.keys(queryResults[0]).map((column) => (
-                                <TableHead key={column} className="font-semibold">
-                                  {column}
-                                </TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {queryResults.map((row, idx) => (
-                              <TableRow key={idx}>
-                                {Object.values(row).map((value: any, cellIdx) => (
-                                  <TableCell key={cellIdx} className="font-mono text-sm">
-                                    {typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')}
-                                  </TableCell>
-                                ))}
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
 
                 {/* Employee Roster */}
                 <Card>
@@ -993,39 +848,184 @@ export default function Integrations() {
                   </CardContent>
                 </Card>
 
-                {/* Truck Inventory Sync */}
+                {/* Sync History */}
                 <Card>
                   <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle className="text-base flex items-center gap-2">
-                          <Truck className="h-4 w-4" />
-                          Truck Inventory
-                        </CardTitle>
-                        <CardDescription>
-                          Sync truck inventory data from Snowflake for vehicle-level inventory lookups
-                        </CardDescription>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Button 
-                          onClick={() => syncTruckInventoryMutation.mutate()}
-                          disabled={syncTruckInventoryMutation.isPending || !snowflakeStatus?.configured}
-                          variant="outline"
-                          size="sm"
-                          data-testid="button-sync-truck-inventory"
-                        >
-                          <RefreshCw className={`h-3 w-3 mr-1 ${syncTruckInventoryMutation.isPending ? 'animate-spin' : ''}`} />
-                          {syncTruckInventoryMutation.isPending ? 'Syncing...' : 'Sync Inventory'}
-                        </Button>
-                      </div>
-                    </div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <History className="h-4 w-4" />
+                      Sync History
+                    </CardTitle>
+                    <CardDescription>
+                      View recent synchronization activity and results
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm text-muted-foreground">
-                      Click "Sync Inventory" to load the latest truck inventory data. This enables the "View Inventory" feature on vehicle pages.
-                    </p>
+                    {syncLogsLoading ? (
+                      <div className="flex items-center justify-center py-6">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      </div>
+                    ) : syncLogs.length === 0 ? (
+                      <div className="text-center py-6 text-muted-foreground text-sm">
+                        No sync history available yet.
+                      </div>
+                    ) : (
+                      <div className="rounded-md border overflow-auto max-h-[300px]">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Type</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Started</TableHead>
+                              <TableHead>Duration</TableHead>
+                              <TableHead>Records</TableHead>
+                              <TableHead>Queue Items</TableHead>
+                              <TableHead>Source</TableHead>
+                              <TableHead>Errors</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {syncLogs.slice(0, 20).map((log) => {
+                              const startTime = new Date(log.startedAt);
+                              const endTime = log.completedAt ? new Date(log.completedAt) : null;
+                              const duration = endTime 
+                                ? Math.round((endTime.getTime() - startTime.getTime()) / 1000)
+                                : null;
+                              
+                              return (
+                                <TableRow key={log.id} data-testid={`row-sync-${log.id}`}>
+                                  <TableCell>
+                                    <Badge variant="outline" className="font-mono text-xs">
+                                      {log.syncType === 'termed_techs' ? 'Termed' : 'All Techs'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge 
+                                      variant={
+                                        log.status === 'completed' ? 'default' :
+                                        log.status === 'failed' ? 'destructive' :
+                                        log.status === 'running' ? 'secondary' : 'outline'
+                                      }
+                                      className="flex items-center gap-1 w-fit text-xs"
+                                    >
+                                      {log.status === 'completed' && <CheckCircle className="h-3 w-3" />}
+                                      {log.status === 'failed' && <XCircle className="h-3 w-3" />}
+                                      {log.status === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
+                                      {log.status}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-xs">
+                                    {format(startTime, 'MMM d, h:mm a')}
+                                  </TableCell>
+                                  <TableCell className="text-xs">
+                                    {duration !== null ? `${duration}s` : '-'}
+                                  </TableCell>
+                                  <TableCell className="text-xs font-mono">
+                                    {log.recordsProcessed || 0}
+                                  </TableCell>
+                                  <TableCell className="text-xs font-mono">
+                                    {log.queueItemsCreated || 0}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline" className="text-xs">
+                                      {log.triggeredBy || 'unknown'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    {log.errorMessage ? (
+                                      <div className="flex items-center gap-1 text-destructive">
+                                        <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+                                        <span className="text-xs max-w-[150px] truncate" title={log.errorMessage}>
+                                          {log.errorMessage}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground text-xs">-</span>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
+
+                {/* SQL Query */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">SQL Query</CardTitle>
+                    <CardDescription>Execute SQL queries against Snowflake</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <Label htmlFor="sql-query">SQL Query</Label>
+                      <Textarea
+                        id="sql-query"
+                        value={sqlQuery}
+                        onChange={(e) => setSqlQuery(e.target.value)}
+                        onKeyDown={handleTabKey}
+                        placeholder="Enter your SQL query here..."
+                        className="font-mono min-h-[120px]"
+                        data-testid="textarea-sql-query"
+                      />
+                    </div>
+                    <Button
+                      onClick={handleExecuteQuery}
+                      disabled={!snowflakeStatus?.configured || executeQueryMutation.isPending}
+                      data-testid="button-execute-query"
+                    >
+                      {executeQueryMutation.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Executing...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="mr-2 h-4 w-4" />
+                          Execute Query
+                        </>
+                      )}
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                {/* Query Results */}
+                {queryResults && queryResults.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Query Results</CardTitle>
+                      <CardDescription>{queryResults.length} row(s) returned</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="rounded-md border overflow-auto max-h-[300px]">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              {Object.keys(queryResults[0]).map((column) => (
+                                <TableHead key={column} className="font-semibold">
+                                  {column}
+                                </TableHead>
+                              ))}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {queryResults.map((row, idx) => (
+                              <TableRow key={idx}>
+                                {Object.values(row).map((value: any, cellIdx) => (
+                                  <TableCell key={cellIdx} className="font-mono text-sm">
+                                    {typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')}
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
               </CollapsibleContent>
             </Collapsible>
 
