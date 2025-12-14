@@ -6620,6 +6620,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TPMS Cache Sync Routes - Populate cache from all_techs table
+  const { getTpmsCacheSyncService } = await import("./tpms-cache-sync-service");
+
+  // Start TPMS cache sync (loops through all techs and calls TPMS API)
+  app.post("/api/tpms/cache/sync", requireAuth, async (req: any, res) => {
+    try {
+      if (req.user.role !== 'superadmin') {
+        return res.status(403).json({ success: false, message: 'Only superadmins can trigger TPMS sync' });
+      }
+
+      const syncService = getTpmsCacheSyncService();
+      
+      if (syncService.isRunning()) {
+        return res.json({ 
+          success: true, 
+          message: 'TPMS cache sync already in progress',
+          progress: syncService.getProgress()
+        });
+      }
+
+      // Start sync in background
+      syncService.syncAllTechs({
+        batchSize: 50,
+        delayBetweenBatches: 3000,
+        maxConcurrent: 5,
+        skipRecentlyCached: true,
+        recentCacheHours: 24,
+      }).catch(err => {
+        console.error('[TPMS-Sync] Background sync error:', err);
+      });
+
+      res.json({ 
+        success: true, 
+        message: 'TPMS cache sync started in background',
+        progress: syncService.getProgress()
+      });
+    } catch (error: any) {
+      console.error("Error starting TPMS cache sync:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get TPMS cache sync progress
+  app.get("/api/tpms/cache/sync/progress", requireAuth, async (req: any, res) => {
+    try {
+      const syncService = getTpmsCacheSyncService();
+      const progress = syncService.getProgress();
+      res.json({ success: true, progress });
+    } catch (error: any) {
+      console.error("Error getting TPMS cache sync progress:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get TPMS cache statistics
+  app.get("/api/tpms/cache/stats", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const stats = await tpmsService.getCacheStats();
+      res.json({ success: true, stats });
+    } catch (error: any) {
+      console.error("Error getting TPMS cache stats:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // ==================================================
   // Vehicle Assignment Routes - Aggregated Data from Snowflake, TPMS, Holman
   // ==================================================
