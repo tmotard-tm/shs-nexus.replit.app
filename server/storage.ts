@@ -275,6 +275,11 @@ export interface IStorage {
   markTpmsCacheError(lookupKey: string, errorCode: number, errorMessage: string): Promise<TpmsCachedAssignment | undefined>;
   getStaleTPMSCache(maxAgeHours?: number): Promise<TpmsCachedAssignment[]>;
 
+  // TPMS Sync State Module (tracks initial sync progress)
+  getTpmsSyncState(): Promise<{ initialSyncComplete: boolean; status: string; vehiclesSynced: number; totalVehiclesToSync: number; vehiclesWithAssignments: number; lastSyncAt: Date | null } | null>;
+  updateTpmsSyncState(updates: { initialSyncComplete?: boolean; status?: string; vehiclesSynced?: number; totalVehiclesToSync?: number; vehiclesWithAssignments?: number; vehiclesWithoutAssignments?: number; errorMessage?: string | null; initialSyncStartedAt?: Date; initialSyncCompletedAt?: Date; lastSyncAt?: Date }): Promise<void>;
+  initializeTpmsSyncState(): Promise<void>;
+
   // Field Mapping Module
   getIntegrationDataSources(): Promise<IntegrationDataSource[]>;
   getIntegrationDataSource(id: string): Promise<IntegrationDataSource | undefined>;
@@ -1289,6 +1294,18 @@ export class MemStorage implements IStorage {
 
   async getStaleTPMSCache(_maxAgeHours?: number): Promise<TpmsCachedAssignment[]> {
     return []; // Not implemented in memory storage
+  }
+
+  async getTpmsSyncState(): Promise<{ initialSyncComplete: boolean; status: string; vehiclesSynced: number; totalVehiclesToSync: number; vehiclesWithAssignments: number; lastSyncAt: Date | null } | null> {
+    return null; // Not implemented in memory storage
+  }
+
+  async updateTpmsSyncState(_updates: any): Promise<void> {
+    // Not implemented in memory storage
+  }
+
+  async initializeTpmsSyncState(): Promise<void> {
+    // Not implemented in memory storage
   }
 
   // Activity Logs
@@ -3488,6 +3505,45 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(tpmsCachedAssignments)
       .where(sql`${tpmsCachedAssignments.lastSuccessAt} < ${cutoffDate} OR ${tpmsCachedAssignments.lastSuccessAt} IS NULL`)
       .orderBy(tpmsCachedAssignments.lastSuccessAt);
+  }
+
+  async getTpmsSyncState(): Promise<{ initialSyncComplete: boolean; status: string; vehiclesSynced: number; totalVehiclesToSync: number; vehiclesWithAssignments: number; lastSyncAt: Date | null } | null> {
+    const { tpmsSyncState } = await import('@shared/schema');
+    const result = await db.select().from(tpmsSyncState).limit(1);
+    if (result.length === 0) return null;
+    const state = result[0];
+    return {
+      initialSyncComplete: state.initialSyncComplete,
+      status: state.status,
+      vehiclesSynced: state.vehiclesSynced || 0,
+      totalVehiclesToSync: state.totalVehiclesToSync || 0,
+      vehiclesWithAssignments: state.vehiclesWithAssignments || 0,
+      lastSyncAt: state.lastSyncAt,
+    };
+  }
+
+  async updateTpmsSyncState(updates: { initialSyncComplete?: boolean; status?: string; vehiclesSynced?: number; totalVehiclesToSync?: number; vehiclesWithAssignments?: number; vehiclesWithoutAssignments?: number; errorMessage?: string | null; initialSyncStartedAt?: Date; initialSyncCompletedAt?: Date; lastSyncAt?: Date }): Promise<void> {
+    const { tpmsSyncState } = await import('@shared/schema');
+    const existing = await db.select().from(tpmsSyncState).limit(1);
+    if (existing.length === 0) {
+      await this.initializeTpmsSyncState();
+    }
+    await db.update(tpmsSyncState).set({ ...updates, updatedAt: new Date() });
+  }
+
+  async initializeTpmsSyncState(): Promise<void> {
+    const { tpmsSyncState } = await import('@shared/schema');
+    const existing = await db.select().from(tpmsSyncState).limit(1);
+    if (existing.length === 0) {
+      await db.insert(tpmsSyncState).values({
+        initialSyncComplete: false,
+        status: 'idle',
+        totalVehiclesToSync: 0,
+        vehiclesSynced: 0,
+        vehiclesWithAssignments: 0,
+        vehiclesWithoutAssignments: 0,
+      });
+    }
   }
 
   // Requests

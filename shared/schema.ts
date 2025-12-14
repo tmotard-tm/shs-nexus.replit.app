@@ -1387,3 +1387,29 @@ export const insertHolmanSubmissionSchema = createInsertSchema(holmanSubmissions
 
 export type HolmanSubmission = typeof holmanSubmissions.$inferSelect;
 export type InsertHolmanSubmission = z.infer<typeof insertHolmanSubmissionSchema>;
+
+// TPMS Sync State - tracks initial sync progress for cache-first strategy
+export const tpmsSyncState = pgTable("tpms_sync_state", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  initialSyncComplete: boolean("initial_sync_complete").default(false).notNull(),
+  initialSyncStartedAt: timestamp("initial_sync_started_at"),
+  initialSyncCompletedAt: timestamp("initial_sync_completed_at"),
+  totalVehiclesToSync: integer("total_vehicles_to_sync").default(0),
+  vehiclesSynced: integer("vehicles_synced").default(0),
+  vehiclesWithAssignments: integer("vehicles_with_assignments").default(0),
+  vehiclesWithoutAssignments: integer("vehicles_without_assignments").default(0),
+  lastSyncAt: timestamp("last_sync_at"),
+  status: text("status").notNull().default("idle"), // idle, syncing, completed, failed
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertTpmsSyncStateSchema = createInsertSchema(tpmsSyncState).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type TpmsSyncState = typeof tpmsSyncState.$inferSelect;
+export type InsertTpmsSyncState = z.infer<typeof insertTpmsSyncStateSchema>;
