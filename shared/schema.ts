@@ -64,7 +64,6 @@ export interface RolePermissionSettings {
     management: {
       enabled: boolean;
       storageSpots: boolean;
-      approvals: boolean;
       integrations: boolean;
       userManagement: boolean;
       templateManagement: boolean;

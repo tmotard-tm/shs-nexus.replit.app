@@ -30,7 +30,6 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
     management: {
       enabled: true,
       storageSpots: true,
-      approvals: true,
       integrations: true,
       userManagement: true,
       templateManagement: true,
@@ -140,7 +139,6 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
     management: {
       enabled: false,
       storageSpots: false,
-      approvals: false,
       integrations: false,
       userManagement: false,
       templateManagement: false,
@@ -269,7 +267,6 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/templates': () => perms.sidebar.management.templateManagement,
     '/template-management': () => perms.sidebar.management.templateManagement,
     '/storage-spots': () => perms.sidebar.management.storageSpots,
-    '/approvals': () => perms.sidebar.management.approvals,
     '/integrations': () => perms.sidebar.management.integrations,
     '/snowflake-integration': () => perms.sidebar.management.snowflakeIntegration,
     '/tech-roster': () => perms.sidebar.management.techRoster,

@@ -229,15 +229,6 @@ export const PAGES: PageDefinition[] = [
     ],
   },
   {
-    key: "approvals",
-    label: "Approvals",
-    description: "Request approvals and reviews",
-    path: "/approvals",
-    icon: CheckCircle,
-    category: "management",
-    permissionKey: "approvals",
-  },
-  {
     key: "integrations",
     label: "Integrations",
     description: "API integrations and connections",

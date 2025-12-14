@@ -25,9 +25,6 @@ import OnboardHire from "@/pages/onboard-hire";
 import OffboardTechnician from "@/pages/offboard-technician";
 import ActiveVehicles from "@/pages/active-vehicles";
 import Dashboard from "@/pages/dashboard";
-import RequesterInterface from "@/pages/requester";
-import ApproverInterface from "@/pages/approver";
-import RequestsPage from "@/pages/requests";
 import Integrations from "@/pages/integrations";
 import HolmanIntegration from "@/pages/holman-integration";
 import QueueManagement from "@/pages/queue-management";
@@ -118,37 +115,6 @@ function Router() {
         </ProtectedRoute>
       </Route>
       
-      <Route path="/requester">
-        <ProtectedRoute>
-          <MainContent>
-            <RequesterInterface />
-          </MainContent>
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/approver">
-        <ProtectedRoute>
-          <MainContent>
-            <ApproverInterface />
-          </MainContent>
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/requests">
-        <ProtectedRoute>
-          <MainContent>
-            <RequestsPage />
-          </MainContent>
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/approvals">
-        <ProtectedRoute>
-          <MainContent>
-            <ApproverInterface />
-          </MainContent>
-        </ProtectedRoute>
-      </Route>
       
       {/* New shareable deep-link form routes - public access */}
       <Route path="/forms/create-vehicle">
