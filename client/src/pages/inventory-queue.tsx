@@ -44,7 +44,7 @@ export default function InventoryQueuePage() {
   });
 
   // Only show Inventory Control users in assignment
-  const inventoryUsers = users.filter(u => u.department === "Inventory Control" || u.role === "superadmin");
+  const inventoryUsers = users.filter(u => u.departments?.includes("INVENTORY") || u.role === "superadmin");
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>

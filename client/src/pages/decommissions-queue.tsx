@@ -36,7 +36,7 @@ export default function DecommissionsQueuePage() {
   });
 
   // Only show Decommissions users in assignment
-  const decommissionsUsers = users.filter(u => u.department === "Decommissions" || u.role === "superadmin");
+  const decommissionsUsers = users.filter(u => u.departments?.includes("FLEET") || u.role === "superadmin");
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>

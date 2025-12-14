@@ -42,7 +42,7 @@ export default function FleetQueuePage() {
   });
 
   // Only show Fleet Management users in assignment
-  const fleetUsers = users.filter(u => u.department === "Fleet Management" || u.role === "superadmin");
+  const fleetUsers = users.filter(u => u.departments?.includes("FLEET") || u.role === "superadmin");
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>

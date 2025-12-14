@@ -49,6 +49,7 @@ import TechRoster from "@/pages/tech-roster";
 import VehicleAssignments from "@/pages/vehicle-assignments";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
+import TestRepairResults from "@/pages/test-repair-results";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
@@ -366,6 +367,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <ChangePassword />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/test-repair-results">
+        <ProtectedRoute>
+          <MainContent>
+            <TestRepairResults />
           </MainContent>
         </ProtectedRoute>
       </Route>
