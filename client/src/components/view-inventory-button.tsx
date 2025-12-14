@@ -143,7 +143,10 @@ export function ViewInventoryButton({
         return (
           <div className="flex items-center gap-3 text-left min-w-[180px]">
             <Package className="h-4 w-4 flex-shrink-0" />
-            <span className="text-xs text-red-500">Error loading inventory</span>
+            <div className="flex flex-col">
+              <span className="text-xs font-medium">View Inventory</span>
+              <span className="text-xs text-red-500">Error loading</span>
+            </div>
           </div>
         );
       }
@@ -152,22 +155,23 @@ export function ViewInventoryButton({
         const pieces = inventory.totalPieces || 0;
         const costValue = formatCurrency(inventory.totalAvgCost);
         return (
-          <div className="flex items-center gap-3 text-left min-w-[220px]">
+          <div className="flex items-center gap-3 text-left min-w-[180px]">
             <Package className="h-4 w-4 flex-shrink-0" />
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-medium">View Inventory</span>
-              <span className="text-muted-foreground">•</span>
-              <span className="font-medium">{pieces.toLocaleString()} pcs</span>
-              <span className="text-muted-foreground">•</span>
-              <span className="font-medium">{costValue}</span>
-              {primaryCategory && (
-                <>
-                  <span className="text-muted-foreground">•</span>
-                  <span className="text-muted-foreground truncate max-w-[80px]" title={primaryCategory}>
-                    {primaryCategory.length > 12 ? primaryCategory.substring(0, 10) + '...' : primaryCategory}
-                  </span>
-                </>
-              )}
+            <div className="flex flex-col">
+              <span className="text-xs font-medium">View Inventory</span>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span>{pieces.toLocaleString()} pcs</span>
+                <span>•</span>
+                <span>{costValue}</span>
+                {primaryCategory && (
+                  <>
+                    <span>•</span>
+                    <span className="truncate max-w-[80px]" title={primaryCategory}>
+                      {primaryCategory.length > 12 ? primaryCategory.substring(0, 10) + '...' : primaryCategory}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -176,9 +180,12 @@ export function ViewInventoryButton({
       return (
         <div className="flex items-center gap-3 text-left min-w-[180px]">
           <Package className="h-4 w-4 flex-shrink-0" />
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            <span>Loading inventory...</span>
+          <div className="flex flex-col">
+            <span className="text-xs font-medium">View Inventory</span>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>Loading...</span>
+            </div>
           </div>
         </div>
       );
