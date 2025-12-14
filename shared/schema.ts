@@ -68,6 +68,7 @@ export interface RolePermissionSettings {
       userManagement: boolean;
       templateManagement: boolean;
       rolePermissions: boolean;
+      fleetManagement: boolean;
       vehicleAssignments: boolean;
       snowflakeIntegration: boolean;
       techRoster: boolean;
@@ -130,6 +131,13 @@ export interface RolePermissionSettings {
       editTemplate: boolean;
       deleteTemplate: boolean;
       toggleStatus: boolean;
+    };
+    fleetManagement: {
+      enabled: boolean;
+      viewVehicles: boolean;
+      syncToHolman: boolean;
+      unassignVehicle: boolean;
+      viewHistory: boolean;
     };
     vehicleAssignments: {
       enabled: boolean;

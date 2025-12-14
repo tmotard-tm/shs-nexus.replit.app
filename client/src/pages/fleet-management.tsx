@@ -10,10 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, 
-  UserX, History, AlertTriangle, User
+  UserX, History, AlertTriangle, User, Package
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
@@ -22,7 +24,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { type FleetVehicle } from "@/data/fleetData";
 import { getVehicleOwnership } from "@/lib/vehicle-utils";
-import { DataSourceIndicator, calculateZipDistance, getDistanceLabel } from "@/components/fleet";
+import { DataSourceIndicator, calculateZipDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
 
 interface FleetVehiclesResponse {
   success: boolean;
@@ -68,6 +70,7 @@ export default function FleetManagement() {
   
   // Selected vehicle for detail view
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
+  const [showHistoryDialog, setShowHistoryDialog] = useState(false);
 
   // Fetch vehicles from Holman API with TPMS enrichment
   const { data: apiResponse, isLoading, error, refetch, isFetching } = useQuery<FleetVehiclesResponse>({
@@ -701,87 +704,186 @@ export default function FleetManagement() {
         </div>
       </main>
 
-      {/* Vehicle Detail Dialog - Placeholder for Task 3 */}
-      {selectedVehicle && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setSelectedVehicle(null)}>
-          <div className="bg-background rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold">Vehicle Details</h2>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedVehicle(null)}>
-                  <XCircle className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-muted-foreground text-xs">Truck #</Label>
-                  <p className="font-mono font-semibold">{selectedVehicle.vehicleNumber}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground text-xs">VIN</Label>
-                  <p className="font-mono text-sm">{selectedVehicle.vin}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground text-xs">Vehicle</Label>
-                  <p>{selectedVehicle.modelYear} {selectedVehicle.makeName} {selectedVehicle.modelName}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground text-xs">License</Label>
-                  <p>{selectedVehicle.licensePlate} ({selectedVehicle.licenseState})</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground text-xs">Location</Label>
-                  <p>{selectedVehicle.city}, {selectedVehicle.state} {selectedVehicle.zip}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground text-xs">Region / District</Label>
-                  <p>{selectedVehicle.region} / {selectedVehicle.district}</p>
-                </div>
-              </div>
+      {/* Vehicle Detail Drawer */}
+      <Sheet open={!!selectedVehicle} onOpenChange={(open) => !open && setSelectedVehicle(null)}>
+        <SheetContent className="w-[500px] sm:max-w-[500px] overflow-y-auto" data-testid="sheet-vehicle-detail">
+          {selectedVehicle && (
+            <>
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2">
+                  <Truck className="h-5 w-5" />
+                  Vehicle #{selectedVehicle.vehicleNumber}
+                </SheetTitle>
+                <SheetDescription>
+                  {selectedVehicle.modelYear} {selectedVehicle.makeName} {selectedVehicle.modelName}
+                </SheetDescription>
+              </SheetHeader>
               
-              <div className="border-t pt-4">
-                <h3 className="font-medium mb-3">Assignment Info</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-muted-foreground text-xs">TPMS Assigned</Label>
-                    <p className="font-mono">{selectedVehicle.tpmsAssignedTechId || '-'}</p>
-                    {selectedVehicle.tpmsAssignedTechName && (
-                      <p className="text-sm text-muted-foreground">{selectedVehicle.tpmsAssignedTechName}</p>
-                    )}
+              <div className="mt-6 space-y-6">
+                {/* Status Badge */}
+                <div className="flex items-center gap-2">
+                  <Badge className={getAssignmentStatus(selectedVehicle).color}>
+                    {getAssignmentStatus(selectedVehicle).label}
+                  </Badge>
+                  <Badge variant="outline">{getVehicleOwnership(selectedVehicle.vehicleNumber).type}</Badge>
+                </div>
+
+                <Separator />
+
+                {/* Vehicle Details */}
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm text-muted-foreground">Vehicle Information</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">VIN</Label>
+                      <p className="font-mono text-xs">{selectedVehicle.vin}</p>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">License Plate</Label>
+                      <p>{selectedVehicle.licensePlate} ({selectedVehicle.licenseState})</p>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Location</Label>
+                      <p>{selectedVehicle.city}, {selectedVehicle.state} {selectedVehicle.zip}</p>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Region / District</Label>
+                      <p>{selectedVehicle.region} / {selectedVehicle.district}</p>
+                    </div>
                   </div>
-                  <div>
-                    <Label className="text-muted-foreground text-xs">Holman Assigned</Label>
-                    <p className="font-mono">{selectedVehicle.holmanTechAssigned || '-'}</p>
-                    {selectedVehicle.holmanTechName && (
-                      <p className="text-sm text-muted-foreground">{selectedVehicle.holmanTechName}</p>
-                    )}
+                </div>
+
+                <Separator />
+
+                {/* Assignment Info */}
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm text-muted-foreground">Assignment Details</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Card className="p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Link2 className="h-4 w-4 text-blue-600" />
+                        <Label className="text-xs font-medium">TPMS</Label>
+                      </div>
+                      {selectedVehicle.tpmsAssignedTechId ? (
+                        <>
+                          <p className="font-mono text-sm">{selectedVehicle.tpmsAssignedTechId}</p>
+                          {selectedVehicle.tpmsAssignedTechName && (
+                            <p className="text-xs text-muted-foreground mt-1">{selectedVehicle.tpmsAssignedTechName}</p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground text-sm">Unassigned</p>
+                      )}
+                    </Card>
+                    <Card className="p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Truck className="h-4 w-4 text-green-600" />
+                        <Label className="text-xs font-medium">Holman</Label>
+                      </div>
+                      {selectedVehicle.holmanTechAssigned ? (
+                        <>
+                          <p className="font-mono text-sm">{selectedVehicle.holmanTechAssigned}</p>
+                          {selectedVehicle.holmanTechName && (
+                            <p className="text-xs text-muted-foreground mt-1">{selectedVehicle.holmanTechName}</p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground text-sm">Unassigned</p>
+                      )}
+                    </Card>
+                  </div>
+
+                  {/* Mismatch Warning */}
+                  {getAssignmentStatus(selectedVehicle).status === 'mismatch' && (
+                    <Alert className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
+                      <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      <AlertTitle className="text-amber-800 dark:text-amber-400">Assignment Mismatch</AlertTitle>
+                      <AlertDescription className="text-amber-700 dark:text-amber-300 text-sm">
+                        TPMS and Holman records don't match. Use "Sync to Holman" to update.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Actions */}
+                <div className="space-y-3">
+                  <h4 className="font-medium text-sm text-muted-foreground">Actions</h4>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* Sync to Holman */}
+                    <Button 
+                      onClick={() => syncToHolmanMutation.mutate({ 
+                        vehicleNumber: selectedVehicle.vehicleNumber, 
+                        enterpriseId: selectedVehicle.tpmsAssignedTechId 
+                      })}
+                      disabled={syncToHolmanMutation.isPending}
+                      className="w-full"
+                      data-testid="button-sync-holman"
+                    >
+                      {syncToHolmanMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                      )}
+                      Sync to Holman
+                    </Button>
+
+                    {/* Unassign from Holman */}
+                    <Button 
+                      variant="outline"
+                      onClick={() => {
+                        if (window.confirm(`Are you sure you want to unassign vehicle ${selectedVehicle.vehicleNumber} in Holman?`)) {
+                          syncToHolmanMutation.mutate({ 
+                            vehicleNumber: selectedVehicle.vehicleNumber, 
+                            enterpriseId: null 
+                          });
+                        }
+                      }}
+                      disabled={syncToHolmanMutation.isPending || !selectedVehicle.holmanTechAssigned}
+                      className="w-full"
+                      data-testid="button-unassign-holman"
+                    >
+                      <UserX className="h-4 w-4 mr-2" />
+                      Unassign
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* View Inventory */}
+                    <ViewInventoryButton 
+                      vehicleNumber={selectedVehicle.vehicleNumber} 
+                      className="w-full"
+                    />
+
+                    {/* View History */}
+                    <Button 
+                      variant="outline"
+                      onClick={() => setShowHistoryDialog(true)}
+                      disabled={!selectedVehicle.tpmsAssignedTechId}
+                      className="w-full"
+                      data-testid="button-view-history"
+                    >
+                      <History className="h-4 w-4 mr-2" />
+                      History
+                    </Button>
                   </div>
                 </div>
               </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
 
-              <div className="border-t pt-4 flex gap-2">
-                <Button 
-                  onClick={() => syncToHolmanMutation.mutate({ 
-                    vehicleNumber: selectedVehicle.vehicleNumber, 
-                    enterpriseId: selectedVehicle.tpmsAssignedTechId 
-                  })}
-                  disabled={syncToHolmanMutation.isPending}
-                  data-testid="button-sync-holman"
-                >
-                  {syncToHolmanMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                  )}
-                  Sync to Holman
-                </Button>
-                <ViewInventoryButton vehicleNumber={selectedVehicle.vehicleNumber} />
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Assignment History Dialog */}
+      {selectedVehicle?.tpmsAssignedTechId && (
+        <AssignmentHistoryDialog
+          open={showHistoryDialog}
+          onOpenChange={setShowHistoryDialog}
+          techRacfid={selectedVehicle.tpmsAssignedTechId}
+          techName={selectedVehicle.tpmsAssignedTechName || selectedVehicle.tpmsAssignedTechId}
+        />
       )}
     </MainContent>
   );
