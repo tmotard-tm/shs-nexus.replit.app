@@ -169,9 +169,9 @@ Preferred communication style: Simple, everyday language.
 
 # Production Configuration
 
-## Scheduled Snowflake Sync (Required for Production)
+## Scheduled Daily Sync (Required for Production)
 
-The daily Snowflake sync for technician rosters must be configured as a Replit Scheduled Deployment to run reliably in production. The in-memory setInterval approach only works in development because production apps sleep when idle.
+The daily sync for technician rosters and vehicle assignments must be configured as a Replit Scheduled Deployment to run reliably in production. The in-memory setInterval approach only works in development because production apps sleep when idle.
 
 ### Setup Instructions
 
@@ -180,7 +180,7 @@ The daily Snowflake sync for technician rosters must be configured as a Replit S
 3. Configure:
    - **Schedule**: `Every day at 5:00 AM EST` (or use cron: `0 10 * * *` for 10:00 UTC = 5:00 AM EST)
    - **Run command**: `npx tsx server/run-sync.ts`
-   - **Job timeout**: 10 minutes (sync typically takes 1-2 minutes)
+   - **Job timeout**: 15 minutes (full sync may take 5-10 minutes with TPMS)
 4. Ensure all required secrets are configured in Deployment Secrets:
    - `SNOWFLAKE_ACCOUNT`
    - `SNOWFLAKE_USER`
@@ -188,15 +188,23 @@ The daily Snowflake sync for technician rosters must be configured as a Replit S
    - `SNOWFLAKE_DATABASE`
    - `SNOWFLAKE_WAREHOUSE`
    - `DATABASE_URL` (for storing sync results)
+   - `HOLMAN_API_URL`, `HOLMAN_CLIENT_ID`, `HOLMAN_CLIENT_SECRET` (for TPMS sync)
+   - `TPMS_API_URL`, `TPMS_API_KEY` (for vehicle assignments)
 
 ### Sync Script Details
 
 The standalone sync script (`server/run-sync.ts`) performs:
 1. **Termed Techs Sync**: Fetches terminated technicians and creates offboarding queue items
 2. **All Techs Sync**: Updates the complete technician roster for lookup
+3. **TPMS Vehicle Assignment Sync**: Caches all vehicle-tech assignments from TPMS for accurate fleet counts
 
 ### Manual Sync
 
-Manual syncs can still be triggered via the superadmin UI at `/snowflake-integration` or `/tech-roster` pages, or via API:
+Manual syncs can still be triggered via the superadmin UI:
+- Snowflake sync: `/snowflake-integration` or `/tech-roster` pages
+- TPMS sync: "Run Initial Sync" button on `/fleet-management` page
+
+API endpoints:
 - POST `/api/snowflake/sync/termed-techs`
 - POST `/api/snowflake/sync/all-techs`
+- POST `/api/tpms/fleet-sync/start` (requires superadmin)

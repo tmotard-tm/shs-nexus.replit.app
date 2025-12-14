@@ -1,9 +1,11 @@
 #!/usr/bin/env npx tsx
 /**
- * Standalone Snowflake Sync Script
+ * Standalone Daily Sync Script
  * 
  * This script is designed to be run as a Replit Scheduled Deployment task.
- * It performs the daily Snowflake sync for technician rosters and exits.
+ * It performs the daily syncs for:
+ * - Snowflake technician rosters (termed techs, all techs)
+ * - TPMS vehicle assignments (caches all vehicle-tech assignments)
  * 
  * Usage: npx tsx server/run-sync.ts
  * 
@@ -53,6 +55,43 @@ async function runSync(): Promise<void> {
     if (allTechsResult.errors && allTechsResult.errors.length > 0) {
       console.log(`  - Errors: ${allTechsResult.errors.length}`);
       allTechsResult.errors.slice(0, 5).forEach((err: string) => console.log(`    - ${err}`));
+    }
+
+    // TPMS Vehicle Assignment Sync
+    console.log('\n--- Syncing TPMS Vehicle Assignments ---');
+    console.log('[Scheduled Sync] Caching all vehicle-tech assignments from TPMS...');
+    
+    try {
+      const { holmanVehicleSyncService } = await import('./holman-vehicle-sync-service');
+      
+      // Get all vehicle numbers from Holman
+      console.log('[Scheduled Sync] Fetching vehicle list from Holman...');
+      const vehiclesResult = await holmanVehicleSyncService.fetchActiveVehicles();
+      
+      if (vehiclesResult.vehicles && vehiclesResult.vehicles.length > 0) {
+        const truckNumbers = vehiclesResult.vehicles.map((v) => v.vehicleNumber).filter(Boolean) as string[];
+        console.log(`[Scheduled Sync] Found ${truckNumbers.length} vehicles to sync`);
+        
+        const { getTPMSService } = await import('./tpms-service');
+        const tpmsService = getTPMSService();
+        
+        const tpmsResult = await tpmsService.runInitialSync(truckNumbers, (synced, total, withAssignments) => {
+          if (synced % 100 === 0) {
+            console.log(`[Scheduled Sync] TPMS progress: ${synced}/${total} vehicles (${withAssignments} with assignments)`);
+          }
+        });
+        
+        console.log(`[Scheduled Sync] TPMS sync complete:`);
+        console.log(`  - Vehicles synced: ${tpmsResult.synced}`);
+        console.log(`  - With assignments: ${tpmsResult.withAssignments}`);
+        console.log(`  - Without assignments: ${tpmsResult.withoutAssignments}`);
+        console.log(`  - Errors: ${tpmsResult.errors}`);
+      } else {
+        console.log('[Scheduled Sync] No vehicles found from Holman, skipping TPMS sync');
+      }
+    } catch (tpmsError) {
+      console.error('[Scheduled Sync] TPMS sync failed (non-fatal):', tpmsError);
+      console.log('[Scheduled Sync] Continuing with other syncs...');
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
