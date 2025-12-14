@@ -5806,6 +5806,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/snowflake/sync/truck-inventory", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      }
+      
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.syncTruckInventory('manual');
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error syncing truck inventory:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Samsara GPS vehicle location lookup
   app.get("/api/samsara/vehicle/:vehicleName", requireAuth, async (req: any, res) => {
     try {

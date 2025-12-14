@@ -2,7 +2,7 @@ import { getSnowflakeService, isSnowflakeConfigured } from './snowflake-service'
 import { getTPMSService } from './tpms-service';
 import { storage } from './storage';
 import { randomUUID } from 'crypto';
-import type { InsertAllTech, InsertQueueItem } from '@shared/schema';
+import type { InsertAllTech, InsertQueueItem, InsertTruckInventory } from '@shared/schema';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -25,6 +25,29 @@ interface SkippedEmployee {
   reason: string;
   existingTaskCount: number;
   openTaskCount: number;
+}
+
+interface SnowflakeTruckInventoryRow {
+  EXTRACT_DATE: string;
+  DISTRICT: string;
+  TRUCK: string;
+  TECH_ID: string;
+  ENTERPRISE_ID: string;
+  DIV: string | null;
+  PLS: string | null;
+  PART_NO: string | null;
+  PART_DESC: string | null;
+  SKU: string | null;
+  NS_AVG_COST: number | null;
+  IM_COST: number | null;
+  SELL: number | null;
+  BIN: string | null;
+  QTY: number | null;
+  TRUCKSTOCK_ADD_DATE: string | null;
+  TRUCKSTOCK_CHANGE_DATE: string | null;
+  EXT_NS_AVG_COST: number | null;
+  EXT_IM_COST: number | null;
+  PRODUCT_CATEGORY: string | null;
 }
 
 interface SyncResult {
@@ -689,6 +712,163 @@ export class SnowflakeSyncService {
       console.error('[TPMS-Snowflake] Error looking up tech addresses:', error);
       return { success: false, message: error.message };
     }
+  }
+
+  async syncTruckInventory(triggeredBy: string = 'manual'): Promise<SyncResult> {
+    const startTime = Date.now();
+    const result: SyncResult = {
+      success: false,
+      recordsProcessed: 0,
+      recordsCreated: 0,
+      recordsUpdated: 0,
+      queueItemsCreated: 0,
+      queueItemsSkipped: 0,
+      skippedEmployees: [],
+      errors: [],
+      duration: 0,
+    };
+
+    if (!isSnowflakeConfigured()) {
+      result.errors.push('Snowflake is not configured');
+      result.duration = Date.now() - startTime;
+      return result;
+    }
+
+    let syncLog;
+    try {
+      syncLog = await storage.createSyncLog({
+        syncType: 'truck_inventory',
+        status: 'running',
+        triggeredBy,
+      });
+      result.syncLogId = syncLog.id;
+    } catch (error: any) {
+      result.errors.push(`Failed to create sync log: ${error.message}`);
+      result.duration = Date.now() - startTime;
+      return result;
+    }
+
+    try {
+      const snowflake = getSnowflakeService();
+      await snowflake.connect();
+
+      console.log('[Sync] Fetching truck inventory from Snowflake...');
+      const query = `
+        SELECT
+          PISR.EXTRACT_DATE,
+          LPAD(PISR.DISTRICT,7,0) AS DISTRICT,
+          LPAD(PISR.TRUCK,6,0) AS TRUCK,
+          LPAD(PISR.TECH_ID,7,0) AS TECH_ID,
+          UPPER(PISR.ENTERPRISE_ID) AS ENTERPRISE_ID,
+          PISR.DIV,
+          PISR.PLS,
+          PISR.PART_NO,
+          PISR.PART_DESC,
+          PISR.SKU,
+          PISR.AVG_COST AS NS_AVG_COST,
+          PISR.COST AS IM_COST,
+          PISR.SELL,  
+          PISR.BIN,
+          PISR.QTY,
+          PISR.TRUCKSTOCK_ADD_DATE,
+          PISR.TRUCKSTOCK_CHANGE_DATE,
+          PISR.QTY * PISR.AVG_COST AS EXT_NS_AVG_COST,
+          PISR.QTY * PISR.COST AS EXT_IM_COST,
+          COALESCE(PC.PRODUCT_CATEGORY,MSL.PRODUCT_CATEGORY,'UNDEFINED') AS PRODUCT_CATEGORY
+        FROM 
+          PARTS_SUPPLYCHAIN.SOFTEON.PISR_SKU_DETAIL PISR
+        LEFT JOIN
+          (SELECT SKU, PRODUCT_CATEGORY
+           FROM PARTS_SUPPLYCHAIN.ANAPLAN.MASTER_SKU_LIST
+           WHERE CURRENT_DAT = (SELECT MAX(CURRENT_DAT) FROM PARTS_SUPPLYCHAIN.ANAPLAN.MASTER_SKU_LIST)
+           AND PRODUCT_CATEGORY IS NOT NULL) MSL
+        ON PISR.SKU = MSL.SKU
+        LEFT JOIN
+          (SELECT PRODUCT_SKU, PRODUCT_CATEGORY
+           FROM PARTS_SUPPLYCHAIN.NTAO.DIM_PRODUCT_CATEGORY) PC
+        ON PISR.SKU = PC.PRODUCT_SKU
+        WHERE
+          PISR.EXTRACT_DATE = (SELECT MAX(EXTRACT_DATE) FROM PARTS_SUPPLYCHAIN.SOFTEON.PISR_SKU_DETAIL)
+          AND PISR.BIN NOT IN ('SHCRE','CRE','SGCRE')
+          AND PISR.TRUCK != PISR.DISTRICT
+      `;
+
+      const rawRows = await snowflake.executeQuery(query) as SnowflakeTruckInventoryRow[];
+      console.log(`[Sync] Retrieved ${rawRows.length} truck inventory records from Snowflake`);
+
+      // Process in batches of 500 for performance
+      const BATCH_SIZE = 500;
+      const totalBatches = Math.ceil(rawRows.length / BATCH_SIZE);
+      console.log(`[Sync] Processing ${rawRows.length} records in ${totalBatches} batches of ${BATCH_SIZE}...`);
+
+      for (let i = 0; i < rawRows.length; i += BATCH_SIZE) {
+        const batch = rawRows.slice(i, i + BATCH_SIZE);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        
+        try {
+          const inventoryDataBatch: InsertTruckInventory[] = batch.map(row => ({
+            extractDate: this.formatDateForDB(row.EXTRACT_DATE) || new Date().toISOString().split('T')[0],
+            district: row.DISTRICT || '',
+            truck: row.TRUCK || '',
+            techId: row.TECH_ID || undefined,
+            enterpriseId: row.ENTERPRISE_ID || undefined,
+            div: row.DIV || undefined,
+            pls: row.PLS || undefined,
+            partNo: row.PART_NO || undefined,
+            partDesc: row.PART_DESC || undefined,
+            sku: row.SKU || undefined,
+            nsAvgCost: row.NS_AVG_COST?.toString() || undefined,
+            imCost: row.IM_COST?.toString() || undefined,
+            sell: row.SELL?.toString() || undefined,
+            bin: row.BIN || undefined,
+            qty: row.QTY ?? undefined,
+            truckstockAddDate: this.formatDateForDB(row.TRUCKSTOCK_ADD_DATE) || undefined,
+            truckstockChangeDate: this.formatDateForDB(row.TRUCKSTOCK_CHANGE_DATE) || undefined,
+            extNsAvgCost: row.EXT_NS_AVG_COST?.toString() || undefined,
+            extImCost: row.EXT_IM_COST?.toString() || undefined,
+            productCategory: row.PRODUCT_CATEGORY || 'UNDEFINED',
+          }));
+
+          const upsertedCount = await storage.bulkUpsertTruckInventory(inventoryDataBatch);
+          result.recordsProcessed += upsertedCount;
+          
+          console.log(`[Sync] Batch ${batchNum}/${totalBatches}: processed ${upsertedCount} records`);
+        } catch (error: any) {
+          console.error(`[Sync] Error processing batch ${batchNum}:`, error.message);
+          result.errors.push(`Error processing batch ${batchNum}: ${error.message}`);
+        }
+      }
+
+      result.success = true;
+      result.duration = Date.now() - startTime;
+
+      await storage.updateSyncLog(syncLog.id, {
+        status: 'completed',
+        completedAt: new Date(),
+        recordsProcessed: result.recordsProcessed,
+        recordsCreated: result.recordsCreated,
+        recordsUpdated: result.recordsUpdated,
+        queueItemsCreated: 0,
+        errorMessage: result.errors.length > 0 ? result.errors.join('; ') : null,
+      });
+
+      console.log(`[Sync] Truck inventory sync completed: ${result.recordsProcessed} processed`);
+    } catch (error: any) {
+      result.errors.push(`Sync failed: ${error.message}`);
+      result.duration = Date.now() - startTime;
+
+      if (syncLog) {
+        await storage.updateSyncLog(syncLog.id, {
+          status: 'failed',
+          completedAt: new Date(),
+          errorMessage: error.message,
+        });
+      }
+
+      console.error('[Sync] Truck inventory sync failed:', error);
+    }
+
+    return result;
   }
 }
 
