@@ -5827,13 +5827,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { truck } = req.params;
       const paddedTruck = truck.padStart(6, '0');
+      console.log(`[Inventory] Looking up truck: ${truck} -> padded: ${paddedTruck}`);
       const inventory = await storage.getTruckInventory(paddedTruck);
+      console.log(`[Inventory] Found ${inventory.length} items for truck ${paddedTruck}`);
       
       const totalPieces = inventory.reduce((sum, item) => sum + (item.qty || 0), 0);
       const totalAvgCost = inventory.reduce((sum, item) => {
         const cost = parseFloat(item.extNsAvgCost || '0');
         return sum + (isNaN(cost) ? 0 : cost);
       }, 0);
+      
+      console.log(`[Inventory] Summary: ${totalPieces} pieces, $${totalAvgCost.toFixed(2)}, ${inventory.length} unique SKUs`);
       
       res.json({
         truck: paddedTruck,

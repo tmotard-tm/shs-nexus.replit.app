@@ -209,6 +209,39 @@ async function initializeSnowflake() {
     console.error("❌ Failed to start sync scheduler:", error);
   }
 
+  // Auto-sync truck inventory on startup if empty
+  try {
+    const { getSnowflakeService } = await import("./snowflake-service");
+    const snowflakeService = getSnowflakeService();
+    
+    if (snowflakeService) {
+      // Check if truck_inventory table has data by checking latest extract date
+      const latestExtract = await storage.getLatestTruckInventoryExtractDate();
+      log(`📦 Truck inventory check: latest extract = ${latestExtract || 'none'}`);
+      
+      if (!latestExtract) {
+        log("📦 Truck inventory empty - starting auto-sync from Snowflake...");
+        const { SnowflakeSyncService } = await import("./snowflake-sync-service");
+        const syncService = new SnowflakeSyncService();
+        
+        // Run sync in background (don't block server startup)
+        syncService.syncTruckInventory().then(result => {
+          if (result.success) {
+            log(`✅ Truck inventory auto-sync complete: ${result.recordsProcessed} items synced`);
+          } else {
+            log(`⚠️ Truck inventory auto-sync failed: ${result.errors?.join(', ')}`);
+          }
+        }).catch(err => {
+          console.error("❌ Truck inventory auto-sync error:", err);
+        });
+      } else {
+        log("✅ Truck inventory already populated, skipping auto-sync");
+      }
+    }
+  } catch (error) {
+    console.error("⚠️ Truck inventory auto-sync check failed:", error);
+  }
+
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
