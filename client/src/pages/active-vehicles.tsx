@@ -741,10 +741,7 @@ export default function ActiveVehicles() {
                             <Car className="h-4 w-4 text-muted-foreground" />
                             <span className="font-semibold">{vehicle.modelYear} {vehicle.makeName} {vehicle.modelName}</span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
-                            <ViewInventoryButton vehicleNumber={vehicle.vehicleNumber} size="sm" variant="ghost" className="h-6 px-2 text-xs" />
-                          </div>
+                          <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
                           
                           {/* Holman Status Badge */}
@@ -849,39 +846,47 @@ export default function ActiveVehicles() {
                         </div>
                       </div>
                       
-                      <div className="mt-4 pt-4 border-t grid grid-cols-1 md:grid-cols-5 gap-4 text-xs text-muted-foreground">
-                        {vehicle.deliveryDate && (
+                      <div className="mt-4 pt-4 border-t flex justify-between items-start gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs text-muted-foreground flex-1 min-h-[60px]">
+                          {vehicle.deliveryDate && (
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-3 w-3" />
+                              <span>Acquired: {vehicle.deliveryDate}</span>
+                            </div>
+                          )}
+                          {vehicle.regRenewalDate && (
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-3 w-3" />
+                              <span>Reg Renewal: {vehicle.regRenewalDate}</span>
+                            </div>
+                          )}
+                          {(vehicle.odometer && vehicle.odometer > 0) ? (
+                            <div>
+                              <span>Odometer: {vehicle.odometer.toLocaleString()} miles{vehicle.odometerDate ? ` (${vehicle.odometerDate})` : ''}</span>
+                            </div>
+                          ) : vehicle.odometerDelivery > 0 ? (
+                            <div>
+                              <span>Odometer: {vehicle.odometerDelivery.toLocaleString()} miles</span>
+                            </div>
+                          ) : null}
+                          {vehicle.remainingBookValue > 0 && (
+                            <div>
+                              <span>Book Value: ${vehicle.remainingBookValue.toLocaleString()}</span>
+                            </div>
+                          )}
                           <div className="flex items-center gap-2">
-                            <Calendar className="h-3 w-3" />
-                            <span>Acquired: {vehicle.deliveryDate}</span>
+                            <Database className="h-3 w-3" />
+                            <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium" data-testid={`source-${vehicle.vin}`}>
+                              {vehicle.source || 'Holman'}
+                            </span>
                           </div>
-                        )}
-                        {vehicle.regRenewalDate && (
-                          <div className="flex items-center gap-2">
-                            <Calendar className="h-3 w-3" />
-                            <span>Reg Renewal: {vehicle.regRenewalDate}</span>
-                          </div>
-                        )}
-                        {(vehicle.odometer && vehicle.odometer > 0) ? (
-                          <div>
-                            <span>Odometer: {vehicle.odometer.toLocaleString()} miles{vehicle.odometerDate ? ` (${vehicle.odometerDate})` : ''}</span>
-                          </div>
-                        ) : vehicle.odometerDelivery > 0 ? (
-                          <div>
-                            <span>Odometer: {vehicle.odometerDelivery.toLocaleString()} miles</span>
-                          </div>
-                        ) : null}
-                        {vehicle.remainingBookValue > 0 && (
-                          <div>
-                            <span>Book Value: ${vehicle.remainingBookValue.toLocaleString()}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2">
-                          <Database className="h-3 w-3" />
-                          <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium" data-testid={`source-${vehicle.vin}`}>
-                            {vehicle.source || 'Holman'}
-                          </span>
                         </div>
+                        <ViewInventoryButton 
+                          vehicleNumber={vehicle.vehicleNumber} 
+                          variant="outline" 
+                          showSummary={true}
+                          className="shrink-0 self-end"
+                        />
                       </div>
                     </CardContent>
                   </Card>

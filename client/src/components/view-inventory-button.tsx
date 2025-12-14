@@ -33,13 +33,15 @@ interface ViewInventoryButtonProps {
   variant?: "default" | "outline" | "ghost" | "secondary" | "destructive" | "link";
   size?: "default" | "sm" | "lg" | "icon";
   className?: string;
+  showSummary?: boolean;
 }
 
 export function ViewInventoryButton({ 
   vehicleNumber, 
   variant = "outline", 
   size = "sm",
-  className = ""
+  className = "",
+  showSummary = false
 }: ViewInventoryButtonProps) {
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -49,13 +51,32 @@ export function ViewInventoryButton({
 
   const { data: inventory, isLoading, error } = useQuery<InventorySummary>({
     queryKey: ['/api/truck-inventory/summary', cleanVehicleNumber],
-    enabled: open && !!cleanVehicleNumber,
+    enabled: (showSummary || open) && !!cleanVehicleNumber,
   });
 
   const categories = useMemo(() => {
     if (!inventory?.items) return [];
-    const cats = [...new Set(inventory.items.map(i => i.category).filter(Boolean))];
-    return cats.sort();
+    const catSet = new Set(inventory.items.map(i => i.category).filter(Boolean));
+    return Array.from(catSet).sort();
+  }, [inventory?.items]);
+
+  const primaryCategory = useMemo(() => {
+    if (!inventory?.items || inventory.items.length === 0) return null;
+    const categoryCounts: Record<string, number> = {};
+    inventory.items.forEach(item => {
+      if (item.category) {
+        categoryCounts[item.category] = (categoryCounts[item.category] || 0) + item.qty;
+      }
+    });
+    let maxCategory = '';
+    let maxCount = 0;
+    Object.entries(categoryCounts).forEach(([cat, count]) => {
+      if (count > maxCount) {
+        maxCount = count;
+        maxCategory = cat;
+      }
+    });
+    return maxCategory || null;
   }, [inventory?.items]);
 
   const filteredItems = useMemo(() => {
@@ -92,6 +113,22 @@ export function ViewInventoryButton({
     return dateStr;
   };
 
+  const formatCurrency = (value: number | string | undefined | null) => {
+    if (value === undefined || value === null || value === '') return '$0';
+    let num: number;
+    if (typeof value === 'string') {
+      const cleanedValue = value.replace(/,/g, '');
+      num = parseFloat(cleanedValue);
+    } else {
+      num = value;
+    }
+    if (isNaN(num)) return '$0';
+    if (num >= 1000) {
+      return `$${(num / 1000).toFixed(1)}k`;
+    }
+    return `$${num.toFixed(0)}`;
+  };
+
   const handleOpenChange = (newOpen: boolean) => {
     setOpen(newOpen);
     if (!newOpen) {
@@ -100,17 +137,75 @@ export function ViewInventoryButton({
     }
   };
 
+  const renderButtonContent = () => {
+    if (showSummary) {
+      if (error) {
+        return (
+          <div className="flex flex-col items-start text-left w-full min-w-[100px]">
+            <div className="flex items-center gap-1 text-xs font-medium">
+              <Package className="h-3.5 w-3.5" />
+              <span>Inventory</span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              <span className="text-red-500">Error loading</span>
+            </div>
+          </div>
+        );
+      }
+
+      if (inventory) {
+        const pieces = inventory.totalPieces || 0;
+        const costValue = formatCurrency(inventory.totalAvgCost);
+        return (
+          <div className="flex flex-col items-start text-left w-full min-w-[100px]">
+            <div className="flex items-center gap-1 text-xs font-medium">
+              <Package className="h-3.5 w-3.5" />
+              <span>Inventory</span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {pieces.toLocaleString()} pcs • {costValue}
+            </div>
+            {primaryCategory && (
+              <div className="text-xs text-muted-foreground truncate max-w-full" title={primaryCategory}>
+                {primaryCategory.length > 18 ? primaryCategory.substring(0, 16) + '...' : primaryCategory}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      return (
+        <div className="flex flex-col items-start text-left w-full min-w-[100px]">
+          <div className="flex items-center gap-1 text-xs font-medium">
+            <Package className="h-3.5 w-3.5" />
+            <span>Inventory</span>
+          </div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>Loading...</span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <Package className="h-4 w-4 mr-1" />
+        View Inventory
+      </>
+    );
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button 
           variant={variant} 
-          size={size} 
-          className={className}
+          size={showSummary ? "default" : size} 
+          className={`${className} ${showSummary ? 'h-auto py-2 px-3' : ''}`}
           data-testid={`btn-view-inventory-${cleanVehicleNumber}`}
         >
-          <Package className="h-4 w-4 mr-1" />
-          View Inventory
+          {renderButtonContent()}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-3xl max-h-[90vh]">
@@ -179,6 +274,12 @@ export function ViewInventoryButton({
                   <span>Unique SKUs:</span>
                   <span className="font-medium">{inventory.itemCount.toLocaleString()}</span>
                 </div>
+                {primaryCategory && (
+                  <div className="flex justify-between mt-1">
+                    <span>Primary Category:</span>
+                    <span className="font-medium">{primaryCategory}</span>
+                  </div>
+                )}
                 {inventory.extractDate && (
                   <div className="flex justify-between mt-1">
                     <span>Data as of:</span>
