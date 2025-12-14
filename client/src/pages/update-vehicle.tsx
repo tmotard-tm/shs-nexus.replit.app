@@ -20,6 +20,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { useToast } from "@/hooks/use-toast";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
+import { ViewInventoryButton } from "@/components/view-inventory-button";
 // FleetVehicle type for Holman API data
 interface FleetVehicle {
   vin: string;
@@ -1189,6 +1190,9 @@ export default function UpdateVehicle() {
                           <p className="text-xs text-muted-foreground">Region: {vehicle.region || 'N/A'}</p>
                           <p className="text-xs text-muted-foreground">Division: {vehicle.division || 'N/A'}</p>
                           <p className="text-xs text-muted-foreground">District: {vehicle.district || 'N/A'}</p>
+                          <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                            <ViewInventoryButton vehicleNumber={vehicle.vehicleNumber} size="sm" />
+                          </div>
                         </div>
                       </div>
                       
@@ -1253,11 +1257,16 @@ export default function UpdateVehicle() {
                 <form onSubmit={handleUpdateVehicle} className="space-y-4">
                   {/* Vehicle Identification */}
                   <div className="p-3 bg-muted rounded-lg">
-                    <p className="font-semibold text-sm mb-1">Selected Vehicle:</p>
-                    <p className="text-sm">{selectedVehicle.modelYear} {selectedVehicle.makeName} {selectedVehicle.modelName}</p>
-                    <p className="text-xs text-muted-foreground">
-                      VIN: {selectedVehicle.vin} | Vehicle #: {selectedVehicle.vehicleNumber}
-                    </p>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-semibold text-sm mb-1">Selected Vehicle:</p>
+                        <p className="text-sm">{selectedVehicle.modelYear} {selectedVehicle.makeName} {selectedVehicle.modelName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          VIN: {selectedVehicle.vin} | Vehicle #: {selectedVehicle.vehicleNumber}
+                        </p>
+                      </div>
+                      <ViewInventoryButton vehicleNumber={selectedVehicle.vehicleNumber} />
+                    </div>
                   </div>
                   
                   {/* Editable Fields */}

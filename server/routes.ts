@@ -5822,6 +5822,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get truck inventory summary (total pieces and total avg cost)
+  app.get("/api/truck-inventory/summary/:truck", requireAuth, async (req: any, res) => {
+    try {
+      const { truck } = req.params;
+      const paddedTruck = truck.padStart(6, '0');
+      const inventory = await storage.getTruckInventory(paddedTruck);
+      
+      const totalPieces = inventory.reduce((sum, item) => sum + (item.qty || 0), 0);
+      const totalAvgCost = inventory.reduce((sum, item) => {
+        const cost = parseFloat(item.extNsAvgCost || '0');
+        return sum + (isNaN(cost) ? 0 : cost);
+      }, 0);
+      
+      res.json({
+        truck: paddedTruck,
+        totalPieces,
+        totalAvgCost: totalAvgCost.toFixed(2),
+        itemCount: inventory.length,
+        extractDate: inventory.length > 0 ? inventory[0].extractDate : null,
+      });
+    } catch (error: any) {
+      console.error("Error getting truck inventory summary:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Samsara GPS vehicle location lookup
   app.get("/api/samsara/vehicle/:vehicleName", requireAuth, async (req: any, res) => {
     try {
