@@ -60,13 +60,21 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
 - **Snowflake**: Master source for employee roster and HR data (via all_techs table)
 - **TPMS**: Master source for technician-to-truck assignments
 - **Holman**: Master source for vehicle fleet details and specifications
-- Features:
-  - Technician lookup by Enterprise ID with auto-population of employee data
-  - Vehicle Assignment Dashboard at `/vehicle-assignments` with search and filters
-  - Assignment form at `/assign-vehicle` with integrated tech lookup
-  - Full assignment history tracking with audit trail
-  - REST API at `/api/vehicle-assignments/*` for CRUD operations
 - Key field mappings: TPMS truckNo ↔ Holman vehicleNumber (leading zeros ignored)
+
+**Fleet Management Page** (December 2025): Consolidated fleet management at `/fleet-management`:
+- Replaces separate vehicle-assignments, assign-vehicle-location, update-vehicle pages
+- **Stats Dashboard**: Total vehicles, assigned, unassigned, mismatches
+- **Quick Lookup**: By Enterprise ID or Truck Number
+- **Unified Search**: VIN, truck #, tech ID/name, license plate, city
+- **Filters**: Region, district, assignment status, program (Fleet/BYOV), sync status
+- **Zipcode Distance Sorting**: Sort vehicles by proximity to target zipcode
+- **Vehicle Detail Drawer**: Sheet-based drawer with vehicle info, TPMS/Holman comparison
+- **Actions**: Sync to Holman, Unassign, View Inventory, Assignment History
+- **Shared Components**: Located in `/client/src/components/fleet/`
+  - DataSourceIndicator, distance-helper, assignment-history-dialog
+- **Permissions**: Added to RolePermissionSettings as `fleetManagement`
+- Legacy pages still available but marked as "(Legacy)" in navigation
 
 **Holman Assignment Sync** (December 2025): Sync TPMS technician data to Holman to fix assignment mismatches:
 - **Purpose**: When TPMS and Holman assignment data don't match, update Holman records with TPMS tech data
