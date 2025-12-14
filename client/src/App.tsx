@@ -44,6 +44,7 @@ import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
 import VehicleAssignments from "@/pages/vehicle-assignments";
+import FleetManagement from "@/pages/fleet-management";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import TestRepairResults from "@/pages/test-repair-results";
@@ -274,6 +275,12 @@ function Router() {
       <Route path="/vehicle-assignments">
         <ProtectedRoute>
           <VehicleAssignments />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/fleet-management">
+        <ProtectedRoute>
+          <FleetManagement />
         </ProtectedRoute>
       </Route>
 
