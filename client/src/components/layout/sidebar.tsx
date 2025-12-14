@@ -6,9 +6,10 @@ import { useAuth } from "@/hooks/use-auth";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { usePermissions } from "@/hooks/use-permissions";
 import { usePreviewRole } from "@/hooks/use-preview-role";
-import type { RolePermissionSettings, UserRole, RolePermission } from "@shared/schema";
+import type { RolePermissionSettings, UserRole, RolePermission, User } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,7 +41,9 @@ import {
   Database,
   Truck,
   Shield,
-  Eye
+  Eye,
+  User as UserIcon,
+  Search
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PAGES, CATEGORIES, getPagesByCategory, type PageCategory } from "@shared/page-registry";
@@ -63,13 +66,31 @@ export function Sidebar() {
   const { user, logout } = useAuth();
   const { startOnboarding, resetOnboarding } = useOnboarding();
   const { permissions, effectiveRole } = usePermissions();
-  const { previewRole, setPreviewRole, isPreviewMode, exitPreviewMode } = usePreviewRole();
+  const { previewRole, setPreviewRole, previewUser, setPreviewUser, isPreviewMode, isUserPreviewMode, exitPreviewMode } = usePreviewRole();
   const [isOpen, setIsOpen] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
 
   const { data: rolePermissions = [] } = useQuery<RolePermission[]>({
     queryKey: ['/api/role-permissions'],
     enabled: user?.role === 'superadmin',
   });
+
+  const { data: allUsers = [] } = useQuery<User[]>({
+    queryKey: ['/api/users'],
+    enabled: user?.role === 'superadmin',
+  });
+
+  const filteredUsers = useMemo(() => {
+    if (!userSearch.trim()) return allUsers.slice(0, 10);
+    const search = userSearch.toLowerCase();
+    return allUsers
+      .filter(u => 
+        u.username.toLowerCase().includes(search) || 
+        u.email?.toLowerCase().includes(search) ||
+        u.role.toLowerCase().includes(search)
+      )
+      .slice(0, 10);
+  }, [allUsers, userSearch]);
 
   const availableRoles = useMemo(() => {
     return rolePermissions
@@ -97,6 +118,17 @@ export function Sidebar() {
     } else {
       setPreviewRole(role as UserRole);
     }
+    setIsOpen(false);
+  };
+
+  const handlePreviewUserSelect = (selectedUser: User) => {
+    setPreviewUser({
+      id: selectedUser.id,
+      username: selectedUser.username,
+      role: selectedUser.role as UserRole,
+      departments: selectedUser.departments || [],
+    });
+    setUserSearch("");
     setIsOpen(false);
   };
 
@@ -282,7 +314,7 @@ export function Sidebar() {
               <DropdownMenuSubTrigger className="flex items-center gap-3" data-testid="menu-view-as-role">
                 <Eye className="h-4 w-4" />
                 <span>View as Role</span>
-                {isPreviewMode && (
+                {isPreviewMode && !isUserPreviewMode && (
                   <span className="ml-auto text-xs bg-amber-500/20 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
                     Active
                   </span>
@@ -301,6 +333,86 @@ export function Sidebar() {
                       </DropdownMenuRadioItem>
                     ))}
                   </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuPortal>
+            </DropdownMenuSub>
+          )}
+
+          {/* View as User - Super Admin Only */}
+          {user.role === 'superadmin' && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="flex items-center gap-3" data-testid="menu-view-as-user">
+                <UserIcon className="h-4 w-4" />
+                <span>View as User</span>
+                {isUserPreviewMode && (
+                  <span className="ml-auto text-xs bg-amber-500/20 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                    {previewUser?.username}
+                  </span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuSubContent className="min-w-64">
+                  <div className="p-2">
+                    <div className="relative">
+                      <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Search users..."
+                        value={userSearch}
+                        onChange={(e) => setUserSearch(e.target.value)}
+                        className="pl-8 h-8 text-sm"
+                        data-testid="input-user-search"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setPreviewUser(null);
+                      setUserSearch("");
+                      setIsOpen(false);
+                    }}
+                    className="flex items-center gap-2"
+                    data-testid="menu-exit-user-preview"
+                  >
+                    <span className={!isUserPreviewMode ? "font-medium" : ""}>
+                      Exit User Preview
+                    </span>
+                    {!isUserPreviewMode && <CheckCircle className="h-3 w-3 ml-auto text-green-500" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <div className="max-h-48 overflow-y-auto">
+                    {filteredUsers.length === 0 ? (
+                      <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                        No users found
+                      </div>
+                    ) : (
+                      filteredUsers.map((u) => (
+                        <DropdownMenuItem
+                          key={u.id}
+                          onClick={() => handlePreviewUserSelect(u)}
+                          className="flex items-center justify-between gap-2"
+                          data-testid={`menu-user-${u.username}`}
+                        >
+                          <div className="flex flex-col">
+                            <span className={previewUser?.id === u.id ? "font-medium" : ""}>
+                              {u.username}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {u.role} {u.departments?.length ? `• ${u.departments.join(', ')}` : ''}
+                            </span>
+                          </div>
+                          {previewUser?.id === u.id && <CheckCircle className="h-3 w-3 text-green-500" />}
+                        </DropdownMenuItem>
+                      ))
+                    )}
+                  </div>
+                  {allUsers.length > 10 && !userSearch && (
+                    <div className="px-2 py-1 text-xs text-muted-foreground text-center border-t">
+                      Type to search {allUsers.length} users
+                    </div>
+                  )}
                 </DropdownMenuSubContent>
               </DropdownMenuPortal>
             </DropdownMenuSub>

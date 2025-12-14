@@ -71,7 +71,7 @@ const PermissionsContext = createContext<PermissionsContextType | null>(null);
 
 export function PermissionsProvider({ children }: { children: ReactNode }) {
   const { user, isLoading: isAuthLoading } = useAuth();
-  const { previewRole } = usePreviewRole();
+  const { previewRole, previewUser } = usePreviewRole();
 
   const { data: allPermissions, isLoading, refetch } = useQuery<RolePermission[]>({
     queryKey: ['/api/role-permissions'],
@@ -88,11 +88,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   });
 
   const effectiveRole = useMemo(() => {
+    if (user?.role === 'superadmin' && previewUser) {
+      return previewUser.role;
+    }
     if (user?.role === 'superadmin' && previewRole) {
       return previewRole;
     }
     return (user?.role as UserRole) || 'agent';
-  }, [user?.role, previewRole]);
+  }, [user?.role, previewRole, previewUser]);
 
   const getPermissions = (): RolePermissionSettings => {
     if (!user) {
@@ -100,6 +103,15 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }
 
     const userRole = user.role as UserRole;
+    
+    if (userRole === 'superadmin' && previewUser && allPermissions) {
+      const previewDefaults = getDefaultPermissions(previewUser.role);
+      const found = allPermissions.find(p => p.role === previewUser.role);
+      if (found) {
+        return deepMergePermissions(previewDefaults, found.permissions);
+      }
+      return previewDefaults;
+    }
     
     if (userRole === 'superadmin' && previewRole && allPermissions) {
       const previewDefaults = getDefaultPermissions(previewRole);
