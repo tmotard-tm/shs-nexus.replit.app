@@ -874,12 +874,6 @@ export default function ActiveVehicles() {
                               <span>Book Value: ${vehicle.remainingBookValue.toLocaleString()}</span>
                             </div>
                           )}
-                          <div className="flex items-center gap-2">
-                            <Database className="h-3 w-3" />
-                            <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium" data-testid={`source-${vehicle.vin}`}>
-                              {vehicle.source || 'Holman'}
-                            </span>
-                          </div>
                         </div>
                         <ViewInventoryButton 
                           vehicleNumber={vehicle.vehicleNumber} 
