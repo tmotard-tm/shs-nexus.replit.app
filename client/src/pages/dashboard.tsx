@@ -230,9 +230,9 @@ export default function Dashboard() {
                     Assign Existing Vehicles to Users
                   </p>
                 </div>
-                <Link href="/assign-vehicle-location">
+                <Link href="/fleet-management">
                   <Button size="sm" className="w-full" data-testid="button-start-assignment">
-                    Start Assignment
+                    Manage Fleet
                   </Button>
                 </Link>
               </div>
