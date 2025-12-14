@@ -6686,6 +6686,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get TPMS fleet sync state (for cache-first strategy)
+  app.get("/api/tpms/fleet-sync/state", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const state = await tpmsService.getSyncState();
+      res.json({ success: true, state });
+    } catch (error: any) {
+      console.error("Error getting TPMS fleet sync state:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Start TPMS fleet initial sync (processes all fleet vehicles)
+  app.post("/api/tpms/fleet-sync/start", requireAuth, async (req: any, res) => {
+    try {
+      if (req.user.role !== 'superadmin') {
+        return res.status(403).json({ success: false, message: 'Only superadmins can trigger fleet sync' });
+      }
+
+      const tpmsService = getTPMSService();
+      const syncState = await tpmsService.getSyncState();
+      
+      if (syncState?.status === 'syncing') {
+        return res.json({ 
+          success: true, 
+          message: 'Fleet sync already in progress',
+          state: syncState
+        });
+      }
+
+      // Get all fleet vehicle numbers from Holman cache
+      const { getHolmanVehicleSyncService } = await import("./holman-vehicle-sync-service");
+      const holmanService = getHolmanVehicleSyncService();
+      const cachedVehicles = await holmanService.getCachedVehicles();
+      
+      if (cachedVehicles.length === 0) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'No cached vehicles found. Please refresh fleet data first.' 
+        });
+      }
+
+      const truckNumbers = cachedVehicles
+        .map(v => v.holmanVehicleNumber?.padStart(6, '0'))
+        .filter(Boolean) as string[];
+
+      console.log(`[Fleet-Sync] Starting initial sync for ${truckNumbers.length} vehicles`);
+
+      // Start sync in background
+      tpmsService.runInitialSync(truckNumbers).catch(err => {
+        console.error('[Fleet-Sync] Background sync error:', err);
+        storage.updateTpmsSyncState({
+          status: 'failed',
+          errorMessage: err.message,
+        });
+      });
+
+      res.json({ 
+        success: true, 
+        message: `Fleet sync started for ${truckNumbers.length} vehicles`,
+        totalVehicles: truckNumbers.length
+      });
+    } catch (error: any) {
+      console.error("Error starting TPMS fleet sync:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // ==================================================
   // Vehicle Assignment Routes - Aggregated Data from Snowflake, TPMS, Holman
   // ==================================================

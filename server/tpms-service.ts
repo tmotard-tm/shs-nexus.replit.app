@@ -434,6 +434,92 @@ class TPMSService {
       stale: stale.length,
     };
   }
+
+  // Run initial sync - processes all vehicles and caches TPMS assignments
+  async runInitialSync(truckNumbers: string[], onProgress?: (synced: number, total: number, withAssignments: number) => void): Promise<{ success: boolean; synced: number; withAssignments: number; withoutAssignments: number; errors: number }> {
+    console.log(`[TPMS-InitialSync] Starting initial sync for ${truckNumbers.length} vehicles`);
+    
+    await storage.updateTpmsSyncState({
+      status: 'syncing',
+      totalVehiclesToSync: truckNumbers.length,
+      vehiclesSynced: 0,
+      vehiclesWithAssignments: 0,
+      vehiclesWithoutAssignments: 0,
+      initialSyncStartedAt: new Date(),
+      errorMessage: null,
+    });
+
+    let synced = 0;
+    let withAssignments = 0;
+    let withoutAssignments = 0;
+    let errors = 0;
+
+    // Process in batches with delay to avoid rate limiting
+    const batchSize = 5;
+    const delayBetweenBatches = 1000; // 1 second between batches
+
+    for (let i = 0; i < truckNumbers.length; i += batchSize) {
+      const batch = truckNumbers.slice(i, i + batchSize);
+      
+      await Promise.all(batch.map(async (truckNo) => {
+        try {
+          const result = await this.lookupByTruckNumber(truckNo);
+          synced++;
+          
+          if (result.success && result.data?.ldapId) {
+            withAssignments++;
+          } else {
+            withoutAssignments++;
+          }
+        } catch (error) {
+          console.error(`[TPMS-InitialSync] Error syncing ${truckNo}:`, error);
+          errors++;
+          synced++;
+        }
+      }));
+
+      // Update progress
+      await storage.updateTpmsSyncState({
+        vehiclesSynced: synced,
+        vehiclesWithAssignments: withAssignments,
+        vehiclesWithoutAssignments: withoutAssignments,
+      });
+
+      if (onProgress) {
+        onProgress(synced, truckNumbers.length, withAssignments);
+      }
+
+      // Log progress every 50 vehicles
+      if (synced % 50 === 0 || synced === truckNumbers.length) {
+        console.log(`[TPMS-InitialSync] Progress: ${synced}/${truckNumbers.length} (${withAssignments} with assignments)`);
+      }
+
+      // Add delay between batches (except for the last one)
+      if (i + batchSize < truckNumbers.length) {
+        await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+      }
+    }
+
+    // Mark sync complete
+    await storage.updateTpmsSyncState({
+      status: 'completed',
+      initialSyncComplete: true,
+      initialSyncCompletedAt: new Date(),
+      lastSyncAt: new Date(),
+      vehiclesSynced: synced,
+      vehiclesWithAssignments: withAssignments,
+      vehiclesWithoutAssignments: withoutAssignments,
+    });
+
+    console.log(`[TPMS-InitialSync] Complete: ${synced} synced, ${withAssignments} with assignments, ${errors} errors`);
+
+    return { success: true, synced, withAssignments, withoutAssignments, errors };
+  }
+
+  // Get sync state
+  async getSyncState(): Promise<{ initialSyncComplete: boolean; status: string; vehiclesSynced: number; totalVehiclesToSync: number; vehiclesWithAssignments: number; lastSyncAt: Date | null } | null> {
+    return storage.getTpmsSyncState();
+  }
 }
 
 let tpmsServiceInstance: TPMSService | null = null;

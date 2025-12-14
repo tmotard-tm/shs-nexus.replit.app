@@ -882,7 +882,11 @@ class HolmanVehicleSyncService {
       return vehicles;
     }
 
-    console.log(`[HolmanSync] Enriching ${vehicles.length} vehicles with TPMS data (cache-first approach)`);
+    // Check if initial sync is complete - if so, use cache-only mode (no API calls)
+    const syncState = await tpmsService.getSyncState();
+    const cacheOnlyMode = syncState?.initialSyncComplete === true;
+    
+    console.log(`[HolmanSync] Enriching ${vehicles.length} vehicles with TPMS data (mode: ${cacheOnlyMode ? 'cache-only' : 'cache-first'})`);
     
     // Build a map of vehicle number variations to original vehicle
     const vehicleMap = new Map<string, { vehicle: FleetVehicle; variations: string[] }>();
@@ -944,6 +948,16 @@ class HolmanVehicleSyncService {
     }
     
     console.log(`[HolmanSync-TPMS] Cache results: ${cacheHits} hits, ${uncachedVehicles.length} uncached`);
+    
+    // In cache-only mode (after initial sync), skip all API calls - just add uncached vehicles as-is
+    if (cacheOnlyMode) {
+      console.log(`[HolmanSync-TPMS] Cache-only mode: skipping API calls for ${uncachedVehicles.length} uncached vehicles`);
+      for (const { vehicle } of uncachedVehicles) {
+        enrichedVehicles.push(vehicle);
+      }
+      console.log(`[HolmanSync-TPMS] Enrichment complete (cache-only): ${cacheHits} with TPMS data`);
+      return enrichedVehicles;
+    }
     
     // For uncached vehicles, try API calls (with rate limit protection)
     // Only do a limited number of API calls per request to avoid rate limiting
