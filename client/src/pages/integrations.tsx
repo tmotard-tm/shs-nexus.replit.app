@@ -107,6 +107,28 @@ export default function Integrations() {
     },
   });
 
+  const syncTruckInventoryMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest('POST', '/api/snowflake/sync/truck-inventory');
+    },
+    onSuccess: async (response) => {
+      const result = await response.json();
+      toast({
+        title: "Truck Inventory Sync Complete",
+        description: `Processed ${result.recordsProcessed} inventory items (${result.recordsCreated} new, ${result.recordsUpdated} updated)`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/snowflake/sync/status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sync-logs'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to sync truck inventory data",
+        variant: "destructive",
+      });
+    },
+  });
+
   const createConfigMutation = useMutation({
     mutationFn: async (data: any) => {
       const response = await apiRequest("POST", "/api/configurations", data);
@@ -1003,6 +1025,40 @@ export default function Integrations() {
                         </Link>
                       </div>
                     )}
+                  </CardContent>
+                </Card>
+
+                {/* Truck Inventory Sync */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Truck className="h-4 w-4" />
+                          Truck Inventory
+                        </CardTitle>
+                        <CardDescription>
+                          Sync truck inventory data from Snowflake for vehicle-level inventory lookups
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Button 
+                          onClick={() => syncTruckInventoryMutation.mutate()}
+                          disabled={syncTruckInventoryMutation.isPending || !snowflakeStatus?.configured}
+                          variant="outline"
+                          size="sm"
+                          data-testid="button-sync-truck-inventory"
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1 ${syncTruckInventoryMutation.isPending ? 'animate-spin' : ''}`} />
+                          {syncTruckInventoryMutation.isPending ? 'Syncing...' : 'Sync Inventory'}
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      Click "Sync Inventory" to load the latest truck inventory data. This enables the "View Inventory" feature on vehicle pages.
+                    </p>
                   </CardContent>
                 </Card>
               </CollapsibleContent>
