@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { type FleetVehicle } from "@/data/fleetData";
 import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
+import { ViewInventoryButton } from "@/components/view-inventory-button";
 
 interface SyncStatus {
   dataMode: 'live' | 'cached' | 'empty';
@@ -740,7 +741,10 @@ export default function ActiveVehicles() {
                             <Car className="h-4 w-4 text-muted-foreground" />
                             <span className="font-semibold">{vehicle.modelYear} {vehicle.makeName} {vehicle.modelName}</span>
                           </div>
-                          <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm text-muted-foreground">Vehicle #{vehicle.vehicleNumber}</p>
+                            <ViewInventoryButton vehicleNumber={vehicle.vehicleNumber} size="sm" variant="ghost" className="h-6 px-2 text-xs" />
+                          </div>
                           <p className="text-sm text-muted-foreground">VIN: {vehicle.vin}</p>
                           
                           {/* Holman Status Badge */}

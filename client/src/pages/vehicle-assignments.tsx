@@ -14,6 +14,7 @@ import {
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Eye, UserX, Link2, History
 } from "lucide-react";
+import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -400,7 +401,12 @@ export default function VehicleAssignments() {
                               )}
                             </td>
                             <td className="p-3 font-mono text-sm">{assignment.techRacfid}</td>
-                            <td className="p-3 font-mono text-sm font-semibold">{assignment.truckNo || '-'}</td>
+                            <td className="p-3">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-sm font-semibold">{assignment.truckNo || '-'}</span>
+                                {assignment.truckNo && <ViewInventoryButton vehicleNumber={assignment.truckNo} size="sm" variant="ghost" className="h-6 px-2 text-xs" />}
+                              </div>
+                            </td>
                             <td className="p-3 text-sm">
                               {assignment.vehicleYear && assignment.vehicleMake && assignment.vehicleModel 
                                 ? `${assignment.vehicleYear} ${assignment.vehicleMake} ${assignment.vehicleModel}`
@@ -498,7 +504,10 @@ export default function VehicleAssignments() {
               </div>
               <div className="space-y-4">
                 <div>
-                  <h4 className="font-semibold text-sm text-muted-foreground mb-2">Vehicle Info (Holman)</h4>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-semibold text-sm text-muted-foreground">Vehicle Info (Holman)</h4>
+                    {selectedAssignment.truckNo && <ViewInventoryButton vehicleNumber={selectedAssignment.truckNo} size="sm" />}
+                  </div>
                   <div className="space-y-1">
                     <p><span className="font-medium">Truck #:</span> {selectedAssignment.truckNo || '-'}</p>
                     <p><span className="font-medium">Holman Vehicle #:</span> {selectedAssignment.holmanVehicleNumber || '-'}</p>

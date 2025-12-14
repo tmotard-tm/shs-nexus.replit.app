@@ -16,6 +16,7 @@ import {
   Tag,
   FileText
 } from "lucide-react";
+import { ViewInventoryButton } from "@/components/view-inventory-button";
 
 interface QueueItemDataTemplateProps {
   data: string | null;
@@ -246,12 +247,34 @@ export function QueueItemDataTemplate({ data }: QueueItemDataTemplateProps) {
     }
   });
   
+  // Extract vehicle number from vehicle fields for inventory button
+  const getVehicleNumber = (): string | null => {
+    for (const [key, value] of vehicleFields) {
+      const lowerKey = key.toLowerCase();
+      if ((lowerKey.includes('vehiclenumber') || lowerKey === 'trucknumber' || lowerKey === 'truckno') && typeof value === 'string') {
+        return value;
+      }
+      // Check nested objects for vehicleNumber
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        for (const [nestedKey, nestedValue] of Object.entries(value)) {
+          const lowerNestedKey = nestedKey.toLowerCase();
+          if ((lowerNestedKey.includes('vehiclenumber') || lowerNestedKey === 'trucknumber' || lowerNestedKey === 'truckno') && typeof nestedValue === 'string') {
+            return nestedValue as string;
+          }
+        }
+      }
+    }
+    return null;
+  };
+  
+  const vehicleNumber = getVehicleNumber();
+
   const sections = [
-    { title: 'Workflow Information', fields: workflowFields, icon: <Settings className="h-4 w-4" /> },
-    { title: 'Employee Information', fields: employeeFields, icon: <User className="h-4 w-4" /> },
-    { title: 'Vehicle Information', fields: vehicleFields, icon: <Car className="h-4 w-4" /> },
-    { title: 'Submitter Information', fields: submitterFields, icon: <Briefcase className="h-4 w-4" /> },
-    { title: 'Additional Information', fields: otherFields, icon: <FileText className="h-4 w-4" /> }
+    { title: 'Workflow Information', fields: workflowFields, icon: <Settings className="h-4 w-4" />, showInventory: false },
+    { title: 'Employee Information', fields: employeeFields, icon: <User className="h-4 w-4" />, showInventory: false },
+    { title: 'Vehicle Information', fields: vehicleFields, icon: <Car className="h-4 w-4" />, showInventory: true },
+    { title: 'Submitter Information', fields: submitterFields, icon: <Briefcase className="h-4 w-4" />, showInventory: false },
+    { title: 'Additional Information', fields: otherFields, icon: <FileText className="h-4 w-4" />, showInventory: false }
   ].filter(section => section.fields.length > 0);
   
   return (
@@ -259,10 +282,15 @@ export function QueueItemDataTemplate({ data }: QueueItemDataTemplateProps) {
       {sections.map((section, sectionIndex) => (
         <Card key={section.title} className="border-l-4 border-l-primary/20">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2 text-primary">
-              {section.icon}
-              {section.title}
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm flex items-center gap-2 text-primary">
+                {section.icon}
+                {section.title}
+              </CardTitle>
+              {section.showInventory && vehicleNumber && (
+                <ViewInventoryButton vehicleNumber={vehicleNumber} size="sm" />
+              )}
+            </div>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="space-y-3">
