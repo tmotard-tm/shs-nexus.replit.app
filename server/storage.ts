@@ -3295,6 +3295,45 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  // Truck Inventory Module
+  async getTruckInventory(truck: string): Promise<TruckInventory[]> {
+    return await db.select().from(truckInventory).where(eq(truckInventory.truck, truck));
+  }
+
+  async getTruckInventoryByEnterpriseId(enterpriseId: string): Promise<TruckInventory[]> {
+    return await db.select().from(truckInventory).where(eq(truckInventory.enterpriseId, enterpriseId.toUpperCase()));
+  }
+
+  async getTruckInventoryByDistrict(district: string): Promise<TruckInventory[]> {
+    return await db.select().from(truckInventory).where(eq(truckInventory.district, district));
+  }
+
+  async getLatestTruckInventoryExtractDate(): Promise<string | null> {
+    const result = await db.select({ extractDate: truckInventory.extractDate })
+      .from(truckInventory)
+      .orderBy(desc(truckInventory.extractDate))
+      .limit(1);
+    return result[0]?.extractDate || null;
+  }
+
+  async bulkUpsertTruckInventory(items: InsertTruckInventory[]): Promise<number> {
+    if (items.length === 0) return 0;
+    
+    const result = await db.insert(truckInventory)
+      .values(items)
+      .onConflictDoNothing()
+      .returning({ id: truckInventory.id });
+    
+    return result.length;
+  }
+
+  async clearTruckInventoryByExtractDate(extractDate: string): Promise<number> {
+    const result = await db.delete(truckInventory)
+      .where(eq(truckInventory.extractDate, extractDate))
+      .returning({ id: truckInventory.id });
+    return result.length;
+  }
+
   // Tech Vehicle Assignments Module
   async getTechVehicleAssignment(id: string): Promise<TechVehicleAssignment | undefined> {
     const result = await db.select().from(techVehicleAssignments).where(eq(techVehicleAssignments.id, id)).limit(1);
