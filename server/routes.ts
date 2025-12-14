@@ -5822,7 +5822,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get truck inventory summary (total pieces and total avg cost)
+  // Get truck inventory summary with items (total pieces and total avg cost)
   app.get("/api/truck-inventory/summary/:truck", requireAuth, async (req: any, res) => {
     try {
       const { truck } = req.params;
@@ -5839,12 +5839,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       console.log(`[Inventory] Summary: ${totalPieces} pieces, $${totalAvgCost.toFixed(2)}, ${inventory.length} unique SKUs`);
       
+      // Format items for display - sort by ext cost descending
+      const items = inventory
+        .map(item => ({
+          sku: item.sku,
+          partNo: item.partNo,
+          partDesc: item.partDesc,
+          qty: item.qty || 0,
+          unitCost: parseFloat(item.nsAvgCost || '0'),
+          extCost: parseFloat(item.extNsAvgCost || '0'),
+          bin: item.bin,
+          category: item.productCategory,
+        }))
+        .sort((a, b) => b.extCost - a.extCost);
+      
       res.json({
         truck: paddedTruck,
         totalPieces,
         totalAvgCost: totalAvgCost.toFixed(2),
         itemCount: inventory.length,
         extractDate: inventory.length > 0 ? inventory[0].extractDate : null,
+        items,
       });
     } catch (error: any) {
       console.error("Error getting truck inventory summary:", error);

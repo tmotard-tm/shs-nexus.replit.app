@@ -1,9 +1,21 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Package, DollarSign, Loader2, AlertCircle, Boxes } from "lucide-react";
+
+interface InventoryItem {
+  sku: string;
+  partNo: string;
+  partDesc: string;
+  qty: number;
+  unitCost: number;
+  extCost: number;
+  bin: string;
+  category: string;
+}
 
 interface InventorySummary {
   truck: string;
@@ -11,6 +23,7 @@ interface InventorySummary {
   totalAvgCost: string;
   itemCount: number;
   extractDate: string | null;
+  items: InventoryItem[];
 }
 
 interface ViewInventoryButtonProps {
@@ -39,6 +52,15 @@ export function ViewInventoryButton({
     return null;
   }
 
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return 'N/A';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      return `${parts[1]}/${parts[2]}/${parts[0]}`;
+    }
+    return dateStr;
+  };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -52,12 +74,15 @@ export function ViewInventoryButton({
           View Inventory
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl max-h-[85vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Boxes className="h-5 w-5" />
             Truck {cleanVehicleNumber} Inventory
           </DialogTitle>
+          <DialogDescription>
+            Parts and inventory on this truck
+          </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-4">
@@ -118,10 +143,49 @@ export function ViewInventoryButton({
                 {inventory.extractDate && (
                   <div className="flex justify-between mt-1">
                     <span>Data as of:</span>
-                    <span className="font-medium">{new Date(inventory.extractDate).toLocaleDateString()}</span>
+                    <span className="font-medium">{formatDate(inventory.extractDate)}</span>
                   </div>
                 )}
               </div>
+
+              {inventory.items && inventory.items.length > 0 && (
+                <div className="border rounded-lg">
+                  <div className="bg-muted px-3 py-2 border-b">
+                    <h4 className="text-sm font-semibold">Inventory Details</h4>
+                  </div>
+                  <ScrollArea className="h-[250px]">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50 sticky top-0">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">SKU / Part</th>
+                          <th className="text-right px-3 py-2 font-medium">Qty</th>
+                          <th className="text-right px-3 py-2 font-medium">Unit Cost</th>
+                          <th className="text-right px-3 py-2 font-medium">Ext Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {inventory.items.map((item, idx) => (
+                          <tr key={`${item.sku}-${item.bin}-${idx}`} className="border-b last:border-0 hover:bg-muted/30">
+                            <td className="px-3 py-2">
+                              <div className="font-mono text-xs">{item.sku}</div>
+                              <div className="text-xs text-muted-foreground truncate max-w-[200px]" title={item.partDesc}>
+                                {item.partDesc || item.partNo}
+                              </div>
+                            </td>
+                            <td className="text-right px-3 py-2 font-medium">{item.qty}</td>
+                            <td className="text-right px-3 py-2 text-muted-foreground">
+                              ${item.unitCost.toFixed(2)}
+                            </td>
+                            <td className="text-right px-3 py-2 font-medium text-green-600 dark:text-green-400">
+                              ${item.extCost.toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </ScrollArea>
+                </div>
+              )}
             </>
           )}
           
