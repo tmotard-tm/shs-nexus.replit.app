@@ -12,16 +12,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, 
-  UserX, History, AlertTriangle, User, Package, Car, X, Gauge
+  UserX, History, AlertTriangle, User, Package, Car, X, Gauge, CloudDownload
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { type FleetVehicle } from "@/data/fleetData";
 import { getVehicleOwnership } from "@/lib/vehicle-utils";
 import { DataSourceIndicator, calculateZipDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
@@ -51,8 +53,20 @@ interface ServiceStatus {
   };
 }
 
+interface TpmsSyncState {
+  initialSyncComplete: boolean;
+  lastSyncAt: string | null;
+  totalVehicles: number;
+  processedVehicles: number;
+  cachedAssignments: number;
+  syncInProgress: boolean;
+  lastError: string | null;
+}
+
 export default function FleetManagement() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'superadmin';
   
   // Search and filters state
   const [searchQuery, setSearchQuery] = useState("");
@@ -107,6 +121,40 @@ export default function FleetManagement() {
   const { data: serviceStatus } = useQuery<{ success: boolean; data: ServiceStatus }>({
     queryKey: ['/api/vehicle-assignments/status'],
   });
+
+  // TPMS sync state for cache-first mode
+  const { data: tpmsSyncState, refetch: refetchSyncState } = useQuery<{ success: boolean; data: TpmsSyncState }>({
+    queryKey: ['/api/tpms/fleet-sync/state'],
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.data?.syncInProgress ? 3000 : false;
+    },
+  });
+
+  // Start initial TPMS sync mutation
+  const startTpmsSyncMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/tpms/fleet-sync/start', {});
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "TPMS Sync Started",
+        description: "Syncing all vehicle assignments from TPMS. This may take a few minutes.",
+      });
+      refetchSyncState();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to Start Sync",
+        description: error.message || "Unable to start TPMS sync",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const tpmsSync = tpmsSyncState?.data;
+  const syncProgress = tpmsSync?.totalVehicles ? Math.round((tpmsSync.processedVehicles / tpmsSync.totalVehicles) * 100) : 0;
 
   const syncStatus = apiResponse?.syncStatus;
   const apiError = apiResponse && !apiResponse.success ? apiResponse.message : null;
@@ -366,26 +414,50 @@ export default function FleetManagement() {
               </Card>
               <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-green-600">Assigned</CardTitle>
+                  <CardTitle className="text-sm font-medium text-green-600 flex items-center gap-1">
+                    Assigned
+                    {!tpmsSync?.initialSyncComplete && (
+                      <AlertTriangle className="h-3 w-3 text-amber-500" />
+                    )}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-green-600" data-testid="text-assigned-count">{assignedCount}</p>
+                  {!tpmsSync?.initialSyncComplete && (
+                    <p className="text-xs text-amber-600">Sync required for accuracy</p>
+                  )}
                 </CardContent>
               </Card>
               <Card className="border-orange-200 bg-orange-50/50 dark:bg-orange-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-orange-600">Unassigned</CardTitle>
+                  <CardTitle className="text-sm font-medium text-orange-600 flex items-center gap-1">
+                    Unassigned
+                    {!tpmsSync?.initialSyncComplete && (
+                      <AlertTriangle className="h-3 w-3 text-amber-500" />
+                    )}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-orange-600" data-testid="text-unassigned-count">{unassignedCount}</p>
+                  {!tpmsSync?.initialSyncComplete && (
+                    <p className="text-xs text-amber-600">Sync required for accuracy</p>
+                  )}
                 </CardContent>
               </Card>
               <Card className="border-red-200 bg-red-50/50 dark:bg-red-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-red-600">Mismatches</CardTitle>
+                  <CardTitle className="text-sm font-medium text-red-600 flex items-center gap-1">
+                    Mismatches
+                    {!tpmsSync?.initialSyncComplete && (
+                      <AlertTriangle className="h-3 w-3 text-amber-500" />
+                    )}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-red-600" data-testid="text-mismatch-count">{mismatchCount}</p>
+                  {!tpmsSync?.initialSyncComplete && (
+                    <p className="text-xs text-amber-600">Sync required for accuracy</p>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -484,6 +556,77 @@ export default function FleetManagement() {
               <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
                 <CheckCircle className="h-4 w-4" />
                 <span>Live data from Holman API</span>
+              </div>
+            )}
+
+            {/* TPMS Sync Status Banner */}
+            {tpmsSync?.syncInProgress && (
+              <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950/20">
+                <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+                <AlertTitle className="text-blue-800 dark:text-blue-400">TPMS Sync In Progress</AlertTitle>
+                <AlertDescription className="text-blue-700 dark:text-blue-300">
+                  <div className="flex flex-col gap-2">
+                    <span>Syncing vehicle assignments from TPMS... {tpmsSync.processedVehicles} of {tpmsSync.totalVehicles} vehicles processed</span>
+                    <Progress value={syncProgress} className="h-2" />
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {!tpmsSync?.initialSyncComplete && !tpmsSync?.syncInProgress && !isLoading && (
+              <Alert className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <AlertTitle className="text-amber-800 dark:text-amber-400">TPMS Data Not Synced</AlertTitle>
+                <AlertDescription className="text-amber-700 dark:text-amber-300">
+                  <div className="flex items-center justify-between">
+                    <span>
+                      Vehicle assignment counts may be inaccurate. Run an initial sync to cache all TPMS data.
+                      {tpmsSync?.cachedAssignments ? ` (${tpmsSync.cachedAssignments} vehicles currently cached)` : ''}
+                    </span>
+                    {isSuperAdmin && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => startTpmsSyncMutation.mutate()}
+                        disabled={startTpmsSyncMutation.isPending}
+                        className="ml-4"
+                        data-testid="button-start-tpms-sync"
+                      >
+                        {startTpmsSyncMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <CloudDownload className="h-4 w-4 mr-2" />
+                        )}
+                        Run Initial Sync
+                      </Button>
+                    )}
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {tpmsSync?.initialSyncComplete && !tpmsSync?.syncInProgress && tpmsSync?.lastSyncAt && (
+              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                <Database className="h-4 w-4" />
+                <span>
+                  TPMS data synced ({tpmsSync.cachedAssignments} vehicles cached) - Last sync: {new Date(tpmsSync.lastSyncAt).toLocaleString()}
+                </span>
+                {isSuperAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => startTpmsSyncMutation.mutate()}
+                    disabled={startTpmsSyncMutation.isPending}
+                    className="ml-2 h-6 px-2"
+                    data-testid="button-resync-tpms"
+                  >
+                    {startTpmsSyncMutation.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3" />
+                    )}
+                  </Button>
+                )}
               </div>
             )}
 
