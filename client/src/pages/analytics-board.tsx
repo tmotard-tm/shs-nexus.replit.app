@@ -21,6 +21,11 @@ interface FleetVehiclesResponse {
   vehicles: FleetVehicle[];
 }
 
+// Helper to check if a vehicle is assigned (has a tech via TPMS or Holman)
+function isVehicleAssigned(vehicle: FleetVehicle): boolean {
+  return !!(vehicle.tpmsAssignedTechId || vehicle.holmanTechAssigned);
+}
+
 export default function AnalyticsBoard() {
   const [, setLocation] = useLocation();
   
@@ -32,9 +37,9 @@ export default function AnalyticsBoard() {
 
   const allVehicles = apiResponse?.vehicles || [];
   
-  // TPMS assignment determines if vehicle is assigned (accurate from live enrichment)
-  const assignedVehicles = allVehicles.filter(v => v.tpmsAssignedTechId);
-  const unassignedVehicles = allVehicles.filter(v => !v.tpmsAssignedTechId);
+  // Vehicle is assigned if it has a tech assigned via TPMS or Holman
+  const assignedVehicles = allVehicles.filter(isVehicleAssigned);
+  const unassignedVehicles = allVehicles.filter(v => !isVehicleAssigned(v));
 
   // Use Holman fleet data for maps
   const mapVehicleData = allVehicles;

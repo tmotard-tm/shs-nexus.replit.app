@@ -127,8 +127,11 @@ export default function AssignVehicleLocation() {
   // Get all vehicles from API response
   const allVehicles = apiResponse?.vehicles || [];
   
-  // Unassigned vehicles = no TPMS assignment (TPMS determines assignment status)
-  const unassignedVehicles = allVehicles.filter(v => !v.tpmsAssignedTechId);
+  // Helper to check if a vehicle is assigned (has a tech via TPMS or Holman)
+  const isVehicleAssigned = (v: FleetVehicle) => !!(v.tpmsAssignedTechId || v.holmanTechAssigned);
+  
+  // Unassigned vehicles = no assignment via TPMS or Holman
+  const unassignedVehicles = allVehicles.filter(v => !isVehicleAssigned(v));
   
   // Get filter options from actual data
   const getBrandingOptions = () => Array.from(new Set(allVehicles.map(v => v.branding))).filter(Boolean).sort();
@@ -599,9 +602,9 @@ export default function AssignVehicleLocation() {
                 <CardContent>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-                      <p className="text-3xl font-bold text-green-600 dark:text-green-400" data-testid="text-assigned-vehicles-count">{allVehicles.filter(v => v.tpmsAssignedTechId).length}</p>
+                      <p className="text-3xl font-bold text-green-600 dark:text-green-400" data-testid="text-assigned-vehicles-count">{allVehicles.filter(isVehicleAssigned).length}</p>
                       <p className="text-sm text-green-700 dark:text-green-300">Assigned Vehicles</p>
-                      <p className="text-xs text-muted-foreground mt-1">Currently in use (TPMS)</p>
+                      <p className="text-xs text-muted-foreground mt-1">Currently in use</p>
                     </div>
                     <div className="text-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
                       <p className="text-3xl font-bold text-orange-600 dark:text-orange-400" data-testid="text-unassigned-vehicles-count">{unassignedVehicles.length}</p>
