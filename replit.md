@@ -51,10 +51,16 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
   - POST `/api/snowflake/sync/all-techs` - Syncs employee roster from Snowflake
   - POST `/api/snowflake/sync/termed-techs` - Creates offboarding tasks for recently terminated employees
 
-**TPMS API Integration** (November 2025): Live integration with TPMS (Tire Pressure Monitoring System) API for technician-vehicle assignments:
-- Fetches real-time truck assignments by Enterprise ID via `/api/tpms/truck/:enterpriseId`
-- Links to Holman fleet data for vehicle details
-- API endpoints available at `/api/tpms/techinfo/:enterpriseId` and `/api/tpms/lookup/truck/:truckNumber`
+**TPMS Integration** (November 2025, updated December 2025): Integration with TPMS (Tire Pressure Monitoring System) for technician-vehicle assignments:
+- **Data Source**: Daily Snowflake snapshot from `PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT` table (more reliable than live API)
+- **Cache Strategy**: TPMS data is synced from Snowflake daily snapshot instead of live API calls due to API reliability issues
+- **Manual API Refresh**: Live TPMS API can still be triggered manually via integrations screen when needed
+- **API Endpoints**:
+  - POST `/api/snowflake/sync/tpms` - Sync TPMS cache from Snowflake daily snapshot (recommended)
+  - POST `/api/tpms/fleet-sync/start` - Legacy: Sync from live TPMS API (manual only)
+  - GET `/api/tpms/truck/:enterpriseId` - Lookup truck by enterprise ID (uses cache first)
+  - GET `/api/tpms/techinfo/:enterpriseId` - Get tech info by enterprise ID
+  - GET `/api/tpms/lookup/truck/:truckNumber` - Lookup tech info by truck number
 
 **Vehicle Assignment System** (December 2025): Unified vehicle assignment management that aggregates data from three sources:
 - **Snowflake**: Master source for employee roster and HR data (via all_techs table)
@@ -196,15 +202,17 @@ The daily sync for technician rosters and vehicle assignments must be configured
 The standalone sync script (`server/run-sync.ts`) performs:
 1. **Termed Techs Sync**: Fetches terminated technicians and creates offboarding queue items
 2. **All Techs Sync**: Updates the complete technician roster for lookup
-3. **TPMS Vehicle Assignment Sync**: Caches all vehicle-tech assignments from TPMS for accurate fleet counts
+3. **TPMS Snowflake Sync**: Loads vehicle-tech assignments from Snowflake daily snapshot (`TPMS_EXTRACT` table) for accurate fleet counts. This replaces the unreliable live TPMS API calls.
 
 ### Manual Sync
 
 Manual syncs can still be triggered via the superadmin UI:
 - Snowflake sync: `/snowflake-integration` or `/tech-roster` pages
-- TPMS sync: "Run Initial Sync" button on `/fleet-management` page
+- TPMS Snowflake sync: Use `/api/snowflake/sync/tpms` endpoint
+- TPMS API sync (legacy): "Run Initial Sync" button on `/fleet-management` page (only use when API endpoints improve)
 
 API endpoints:
 - POST `/api/snowflake/sync/termed-techs`
 - POST `/api/snowflake/sync/all-techs`
-- POST `/api/tpms/fleet-sync/start` (requires superadmin)
+- POST `/api/snowflake/sync/tpms` - Sync TPMS from Snowflake daily snapshot (recommended)
+- POST `/api/tpms/fleet-sync/start` - Legacy: Sync from live TPMS API (manual only)

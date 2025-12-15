@@ -2,7 +2,7 @@ import { getSnowflakeService, isSnowflakeConfigured } from './snowflake-service'
 import { getTPMSService } from './tpms-service';
 import { storage } from './storage';
 import { randomUUID } from 'crypto';
-import type { InsertAllTech, InsertQueueItem, InsertTruckInventory } from '@shared/schema';
+import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCachedAssignment } from '@shared/schema';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -48,6 +48,32 @@ interface SnowflakeTruckInventoryRow {
   EXT_NS_AVG_COST: number | null;
   EXT_IM_COST: number | null;
   PRODUCT_CATEGORY: string | null;
+}
+
+// TPMS Extract from Snowflake (daily snapshot of TPMS data)
+interface SnowflakeTPMSExtractRow {
+  TRUCK_LU: string | null;
+  FULL_NAME: string | null;
+  DISTRICT: string | null;
+  TECH_NO: string | null;
+  TRUCK_NO: string | null;
+  ENTERPRISE_ID: string | null;
+  LAST_NAME: string | null;
+  FIRST_NAME: string | null;
+  MOBILEPHONENUMBER: string | null;
+  DEMINFL: string | null;
+  STATUS: string | null;
+  PRIMARYADDR1: string | null;
+  PRIMARYADDR2: string | null;
+  PRIMARYCITY: string | null;
+  PRIMARYSTATE: string | null;
+  PRIMARYZIP: string | null;
+  SHIPPING_SCHEDULE: string | null;
+  PDC_NO: string | null;
+  MANAGER_ENT_ID: string | null;
+  MANAGER_NAME: string | null;
+  EMAIL_ADDRESS: string | null;
+  FILE_DATE: string | null;
 }
 
 interface SyncResult {
@@ -866,6 +892,216 @@ export class SnowflakeSyncService {
       }
 
       console.error('[Sync] Truck inventory sync failed:', error);
+    }
+
+    return result;
+  }
+
+  /**
+   * Sync TPMS data from Snowflake daily snapshot (TPMS_EXTRACT table)
+   * This replaces unreliable TPMS API calls with reliable Snowflake data
+   */
+  async syncTPMSFromSnowflake(triggeredBy: string = 'manual'): Promise<SyncResult> {
+    const startTime = Date.now();
+    const result: SyncResult = {
+      success: false,
+      recordsProcessed: 0,
+      recordsCreated: 0,
+      recordsUpdated: 0,
+      queueItemsCreated: 0,
+      queueItemsSkipped: 0,
+      skippedEmployees: [],
+      errors: [],
+      duration: 0,
+    };
+
+    if (!isSnowflakeConfigured()) {
+      result.errors.push('Snowflake not configured');
+      result.duration = Date.now() - startTime;
+      console.error('[TPMS-Snowflake] Snowflake not configured');
+      return result;
+    }
+
+    let syncLog;
+    try {
+      syncLog = await storage.createSyncLog({
+        syncType: 'tpms_snowflake',
+        status: 'running',
+        triggeredBy,
+      });
+      result.syncLogId = syncLog.id;
+    } catch (error: any) {
+      result.errors.push(`Failed to create sync log: ${error.message}`);
+      result.duration = Date.now() - startTime;
+      return result;
+    }
+
+    try {
+      const snowflake = getSnowflakeService();
+      await snowflake.connect();
+
+      console.log('[TPMS-Snowflake] Fetching TPMS data from Snowflake...');
+      const query = `
+        SELECT 
+          TRUCK_LU,
+          FULL_NAME,
+          DISTRICT,
+          TECH_NO,
+          TRUCK_NO,
+          ENTERPRISE_ID,
+          LAST_NAME,
+          FIRST_NAME,
+          MOBILEPHONENUMBER,
+          DEMINFL,
+          STATUS,
+          PRIMARYADDR1,
+          PRIMARYADDR2,
+          PRIMARYCITY,
+          PRIMARYSTATE,
+          PRIMARYZIP,
+          SHIPPING_SCHEDULE,
+          PDC_NO,
+          MANAGER_ENT_ID,
+          MANAGER_NAME,
+          EMAIL_ADDRESS,
+          FILE_DATE
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+      `;
+
+      const rawRows = await snowflake.executeQuery(query) as SnowflakeTPMSExtractRow[];
+      console.log(`[TPMS-Snowflake] Retrieved ${rawRows.length} records from Snowflake`);
+
+      // Filter to only records with enterprise ID and truck number for vehicle assignments
+      const validRows = rawRows.filter(row => row.ENTERPRISE_ID && row.TRUCK_NO);
+      console.log(`[TPMS-Snowflake] ${validRows.length} records have both Enterprise ID and Truck Number`);
+
+      // Update TPMS sync state
+      await storage.updateTpmsSyncState({
+        status: 'syncing',
+        totalVehiclesToSync: validRows.length,
+        vehiclesSynced: 0,
+      });
+
+      // Process in batches of 500 for performance
+      const BATCH_SIZE = 500;
+      const totalBatches = Math.ceil(validRows.length / BATCH_SIZE);
+      console.log(`[TPMS-Snowflake] Processing ${validRows.length} records in ${totalBatches} batches...`);
+
+      let vehiclesWithAssignments = 0;
+
+      for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
+        const batch = validRows.slice(i, i + BATCH_SIZE);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+
+        try {
+          const cacheDataBatch: InsertTpmsCachedAssignment[] = batch.map(row => {
+            const enterpriseId = row.ENTERPRISE_ID?.trim().toUpperCase() || '';
+            const truckNo = row.TRUCK_NO?.trim() || null;
+            
+            // Build raw response object matching TPMS API structure
+            const rawResponse = {
+              techId: row.TECH_NO,
+              ldapId: enterpriseId,
+              firstName: row.FIRST_NAME,
+              lastName: row.LAST_NAME,
+              fullName: row.FULL_NAME,
+              districtNo: row.DISTRICT,
+              truckNo: truckNo,
+              contactNo: row.MOBILEPHONENUMBER,
+              email: row.EMAIL_ADDRESS,
+              status: row.STATUS,
+              primaryAddr1: row.PRIMARYADDR1,
+              primaryAddr2: row.PRIMARYADDR2,
+              primaryCity: row.PRIMARYCITY,
+              primaryState: row.PRIMARYSTATE,
+              primaryZip: row.PRIMARYZIP,
+              shippingSchedule: row.SHIPPING_SCHEDULE,
+              pdcNo: row.PDC_NO,
+              managerEntId: row.MANAGER_ENT_ID,
+              managerName: row.MANAGER_NAME,
+              fileDate: row.FILE_DATE,
+              source: 'snowflake',
+            };
+
+            return {
+              lookupKey: enterpriseId,
+              lookupType: 'enterprise_id' as const,
+              truckNo: truckNo,
+              enterpriseId: enterpriseId,
+              techId: row.TECH_NO || null,
+              firstName: row.FIRST_NAME || null,
+              lastName: row.LAST_NAME || null,
+              districtNo: row.DISTRICT || null,
+              contactNo: row.MOBILEPHONENUMBER || null,
+              email: row.EMAIL_ADDRESS || null,
+              rawResponse: JSON.stringify(rawResponse),
+              status: 'live' as const,
+              lastSuccessAt: new Date(),
+              lastAttemptAt: new Date(),
+              failureCount: 0,
+            };
+          });
+
+          const upsertedCount = await storage.bulkUpsertTpmsCachedAssignments(cacheDataBatch);
+          result.recordsProcessed += upsertedCount;
+          vehiclesWithAssignments += batch.filter(r => r.TRUCK_NO?.trim()).length;
+
+          // Update sync progress
+          await storage.updateTpmsSyncState({
+            vehiclesSynced: result.recordsProcessed,
+          });
+
+          console.log(`[TPMS-Snowflake] Batch ${batchNum}/${totalBatches}: processed ${upsertedCount} records`);
+        } catch (error: any) {
+          console.error(`[TPMS-Snowflake] Error processing batch ${batchNum}:`, error.message);
+          result.errors.push(`Error processing batch ${batchNum}: ${error.message}`);
+        }
+      }
+
+      result.success = true;
+      result.duration = Date.now() - startTime;
+
+      // Update TPMS sync state to completed
+      await storage.updateTpmsSyncState({
+        initialSyncComplete: true,
+        status: 'idle',
+        vehiclesSynced: result.recordsProcessed,
+        vehiclesWithAssignments: vehiclesWithAssignments,
+        vehiclesWithoutAssignments: validRows.length - vehiclesWithAssignments,
+        lastSyncAt: new Date(),
+        initialSyncCompletedAt: new Date(),
+      });
+
+      await storage.updateSyncLog(syncLog.id, {
+        status: 'completed',
+        completedAt: new Date(),
+        recordsProcessed: result.recordsProcessed,
+        recordsCreated: result.recordsCreated,
+        recordsUpdated: result.recordsUpdated,
+        queueItemsCreated: 0,
+        errorMessage: result.errors.length > 0 ? result.errors.join('; ') : null,
+      });
+
+      console.log(`[TPMS-Snowflake] Sync completed: ${result.recordsProcessed} records processed`);
+      console.log(`[TPMS-Snowflake] Technicians with truck assignments: ${vehiclesWithAssignments}`);
+    } catch (error: any) {
+      result.errors.push(`Sync failed: ${error.message}`);
+      result.duration = Date.now() - startTime;
+
+      await storage.updateTpmsSyncState({
+        status: 'error',
+        errorMessage: error.message,
+      });
+
+      if (syncLog) {
+        await storage.updateSyncLog(syncLog.id, {
+          status: 'failed',
+          completedAt: new Date(),
+          errorMessage: error.message,
+        });
+      }
+
+      console.error('[TPMS-Snowflake] Sync failed:', error);
     }
 
     return result;

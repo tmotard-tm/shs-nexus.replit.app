@@ -5850,6 +5850,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Sync TPMS data from Snowflake daily snapshot (replaces unreliable TPMS API for daily sync)
+  app.post("/api/snowflake/sync/tpms", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      }
+      
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.syncTPMSFromSnowflake('manual');
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error syncing TPMS from Snowflake:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Get truck inventory summary with items (total pieces and total avg cost)
   app.get("/api/truck-inventory/summary/:truck", requireAuth, async (req: any, res) => {
     try {

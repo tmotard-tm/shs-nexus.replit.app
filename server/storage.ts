@@ -271,6 +271,8 @@ export interface IStorage {
   getTpmsCachedAssignmentByTruckNo(truckNo: string): Promise<TpmsCachedAssignment | undefined>;
   getAllTpmsCachedAssignments(): Promise<TpmsCachedAssignment[]>;
   upsertTpmsCachedAssignment(data: InsertTpmsCachedAssignment): Promise<TpmsCachedAssignment>;
+  bulkUpsertTpmsCachedAssignments(items: InsertTpmsCachedAssignment[]): Promise<number>;
+  clearTpmsCachedAssignments(): Promise<number>;
   updateTpmsCachedAssignment(lookupKey: string, updates: Partial<TpmsCachedAssignment>): Promise<TpmsCachedAssignment | undefined>;
   markTpmsCacheError(lookupKey: string, errorCode: number, errorMessage: string): Promise<TpmsCachedAssignment | undefined>;
   getStaleTPMSCache(maxAgeHours?: number): Promise<TpmsCachedAssignment[]>;
@@ -1282,6 +1284,14 @@ export class MemStorage implements IStorage {
 
   async upsertTpmsCachedAssignment(_data: InsertTpmsCachedAssignment): Promise<TpmsCachedAssignment> {
     throw new Error("TPMS cache not implemented in memory storage - use database storage");
+  }
+
+  async bulkUpsertTpmsCachedAssignments(_items: InsertTpmsCachedAssignment[]): Promise<number> {
+    return 0; // Not implemented in memory storage
+  }
+
+  async clearTpmsCachedAssignments(): Promise<number> {
+    return 0; // Not implemented in memory storage
   }
 
   async updateTpmsCachedAssignment(_lookupKey: string, _updates: Partial<TpmsCachedAssignment>): Promise<TpmsCachedAssignment | undefined> {
@@ -3472,6 +3482,51 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return result[0];
     }
+  }
+
+  async bulkUpsertTpmsCachedAssignments(items: InsertTpmsCachedAssignment[]): Promise<number> {
+    if (items.length === 0) return 0;
+    
+    let upsertedCount = 0;
+    for (const item of items) {
+      try {
+        const lookupKey = item.lookupKey.toUpperCase();
+        await db.insert(tpmsCachedAssignments)
+          .values({
+            ...item,
+            lookupKey,
+            enterpriseId: item.enterpriseId?.toUpperCase(),
+          })
+          .onConflictDoUpdate({
+            target: tpmsCachedAssignments.lookupKey,
+            set: {
+              truckNo: item.truckNo,
+              enterpriseId: item.enterpriseId?.toUpperCase(),
+              techId: item.techId,
+              firstName: item.firstName,
+              lastName: item.lastName,
+              districtNo: item.districtNo,
+              contactNo: item.contactNo,
+              email: item.email,
+              rawResponse: item.rawResponse,
+              status: item.status || 'live',
+              lastSuccessAt: item.lastSuccessAt || new Date(),
+              lastAttemptAt: item.lastAttemptAt || new Date(),
+              failureCount: 0,
+              updatedAt: new Date(),
+            },
+          });
+        upsertedCount++;
+      } catch (error: any) {
+        console.error(`[Storage] Error upserting TPMS cache for ${item.lookupKey}:`, error.message);
+      }
+    }
+    return upsertedCount;
+  }
+
+  async clearTpmsCachedAssignments(): Promise<number> {
+    const result = await db.delete(tpmsCachedAssignments).returning();
+    return result.length;
   }
 
   async updateTpmsCachedAssignment(lookupKey: string, updates: Partial<TpmsCachedAssignment>): Promise<TpmsCachedAssignment | undefined> {
