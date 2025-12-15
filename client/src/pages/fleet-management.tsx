@@ -381,7 +381,7 @@ export default function FleetManagement() {
     return { status: 'unassigned', label: 'Unassigned', color: 'bg-gray-100 text-gray-800 border-gray-300', cardBorder: 'border-gray-300', cardBg: '' };
   };
 
-  // Stats
+  // Stats - vehicle is assigned if it has a TPMS tech (source of truth for assignments)
   const assignedCount = allVehicles.filter(v => v.tpmsAssignedTechId).length;
   const unassignedCount = allVehicles.length - assignedCount;
   const mismatchCount = allVehicles.filter(v => {
