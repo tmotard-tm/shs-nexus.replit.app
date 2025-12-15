@@ -718,18 +718,22 @@ class HolmanVehicleSyncService {
 
   async getCachedCounts(): Promise<{ success: boolean; total: number; assigned: number; unassigned: number }> {
     try {
-      // Get total count
+      // Get total count - filter by ALLOWED_DIVISIONS to match main data fetch
       const [totalResult] = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(holmanVehiclesCache)
-        .where(eq(holmanVehiclesCache.isActive, true));
+        .where(and(
+          eq(holmanVehiclesCache.isActive, true),
+          inArray(holmanVehiclesCache.division, ALLOWED_DIVISIONS)
+        ));
 
-      // Get assigned count (has TPMS tech assigned)
+      // Get assigned count (has TPMS tech assigned) - filter by ALLOWED_DIVISIONS
       const [assignedResult] = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(holmanVehiclesCache)
         .where(and(
           eq(holmanVehiclesCache.isActive, true),
+          inArray(holmanVehiclesCache.division, ALLOWED_DIVISIONS),
           sql`${holmanVehiclesCache.tpmsAssignedTechId} IS NOT NULL AND ${holmanVehiclesCache.tpmsAssignedTechId} != ''`
         ));
 
@@ -751,10 +755,14 @@ class HolmanVehicleSyncService {
   async getSyncStatus(): Promise<HolmanSyncStatus> {
     const pendingCount = await this.getPendingChangeCount();
     
+    // Filter by ALLOWED_DIVISIONS to match main data fetch
     const [countResult] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(holmanVehiclesCache)
-      .where(eq(holmanVehiclesCache.isActive, true));
+      .where(and(
+        eq(holmanVehiclesCache.isActive, true),
+        inArray(holmanVehiclesCache.division, ALLOWED_DIVISIONS)
+      ));
 
     const isConfigured = holmanApiService.isConfigured();
 
