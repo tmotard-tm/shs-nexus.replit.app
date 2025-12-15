@@ -393,7 +393,7 @@ async function requireAuth(req: any, res: any, next: any): Promise<any> {
     }
     
     // Fetch full user data to get role and other fields
-    const user = await storage.getUserById(session.userId);
+    const user = await storage.getUser(session.userId);
     if (!user) {
       return res.status(401).json({ message: "User not found" });
     }
