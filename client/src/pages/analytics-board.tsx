@@ -21,9 +21,9 @@ interface FleetVehiclesResponse {
   vehicles: FleetVehicle[];
 }
 
-// Helper to check if a vehicle is assigned (has a tech via TPMS or Holman)
+// Helper to check if a vehicle is assigned (has a tech via TPMS - matches Fleet Management logic)
 function isVehicleAssigned(vehicle: FleetVehicle): boolean {
-  return !!(vehicle.tpmsAssignedTechId || vehicle.holmanTechAssigned);
+  return !!vehicle.tpmsAssignedTechId;
 }
 
 export default function AnalyticsBoard() {
