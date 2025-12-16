@@ -359,6 +359,36 @@ export default function Integrations() {
     },
   });
 
+  const syncTpmsFromSnowflakeMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/snowflake/sync/tpms");
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/tpms/cache/stats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+      if (data.success) {
+        toast({
+          title: "TPMS Snowflake Sync Completed",
+          description: `Processed ${data.recordsProcessed} records. Cache updated with ${data.recordsCreated} assignments.`,
+        });
+      } else {
+        toast({
+          title: "TPMS Sync Failed",
+          description: data.errors?.join(', ') || "Failed to sync TPMS data from Snowflake",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "TPMS Sync Failed",
+        description: error.message || "Failed to sync TPMS data from Snowflake",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.endpoint) {
@@ -845,6 +875,40 @@ export default function Integrations() {
                         </Link>
                       </div>
                     )}
+                  </CardContent>
+                </Card>
+
+                {/* TPMS Vehicle Assignments */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Truck className="h-4 w-4" />
+                          TPMS Vehicle Assignments
+                        </CardTitle>
+                        <CardDescription>
+                          Sync technician-to-truck assignments from Snowflake daily snapshot (replaces unreliable TPMS API)
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Button 
+                          onClick={() => syncTpmsFromSnowflakeMutation.mutate()}
+                          disabled={syncTpmsFromSnowflakeMutation.isPending || !snowflakeStatus?.configured}
+                          variant="outline"
+                          size="sm"
+                          data-testid="button-sync-tpms-snowflake"
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1 ${syncTpmsFromSnowflakeMutation.isPending ? 'animate-spin' : ''}`} />
+                          {syncTpmsFromSnowflakeMutation.isPending ? 'Syncing...' : 'Sync from Snowflake'}
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      Click "Sync from Snowflake" to load the latest TPMS assignments from the daily snapshot. This populates the cache used by Fleet Management for accurate vehicle assignment counts.
+                    </p>
                   </CardContent>
                 </Card>
 
