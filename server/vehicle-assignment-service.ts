@@ -91,12 +91,11 @@ export class VehicleAssignmentService {
     const startIndex = (page - 1) * limit;
     const paginatedAssignments = filteredAssignments.slice(startIndex, startIndex + limit);
     
-    const enrichedAssignments: AggregatedVehicleAssignment[] = [];
-    
-    for (const assignment of paginatedAssignments) {
-      const enriched = await this.enrichAssignmentData(assignment);
-      enrichedAssignments.push(enriched);
-    }
+    // Use Promise.all for parallel enrichment instead of sequential N+1 pattern
+    // This significantly improves performance when enriching multiple assignments
+    const enrichedAssignments = await Promise.all(
+      paginatedAssignments.map(assignment => this.enrichAssignmentData(assignment))
+    );
     
     return enrichedAssignments;
   }

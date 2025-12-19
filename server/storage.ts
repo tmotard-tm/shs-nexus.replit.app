@@ -20,6 +20,8 @@ import {
   type InsertTemplateWithId,
   type Session,
   type InsertSession,
+  type PasswordResetToken,
+  type InsertPasswordResetToken,
   type TermedTech,
   type InsertTermedTech,
   type AllTech,
@@ -56,6 +58,7 @@ import {
   vehicles,
   templates,
   sessions,
+  passwordResetTokens,
   termedTechs,
   allTechs,
   syncLogs,
@@ -215,6 +218,13 @@ export interface IStorage {
   deleteSession(sessionId: string): Promise<boolean>;
   updateSession(sessionId: string, updates: Partial<Session>): Promise<Session | undefined>;
   cleanExpiredSessions(): Promise<number>; // Returns number of sessions cleaned
+
+  // Password Reset Tokens Module
+  createPasswordResetToken(token: InsertPasswordResetToken): Promise<PasswordResetToken>;
+  getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined>;
+  markPasswordResetTokenUsed(token: string): Promise<boolean>;
+  deletePasswordResetToken(token: string): Promise<boolean>;
+  cleanExpiredPasswordResetTokens(): Promise<number>; // Returns number of tokens cleaned
 
   // Termed Techs Module (Snowflake sync)
   getTermedTech(id: string): Promise<TermedTech | undefined>;
@@ -1103,6 +1113,52 @@ export class MemStorage implements IStorage {
     for (const [sessionId, session] of sessionEntries) {
       if (session.expiresAt <= now) {
         this.sessions.delete(sessionId);
+        cleanedCount++;
+      }
+    }
+    
+    return cleanedCount;
+  }
+
+  // Password Reset Tokens Module - In-memory implementation
+  private passwordResetTokensMap = new Map<string, PasswordResetToken>();
+
+  async createPasswordResetToken(insertToken: InsertPasswordResetToken): Promise<PasswordResetToken> {
+    const token: PasswordResetToken = {
+      id: randomUUID(),
+      token: insertToken.token,
+      userId: insertToken.userId,
+      expiresAt: insertToken.expiresAt,
+      usedAt: null,
+      createdAt: new Date(),
+    };
+    this.passwordResetTokensMap.set(insertToken.token, token);
+    return token;
+  }
+
+  async getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined> {
+    return this.passwordResetTokensMap.get(token);
+  }
+
+  async markPasswordResetTokenUsed(token: string): Promise<boolean> {
+    const existing = this.passwordResetTokensMap.get(token);
+    if (!existing) return false;
+    existing.usedAt = new Date();
+    return true;
+  }
+
+  async deletePasswordResetToken(token: string): Promise<boolean> {
+    return this.passwordResetTokensMap.delete(token);
+  }
+
+  async cleanExpiredPasswordResetTokens(): Promise<number> {
+    const now = new Date();
+    let cleanedCount = 0;
+    
+    const entries = Array.from(this.passwordResetTokensMap.entries());
+    for (const [token, data] of entries) {
+      if (data.expiresAt <= now || data.usedAt) {
+        this.passwordResetTokensMap.delete(token);
         cleanedCount++;
       }
     }
@@ -3109,6 +3165,39 @@ export class DatabaseStorage implements IStorage {
     const now = new Date();
     const result = await db.delete(sessions).where(sql`${sessions.expiresAt} <= ${now}`);
     return result.rowCount!;
+  }
+
+  // Password Reset Tokens Module (Database implementation)
+  async createPasswordResetToken(insertToken: InsertPasswordResetToken): Promise<PasswordResetToken> {
+    const result = await db.insert(passwordResetTokens).values(insertToken).returning();
+    return result[0];
+  }
+
+  async getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined> {
+    const result = await db.select().from(passwordResetTokens)
+      .where(eq(passwordResetTokens.token, token))
+      .limit(1);
+    return result[0];
+  }
+
+  async markPasswordResetTokenUsed(token: string): Promise<boolean> {
+    const result = await db.update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetTokens.token, token));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async deletePasswordResetToken(token: string): Promise<boolean> {
+    const result = await db.delete(passwordResetTokens)
+      .where(eq(passwordResetTokens.token, token));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async cleanExpiredPasswordResetTokens(): Promise<number> {
+    const now = new Date();
+    const result = await db.delete(passwordResetTokens)
+      .where(sql`${passwordResetTokens.expiresAt} <= ${now} OR ${passwordResetTokens.usedAt} IS NOT NULL`);
+    return result.rowCount ?? 0;
   }
 
   // Termed Techs Module (Snowflake sync)

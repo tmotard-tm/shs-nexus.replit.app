@@ -168,6 +168,13 @@ export const requests = pgTable("requests", {
   approverId: varchar("approver_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    statusIdx: index("requests_status_idx").on(table.status),
+    requesterIdIdx: index("requests_requester_id_idx").on(table.requesterId),
+    createdAtIdx: index("requests_created_at_idx").on(table.createdAt),
+    typeIdx: index("requests_type_idx").on(table.type),
+  };
 });
 
 export const apiConfigurations = pgTable("api_configurations", {
@@ -189,6 +196,14 @@ export const activityLogs = pgTable("activity_logs", {
   entityId: varchar("entity_id"),
   details: text("details"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    userIdIdx: index("activity_logs_user_id_idx").on(table.userId),
+    actionIdx: index("activity_logs_action_idx").on(table.action),
+    entityTypeIdx: index("activity_logs_entity_type_idx").on(table.entityType),
+    createdAtIdx: index("activity_logs_created_at_idx").on(table.createdAt),
+    userIdCreatedAtIdx: index("activity_logs_user_id_created_at_idx").on(table.userId, table.createdAt),
+  };
 });
 
 export const queueItems = pgTable("queue_items", {
@@ -318,6 +333,26 @@ export const sessions = pgTable("sessions", {
     userIdIdx: index("sessions_user_id_idx").on(table.userId),
   };
 });
+
+// Password reset tokens - persisted to survive server restarts
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  userId: varchar("user_id").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"), // Set when token is consumed
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    tokenIdx: index("password_reset_tokens_token_idx").on(table.token),
+    userIdIdx: index("password_reset_tokens_user_id_idx").on(table.userId),
+    expiresAtIdx: index("password_reset_tokens_expires_at_idx").on(table.expiresAt),
+  };
+});
+
+export const insertPasswordResetTokenSchema = createInsertSchema(passwordResetTokens).omit({ id: true, createdAt: true, usedAt: true });
+export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 
 // Termed Technicians from Snowflake DRIVELINE_TERMED_TECHS_LAST30 view
 export const termedTechs = pgTable("termed_techs", {

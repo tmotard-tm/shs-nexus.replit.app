@@ -16,7 +16,7 @@ import { checkPasswordCompromised, validatePasswordRequirements } from "./passwo
 import * as ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { holmanApiService } from "./holman-api-service";
 
 // Initialize session cleanup on startup
@@ -38,8 +38,19 @@ const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 5 * 60 * 1000; // 5 minutes
 const RATE_LIMIT_MAX_REQUESTS = 50; // Increased to 50 requests per window for testing
 
-// Password reset token store (in production, this would be in database)
-const passwordResetStore = new Map<string, { userId: string; token: string; expiresAt: Date }>();
+// Password reset tokens are now stored in the database via storage.createPasswordResetToken()
+// Clean up expired tokens on startup
+try {
+  storage.cleanExpiredPasswordResetTokens().then(cleanedCount => {
+    if (cleanedCount > 0) {
+      console.log(`Cleaned up ${cleanedCount} expired password reset tokens from database`);
+    }
+  }).catch(error => {
+    console.warn('Failed to clean expired password reset tokens on startup:', error);
+  });
+} catch (error) {
+  console.warn('Failed to initialize password reset token cleanup:', error);
+}
 
 // Login rate limiter with NIST-recommended settings
 const loginRateLimiter = rateLimit({
@@ -1083,10 +1094,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const resetToken = crypto.randomBytes(32).toString('hex');
       const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-      // Store reset token (in production, you'd store this in database)
-      passwordResetStore.set(resetToken, {
-        userId: user.id,
+      // Store reset token in database (persists across server restarts)
+      await storage.createPasswordResetToken({
         token: resetToken,
+        userId: user.id,
         expiresAt: resetTokenExpiry
       });
 
@@ -1144,10 +1155,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Check reset token (in production, retrieve from database)
-      const resetData = passwordResetStore.get(resetToken);
+      // Check reset token from database
+      const resetData = await storage.getPasswordResetToken(resetToken);
       
-      if (!resetData || resetData.expiresAt < new Date()) {
+      if (!resetData || resetData.expiresAt < new Date() || resetData.usedAt) {
         return res.status(400).json({ message: "Invalid or expired reset token" });
       }
 
@@ -1173,8 +1184,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ message: "Failed to update password" });
       }
 
-      // Remove used reset token
-      passwordResetStore.delete(resetToken);
+      // Mark token as used (prevents token reuse)
+      await storage.markPasswordResetTokenUsed(resetToken);
 
       // Log security action
       await storage.createActivityLog({
@@ -6744,10 +6755,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Get all fleet vehicle numbers from Holman cache
-      const { getHolmanVehicleSyncService } = await import("./holman-vehicle-sync-service");
-      const holmanService = getHolmanVehicleSyncService();
-      const cachedVehicles = await holmanService.getCachedVehicles();
+      // Get all fleet vehicle numbers from Holman cache in database
+      const { holmanVehiclesCache } = await import("@shared/schema");
+      const cachedVehicles = await db.select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
+        .from(holmanVehiclesCache)
+        .where(eq(holmanVehiclesCache.isActive, true));
       
       if (cachedVehicles.length === 0) {
         return res.status(400).json({ 
@@ -6757,7 +6769,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const truckNumbers = cachedVehicles
-        .map(v => v.holmanVehicleNumber?.padStart(6, '0'))
+        .map((v) => v.holmanVehicleNumber?.padStart(6, '0'))
         .filter(Boolean) as string[];
 
       console.log(`[Fleet-Sync] Starting initial sync for ${truckNumbers.length} vehicles`);

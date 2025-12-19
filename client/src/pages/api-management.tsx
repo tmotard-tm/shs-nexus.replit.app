@@ -13,7 +13,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { ApiConfiguration } from "@shared/schema";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
-import { Plus, Settings, Trash2, TestTube, Database, ArrowRight } from "lucide-react";
+import { Plus, Settings, Trash2, TestTube, Database, ArrowRight, Plug, Check, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
 
 export default function ApiManagement() {
@@ -177,7 +177,7 @@ export default function ApiManagement() {
           <Card>
             <CardContent className="flex items-center p-6">
               <div className="w-8 h-8 bg-[hsl(var(--chart-2))]/10 rounded-lg flex items-center justify-center mr-4">
-                <i className="fas fa-plug text-[hsl(var(--chart-2))]"></i>
+                <Plug className="h-4 w-4 text-[hsl(var(--chart-2))]" />
               </div>
               <div>
                 <p className="text-2xl font-bold" data-testid="text-active-apis">{apiStats.active}</p>
@@ -188,7 +188,7 @@ export default function ApiManagement() {
           <Card>
             <CardContent className="flex items-center p-6">
               <div className="w-8 h-8 bg-[hsl(var(--chart-2))]/10 rounded-lg flex items-center justify-center mr-4">
-                <i className="fas fa-check text-[hsl(var(--chart-2))]"></i>
+                <Check className="h-4 w-4 text-[hsl(var(--chart-2))]" />
               </div>
               <div>
                 <p className="text-2xl font-bold" data-testid="text-healthy-apis">{apiStats.healthy}</p>
@@ -199,7 +199,7 @@ export default function ApiManagement() {
           <Card>
             <CardContent className="flex items-center p-6">
               <div className="w-8 h-8 bg-destructive/10 rounded-lg flex items-center justify-center mr-4">
-                <i className="fas fa-exclamation-triangle text-destructive"></i>
+                <AlertTriangle className="h-4 w-4 text-destructive" />
               </div>
               <div>
                 <p className="text-2xl font-bold" data-testid="text-error-apis">{apiStats.errors}</p>

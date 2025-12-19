@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Request } from "@shared/schema";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, FileText, Database, Settings, Key, type LucideIcon } from "lucide-react";
 
 interface RequestItemProps {
   request: Request & { requesterName?: string };
@@ -14,11 +14,11 @@ const statusColors = {
   denied: "destructive",
 };
 
-const typeIcons = {
-  api_access: "fas fa-file-alt",
-  snowflake_query: "fas fa-database",
-  system_config: "fas fa-cog",
-  user_permission: "fas fa-key",
+const typeIcons: Record<string, LucideIcon> = {
+  api_access: FileText,
+  snowflake_query: Database,
+  system_config: Settings,
+  user_permission: Key,
 };
 
 export function RequestItem({ request, onView }: RequestItemProps) {
@@ -26,8 +26,8 @@ export function RequestItem({ request, onView }: RequestItemProps) {
     return statusColors[status as keyof typeof statusColors] || "secondary";
   };
 
-  const getTypeIcon = (type: string) => {
-    return typeIcons[type as keyof typeof typeIcons] || "fas fa-file-alt";
+  const getTypeIcon = (type: string): LucideIcon => {
+    return typeIcons[type as keyof typeof typeIcons] || FileText;
   };
 
   const formatTimeAgo = (date: Date) => {
@@ -50,7 +50,7 @@ export function RequestItem({ request, onView }: RequestItemProps) {
     >
       <div className="flex items-center gap-4">
         <div className="w-10 h-10 bg-secondary rounded-lg flex items-center justify-center">
-          <i className={`${getTypeIcon(request.type)} text-secondary-foreground`}></i>
+          {(() => { const Icon = getTypeIcon(request.type); return <Icon className="h-5 w-5 text-secondary-foreground" />; })()}
         </div>
         <div>
           <p className="font-medium" data-testid={`text-title-${request.id}`}>
