@@ -309,15 +309,6 @@ export const PAGES: PageDefinition[] = [
     ],
   },
   {
-    key: "snowflakeIntegration",
-    label: "Snowflake Integration",
-    description: "Snowflake data warehouse settings",
-    path: "/snowflake-integration",
-    icon: Database,
-    category: "management",
-    permissionKey: "snowflakeIntegration",
-  },
-  {
     key: "techRoster",
     label: "Tech Roster",
     description: "View technician roster from Snowflake",

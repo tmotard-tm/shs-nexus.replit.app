@@ -42,7 +42,7 @@ This is a full-stack admin platform built with React, TypeScript, and Express.js
 - **Terminated Employee Detection**: Employees with `effectiveDate` within the last 30 days are automatically identified as recently terminated
 - **Offboarding Tracking**: The `all_techs` table includes offboarding tracking fields: `offboardingTaskCreated`, `offboardingTaskId`, `processedAt`
 - Database tables: `all_techs`, `sync_logs` track sync status and offboarding task creation (deprecated `termed_techs` table still exists but is no longer used)
-- Manual sync available via superadmin UI at /snowflake-integration or /tech-roster pages
+- Manual sync available via superadmin UI on the Integrations page (/integrations) or Tech Roster page (/tech-roster)
 - **Production Scheduling**: Uses Replit Scheduled Deployments (see Production Configuration below)
 - **Development Scheduling**: Uses setInterval (only when NODE_ENV=development)
 - **API Endpoints**:
@@ -207,7 +207,7 @@ The standalone sync script (`server/run-sync.ts`) performs:
 ### Manual Sync
 
 Manual syncs can still be triggered via the superadmin UI:
-- Snowflake sync: `/snowflake-integration` or `/tech-roster` pages
+- Snowflake sync: `/integrations` or `/tech-roster` pages
 - TPMS Snowflake sync: Use `/api/snowflake/sync/tpms` endpoint
 - TPMS API sync (legacy): "Run Initial Sync" button on `/fleet-management` page (only use when API endpoints improve)
 

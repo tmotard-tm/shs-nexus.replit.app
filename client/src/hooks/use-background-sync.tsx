@@ -11,7 +11,7 @@ import { useStatusBar } from "@/components/status-bar";
  * The server now handles syncing:
  * - On startup (development mode)
  * - Via scheduled deployment (production mode - see replit.md)
- * - Manual sync available via superadmin UI at /snowflake-integration
+ * - Manual sync available via superadmin UI on the Integrations page
  * 
  * This hook now only checks if employee data is available and shows
  * an info message if data is missing or stale.

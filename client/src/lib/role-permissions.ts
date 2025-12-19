@@ -36,7 +36,6 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       rolePermissions: true,
       fleetManagement: true,
       vehicleAssignments: true,
-      snowflakeIntegration: true,
       techRoster: true,
     },
     activities: {
@@ -153,7 +152,6 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       rolePermissions: false,
       fleetManagement: false,
       vehicleAssignments: false,
-      snowflakeIntegration: false,
       techRoster: false,
     },
     activities: {
@@ -285,7 +283,6 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/template-management': () => perms.sidebar.management.templateManagement,
     '/storage-spots': () => perms.sidebar.management.storageSpots,
     '/integrations': () => perms.sidebar.management.integrations,
-    '/snowflake-integration': () => perms.sidebar.management.snowflakeIntegration,
     '/tech-roster': () => perms.sidebar.management.techRoster,
     '/role-permissions': () => perms.sidebar.management.rolePermissions,
     '/activity': () => perms.sidebar.activities.activityLogs,

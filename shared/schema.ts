@@ -70,7 +70,6 @@ export interface RolePermissionSettings {
       rolePermissions: boolean;
       fleetManagement: boolean;
       vehicleAssignments: boolean;
-      snowflakeIntegration: boolean;
       techRoster: boolean;
     };
     activities: {
