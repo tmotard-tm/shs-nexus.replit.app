@@ -397,87 +397,32 @@ export default function FleetManagement() {
               </Card>
               <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-green-600 flex items-center gap-1">
-                    Assigned
-                    {!tpmsSync?.initialSyncComplete && (
-                      <AlertTriangle className="h-3 w-3 text-amber-500" />
-                    )}
-                  </CardTitle>
+                  <CardTitle className="text-sm font-medium text-green-600">Assigned</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-green-600" data-testid="text-assigned-count">{assignedCount}</p>
-                  {!tpmsSync?.initialSyncComplete && (
-                    <p className="text-xs text-amber-600">Sync required for accuracy</p>
-                  )}
                 </CardContent>
               </Card>
               <Card className="border-orange-200 bg-orange-50/50 dark:bg-orange-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-orange-600 flex items-center gap-1">
-                    Unassigned
-                    {!tpmsSync?.initialSyncComplete && (
-                      <AlertTriangle className="h-3 w-3 text-amber-500" />
-                    )}
-                  </CardTitle>
+                  <CardTitle className="text-sm font-medium text-orange-600">Unassigned</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-orange-600" data-testid="text-unassigned-count">{unassignedCount}</p>
-                  {!tpmsSync?.initialSyncComplete && (
-                    <p className="text-xs text-amber-600">Sync required for accuracy</p>
-                  )}
                 </CardContent>
               </Card>
               <Card className="border-red-200 bg-red-50/50 dark:bg-red-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-red-600 flex items-center gap-1">
-                    Mismatches
-                    {!tpmsSync?.initialSyncComplete && (
-                      <AlertTriangle className="h-3 w-3 text-amber-500" />
-                    )}
-                  </CardTitle>
+                  <CardTitle className="text-sm font-medium text-red-600">Mismatches</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-red-600" data-testid="text-mismatch-count">{mismatchCount}</p>
-                  {!tpmsSync?.initialSyncComplete && (
-                    <p className="text-xs text-amber-600">Sync required for accuracy</p>
-                  )}
                 </CardContent>
               </Card>
             </div>
 
             {/* Quick Lookup Row */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Data Sources</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-around">
-                    <div className="text-center">
-                      <Database className={`h-6 w-6 mx-auto ${serviceStatus?.data?.dataSources?.snowflake ? 'text-green-600' : 'text-gray-400'}`} />
-                      <span className="text-xs block">Snowflake</span>
-                      <span className={`text-[10px] ${serviceStatus?.data?.dataSources?.snowflake ? 'text-green-600' : 'text-amber-500'}`}>
-                        {serviceStatus?.data?.dataSources?.snowflake ? 'Synced' : 'Not Synced'}
-                      </span>
-                    </div>
-                    <div className="text-center">
-                      <Link2 className={`h-6 w-6 mx-auto ${tpmsSync?.initialSyncComplete ? 'text-green-600' : 'text-gray-400'}`} />
-                      <span className="text-xs block">TPMS</span>
-                      <span className={`text-[10px] ${tpmsSync?.initialSyncComplete ? 'text-green-600' : 'text-amber-500'}`}>
-                        {tpmsSync?.initialSyncComplete ? 'Synced' : 'Not Synced'}
-                      </span>
-                    </div>
-                    <div className="text-center">
-                      <Truck className={`h-6 w-6 mx-auto ${serviceStatus?.data?.dataSources?.holman ? 'text-green-600' : 'text-gray-400'}`} />
-                      <span className="text-xs block">Holman</span>
-                      <span className={`text-[10px] ${serviceStatus?.data?.dataSources?.holman ? 'text-green-600' : 'text-amber-500'}`}>
-                        {serviceStatus?.data?.dataSources?.holman ? 'Live' : 'Offline'}
-                      </span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium">Lookup by Enterprise ID</CardTitle>
