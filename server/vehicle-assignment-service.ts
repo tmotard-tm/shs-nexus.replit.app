@@ -1,6 +1,7 @@
 import { storage } from './storage';
 import { getTPMSService } from './tpms-service';
 import { holmanApiService } from './holman-api-service';
+import { isSnowflakeConfigured } from './snowflake-service';
 import type { 
   TechVehicleAssignment, 
   InsertTechVehicleAssignment,
