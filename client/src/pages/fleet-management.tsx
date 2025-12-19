@@ -12,11 +12,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, 
-  UserX, History, AlertTriangle, User, Package, Car, X, Gauge, CloudDownload
+  UserX, History, AlertTriangle, User, Package, Car, X, Gauge
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
@@ -138,31 +137,7 @@ export default function FleetManagement() {
     },
   });
 
-  // Start TPMS sync from Snowflake (replaces unreliable TPMS API)
-  const startTpmsSyncMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/snowflake/sync/tpms', {});
-      return response.json();
-    },
-    onSuccess: (data: any) => {
-      toast({
-        title: "TPMS Sync Complete",
-        description: `Synced ${data.recordsProcessed || 0} vehicle assignments from Snowflake.`,
-      });
-      refetchSyncState();
-      queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Failed to Sync TPMS",
-        description: error.message || "Unable to sync TPMS data from Snowflake",
-        variant: "destructive",
-      });
-    },
-  });
-
   const tpmsSync = tpmsSyncState?.data;
-  const syncProgress = tpmsSync?.totalVehicles ? Math.round((tpmsSync.processedVehicles / tpmsSync.totalVehicles) * 100) : 0;
 
   const syncStatus = apiResponse?.syncStatus;
   const apiError = apiResponse && !apiResponse.success ? apiResponse.message : null;
@@ -480,15 +455,24 @@ export default function FleetManagement() {
                   <div className="flex items-center justify-around">
                     <div className="text-center">
                       <Database className={`h-6 w-6 mx-auto ${serviceStatus?.data?.dataSources?.snowflake ? 'text-green-600' : 'text-gray-400'}`} />
-                      <span className="text-xs">Snowflake</span>
+                      <span className="text-xs block">Snowflake</span>
+                      <span className={`text-[10px] ${serviceStatus?.data?.dataSources?.snowflake ? 'text-green-600' : 'text-amber-500'}`}>
+                        {serviceStatus?.data?.dataSources?.snowflake ? 'Synced' : 'Not Synced'}
+                      </span>
                     </div>
                     <div className="text-center">
-                      <Link2 className={`h-6 w-6 mx-auto ${serviceStatus?.data?.dataSources?.tpms ? 'text-green-600' : 'text-gray-400'}`} />
-                      <span className="text-xs">TPMS</span>
+                      <Link2 className={`h-6 w-6 mx-auto ${tpmsSync?.initialSyncComplete ? 'text-green-600' : 'text-gray-400'}`} />
+                      <span className="text-xs block">TPMS</span>
+                      <span className={`text-[10px] ${tpmsSync?.initialSyncComplete ? 'text-green-600' : 'text-amber-500'}`}>
+                        {tpmsSync?.initialSyncComplete ? 'Synced' : 'Not Synced'}
+                      </span>
                     </div>
                     <div className="text-center">
                       <Truck className={`h-6 w-6 mx-auto ${serviceStatus?.data?.dataSources?.holman ? 'text-green-600' : 'text-gray-400'}`} />
-                      <span className="text-xs">Holman</span>
+                      <span className="text-xs block">Holman</span>
+                      <span className={`text-[10px] ${serviceStatus?.data?.dataSources?.holman ? 'text-green-600' : 'text-amber-500'}`}>
+                        {serviceStatus?.data?.dataSources?.holman ? 'Live' : 'Offline'}
+                      </span>
                     </div>
                   </div>
                 </CardContent>
@@ -564,78 +548,6 @@ export default function FleetManagement() {
               <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
                 <CheckCircle className="h-4 w-4" />
                 <span>Live data from Holman API</span>
-              </div>
-            )}
-
-            {/* TPMS Sync Status Banner */}
-            {tpmsSync?.syncInProgress && (
-              <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950/20">
-                <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
-                <AlertTitle className="text-blue-800 dark:text-blue-400">TPMS Sync In Progress</AlertTitle>
-                <AlertDescription className="text-blue-700 dark:text-blue-300">
-                  <div className="flex flex-col gap-2">
-                    <span>Syncing vehicle assignments from Snowflake... {tpmsSync.processedVehicles || tpmsSync.vehiclesSynced || 0} of {tpmsSync.totalVehicles || tpmsSync.totalVehiclesToSync || 0} records processed</span>
-                    <Progress value={syncProgress} className="h-2" />
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {!tpmsSync?.initialSyncComplete && !tpmsSync?.syncInProgress && !isLoading && (
-              <Alert className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                <AlertTitle className="text-amber-800 dark:text-amber-400">TPMS Data Not Synced</AlertTitle>
-                <AlertDescription className="text-amber-700 dark:text-amber-300">
-                  <div className="flex items-center justify-between">
-                    <span>
-                      Vehicle assignment counts may be inaccurate. Sync TPMS data from Snowflake daily snapshot.
-                      {tpmsSync?.cachedAssignments ? ` (${tpmsSync.cachedAssignments} vehicles currently cached)` : ''}
-                    </span>
-                    {isSuperAdmin && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => startTpmsSyncMutation.mutate()}
-                        disabled={startTpmsSyncMutation.isPending}
-                        className="ml-4"
-                        data-testid="button-start-tpms-sync"
-                      >
-                        {startTpmsSyncMutation.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <CloudDownload className="h-4 w-4 mr-2" />
-                        )}
-                        Sync from Snowflake
-                      </Button>
-                    )}
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {tpmsSync?.initialSyncComplete && !tpmsSync?.syncInProgress && tpmsSync?.lastSyncAt && (
-              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                <Database className="h-4 w-4" />
-                <span>
-                  TPMS data synced from Snowflake ({tpmsSync.cachedAssignments || tpmsSync.vehiclesWithAssignments || 0} assignments) - Last sync: {new Date(tpmsSync.lastSyncAt).toLocaleString()}
-                </span>
-                {isSuperAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => startTpmsSyncMutation.mutate()}
-                    disabled={startTpmsSyncMutation.isPending}
-                    className="ml-2 h-6 px-2"
-                    title="Refresh from Snowflake"
-                    data-testid="button-resync-tpms"
-                  >
-                    {startTpmsSyncMutation.isPending ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3 w-3" />
-                    )}
-                  </Button>
-                )}
               </div>
             )}
 
