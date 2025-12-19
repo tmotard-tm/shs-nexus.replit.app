@@ -18,6 +18,7 @@ import {
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
+import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -1014,7 +1015,7 @@ export default function FleetManagement() {
                             </div>
                           </div>
                           
-                          {/* Location & Odometer */}
+                          {/* Location & License Plate */}
                           <div className="grid grid-cols-2 gap-2 pt-2 border-t text-xs">
                             <div className="space-y-1">
                               <div className="flex items-center gap-1 text-muted-foreground">
@@ -1029,10 +1030,11 @@ export default function FleetManagement() {
                             </div>
                             <div className="space-y-1">
                               <div className="flex items-center gap-1 text-muted-foreground">
-                                <Gauge className="h-3 w-3" />
-                                <span>Odometer</span>
+                                <img src={licensePlateIcon} alt="License plate" className="h-4 w-5 object-contain" />
+                                <span>License Plate</span>
                               </div>
-                              <p className="font-medium">{vehicle.odometer?.toLocaleString() || 'N/A'} mi</p>
+                              <p className="font-medium">{vehicle.licensePlate || 'N/A'}</p>
+                              <p className="text-muted-foreground">{vehicle.licenseState || ''}</p>
                             </div>
                           </div>
                           
