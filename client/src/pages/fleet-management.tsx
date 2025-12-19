@@ -61,6 +61,13 @@ interface TpmsSyncState {
   cachedAssignments: number;
   syncInProgress: boolean;
   lastError: string | null;
+  vehiclesSynced?: number;
+  totalVehiclesToSync?: number;
+  vehiclesWithAssignments?: number;
+  vehiclesWithoutAssignments?: number;
+  status?: string;
+  errorMessage?: string | null;
+  initialSyncCompletedAt?: string | null;
 }
 
 export default function FleetManagement() {
@@ -131,23 +138,24 @@ export default function FleetManagement() {
     },
   });
 
-  // Start initial TPMS sync mutation
+  // Start TPMS sync from Snowflake (replaces unreliable TPMS API)
   const startTpmsSyncMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/tpms/fleet-sync/start', {});
+      const response = await apiRequest('POST', '/api/snowflake/sync/tpms', {});
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       toast({
-        title: "TPMS Sync Started",
-        description: "Syncing all vehicle assignments from TPMS. This may take a few minutes.",
+        title: "TPMS Sync Complete",
+        description: `Synced ${data.recordsProcessed || 0} vehicle assignments from Snowflake.`,
       });
       refetchSyncState();
+      queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
     },
     onError: (error: any) => {
       toast({
-        title: "Failed to Start Sync",
-        description: error.message || "Unable to start TPMS sync",
+        title: "Failed to Sync TPMS",
+        description: error.message || "Unable to sync TPMS data from Snowflake",
         variant: "destructive",
       });
     },
@@ -566,7 +574,7 @@ export default function FleetManagement() {
                 <AlertTitle className="text-blue-800 dark:text-blue-400">TPMS Sync In Progress</AlertTitle>
                 <AlertDescription className="text-blue-700 dark:text-blue-300">
                   <div className="flex flex-col gap-2">
-                    <span>Syncing vehicle assignments from TPMS... {tpmsSync.processedVehicles} of {tpmsSync.totalVehicles} vehicles processed</span>
+                    <span>Syncing vehicle assignments from Snowflake... {tpmsSync.processedVehicles || tpmsSync.vehiclesSynced || 0} of {tpmsSync.totalVehicles || tpmsSync.totalVehiclesToSync || 0} records processed</span>
                     <Progress value={syncProgress} className="h-2" />
                   </div>
                 </AlertDescription>
@@ -580,7 +588,7 @@ export default function FleetManagement() {
                 <AlertDescription className="text-amber-700 dark:text-amber-300">
                   <div className="flex items-center justify-between">
                     <span>
-                      Vehicle assignment counts may be inaccurate. Run an initial sync to cache all TPMS data.
+                      Vehicle assignment counts may be inaccurate. Sync TPMS data from Snowflake daily snapshot.
                       {tpmsSync?.cachedAssignments ? ` (${tpmsSync.cachedAssignments} vehicles currently cached)` : ''}
                     </span>
                     {isSuperAdmin && (
@@ -597,7 +605,7 @@ export default function FleetManagement() {
                         ) : (
                           <CloudDownload className="h-4 w-4 mr-2" />
                         )}
-                        Run Initial Sync
+                        Sync from Snowflake
                       </Button>
                     )}
                   </div>
@@ -609,7 +617,7 @@ export default function FleetManagement() {
               <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
                 <Database className="h-4 w-4" />
                 <span>
-                  TPMS data synced ({tpmsSync.cachedAssignments} vehicles cached) - Last sync: {new Date(tpmsSync.lastSyncAt).toLocaleString()}
+                  TPMS data synced from Snowflake ({tpmsSync.cachedAssignments || tpmsSync.vehiclesWithAssignments || 0} assignments) - Last sync: {new Date(tpmsSync.lastSyncAt).toLocaleString()}
                 </span>
                 {isSuperAdmin && (
                   <Button
@@ -618,6 +626,7 @@ export default function FleetManagement() {
                     onClick={() => startTpmsSyncMutation.mutate()}
                     disabled={startTpmsSyncMutation.isPending}
                     className="ml-2 h-6 px-2"
+                    title="Refresh from Snowflake"
                     data-testid="button-resync-tpms"
                   >
                     {startTpmsSyncMutation.isPending ? (
