@@ -350,10 +350,10 @@ export default function FleetManagement() {
     const tpmsId = vehicle.tpmsAssignedTechId?.trim();
     
     if (tpmsId && holmanId && tpmsId.toLowerCase() === holmanId.toLowerCase()) {
-      return { status: 'synced', label: 'Synced', color: 'bg-green-100 text-green-800 border-green-300', cardBorder: 'border-green-500', cardBg: 'bg-green-50 dark:bg-green-950/20' };
+      return { status: 'synced', label: 'Synced', color: 'bg-blue-100 text-blue-800 border-blue-300', cardBorder: 'border-blue-500', cardBg: 'bg-blue-50 dark:bg-blue-950/20' };
     }
     if (tpmsId && !holmanId) {
-      return { status: 'pending', label: 'Pending Sync', color: 'bg-yellow-100 text-yellow-800 border-yellow-300', cardBorder: 'border-yellow-500', cardBg: 'bg-yellow-50 dark:bg-yellow-950/20' };
+      return { status: 'pending', label: 'Pending Sync', color: 'bg-blue-100 text-blue-800 border-blue-300', cardBorder: 'border-blue-500', cardBg: 'bg-blue-50 dark:bg-blue-950/20' };
     }
     if (holmanId && !tpmsId) {
       return { status: 'mismatch', label: 'Mismatch', color: 'bg-red-100 text-red-800 border-red-300', cardBorder: 'border-red-500', cardBg: 'bg-red-50 dark:bg-red-950/20' };
@@ -361,7 +361,7 @@ export default function FleetManagement() {
     if (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) {
       return { status: 'mismatch', label: 'Mismatch', color: 'bg-red-100 text-red-800 border-red-300', cardBorder: 'border-red-500', cardBg: 'bg-red-50 dark:bg-red-950/20' };
     }
-    return { status: 'unassigned', label: 'Unassigned', color: 'bg-gray-100 text-gray-800 border-gray-300', cardBorder: 'border-gray-300', cardBg: '' };
+    return { status: 'unassigned', label: 'Unassigned', color: 'bg-green-100 text-green-800 border-green-300', cardBorder: 'border-green-500', cardBg: 'bg-green-50 dark:bg-green-950/20' };
   };
 
   // Stats - vehicle is assigned if it has a TPMS tech (source of truth for assignments)
@@ -395,20 +395,20 @@ export default function FleetManagement() {
                   <p className="text-2xl font-bold" data-testid="text-total-vehicles">{allVehicles.length}</p>
                 </CardContent>
               </Card>
-              <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/10">
+              <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-green-600">Assigned</CardTitle>
+                  <CardTitle className="text-sm font-medium text-blue-600">Assigned</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold text-green-600" data-testid="text-assigned-count">{assignedCount}</p>
+                  <p className="text-2xl font-bold text-blue-600" data-testid="text-assigned-count">{assignedCount}</p>
                 </CardContent>
               </Card>
-              <Card className="border-orange-200 bg-orange-50/50 dark:bg-orange-950/10">
+              <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/10">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-orange-600">Unassigned</CardTitle>
+                  <CardTitle className="text-sm font-medium text-green-600">Unassigned</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold text-orange-600" data-testid="text-unassigned-count">{unassignedCount}</p>
+                  <p className="text-2xl font-bold text-green-600" data-testid="text-unassigned-count">{unassignedCount}</p>
                 </CardContent>
               </Card>
               <Card className="border-red-200 bg-red-50/50 dark:bg-red-950/10">
