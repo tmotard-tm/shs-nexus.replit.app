@@ -8,8 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw, User, AlertTriangle, Truck } from "lucide-react";
-import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw, User, AlertTriangle, Truck, CreditCard } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -769,7 +768,7 @@ export default function ActiveVehicles() {
                         
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <img src={licensePlateIcon} alt="License plate" className="h-6 w-8 object-contain" />
+                            <CreditCard className="h-4 w-4 text-muted-foreground" />
                             <span className="text-sm">{vehicle.licensePlate}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">{vehicle.licenseState}</p>

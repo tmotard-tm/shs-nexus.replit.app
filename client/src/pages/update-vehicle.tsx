@@ -13,9 +13,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User, AlertCircle, Loader2, RefreshCw, Truck, AlertTriangle, Database } from "lucide-react";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User, AlertCircle, Loader2, RefreshCw, Truck, AlertTriangle, Database, CreditCard } from "lucide-react";
 import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
-import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { useToast } from "@/hooks/use-toast";
@@ -1116,7 +1115,7 @@ export default function UpdateVehicle() {
                         
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <img src={licensePlateIcon} alt="License plate" className="h-6 w-8 object-contain" />
+                            <CreditCard className="h-4 w-4 text-muted-foreground" />
                             <span className="text-sm">{vehicle.licensePlate}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">{vehicle.licenseState}</p>

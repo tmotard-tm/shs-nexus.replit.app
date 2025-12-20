@@ -11,9 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
-import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User, Database, Loader2, RefreshCw, CheckCircle, Truck } from "lucide-react";
+import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User, Database, Loader2, RefreshCw, CheckCircle, Truck, CreditCard } from "lucide-react";
 import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
-import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
@@ -678,7 +677,7 @@ export default function AssignVehicleLocation() {
                           
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <img src={licensePlateIcon} alt="License plate" className="h-6 w-8 object-contain" />
+                              <CreditCard className="h-4 w-4 text-muted-foreground" />
                               <span className="text-sm">{vehicle.licensePlate}</span>
                             </div>
                             <p className="text-xs text-muted-foreground">{vehicle.licenseState}</p>

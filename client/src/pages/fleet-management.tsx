@@ -15,10 +15,9 @@ import { Separator } from "@/components/ui/separator";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, 
-  UserX, History, AlertTriangle, User, Package, Car, X, Gauge
+  UserX, History, AlertTriangle, User, Package, Car, X, Gauge, CreditCard
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
-import licensePlateIcon from "@assets/generated_images/Generic_license_plate_icon_8524bf34.png";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -1030,7 +1029,7 @@ export default function FleetManagement() {
                             </div>
                             <div className="space-y-1">
                               <div className="flex items-center gap-1 text-muted-foreground">
-                                <img src={licensePlateIcon} alt="License plate" className="h-4 w-5 object-contain" />
+                                <CreditCard className="h-3 w-3" />
                                 <span>License Plate</span>
                               </div>
                               <p className="font-medium">{vehicle.licensePlate || 'N/A'}</p>
