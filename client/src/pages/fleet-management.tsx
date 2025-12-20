@@ -15,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, 
-  UserX, History, AlertTriangle, User, Package, Car, X, Gauge, CreditCard
+  UserX, History, AlertTriangle, User, Package, Car, X, Gauge
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
@@ -26,6 +26,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { type FleetVehicle } from "@/data/fleetData";
 import { getVehicleOwnership } from "@/lib/vehicle-utils";
 import { DataSourceIndicator, calculateZipDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
+import { LicensePlate } from "@/components/license-plate";
 
 interface FleetVehiclesResponse {
   success: boolean;
@@ -1028,12 +1029,15 @@ export default function FleetManagement() {
                               )}
                             </div>
                             <div className="space-y-1">
-                              <div className="flex items-center gap-1 text-muted-foreground">
-                                <CreditCard className="h-3 w-3" />
+                              <div className="flex items-center gap-1 text-muted-foreground mb-1">
                                 <span>License Plate</span>
                               </div>
-                              <p className="font-medium">{vehicle.licensePlate || 'N/A'}</p>
-                              <p className="text-muted-foreground">{vehicle.licenseState || ''}</p>
+                              <LicensePlate 
+                                plateNumber={vehicle.licensePlate || ''} 
+                                state={vehicle.licenseState}
+                                renewalDate={vehicle.regRenewalDate}
+                                size="sm"
+                              />
                             </div>
                           </div>
                           
