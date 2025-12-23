@@ -180,7 +180,7 @@ export class SnowflakeService {
     });
   }
 
-  async executeQuery(sqlText: string, binds?: any[]): Promise<any[]> {
+  async executeQuery(sqlText: string, binds?: any[], retryOnConnectionError = true): Promise<any[]> {
     if (!this.connection) {
       await this.connect();
     }
@@ -188,10 +188,31 @@ export class SnowflakeService {
     return new Promise((resolve, reject) => {
       const options: any = {
         sqlText,
-        complete: (err: any, stmt: any, rows: any[]) => {
+        complete: async (err: any, stmt: any, rows: any[]) => {
           if (err) {
             console.error('[Snowflake] Query error:', err.message);
-            reject(new Error(`Query execution failed: ${err.message}`));
+            
+            // Check if this is a connection termination error and we should retry
+            const isConnectionError = err.message?.includes('terminated connection') ||
+                                       err.message?.includes('Connection lost') ||
+                                       err.message?.includes('connection was closed');
+            
+            if (isConnectionError && retryOnConnectionError) {
+              console.log('[Snowflake] Connection terminated, attempting to reconnect...');
+              // Reset the connection so connect() will create a new one
+              this.connection = null;
+              
+              try {
+                // Retry the query with a fresh connection (but don't retry again if this fails)
+                const result = await this.executeQuery(sqlText, binds, false);
+                resolve(result);
+              } catch (retryErr: any) {
+                console.error('[Snowflake] Retry after reconnect failed:', retryErr.message);
+                reject(new Error(`Query execution failed after reconnect: ${retryErr.message}`));
+              }
+            } else {
+              reject(new Error(`Query execution failed: ${err.message}`));
+            }
           } else {
             resolve(rows || []);
           }
