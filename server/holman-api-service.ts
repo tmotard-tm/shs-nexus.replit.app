@@ -286,14 +286,15 @@ export class HolmanApiService {
     const vehicleYear = matchingVehicle.modelYear || matchingVehicle.year || '';
     
     // Build garaging address from available fields
+    // Check both garaging-specific fields and general address fields (basic-query returns addressLine1, etc.)
     const addressParts = [
-      matchingVehicle.garagingStreet1 || matchingVehicle.garagingAddress1 || '',
-      matchingVehicle.garagingStreet2 || matchingVehicle.garagingAddress2 || '',
+      matchingVehicle.garagingStreet1 || matchingVehicle.garagingAddress1 || matchingVehicle.addressLine1 || '',
+      matchingVehicle.garagingStreet2 || matchingVehicle.garagingAddress2 || matchingVehicle.addressLine2 || '',
     ].filter(p => p && p.trim());
     const cityStateZip = [
-      matchingVehicle.garagingCity || '',
-      matchingVehicle.garagingState || '',
-      matchingVehicle.garagingZip || matchingVehicle.garagingPostalCode || ''
+      matchingVehicle.garagingCity || matchingVehicle.city || '',
+      matchingVehicle.garagingState || matchingVehicle.stateProvince || '',
+      matchingVehicle.garagingZip || matchingVehicle.garagingPostalCode || matchingVehicle.zipPostalCode || ''
     ].filter(p => p && p.trim()).join(', ');
     
     const fullAddress = [...addressParts, cityStateZip].filter(p => p && p.trim()).join(', ');
