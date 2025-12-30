@@ -293,22 +293,6 @@ export const PAGES: PageDefinition[] = [
     ],
   },
   {
-    key: "vehicleAssignments",
-    label: "Vehicle Assignments (Legacy)",
-    description: "Legacy vehicle assignments page",
-    path: "/vehicle-assignments",
-    icon: Truck,
-    category: "management",
-    permissionKey: "vehicleAssignments",
-    features: [
-      { key: "viewAssignments", label: "View Assignments", description: "Show/hide assignment view" },
-      { key: "createAssignment", label: "Create Assignment", description: "Show/hide Create Assignment button" },
-      { key: "editAssignment", label: "Edit Assignment", description: "Show/hide Edit Assignment button" },
-      { key: "deleteAssignment", label: "Delete Assignment", description: "Show/hide Delete Assignment button" },
-      { key: "syncFromTPMS", label: "Sync from TPMS", description: "Show/hide TPMS sync button" },
-    ],
-  },
-  {
     key: "techRoster",
     label: "Tech Roster",
     description: "View technician roster from Snowflake",
