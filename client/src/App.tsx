@@ -45,6 +45,7 @@ import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
 import VehicleAssignments from "@/pages/vehicle-assignments";
 import FleetManagement from "@/pages/fleet-management";
+import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import TestRepairResults from "@/pages/test-repair-results";
@@ -171,6 +172,12 @@ function Router() {
           <MainContent>
             <CreateVehicle />
           </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/weekly-onboarding">
+        <ProtectedRoute>
+          <WeeklyOnboarding />
         </ProtectedRoute>
       </Route>
       

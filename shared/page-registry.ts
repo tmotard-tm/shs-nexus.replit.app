@@ -13,6 +13,7 @@ import {
   Truck, 
   Key,
   Database,
+  UserPlus,
   type LucideIcon
 } from "lucide-react";
 
@@ -293,6 +294,15 @@ export const PAGES: PageDefinition[] = [
     ],
   },
   {
+    key: "weeklyOnboarding",
+    label: "Weekly Onboarding",
+    description: "Track new tech hires and assign trucks for weekly onboarding",
+    path: "/weekly-onboarding",
+    icon: UserPlus,
+    category: "management",
+    permissionKey: "weeklyOnboarding",
+  },
+  {
     key: "techRoster",
     label: "Tech Roster",
     description: "View technician roster from Snowflake",
@@ -335,6 +345,7 @@ export const QUICK_ACTIONS: PageFeature[] = [
   { key: "offboarding", label: "Offboarding", description: "Access to Offboarding quick action" },
   { key: "onboarding", label: "Onboarding", description: "Access to Onboarding quick action" },
   { key: "assignVehicle", label: "Assign or Update Vehicle", description: "Access to Vehicle Assignment quick action" },
+  { key: "weeklyOnboarding", label: "Weekly Onboarding", description: "Access to Weekly Onboarding Truck Assignment quick action" },
   { key: "createVehicle", label: "Create New Vehicle", description: "Access to Create Vehicle quick action" },
 ];
 

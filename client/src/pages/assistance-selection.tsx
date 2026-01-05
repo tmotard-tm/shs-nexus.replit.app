@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { usePermissions } from "@/hooks/use-permissions";
-import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench } from "lucide-react";
+import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench, CalendarPlus } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { FilteredMap } from "@/components/vehicle-map-filters";
@@ -49,6 +49,7 @@ export default function AssistanceSelection() {
     { value: "offboarding", label: "Offboarding", icon: UserMinus, color: "bg-red-600 hover:bg-red-700", action: () => setLocation("/offboard-technician"), permissionKey: "offboarding" as const },
     { value: "onboarding", label: "Onboarding", icon: UserPlus, color: "bg-purple-600 hover:bg-purple-700", action: () => setLocation("/onboard-hire"), permissionKey: "onboarding" as const },
     { value: "assign-vehicle", label: "Fleet Management", icon: MapPin, color: "bg-green-600 hover:bg-green-700", action: () => setLocation("/fleet-management"), permissionKey: "assignVehicle" as const },
+    { value: "weekly-onboarding", label: "Weekly Onboarding", icon: CalendarPlus, color: "bg-cyan-600 hover:bg-cyan-700", action: () => setLocation("/weekly-onboarding"), permissionKey: "weeklyOnboarding" as const },
     { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-600 hover:bg-blue-700", action: () => setLocation("/create-vehicle-location"), permissionKey: "createVehicle" as const },
   ];
 
