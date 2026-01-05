@@ -5878,6 +5878,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Sync onboarding hires from Snowflake HR roster view
+  app.post("/api/snowflake/sync/onboarding-hires", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      }
+      
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.syncOnboardingHires('manual');
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error syncing onboarding hires:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get all onboarding hires
+  app.get("/api/onboarding-hires", requireAuth, async (req: any, res) => {
+    try {
+      const hires = await storage.getOnboardingHires();
+      res.json(hires);
+    } catch (error: any) {
+      console.error("Error getting onboarding hires:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Update onboarding hire (mark truck assigned)
+  app.patch("/api/onboarding-hires/:id", requireAuth, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      
+      const updates = {
+        ...req.body,
+        assignedBy: currentUser?.username,
+        assignedAt: req.body.truckAssigned ? new Date() : null,
+      };
+      
+      const updated = await storage.updateOnboardingHire(id, updates);
+      if (!updated) {
+        return res.status(404).json({ message: "Onboarding hire not found" });
+      }
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating onboarding hire:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get truck inventory summary with items (total pieces and total avg cost)
   app.get("/api/truck-inventory/summary/:truck", requireAuth, async (req: any, res) => {
     try {

@@ -1106,6 +1106,97 @@ export class SnowflakeSyncService {
 
     return result;
   }
+
+  async syncOnboardingHires(triggeredBy: string = 'manual'): Promise<SyncResult> {
+    const startTime = Date.now();
+    const result: SyncResult = {
+      success: false,
+      recordsProcessed: 0,
+      recordsCreated: 0,
+      recordsUpdated: 0,
+      queueItemsCreated: 0,
+      queueItemsSkipped: 0,
+      skippedEmployees: [],
+      errors: [],
+      duration: 0,
+    };
+
+    if (!isSnowflakeConfigured()) {
+      result.errors.push('Snowflake is not configured');
+      result.duration = Date.now() - startTime;
+      return result;
+    }
+
+    let syncLog;
+    try {
+      syncLog = await storage.createSyncLog({
+        syncType: 'onboarding_hires',
+        status: 'running',
+        triggeredBy,
+      });
+      result.syncLogId = syncLog.id;
+
+      console.log('[OnboardingHires] Starting sync from Snowflake...');
+
+      const snowflake = getSnowflakeService();
+      
+      // Query the HR roster view for new hires with Service_DT >= 2026-01-04
+      const query = `
+        SELECT 
+          SERVICE_DT,
+          EMPL_NAME
+        FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW
+        WHERE SERVICE_DT >= '2026-01-04'
+        ORDER BY SERVICE_DT DESC
+      `;
+
+      const rows = await snowflake.executeQuery<{
+        SERVICE_DT: string;
+        EMPL_NAME: string;
+      }>(query);
+
+      console.log(`[OnboardingHires] Fetched ${rows.length} new hires from Snowflake`);
+
+      // Transform and upsert records
+      const hires = rows.map(row => ({
+        serviceDate: this.formatDateForDB(row.SERVICE_DT) || new Date().toISOString().split('T')[0],
+        employeeName: row.EMPL_NAME?.trim() || 'Unknown',
+      }));
+
+      const upsertedCount = await storage.bulkUpsertOnboardingHires(hires);
+      result.recordsProcessed = rows.length;
+      result.recordsCreated = upsertedCount;
+
+      result.success = true;
+      result.duration = Date.now() - startTime;
+
+      await storage.updateSyncLog(syncLog.id, {
+        status: 'completed',
+        completedAt: new Date(),
+        recordsProcessed: result.recordsProcessed,
+        recordsCreated: result.recordsCreated,
+        recordsUpdated: result.recordsUpdated,
+        errorMessage: result.errors.length > 0 ? result.errors.join('; ') : null,
+      });
+
+      console.log(`[OnboardingHires] Sync completed: ${result.recordsProcessed} records processed`);
+    } catch (error: any) {
+      result.errors.push(`Sync failed: ${error.message}`);
+      result.duration = Date.now() - startTime;
+
+      if (syncLog) {
+        await storage.updateSyncLog(syncLog.id, {
+          status: 'failed',
+          completedAt: new Date(),
+          errorMessage: error.message,
+        });
+      }
+
+      console.error('[OnboardingHires] Sync failed:', error);
+    }
+
+    return result;
+  }
 }
 
 let syncServiceInstance: SnowflakeSyncService | null = null;

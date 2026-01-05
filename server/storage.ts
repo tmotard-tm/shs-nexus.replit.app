@@ -36,6 +36,8 @@ import {
   type InsertTechVehicleAssignmentHistory,
   type TpmsCachedAssignment,
   type InsertTpmsCachedAssignment,
+  type OnboardingHire,
+  type InsertOnboardingHire,
   type IntegrationDataSource,
   type InsertIntegrationDataSource,
   type DataSourceField,
@@ -66,6 +68,7 @@ import {
   techVehicleAssignments,
   techVehicleAssignmentHistory,
   tpmsCachedAssignments,
+  onboardingHires,
   integrationDataSources,
   dataSourceFields,
   mappingSets,
@@ -291,6 +294,15 @@ export interface IStorage {
   getTpmsSyncState(): Promise<{ initialSyncComplete: boolean; status: string; vehiclesSynced: number; totalVehiclesToSync: number; vehiclesWithAssignments: number; lastSyncAt: Date | null } | null>;
   updateTpmsSyncState(updates: { initialSyncComplete?: boolean; status?: string; vehiclesSynced?: number; totalVehiclesToSync?: number; vehiclesWithAssignments?: number; vehiclesWithoutAssignments?: number; errorMessage?: string | null; initialSyncStartedAt?: Date; initialSyncCompletedAt?: Date; lastSyncAt?: Date }): Promise<void>;
   initializeTpmsSyncState(): Promise<void>;
+
+  // Onboarding Hires Module (Weekly truck assignment tracking)
+  getOnboardingHires(): Promise<OnboardingHire[]>;
+  getOnboardingHire(id: string): Promise<OnboardingHire | undefined>;
+  getOnboardingHireByNameAndDate(employeeName: string, serviceDate: string): Promise<OnboardingHire | undefined>;
+  upsertOnboardingHire(hire: InsertOnboardingHire): Promise<OnboardingHire>;
+  bulkUpsertOnboardingHires(hires: InsertOnboardingHire[]): Promise<number>;
+  updateOnboardingHire(id: string, updates: Partial<OnboardingHire>): Promise<OnboardingHire | undefined>;
+  deleteOnboardingHire(id: string): Promise<boolean>;
 
   // Field Mapping Module
   getIntegrationDataSources(): Promise<IntegrationDataSource[]>;
@@ -1372,6 +1384,35 @@ export class MemStorage implements IStorage {
 
   async initializeTpmsSyncState(): Promise<void> {
     // Not implemented in memory storage
+  }
+
+  // Onboarding Hires (not implemented in memory storage)
+  async getOnboardingHires(): Promise<OnboardingHire[]> {
+    return [];
+  }
+
+  async getOnboardingHire(_id: string): Promise<OnboardingHire | undefined> {
+    return undefined;
+  }
+
+  async getOnboardingHireByNameAndDate(_employeeName: string, _serviceDate: string): Promise<OnboardingHire | undefined> {
+    return undefined;
+  }
+
+  async upsertOnboardingHire(_hire: InsertOnboardingHire): Promise<OnboardingHire> {
+    throw new Error("Onboarding hires not implemented in memory storage");
+  }
+
+  async bulkUpsertOnboardingHires(_hires: InsertOnboardingHire[]): Promise<number> {
+    return 0;
+  }
+
+  async updateOnboardingHire(_id: string, _updates: Partial<OnboardingHire>): Promise<OnboardingHire | undefined> {
+    return undefined;
+  }
+
+  async deleteOnboardingHire(_id: string): Promise<boolean> {
+    return false;
   }
 
   // Activity Logs
@@ -3688,6 +3729,61 @@ export class DatabaseStorage implements IStorage {
         vehiclesWithoutAssignments: 0,
       });
     }
+  }
+
+  // Onboarding Hires
+  async getOnboardingHires(): Promise<OnboardingHire[]> {
+    return await db.select().from(onboardingHires).orderBy(desc(onboardingHires.serviceDate));
+  }
+
+  async getOnboardingHire(id: string): Promise<OnboardingHire | undefined> {
+    const result = await db.select().from(onboardingHires).where(eq(onboardingHires.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getOnboardingHireByNameAndDate(employeeName: string, serviceDate: string): Promise<OnboardingHire | undefined> {
+    const result = await db.select().from(onboardingHires)
+      .where(and(
+        eq(onboardingHires.employeeName, employeeName),
+        eq(onboardingHires.serviceDate, serviceDate)
+      ))
+      .limit(1);
+    return result[0];
+  }
+
+  async upsertOnboardingHire(hire: InsertOnboardingHire): Promise<OnboardingHire> {
+    const existing = await this.getOnboardingHireByNameAndDate(hire.employeeName, hire.serviceDate);
+    if (existing) {
+      const result = await db.update(onboardingHires)
+        .set({ ...hire, updatedAt: new Date(), syncedAt: new Date() })
+        .where(eq(onboardingHires.id, existing.id))
+        .returning();
+      return result[0];
+    }
+    const result = await db.insert(onboardingHires).values(hire).returning();
+    return result[0];
+  }
+
+  async bulkUpsertOnboardingHires(hires: InsertOnboardingHire[]): Promise<number> {
+    let upsertedCount = 0;
+    for (const hire of hires) {
+      await this.upsertOnboardingHire(hire);
+      upsertedCount++;
+    }
+    return upsertedCount;
+  }
+
+  async updateOnboardingHire(id: string, updates: Partial<OnboardingHire>): Promise<OnboardingHire | undefined> {
+    const result = await db.update(onboardingHires)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(onboardingHires.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteOnboardingHire(id: string): Promise<boolean> {
+    const result = await db.delete(onboardingHires).where(eq(onboardingHires.id, id)).returning();
+    return result.length > 0;
   }
 
   // Requests
