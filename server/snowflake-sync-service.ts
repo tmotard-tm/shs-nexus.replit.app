@@ -1140,24 +1140,20 @@ export class SnowflakeSyncService {
 
       const snowflake = getSnowflakeService();
       
-      // First, discover available columns by querying one row
-      const discoverQuery = `
-        SELECT * 
-        FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW
-        LIMIT 1
-      `;
-      
-      console.log('[OnboardingHires] Discovering available columns...');
-      const sampleRows = await snowflake.executeQuery(discoverQuery) as Array<Record<string, any>>;
-      
-      if (sampleRows.length > 0) {
-        const availableColumns = Object.keys(sampleRows[0]);
-        console.log(`[OnboardingHires] Available columns: ${availableColumns.join(', ')}`);
-      }
-      
-      // Query all records with SELECT * to get all available fields
+      // Query with explicit column names for better performance
       const query = `
-        SELECT *
+        SELECT 
+          SERVICE_DT,
+          EMPL_NAME,
+          ENTERPRISE_ID,
+          WORK_STATE,
+          ACTION_REASON_DESCR,
+          JOBTITLE,
+          TECH_TYPE,
+          DISTRICT,
+          LOCATION,
+          LOCATION_CITY,
+          PLANNING_AREA_NAME
         FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW
         WHERE SERVICE_DT >= '2026-01-04'
         ORDER BY SERVICE_DT DESC
@@ -1171,40 +1167,40 @@ export class SnowflakeSyncService {
         setTimeout(() => reject(new Error('Snowflake query timed out after 60 seconds')), 60000)
       );
       
-      const rows = await Promise.race([queryPromise, timeoutPromise]) as Array<Record<string, any>>;
+      const rows = await Promise.race([queryPromise, timeoutPromise]) as Array<{
+        SERVICE_DT: string;
+        EMPL_NAME: string;
+        ENTERPRISE_ID: string;
+        WORK_STATE: string;
+        ACTION_REASON_DESCR: string;
+        JOBTITLE: string;
+        TECH_TYPE: string;
+        DISTRICT: string;
+        LOCATION: string;
+        LOCATION_CITY: string;
+        PLANNING_AREA_NAME: string;
+      }>;
 
       console.log(`[OnboardingHires] Fetched ${rows.length} new hires from Snowflake`);
       
-      // Log first row structure for debugging
+      // Log sample data for debugging
       if (rows.length > 0) {
-        console.log(`[OnboardingHires] Sample row keys: ${Object.keys(rows[0]).join(', ')}`);
+        console.log(`[OnboardingHires] Sample row:`, JSON.stringify(rows[0]));
       }
 
-      // Helper function to get value by case-insensitive key match
-      const getValue = (row: Record<string, any>, ...possibleKeys: string[]): string | null => {
-        for (const key of possibleKeys) {
-          // Try exact match first
-          if (row[key] !== undefined) return row[key]?.toString()?.trim() || null;
-          // Try case-insensitive match
-          const foundKey = Object.keys(row).find(k => k.toLowerCase() === key.toLowerCase());
-          if (foundKey && row[foundKey] !== undefined) return row[foundKey]?.toString()?.trim() || null;
-        }
-        return null;
-      };
-
-      // Transform and upsert records - using flexible column matching
+      // Transform records using exact column names
       const hires = rows.map(row => ({
-        serviceDate: this.formatDateForDB(getValue(row, 'SERVICE_DT', 'Service_DT')) || new Date().toISOString().split('T')[0],
-        employeeName: getValue(row, 'EMPL_NAME', 'Empl_Name') || 'Unknown',
-        enterpriseId: getValue(row, 'ENTERPRISE_ID', 'Enterprise_ID', 'Enterprise_Id'),
-        workState: getValue(row, 'WORK_STATE', 'Work_State'),
-        actionReasonDescr: getValue(row, 'ACTION_REASON_DESCR', 'Action_Reason_Descr'),
-        jobTitle: getValue(row, 'JOBTITLE', 'JOB_TITLE', 'Job_Title', 'JOBCODE_DESCR', 'Jobcode_Descr'),
-        techType: getValue(row, 'TECH_TYPE', 'Tech_Type'),
-        district: getValue(row, 'DISTRICT', 'District'),
-        zipcode: getValue(row, 'LOCATION', 'Location', 'POSTAL', 'Postal'),
-        locationCity: getValue(row, 'LOCATION_CITY', 'Location_City', 'CITY', 'City'),
-        planningAreaName: getValue(row, 'PLANNING_AREA_NAME', 'Planning_Area_Name'),
+        serviceDate: this.formatDateForDB(row.SERVICE_DT) || new Date().toISOString().split('T')[0],
+        employeeName: row.EMPL_NAME?.trim() || 'Unknown',
+        enterpriseId: row.ENTERPRISE_ID?.trim() || null,
+        workState: row.WORK_STATE?.trim() || null,
+        actionReasonDescr: row.ACTION_REASON_DESCR?.trim() || null,
+        jobTitle: row.JOBTITLE?.trim() || null,
+        techType: row.TECH_TYPE?.trim() || null,
+        district: row.DISTRICT?.trim() || null,
+        zipcode: row.LOCATION?.trim() || null,
+        locationCity: row.LOCATION_CITY?.trim() || null,
+        planningAreaName: row.PLANNING_AREA_NAME?.trim() || null,
       }));
 
       const upsertedCount = await storage.bulkUpsertOnboardingHires(hires);

@@ -3754,8 +3754,21 @@ export class DatabaseStorage implements IStorage {
   async upsertOnboardingHire(hire: InsertOnboardingHire): Promise<OnboardingHire> {
     const existing = await this.getOnboardingHireByNameAndDate(hire.employeeName, hire.serviceDate);
     if (existing) {
+      // Only update Snowflake-sourced fields, preserve manual assignments (truckAssigned, assignedTruckNo, notes)
       const result = await db.update(onboardingHires)
-        .set({ ...hire, updatedAt: new Date(), syncedAt: new Date() })
+        .set({ 
+          enterpriseId: hire.enterpriseId,
+          workState: hire.workState,
+          actionReasonDescr: hire.actionReasonDescr,
+          jobTitle: hire.jobTitle,
+          techType: hire.techType,
+          district: hire.district,
+          zipcode: hire.zipcode,
+          locationCity: hire.locationCity,
+          planningAreaName: hire.planningAreaName,
+          updatedAt: new Date(), 
+          syncedAt: new Date() 
+        })
         .where(eq(onboardingHires.id, existing.id))
         .returning();
       return result[0];

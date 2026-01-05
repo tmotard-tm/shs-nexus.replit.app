@@ -1,15 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -38,26 +38,27 @@ export default function WeeklyOnboarding() {
 
   const lastSync = syncLogs.find(log => log.syncType === 'onboarding_hires');
 
+  const [syncFailed, setSyncFailed] = useState(false);
+
   const syncMutation = useMutation({
     mutationFn: async () => {
       return await apiRequest('POST', '/api/snowflake/sync/onboarding-hires');
     },
     onSuccess: (result: any) => {
-      toast({
-        title: "Sync Complete",
-        description: `Processed ${result.recordsProcessed} new hires`,
-      });
+      setSyncFailed(false);
       queryClient.invalidateQueries({ queryKey: ['/api/onboarding-hires'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sync-logs'] });
     },
     onError: (error: any) => {
-      toast({
-        title: "Sync Failed",
-        description: error.message || "Failed to sync onboarding hires",
-        variant: "destructive",
-      });
+      setSyncFailed(true);
+      console.error('[OnboardingHires] Sync failed:', error.message);
     },
   });
+
+  // Auto-sync on page load
+  useEffect(() => {
+    syncMutation.mutate();
+  }, []);
 
   const assignMutation = useMutation({
     mutationFn: async ({ id, truckAssigned, assignedTruckNo, notes }: { id: string; truckAssigned: boolean; assignedTruckNo: string; notes: string }) => {
@@ -137,24 +138,32 @@ export default function WeeklyOnboarding() {
                       </CardDescription>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    {lastSync && (
-                      <div className="text-sm text-muted-foreground flex items-center gap-2">
-                        <Clock className="h-4 w-4" />
-                        {lastSync.completedAt 
-                          ? `Last synced: ${format(new Date(lastSync.completedAt), 'MMM d, yyyy h:mm a')}`
-                          : 'Never synced'}
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    {syncMutation.isPending ? (
+                      <div className="flex items-center gap-2">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span>Syncing from HR system...</span>
                       </div>
-                    )}
-                    <Button 
-                      onClick={() => syncMutation.mutate()}
-                      disabled={syncMutation.isPending}
-                      variant="outline"
-                      data-testid="button-sync-hires"
-                    >
-                      <RefreshCw className={`h-4 w-4 mr-2 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-                      {syncMutation.isPending ? 'Syncing...' : 'Sync from Snowflake'}
-                    </Button>
+                    ) : syncFailed ? (
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 text-yellow-600" />
+                        <span className="text-yellow-600">Sync failed</span>
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => syncMutation.mutate()}
+                          data-testid="button-retry-sync"
+                        >
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                          Retry
+                        </Button>
+                      </div>
+                    ) : lastSync?.completedAt ? (
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        <span>Last synced: {format(new Date(lastSync.completedAt), 'MMM d, yyyy h:mm a')}</span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </CardHeader>
@@ -244,7 +253,7 @@ export default function WeeklyOnboarding() {
                       <div>
                         <UserPlus className="h-12 w-12 mx-auto mb-4 opacity-50" />
                         <p>No onboarding hires found.</p>
-                        <p className="text-sm mt-2">Click "Sync from Snowflake" to pull new hire data.</p>
+                        <p className="text-sm mt-2">Data syncs automatically from HR system.</p>
                       </div>
                     ) : (
                       <p>No results match your search criteria.</p>
