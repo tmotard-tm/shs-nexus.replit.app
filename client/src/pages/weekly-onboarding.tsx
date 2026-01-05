@@ -18,6 +18,48 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import type { OnboardingHire } from "@shared/schema";
 
+// District to Owner mapping based on last 4 digits
+const districtOwnerMap: Record<string, string> = {
+  '3132': 'Monica, Cheryl & Machell',
+  '3580': 'Monica, Cheryl & Machell',
+  '4766': 'Rob & Andrea',
+  '6141': 'Monica, Cheryl & Machell',
+  '7084': 'Rob & Andrea',
+  '7088': 'Carol & Tasha',
+  '7108': 'Carol & Tasha',
+  '7323': 'Monica, Cheryl & Machell',
+  '7435': 'Rob & Andrea',
+  '7670': 'Rob & Andrea',
+  '7744': 'Rob & Andrea',
+  '7983': 'Rob & Andrea',
+  '7995': 'Carol & Tasha',
+  '8035': 'Rob & Andrea',
+  '8096': 'Monica, Cheryl & Machell',
+  '8107': 'Carol & Tasha',
+  '8147': 'Carol & Tasha',
+  '8158': 'Carol & Tasha',
+  '8162': 'Monica, Cheryl & Machell',
+  '8169': 'Carol & Tasha',
+  '8175': 'Rob & Andrea',
+  '8184': 'Carol & Tasha',
+  '8206': 'Monica, Cheryl & Machell',
+  '8220': 'Monica, Cheryl & Machell',
+  '8228': 'Carol & Tasha',
+  '8309': 'Monica, Cheryl & Machell',
+  '8366': 'Carol & Tasha',
+  '8380': 'Rob & Andrea',
+  '8420': 'Monica, Cheryl & Machell',
+  '8555': 'Monica, Cheryl & Machell',
+  '8935': 'Monica, Cheryl & Machell',
+};
+
+// Get owner from district (uses last 4 digits)
+function getOwnerFromDistrict(district: string | null | undefined): string {
+  if (!district) return '-';
+  const last4 = district.slice(-4);
+  return districtOwnerMap[last4] || '-';
+}
+
 export default function WeeklyOnboarding() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -295,6 +337,7 @@ export default function WeeklyOnboarding() {
                           <TableHead>Action Reason</TableHead>
                           <TableHead>Job Title</TableHead>
                           <TableHead className="w-[80px]">District</TableHead>
+                          <TableHead>Owner</TableHead>
                           <TableHead className="w-[80px]">Zipcode</TableHead>
                           <TableHead>City</TableHead>
                           <TableHead>Planning Area</TableHead>
@@ -323,6 +366,7 @@ export default function WeeklyOnboarding() {
                             <TableCell className="text-sm">{hire.actionReasonDescr || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.jobTitle || '-'}</TableCell>
                             <TableCell>{hire.district || '-'}</TableCell>
+                            <TableCell className="text-sm">{getOwnerFromDistrict(hire.district)}</TableCell>
                             <TableCell>{hire.zipcode || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.locationCity || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.planningAreaName || '-'}</TableCell>
