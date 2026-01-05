@@ -1164,7 +1164,7 @@ export class SnowflakeSyncService {
       // Add timeout wrapper to prevent hanging
       const queryPromise = snowflake.executeQuery(query);
       const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Snowflake query timed out after 60 seconds')), 60000)
+        setTimeout(() => reject(new Error('Snowflake query timed out after 120 seconds')), 120000)
       );
       
       const rows = await Promise.race([queryPromise, timeoutPromise]) as Array<{

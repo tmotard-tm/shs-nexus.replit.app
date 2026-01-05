@@ -275,7 +275,6 @@ export default function WeeklyOnboarding() {
                           <TableHead className="w-[60px]">State</TableHead>
                           <TableHead>Action Reason</TableHead>
                           <TableHead>Job Title</TableHead>
-                          <TableHead className="w-[80px]">Tech Type</TableHead>
                           <TableHead className="w-[80px]">District</TableHead>
                           <TableHead className="w-[80px]">Zipcode</TableHead>
                           <TableHead>City</TableHead>
@@ -303,7 +302,6 @@ export default function WeeklyOnboarding() {
                             <TableCell>{hire.workState || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.actionReasonDescr || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.jobTitle || '-'}</TableCell>
-                            <TableCell className="text-sm">{hire.techType || '-'}</TableCell>
                             <TableCell>{hire.district || '-'}</TableCell>
                             <TableCell>{hire.zipcode || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.locationCity || '-'}</TableCell>
