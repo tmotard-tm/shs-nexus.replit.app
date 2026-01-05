@@ -6,6 +6,7 @@
  * It performs the daily syncs for:
  * - Snowflake technician rosters (termed techs, all techs)
  * - TPMS vehicle assignments (caches all vehicle-tech assignments)
+ * - Weekly onboarding hires (new tech hires from HR roster view)
  * 
  * Usage: npx tsx server/run-sync.ts
  * 
@@ -73,6 +74,25 @@ async function runSync(): Promise<void> {
     } catch (tpmsError) {
       console.error('[Scheduled Sync] TPMS Snowflake sync failed (non-fatal):', tpmsError);
       console.log('[Scheduled Sync] Continuing with other syncs...');
+    }
+
+    // Weekly Onboarding Hires Sync from Snowflake HR roster view
+    console.log('\n--- Syncing Weekly Onboarding Hires from Snowflake ---');
+    console.log('[Scheduled Sync] Loading new tech hires from HR roster view...');
+    
+    try {
+      const onboardingResult = await syncService.syncOnboardingHires('scheduled_task');
+      
+      console.log(`[Scheduled Sync] Onboarding hires sync complete:`);
+      console.log(`  - Records processed: ${onboardingResult.recordsProcessed}`);
+      console.log(`  - Records created: ${onboardingResult.recordsCreated}`);
+      if (onboardingResult.errors && onboardingResult.errors.length > 0) {
+        console.log(`  - Errors: ${onboardingResult.errors.length}`);
+        onboardingResult.errors.slice(0, 5).forEach((err: string) => console.log(`    - ${err}`));
+      }
+    } catch (onboardingError) {
+      console.error('[Scheduled Sync] Onboarding hires sync failed (non-fatal):', onboardingError);
+      console.log('[Scheduled Sync] Continuing...');
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
