@@ -1199,7 +1199,7 @@ export class SnowflakeSyncService {
         enterpriseId: getValue(row, 'ENTERPRISE_ID', 'Enterprise_ID', 'Enterprise_Id'),
         workState: getValue(row, 'WORK_STATE', 'Work_State'),
         actionReasonDescr: getValue(row, 'ACTION_REASON_DESCR', 'Action_Reason_Descr'),
-        jobTitle: getValue(row, 'JOB_TITLE', 'Job_Title', 'JOBCODE_DESCR', 'Jobcode_Descr'),
+        jobTitle: getValue(row, 'JOBTITLE', 'JOB_TITLE', 'Job_Title', 'JOBCODE_DESCR', 'Jobcode_Descr'),
         techType: getValue(row, 'TECH_TYPE', 'Tech_Type'),
         district: getValue(row, 'DISTRICT', 'District'),
         zipcode: getValue(row, 'LOCATION', 'Location', 'POSTAL', 'Postal'),
