@@ -1150,10 +1150,18 @@ export class SnowflakeSyncService {
         ORDER BY SERVICE_DT DESC
       `;
 
-      const rows = await snowflake.executeQuery<{
+      console.log('[OnboardingHires] Executing Snowflake query...');
+      
+      // Add timeout wrapper to prevent hanging
+      const queryPromise = snowflake.executeQuery(query);
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Snowflake query timed out after 60 seconds')), 60000)
+      );
+      
+      const rows = await Promise.race([queryPromise, timeoutPromise]) as Array<{
         SERVICE_DT: string;
         EMPL_NAME: string;
-      }>(query);
+      }>;
 
       console.log(`[OnboardingHires] Fetched ${rows.length} new hires from Snowflake`);
 
