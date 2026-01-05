@@ -3766,6 +3766,7 @@ export class DatabaseStorage implements IStorage {
           zipcode: hire.zipcode,
           locationCity: hire.locationCity,
           planningAreaName: hire.planningAreaName,
+          specialties: hire.specialties,
           updatedAt: new Date(), 
           syncedAt: new Date() 
         })

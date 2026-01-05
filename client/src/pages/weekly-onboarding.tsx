@@ -279,6 +279,7 @@ export default function WeeklyOnboarding() {
                           <TableHead className="w-[80px]">Zipcode</TableHead>
                           <TableHead>City</TableHead>
                           <TableHead>Planning Area</TableHead>
+                          <TableHead>Specialties</TableHead>
                           <TableHead className="w-[90px]">Status</TableHead>
                           <TableHead className="w-[100px]">
                             <div className="flex items-center gap-1">
@@ -306,6 +307,7 @@ export default function WeeklyOnboarding() {
                             <TableCell>{hire.zipcode || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.locationCity || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.planningAreaName || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.specialties || '-'}</TableCell>
                             <TableCell>
                               {hire.truckAssigned ? (
                                 <Badge variant="default" className="bg-green-600">

@@ -581,6 +581,7 @@ export const onboardingHires = pgTable("onboarding_hires", {
   zipcode: varchar("zipcode", { length: 20 }), // LOCATION
   locationCity: text("location_city"), // LOCATION_CITY
   planningAreaName: text("planning_area_name"), // PLANNING_AREA_NAME
+  specialties: text("specialties"), // SPECIALTIES from DEV_SEGNO.WORKFLOW_TBLS.ONBOARDING
   // Tracking fields
   truckAssigned: boolean("truck_assigned").notNull().default(false),
   assignedTruckNo: varchar("assigned_truck_no", { length: 20 }),

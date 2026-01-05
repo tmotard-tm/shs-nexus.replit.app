@@ -1141,22 +1141,26 @@ export class SnowflakeSyncService {
       const snowflake = getSnowflakeService();
       
       // Query with explicit column names for better performance
+      // LEFT JOIN ONBOARDING table to get SPECIALTIES with case-insensitive matching
       const query = `
         SELECT 
-          SERVICE_DT,
-          EMPL_NAME,
-          ENTERPRISE_ID,
-          WORK_STATE,
-          ACTION_REASON_DESCR,
-          JOBTITLE,
-          TECH_TYPE,
-          DISTRICT,
-          LOCATION,
-          LOCATION_CITY,
-          PLANNING_AREA_NAME
-        FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW
-        WHERE SERVICE_DT >= '2026-01-04'
-        ORDER BY SERVICE_DT DESC
+          hr.SERVICE_DT,
+          hr.EMPL_NAME,
+          hr.ENTERPRISE_ID,
+          hr.WORK_STATE,
+          hr.ACTION_REASON_DESCR,
+          hr.JOBTITLE,
+          hr.TECH_TYPE,
+          hr.DISTRICT,
+          hr.LOCATION,
+          hr.LOCATION_CITY,
+          hr.PLANNING_AREA_NAME,
+          ob.SPECIALTIES
+        FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW hr
+        LEFT JOIN DEV_SEGNO.WORKFLOW_TBLS.ONBOARDING ob
+          ON UPPER(TRIM(hr.ENTERPRISE_ID)) = UPPER(TRIM(ob.ENTERPRISE_ID))
+        WHERE hr.SERVICE_DT >= '2026-01-04'
+        ORDER BY hr.SERVICE_DT DESC
       `;
 
       console.log('[OnboardingHires] Executing Snowflake query...');
@@ -1179,6 +1183,7 @@ export class SnowflakeSyncService {
         LOCATION: string;
         LOCATION_CITY: string;
         PLANNING_AREA_NAME: string;
+        SPECIALTIES: string;
       }>;
 
       console.log(`[OnboardingHires] Fetched ${rows.length} new hires from Snowflake`);
@@ -1201,6 +1206,7 @@ export class SnowflakeSyncService {
         zipcode: row.LOCATION?.trim() || null,
         locationCity: row.LOCATION_CITY?.trim() || null,
         planningAreaName: row.PLANNING_AREA_NAME?.trim() || null,
+        specialties: row.SPECIALTIES?.trim() || null,
       }));
 
       const upsertedCount = await storage.bulkUpsertOnboardingHires(hires);
