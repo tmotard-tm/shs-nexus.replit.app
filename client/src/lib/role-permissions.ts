@@ -9,6 +9,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
     offboarding: true,
     onboarding: true,
     assignVehicle: true,
+    weeklyOnboarding: true,
     createVehicle: true,
   },
   sidebar: {
@@ -35,6 +36,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       templateManagement: true,
       rolePermissions: true,
       fleetManagement: true,
+      weeklyOnboarding: true,
       vehicleAssignments: true,
       techRoster: true,
     },
@@ -125,6 +127,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
     offboarding: true,
     onboarding: true,
     assignVehicle: false,
+    weeklyOnboarding: false,
     createVehicle: false,
   },
   sidebar: {
@@ -151,6 +154,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       templateManagement: false,
       rolePermissions: false,
       fleetManagement: false,
+      weeklyOnboarding: false,
       vehicleAssignments: false,
       techRoster: false,
     },
