@@ -564,6 +564,30 @@ export const tpmsCachedAssignments = pgTable("tpms_cached_assignments", {
   };
 });
 
+// Onboarding Hires from Snowflake HR data - tracks new tech hires for weekly truck assignment
+export const onboardingHires = pgTable("onboarding_hires", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Core fields from Snowflake NS_TECH_HIRE_ROSTER_VW
+  serviceDate: date("service_date").notNull(), // Service_DT - hire start date
+  employeeName: text("employee_name").notNull(), // EMPL_NAME
+  // Tracking fields
+  truckAssigned: boolean("truck_assigned").notNull().default(false),
+  assignedTruckNo: varchar("assigned_truck_no", { length: 20 }),
+  assignedAt: timestamp("assigned_at"),
+  assignedBy: text("assigned_by"),
+  notes: text("notes"),
+  // Sync tracking
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    serviceDateIdx: index("onboarding_hires_service_date_idx").on(table.serviceDate),
+    employeeNameIdx: index("onboarding_hires_employee_name_idx").on(table.employeeName),
+    truckAssignedIdx: index("onboarding_hires_truck_assigned_idx").on(table.truckAssigned),
+  };
+});
+
 // Password validation schema
 export const passwordValidationSchema = z.string()
   .min(10, "Password must be at least 10 characters long. Consider using a passphrase for better security.")
@@ -666,6 +690,13 @@ export const insertTechVehicleAssignmentHistorySchema = createInsertSchema(techV
 
 export const insertTpmsCachedAssignmentSchema = createInsertSchema(tpmsCachedAssignments).omit({
   id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertOnboardingHireSchema = createInsertSchema(onboardingHires).omit({
+  id: true,
+  syncedAt: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -867,6 +898,8 @@ export type TechVehicleAssignmentHistory = typeof techVehicleAssignmentHistory.$
 export type InsertTechVehicleAssignmentHistory = z.infer<typeof insertTechVehicleAssignmentHistorySchema>;
 export type TpmsCachedAssignment = typeof tpmsCachedAssignments.$inferSelect;
 export type InsertTpmsCachedAssignment = z.infer<typeof insertTpmsCachedAssignmentSchema>;
+export type OnboardingHire = typeof onboardingHires.$inferSelect;
+export type InsertOnboardingHire = z.infer<typeof insertOnboardingHireSchema>;
 
 // Combined queue item with module information for unified queue access
 export type CombinedQueueItem = QueueItem & {
