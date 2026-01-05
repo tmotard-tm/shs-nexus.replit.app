@@ -251,37 +251,54 @@ export default function WeeklyOnboarding() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-md border">
+                  <div className="rounded-md border overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-[140px]">
+                          <TableHead className="w-[110px]">
                             <div className="flex items-center gap-1">
                               <Calendar className="h-4 w-4" />
                               Service Date
                             </div>
                           </TableHead>
                           <TableHead>Employee Name</TableHead>
-                          <TableHead className="w-[120px]">Status</TableHead>
-                          <TableHead className="w-[140px]">
+                          <TableHead className="w-[100px]">Enterprise ID</TableHead>
+                          <TableHead className="w-[60px]">State</TableHead>
+                          <TableHead>Action Reason</TableHead>
+                          <TableHead>Job Title</TableHead>
+                          <TableHead className="w-[80px]">Tech Type</TableHead>
+                          <TableHead className="w-[80px]">District</TableHead>
+                          <TableHead className="w-[80px]">Zipcode</TableHead>
+                          <TableHead>City</TableHead>
+                          <TableHead>Planning Area</TableHead>
+                          <TableHead className="w-[90px]">Status</TableHead>
+                          <TableHead className="w-[100px]">
                             <div className="flex items-center gap-1">
                               <Truck className="h-4 w-4" />
-                              Truck Assigned
+                              Truck #
                             </div>
                           </TableHead>
-                          <TableHead>Assigned By</TableHead>
-                          <TableHead className="w-[120px]">Actions</TableHead>
+                          <TableHead className="w-[100px]">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {filteredHires.map((hire) => (
                           <TableRow key={hire.id} data-testid={`row-hire-${hire.id}`}>
-                            <TableCell className="font-medium">
+                            <TableCell className="font-medium whitespace-nowrap">
                               {hire.serviceDate 
                                 ? format(new Date(hire.serviceDate), 'MMM d, yyyy')
                                 : 'N/A'}
                             </TableCell>
-                            <TableCell>{hire.employeeName}</TableCell>
+                            <TableCell className="font-medium">{hire.employeeName}</TableCell>
+                            <TableCell className="font-mono text-sm">{hire.enterpriseId || '-'}</TableCell>
+                            <TableCell>{hire.workState || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.actionReasonDescr || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.jobTitle || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.techType || '-'}</TableCell>
+                            <TableCell>{hire.district || '-'}</TableCell>
+                            <TableCell>{hire.zipcode || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.locationCity || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.planningAreaName || '-'}</TableCell>
                             <TableCell>
                               {hire.truckAssigned ? (
                                 <Badge variant="default" className="bg-green-600">
@@ -297,18 +314,6 @@ export default function WeeklyOnboarding() {
                             </TableCell>
                             <TableCell>
                               {hire.assignedTruckNo || '-'}
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {hire.assignedBy ? (
-                                <div>
-                                  <p>{hire.assignedBy}</p>
-                                  {hire.assignedAt && (
-                                    <p className="text-xs">
-                                      {format(new Date(hire.assignedAt), 'MMM d')}
-                                    </p>
-                                  )}
-                                </div>
-                              ) : '-'}
                             </TableCell>
                             <TableCell>
                               <Button 

@@ -1144,7 +1144,16 @@ export class SnowflakeSyncService {
       const query = `
         SELECT 
           SERVICE_DT,
-          EMPL_NAME
+          EMPL_NAME,
+          ENTERPRISE_ID,
+          WORK_STATE,
+          ACTION_REASON_DESCR,
+          JOB_TITLE,
+          TECH_TYPE,
+          DISTRICT,
+          LOCATION,
+          LOCATION_CITY,
+          PLANNING_AREA_NAME
         FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW
         WHERE SERVICE_DT >= '2026-01-04'
         ORDER BY SERVICE_DT DESC
@@ -1161,6 +1170,15 @@ export class SnowflakeSyncService {
       const rows = await Promise.race([queryPromise, timeoutPromise]) as Array<{
         SERVICE_DT: string;
         EMPL_NAME: string;
+        ENTERPRISE_ID: string;
+        WORK_STATE: string;
+        ACTION_REASON_DESCR: string;
+        JOB_TITLE: string;
+        TECH_TYPE: string;
+        DISTRICT: string;
+        LOCATION: string;
+        LOCATION_CITY: string;
+        PLANNING_AREA_NAME: string;
       }>;
 
       console.log(`[OnboardingHires] Fetched ${rows.length} new hires from Snowflake`);
@@ -1169,6 +1187,15 @@ export class SnowflakeSyncService {
       const hires = rows.map(row => ({
         serviceDate: this.formatDateForDB(row.SERVICE_DT) || new Date().toISOString().split('T')[0],
         employeeName: row.EMPL_NAME?.trim() || 'Unknown',
+        enterpriseId: row.ENTERPRISE_ID?.trim() || null,
+        workState: row.WORK_STATE?.trim() || null,
+        actionReasonDescr: row.ACTION_REASON_DESCR?.trim() || null,
+        jobTitle: row.JOB_TITLE?.trim() || null,
+        techType: row.TECH_TYPE?.trim() || null,
+        district: row.DISTRICT?.trim() || null,
+        zipcode: row.LOCATION?.trim() || null,
+        locationCity: row.LOCATION_CITY?.trim() || null,
+        planningAreaName: row.PLANNING_AREA_NAME?.trim() || null,
       }));
 
       const upsertedCount = await storage.bulkUpsertOnboardingHires(hires);

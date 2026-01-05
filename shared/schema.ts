@@ -572,6 +572,15 @@ export const onboardingHires = pgTable("onboarding_hires", {
   // Core fields from Snowflake NS_TECH_HIRE_ROSTER_VW
   serviceDate: date("service_date").notNull(), // Service_DT - hire start date
   employeeName: text("employee_name").notNull(), // EMPL_NAME
+  enterpriseId: varchar("enterprise_id", { length: 50 }), // ENTERPRISE_ID
+  workState: varchar("work_state", { length: 10 }), // WORK_STATE
+  actionReasonDescr: text("action_reason_descr"), // ACTION_REASON_DESCR
+  jobTitle: text("job_title"), // JOB_TITLE
+  techType: varchar("tech_type", { length: 50 }), // Tech_Type
+  district: varchar("district", { length: 50 }), // DISTRICT
+  zipcode: varchar("zipcode", { length: 20 }), // LOCATION
+  locationCity: text("location_city"), // LOCATION_CITY
+  planningAreaName: text("planning_area_name"), // PLANNING_AREA_NAME
   // Tracking fields
   truckAssigned: boolean("truck_assigned").notNull().default(false),
   assignedTruckNo: varchar("assigned_truck_no", { length: 20 }),
@@ -587,6 +596,7 @@ export const onboardingHires = pgTable("onboarding_hires", {
     serviceDateIdx: index("onboarding_hires_service_date_idx").on(table.serviceDate),
     employeeNameIdx: index("onboarding_hires_employee_name_idx").on(table.employeeName),
     truckAssignedIdx: index("onboarding_hires_truck_assigned_idx").on(table.truckAssigned),
+    enterpriseIdIdx: index("onboarding_hires_enterprise_id_idx").on(table.enterpriseId),
   };
 });
 
