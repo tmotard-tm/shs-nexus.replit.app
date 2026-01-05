@@ -335,7 +335,7 @@ export default function WeeklyOnboarding() {
                           <TableHead className="w-[100px]">Enterprise ID</TableHead>
                           <TableHead className="w-[60px]">State</TableHead>
                           <TableHead>Action Reason</TableHead>
-                          <TableHead>Job Title</TableHead>
+                          <TableHead className="min-w-[200px]">Job Title</TableHead>
                           <TableHead className="w-[80px]">District</TableHead>
                           <TableHead>Owner</TableHead>
                           <TableHead className="w-[80px]">Zipcode</TableHead>
