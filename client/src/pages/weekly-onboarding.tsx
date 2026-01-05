@@ -260,7 +260,26 @@ export default function WeeklyOnboarding() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-md border overflow-x-auto">
+                  <div className="rounded-md border">
+                    {/* Top scrollbar - synced with table scroll */}
+                    <div 
+                      className="overflow-x-auto scrollbar-thin"
+                      onScroll={(e) => {
+                        const target = e.target as HTMLDivElement;
+                        const tableContainer = target.nextElementSibling as HTMLDivElement;
+                        if (tableContainer) tableContainer.scrollLeft = target.scrollLeft;
+                      }}
+                    >
+                      <div style={{ height: '1px', width: '2000px' }} />
+                    </div>
+                    <div 
+                      className="overflow-x-auto"
+                      onScroll={(e) => {
+                        const target = e.target as HTMLDivElement;
+                        const topScroller = target.previousElementSibling as HTMLDivElement;
+                        if (topScroller) topScroller.scrollLeft = target.scrollLeft;
+                      }}
+                    >
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -339,6 +358,7 @@ export default function WeeklyOnboarding() {
                         ))}
                       </TableBody>
                     </Table>
+                    </div>
                   </div>
                 )}
               </CardContent>
