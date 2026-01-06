@@ -1142,6 +1142,7 @@ export class SnowflakeSyncService {
       
       // Query with explicit column names for better performance
       // LEFT JOIN ONBOARDING table to get SPECIALTIES with case-insensitive matching
+      // LEFT JOIN DRIVELINE_ALL_TECHS to get EMPLOYMENT_STATUS
       const query = `
         SELECT 
           hr.SERVICE_DT,
@@ -1155,10 +1156,13 @@ export class SnowflakeSyncService {
           hr.LOCATION,
           hr.LOCATION_CITY,
           hr.PLANNING_AREA_NAME,
-          ob.SPECIALTIES
+          ob.SPECIALTIES,
+          techs.EMPLOYMENT_STATUS
         FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW hr
         LEFT JOIN DEV_SEGNO.WORKFLOW_TBLS.ONBOARDING ob
           ON UPPER(TRIM(hr.ENTERPRISE_ID)) = UPPER(TRIM(ob.ENTERPRISE_ID))
+        LEFT JOIN PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS techs
+          ON UPPER(TRIM(hr.ENTERPRISE_ID)) = UPPER(TRIM(techs.ENTERPRISE_ID))
         WHERE hr.SERVICE_DT >= '2026-01-04'
         ORDER BY hr.SERVICE_DT DESC
       `;
@@ -1184,6 +1188,7 @@ export class SnowflakeSyncService {
         LOCATION_CITY: string;
         PLANNING_AREA_NAME: string;
         SPECIALTIES: string;
+        EMPLOYMENT_STATUS: string;
       }>;
 
       console.log(`[OnboardingHires] Fetched ${rows.length} new hires from Snowflake`);
@@ -1207,6 +1212,7 @@ export class SnowflakeSyncService {
         locationCity: row.LOCATION_CITY?.trim() || null,
         planningAreaName: row.PLANNING_AREA_NAME?.trim() || null,
         specialties: row.SPECIALTIES?.trim() || null,
+        employmentStatus: row.EMPLOYMENT_STATUS?.trim() || null,
       }));
 
       const upsertedCount = await storage.bulkUpsertOnboardingHires(hires);

@@ -332,6 +332,7 @@ export default function WeeklyOnboarding() {
                             </div>
                           </TableHead>
                           <TableHead>Employee Name</TableHead>
+                          <TableHead className="w-[100px]">Emp. Status</TableHead>
                           <TableHead className="w-[100px]">Enterprise ID</TableHead>
                           <TableHead className="w-[60px]">State</TableHead>
                           <TableHead>Action Reason</TableHead>
@@ -361,6 +362,7 @@ export default function WeeklyOnboarding() {
                                 : 'N/A'}
                             </TableCell>
                             <TableCell className="font-medium">{hire.employeeName}</TableCell>
+                            <TableCell className="text-sm">{hire.employmentStatus || '-'}</TableCell>
                             <TableCell className="font-mono text-sm">{hire.enterpriseId || '-'}</TableCell>
                             <TableCell>{hire.workState || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.actionReasonDescr || '-'}</TableCell>
