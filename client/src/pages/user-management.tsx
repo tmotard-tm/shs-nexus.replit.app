@@ -712,11 +712,10 @@ export default function UserManagement() {
                             editForm.reset({
                               username: user.username,
                               email: user.email,
-                              role: user.role,
-                              departments: user.departments || [],
                             });
                           }}
                           data-testid={`button-edit-${user.id}`}
+                          title="Edit Profile"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -739,11 +738,14 @@ export default function UserManagement() {
         </CardContent>
       </Card>
 
-      {/* Edit User Dialog */}
+      {/* Edit User Profile Dialog - For username/email only */}
       <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
+            <DialogTitle>Edit User Profile</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Update basic profile information. Use "Manage Role & Departments" to change access settings.
+            </p>
           </DialogHeader>
           <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
             <div>
@@ -765,63 +767,12 @@ export default function UserManagement() {
                 {...editForm.register("email")}
               />
             </div>
-            <div>
-              <Label htmlFor="edit-role">Role</Label>
-              <Select 
-                value={editForm.watch("role")} 
-                onValueChange={(value) => editForm.setValue("role", value)}
-              >
-                <SelectTrigger data-testid="select-edit-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableRoles.map(role => (
-                    <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Department Access</Label>
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                {[
-                  { code: 'NTAO', label: 'NTAO' },
-                  { code: 'ASSETS', label: 'Assets' },
-                  { code: 'INVENTORY', label: 'Inventory' },
-                  { code: 'FLEET', label: 'Fleet' }
-                ].map(dept => (
-                  <div key={dept.code} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id={`edit-dept-${dept.code}`}
-                      checked={(editForm.watch("departments") as string[] | undefined)?.includes(dept.code) || false}
-                      onChange={(e) => {
-                        const currentDepts = (editForm.watch("departments") as string[] | undefined) || [];
-                        if (e.target.checked) {
-                          editForm.setValue("departments", [...currentDepts, dept.code]);
-                        } else {
-                          editForm.setValue("departments", currentDepts.filter(d => d !== dept.code));
-                        }
-                      }}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      data-testid={`checkbox-edit-dept-${dept.code.toLowerCase()}`}
-                    />
-                    <Label htmlFor={`edit-dept-${dept.code}`} className="text-sm font-normal">
-                      {dept.label}
-                    </Label>
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Select which department queues this user can access
-              </p>
-            </div>
             <div className="flex justify-end space-x-2">
               <Button type="button" variant="outline" onClick={() => setEditingUser(null)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={updateUserMutation.isPending} data-testid="button-update-user">
-                {updateUserMutation.isPending ? "Updating..." : "Update User"}
+                {updateUserMutation.isPending ? "Updating..." : "Update Profile"}
               </Button>
             </div>
           </form>
