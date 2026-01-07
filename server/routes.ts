@@ -5929,6 +5929,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk create onboarding hires (manual import)
+  app.post("/api/onboarding-hires/bulk", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'superadmin') {
+        return res.status(403).json({ message: "Only superadmin users can bulk import" });
+      }
+
+      const { records } = req.body;
+      if (!Array.isArray(records) || records.length === 0) {
+        return res.status(400).json({ message: "Records array is required" });
+      }
+
+      let created = 0;
+      for (const record of records) {
+        try {
+          const hire = {
+            serviceDate: record.serviceDate,
+            employeeName: record.employeeName,
+            enterpriseId: record.enterpriseId || null,
+            district: record.district || null,
+            assignedTruckNo: record.assignedTruckNo || null,
+            truckAssigned: !!record.assignedTruckNo,
+            notes: record.notes || null,
+            workState: record.workState || null,
+            actionReasonDescr: record.actionReasonDescr || null,
+            jobTitle: record.jobTitle || null,
+            techType: record.techType || null,
+            zipcode: record.zipcode || null,
+            locationCity: record.locationCity || null,
+            planningAreaName: record.planningAreaName || null,
+          };
+          await storage.upsertOnboardingHire(hire);
+          created++;
+        } catch (err: any) {
+          console.error(`Error importing record ${record.employeeName}:`, err.message);
+        }
+      }
+
+      res.json({ success: true, created, total: records.length });
+    } catch (error: any) {
+      console.error("Error bulk importing onboarding hires:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get truck inventory summary with items (total pieces and total avg cost)
   app.get("/api/truck-inventory/summary/:truck", requireAuth, async (req: any, res) => {
     try {

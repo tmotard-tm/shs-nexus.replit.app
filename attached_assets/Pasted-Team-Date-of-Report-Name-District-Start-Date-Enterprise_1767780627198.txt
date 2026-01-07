@@ -1,0 +1,29 @@
+Team	Date of Report	Name	District	Start Date	Enterprise ID	Tech ID	Specialties	Truck Number	Home Dispatch	Employment Terminate	completion_status	is_mail_sent	Additional Mentor Required?	Country	Address
+Monica, Cheryl & Machell	Dec 29th	Richard eugene Paulson	8162	2025-12-07	rpauls0	26856	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	115 Maple Drive
+Carol & Tasha	Dec 29th	Juan Puentes	8147	2025-12-14	jpuente	626648	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	12721 Mi Acre Drive
+Carol & Tasha	Dec 29th	Michael Jones	7995	2025-12-14	mjone10	5629	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	217 Star Street
+Carol & Tasha	Dec 29th	Jacob Wilkins	8366	2025-12-14	jwilki0	947242	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	2448 Wesley Ln
+Monica, Cheryl & Machell	Dec 29th	Demarcus Peeples	8206	2025-12-14	dpeeple	540427	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	1405 Wooded Drive, Apt C11
+Rob & Andrea	Dec 29th	Shawn e Lachance	8175	2025-12-14	slachan	781559	Cooking,Microwave,Laundry,Dishwasher, HA PM Check	46574	YES		Complete	1	 NO	US	1275 White House Road
+Carol & Tasha	Dec 29th	Fabian Meraz	8228	2025-12-21	fmeraz	502633	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	807 S 6th Ave
+Carol & Tasha	Dec 29th	Victor Alvarez	8169	2025-12-21	valvar2	758938	HVAC		YES		Complete	1	 NO	US	5350 W 80th Ave Apt.C308
+Monica, Cheryl & Machell	Dec 29th	Stephen f Sabio-neibart	3132	2025-12-21	ssabion	935379	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	221 Sherando Circle
+Monica, Cheryl & Machell	Dec 29th	Wyatt e Vandevelde	8096	2025-12-21	wvandev	780486	Cooking,Microwave,Laundry,Dishwasher, HA PM Check		YES		Complete	1	 NO	US	311 Albers Street
+Monica, Cheryl & Machell	Dec 29th	Justin Elmore	8206	2025-12-21	jelmore	626481	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	52 Beaver Run Cv.
+Monica, Cheryl & Machell	Dec 29th	Benjamin s Vrell	8096	2025-12-21	bvrell	818609	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	170 Cunningham Ave
+Monica, Cheryl & Machell	Dec 29th	Sayed r Rahman	3132	2025-12-21	srahman	934679	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		 NO		Complete	1	 NO	US	12672 Dulcinea Pl
+Monica, Cheryl & Machell	Dec 29th	William Hartley	3132	2025-12-21	whartle	602797	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	1637 Rock Cliff Dr.
+Monica, Cheryl & Machell	Dec 29th	John Graham	8206	2025-12-21	jgraha4	600221	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	612 S Willow Ave D-32
+Monica, Cheryl & Machell	Dec 29th	Shakil Miller	3132	2025-12-21	smille3	861146	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	34 North Kirkwood Street
+Rob & Andrea	Dec 29th	Julian c Carmichael	7670	2025-12-21	jcarmic	926113	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Complete	1	 NO	US	8 West Center St
+Rob & Andrea	Dec 29th	Keyon Smith	8175	2025-12-21	ksmith	745	Cooking,Microwave,Laundry,Dishwasher, HA PM Check	46966	YES		Complete	1	 NO	US	3608 Tyre Neck Rd, Apt B
+Carol & Tasha	Dec 29th	Keychaundre Hill	8184	2025-12-28	khill5	531202	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		 NO		Complete	1	 NO	US	3652 Colegrove St, 215 Daphne Way
+Monica, Cheryl & Machell	Dec 29th	Draytyn J Ronshausen	3132	2025-12-28	dronsha		Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		 NO		Draft	1	 NO	US	679 Berryville Ave, 679
+Monica, Cheryl & Machell	Dec 29th	Gregory D Leban Jr	8206	2025-12-28	gleban		HVAC		 NO		Draft	1	 NO	US	323 Sharon Ave
+Monica, Cheryl & Machell	Dec 29th	Lenathan Gee	8206	2025-12-28	lgee0		Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		 NO		Draft	1	 NO	US	936 Younglove St
+Rob & Andrea	Dec 29th	Dewarren Gates	7670	2025-12-28	dgates	781831	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		 NO		Complete	1	 NO	US	113 Ashland St
+Rob & Andrea	Dec 29th	Trevon Johnson	4766	2025-12-28	tjohns7	554824	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check	22401	 NO		Complete	1	 NO	US	5712 Belmar Dr
+Rob & Andrea	Dec 29th	James Prosser	8175	2025-12-28	jprosse		Cooking,Microwave,Laundry,Dishwasher, HA PM Check		 NO		Draft	1	 NO	US	3206 Moody Ave
+Rob & Andrea	Dec 29th	John Holland	4766	2025-12-28	jholla2	827428	Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check	22161	 NO		Complete	1	 NO	US	624 Circle Dr
+Rob & Andrea	Dec 29th	David Peyton	8175	2025-12-28	dpeyton		Cooking,Microwave,Laundry,Dishwasher,Refrigerator, HA PM Check		YES		Draft	1	 NO	US	209 W Gordon Ave
+Rob & Andrea	Dec 29th	Leonel Torres	8035	2025-12-28	ltorre3		HVAC	21267	 NO		Draft	1	 NO	US	2400 Cedar Hill Dr
