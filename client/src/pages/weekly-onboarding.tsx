@@ -508,7 +508,7 @@ export default function WeeklyOnboarding() {
                             </TableCell>
                             <TableCell className="font-medium">{hire.employeeName}</TableCell>
                             <TableCell className="text-sm">{hire.employmentStatus || '-'}</TableCell>
-                            <TableCell className="font-mono text-sm">{hire.enterpriseId || '-'}</TableCell>
+                            <TableCell className="font-mono text-sm">{hire.enterpriseId?.toUpperCase() || '-'}</TableCell>
                             <TableCell>
                               {hire.truckAssigned ? (
                                 <Badge variant="default" className="bg-green-600">
