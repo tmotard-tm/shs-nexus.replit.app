@@ -5895,6 +5895,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Enrich onboarding hires with Snowflake data
+  app.post("/api/snowflake/enrich/onboarding-hires", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only superadmin users can trigger enrichment" });
+      }
+      
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.enrichOnboardingHires();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error enriching onboarding hires:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Get all onboarding hires
   app.get("/api/onboarding-hires", requireAuth, async (req: any, res) => {
     try {

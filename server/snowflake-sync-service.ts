@@ -1249,6 +1249,150 @@ export class SnowflakeSyncService {
 
     return result;
   }
+
+  /**
+   * Enrich existing onboarding hires with Snowflake data by matching enterprise_id
+   * This updates State, Action Reason, Job Title, Emp Status, Zipcode, City, Planning Area
+   */
+  async enrichOnboardingHires(): Promise<{
+    success: boolean;
+    enrichedCount: number;
+    errors: string[];
+  }> {
+    const result = {
+      success: false,
+      enrichedCount: 0,
+      errors: [] as string[],
+    };
+
+    if (!isSnowflakeConfigured()) {
+      result.errors.push('Snowflake is not configured');
+      return result;
+    }
+
+    try {
+      // Get all onboarding hires with enterprise IDs
+      const allHires = await storage.getOnboardingHires();
+      const hiresWithIds = allHires.filter(h => h.enterpriseId && h.enterpriseId.trim() !== '');
+      
+      if (hiresWithIds.length === 0) {
+        result.success = true;
+        return result;
+      }
+
+      console.log(`[EnrichOnboarding] Found ${hiresWithIds.length} hires with enterprise IDs to enrich`);
+
+      const snowflake = getSnowflakeService();
+      
+      // Build list of enterprise IDs to look up
+      const enterpriseIds = hiresWithIds.map(h => h.enterpriseId!.trim().toUpperCase());
+      const idList = enterpriseIds.map(id => `'${id}'`).join(',');
+
+      // Query HR roster for these enterprise IDs
+      const hrQuery = `
+        SELECT 
+          UPPER(TRIM(ENTERPRISE_ID)) as ENTERPRISE_ID,
+          WORK_STATE,
+          ACTION_REASON_DESCR,
+          JOBTITLE,
+          LOCATION,
+          LOCATION_CITY,
+          PLANNING_AREA_NAME
+        FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW
+        WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${idList})
+      `;
+
+      // Query DRIVELINE_ALL_TECHS for employment status
+      const techsQuery = `
+        SELECT 
+          UPPER(TRIM(ENTERPRISE_ID)) as ENTERPRISE_ID,
+          EMPLOYMENT_STATUS
+        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS
+        WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${idList})
+      `;
+
+      // Query ONBOARDING for specialties
+      const onboardingQuery = `
+        SELECT 
+          UPPER(TRIM(ENTERPRISE_ID)) as ENTERPRISE_ID,
+          SPECIALTIES
+        FROM DEV_SEGNO.WORKFLOW_TBLS.ONBOARDING
+        WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${idList})
+      `;
+
+      console.log('[EnrichOnboarding] Querying Snowflake for HR data...');
+      
+      const [hrRows, techRows, obRows] = await Promise.all([
+        snowflake.executeQuery(hrQuery) as Promise<Array<{
+          ENTERPRISE_ID: string;
+          WORK_STATE: string;
+          ACTION_REASON_DESCR: string;
+          JOBTITLE: string;
+          LOCATION: string;
+          LOCATION_CITY: string;
+          PLANNING_AREA_NAME: string;
+        }>>,
+        snowflake.executeQuery(techsQuery) as Promise<Array<{
+          ENTERPRISE_ID: string;
+          EMPLOYMENT_STATUS: string;
+        }>>,
+        snowflake.executeQuery(onboardingQuery) as Promise<Array<{
+          ENTERPRISE_ID: string;
+          SPECIALTIES: string;
+        }>>
+      ]);
+
+      console.log(`[EnrichOnboarding] Found: ${hrRows.length} HR matches, ${techRows.length} tech matches, ${obRows.length} onboarding matches`);
+
+      // Build lookup maps
+      const hrMap = new Map(hrRows.map(r => [r.ENTERPRISE_ID, r]));
+      const techMap = new Map(techRows.map(r => [r.ENTERPRISE_ID, r]));
+      const obMap = new Map(obRows.map(r => [r.ENTERPRISE_ID, r]));
+
+      // Update each hire with found data
+      for (const hire of hiresWithIds) {
+        const eid = hire.enterpriseId!.trim().toUpperCase();
+        const hrData = hrMap.get(eid);
+        const techData = techMap.get(eid);
+        const obData = obMap.get(eid);
+
+        if (hrData || techData || obData) {
+          const updates: Record<string, any> = {};
+
+          if (hrData) {
+            if (hrData.WORK_STATE && !hire.workState) updates.workState = hrData.WORK_STATE.trim();
+            if (hrData.ACTION_REASON_DESCR && !hire.actionReasonDescr) updates.actionReasonDescr = hrData.ACTION_REASON_DESCR.trim();
+            if (hrData.JOBTITLE && !hire.jobTitle) updates.jobTitle = hrData.JOBTITLE.trim();
+            if (hrData.LOCATION && !hire.zipcode) updates.zipcode = hrData.LOCATION.trim();
+            if (hrData.LOCATION_CITY && !hire.locationCity) updates.locationCity = hrData.LOCATION_CITY.trim();
+            if (hrData.PLANNING_AREA_NAME && !hire.planningAreaName) updates.planningAreaName = hrData.PLANNING_AREA_NAME.trim();
+          }
+
+          if (techData) {
+            if (techData.EMPLOYMENT_STATUS && !hire.employmentStatus) updates.employmentStatus = techData.EMPLOYMENT_STATUS.trim();
+          }
+
+          if (obData) {
+            if (obData.SPECIALTIES && !hire.specialties) updates.specialties = obData.SPECIALTIES.trim();
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await storage.updateOnboardingHire(hire.id, updates);
+            result.enrichedCount++;
+            console.log(`[EnrichOnboarding] Enriched ${hire.employeeName} (${eid}) with ${Object.keys(updates).length} fields`);
+          }
+        }
+      }
+
+      result.success = true;
+      console.log(`[EnrichOnboarding] Completed: ${result.enrichedCount} records enriched`);
+    } catch (error: any) {
+      result.errors.push(`Enrich failed: ${error.message}`);
+      console.error('[EnrichOnboarding] Failed:', error);
+    }
+
+    return result;
+  }
 }
 
 let syncServiceInstance: SnowflakeSyncService | null = null;

@@ -126,6 +126,26 @@ export default function WeeklyOnboarding() {
     },
   });
 
+  const enrichMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest('POST', '/api/snowflake/enrich/onboarding-hires');
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Enrichment Complete",
+        description: `Updated ${data.enrichedCount} records with Snowflake data`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/onboarding-hires'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Enrichment Failed",
+        description: error.message || "Failed to enrich data from Snowflake",
+        variant: "destructive",
+      });
+    },
+  });
+
   const filteredHires = hires
     .filter(hire => {
       const matchesSearch = !searchQuery || 
@@ -213,6 +233,25 @@ export default function WeeklyOnboarding() {
                         <span>Last synced: {format(new Date(lastSync.completedAt), 'MMM d, yyyy h:mm a')}</span>
                       </div>
                     ) : null}
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => enrichMutation.mutate()}
+                      disabled={enrichMutation.isPending}
+                      data-testid="button-enrich-data"
+                    >
+                      {enrichMutation.isPending ? (
+                        <>
+                          <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                          Enriching...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                          Enrich from Snowflake
+                        </>
+                      )}
+                    </Button>
                   </div>
                 </div>
               </CardHeader>
