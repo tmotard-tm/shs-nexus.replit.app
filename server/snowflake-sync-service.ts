@@ -1320,9 +1320,21 @@ export class SnowflakeSyncService {
         WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${idList})
       `;
 
+      // Query TPMS_EXTRACT for truck numbers
+      const tpmsQuery = `
+        SELECT 
+          UPPER(TRIM(LDAPID)) as ENTERPRISE_ID,
+          TRUCKNO as TRUCK_NO
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+        WHERE UPPER(TRIM(LDAPID)) IN (${idList})
+          AND TRUCKNO IS NOT NULL
+          AND TRIM(TRUCKNO) != ''
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(LDAPID)) ORDER BY FILE_DATE DESC) = 1
+      `;
+
       console.log('[EnrichOnboarding] Querying Snowflake for HR data...');
       
-      const [hrRows, techRows, obRows] = await Promise.all([
+      const [hrRows, techRows, obRows, tpmsRows] = await Promise.all([
         snowflake.executeQuery(hrQuery) as Promise<Array<{
           ENTERPRISE_ID: string;
           WORK_STATE: string;
@@ -1339,15 +1351,20 @@ export class SnowflakeSyncService {
         snowflake.executeQuery(onboardingQuery) as Promise<Array<{
           ENTERPRISE_ID: string;
           SPECIALTIES: string;
+        }>>,
+        snowflake.executeQuery(tpmsQuery) as Promise<Array<{
+          ENTERPRISE_ID: string;
+          TRUCK_NO: string;
         }>>
       ]);
 
-      console.log(`[EnrichOnboarding] Found: ${hrRows.length} HR matches, ${techRows.length} tech matches, ${obRows.length} onboarding matches`);
+      console.log(`[EnrichOnboarding] Found: ${hrRows.length} HR matches, ${techRows.length} tech matches, ${obRows.length} onboarding matches, ${tpmsRows.length} TPMS matches`);
 
       // Build lookup maps
       const hrMap = new Map(hrRows.map(r => [r.ENTERPRISE_ID, r]));
       const techMap = new Map(techRows.map(r => [r.ENTERPRISE_ID, r]));
       const obMap = new Map(obRows.map(r => [r.ENTERPRISE_ID, r]));
+      const tpmsMap = new Map(tpmsRows.map(r => [r.ENTERPRISE_ID, r]));
 
       // Update each hire with found data
       for (const hire of hiresWithIds) {
@@ -1355,8 +1372,9 @@ export class SnowflakeSyncService {
         const hrData = hrMap.get(eid);
         const techData = techMap.get(eid);
         const obData = obMap.get(eid);
+        const tpmsData = tpmsMap.get(eid);
 
-        if (hrData || techData || obData) {
+        if (hrData || techData || obData || tpmsData) {
           const updates: Record<string, any> = {};
 
           if (hrData) {
@@ -1374,6 +1392,20 @@ export class SnowflakeSyncService {
 
           if (obData) {
             if (obData.SPECIALTIES && !hire.specialties) updates.specialties = obData.SPECIALTIES.trim();
+          }
+
+          // Only auto-populate truck number from TPMS if not manually assigned
+          if (tpmsData && tpmsData.TRUCK_NO) {
+            const isManuallyAssigned = hire.truckAssignmentSource === 'manual';
+            if (!isManuallyAssigned) {
+              const truckNo = tpmsData.TRUCK_NO.trim();
+              if (truckNo && truckNo !== hire.assignedTruckNo) {
+                updates.assignedTruckNo = truckNo;
+                updates.truckAssigned = true;
+                updates.truckAssignmentSource = 'tpms';
+                console.log(`[EnrichOnboarding] Auto-assigning truck ${truckNo} to ${hire.employeeName} from TPMS`);
+              }
+            }
           }
 
           if (Object.keys(updates).length > 0) {

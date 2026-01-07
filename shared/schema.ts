@@ -587,6 +587,7 @@ export const onboardingHires = pgTable("onboarding_hires", {
   // Tracking fields
   truckAssigned: boolean("truck_assigned").notNull().default(false),
   assignedTruckNo: varchar("assigned_truck_no", { length: 20 }),
+  truckAssignmentSource: varchar("truck_assignment_source", { length: 20 }), // 'tpms' or 'manual'
   assignedAt: timestamp("assigned_at"),
   assignedBy: text("assigned_by"),
   notes: text("notes"),

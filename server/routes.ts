@@ -6023,11 +6023,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       const currentUser = await storage.getUserByUsername(req.user.username);
       
-      const updates = {
+      const updates: Record<string, any> = {
         ...req.body,
         assignedBy: currentUser?.username,
         assignedAt: req.body.truckAssigned ? new Date() : null,
       };
+      
+      // Mark as manual assignment when user assigns a truck
+      if (req.body.assignedTruckNo && req.body.assignedTruckNo.trim()) {
+        updates.truckAssignmentSource = 'manual';
+      } else if (!req.body.truckAssigned) {
+        // Clear source when unassigning
+        updates.truckAssignmentSource = null;
+      }
       
       const updated = await storage.updateOnboardingHire(id, updates);
       if (!updated) {
