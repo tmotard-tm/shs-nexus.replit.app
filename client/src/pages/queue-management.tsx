@@ -122,27 +122,34 @@ export default function UnifiedQueueManagement() {
   const [selectedReassignee, setSelectedReassignee] = useState<string>("");
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
 
-  // Auto-populate module selection based on user's departments
-  useEffect(() => {
-    if (user) {
-      // Get accessible modules using the departments array
-      const accessibleModules = getUserAccessibleModules(user);
-      setSelectedModules(accessibleModules);
-    } else {
-      setSelectedModules([]);
-    }
-  }, [user]);
+  // Get accessible modules for current user
+  const accessibleModules = user ? getUserAccessibleModules(user) : [];
 
-  // Handle URL parameters for employee filter (e.g., from offboarding page redirect)
+  // Handle URL parameters for department and employee filters
   useEffect(() => {
-    if (searchString) {
+    if (searchString && user) {
       const params = new URLSearchParams(searchString);
+      const deptParam = params.get('dept');
       const employeeId = params.get('employeeId');
       const techRacfId = params.get('techRacfId');
       const techName = params.get('techName');
       
+      // Handle department deep-link
+      if (deptParam) {
+        const deptModule = departmentToQueueModule(deptParam.toUpperCase());
+        if (deptModule && accessibleModules.includes(deptModule)) {
+          setSelectedModules([deptModule]);
+        } else if (accessibleModules.length > 0) {
+          // Fallback to all accessible if invalid department
+          setSelectedModules(accessibleModules);
+        }
+      } else if (selectedModules.length === 0 && accessibleModules.length > 0) {
+        // Default to all accessible modules if no dept specified
+        setSelectedModules(accessibleModules);
+      }
+      
+      // Handle employee filter
       if (employeeId || techRacfId || techName) {
-        // Set the employee filter from URL parameters
         setSelectedEmployee({
           id: employeeId || '',
           employeeId: employeeId || '',
@@ -150,16 +157,30 @@ export default function UnifiedQueueManagement() {
           techName: techName || '',
         });
         
-        // Clear URL parameters after setting filter (to avoid re-applying on refresh)
-        navigate('/queue-management', { replace: true });
-        
         toast({
           title: "Filter Applied",
           description: `Showing tasks for ${techName || employeeId || techRacfId}`,
         });
       }
+      
+      // Clear URL parameters after applying (keep URL clean)
+      if (deptParam || employeeId || techRacfId || techName) {
+        navigate('/queue-management', { replace: true });
+      }
+    } else if (user && selectedModules.length === 0 && accessibleModules.length > 0) {
+      // Auto-populate modules on initial load
+      setSelectedModules(accessibleModules);
     }
-  }, [searchString, navigate, toast]);
+  }, [searchString, user, accessibleModules.length]);
+
+  // Handle department tab click - updates URL and selected modules
+  const handleDepartmentTabClick = (module: QueueModule | 'all') => {
+    if (module === 'all') {
+      setSelectedModules(accessibleModules);
+    } else {
+      setSelectedModules([module]);
+    }
+  };
 
   // Fetch unified queue items
   const { data: queueItems = [], isLoading } = useQuery({
@@ -674,6 +695,46 @@ export default function UnifiedQueueManagement() {
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Department Tabs - Quick department switching */}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant={selectedModules.length === accessibleModules.length ? "default" : "outline"}
+            size="sm"
+            onClick={() => handleDepartmentTabClick('all')}
+            className="flex items-center gap-2"
+            data-testid="tab-dept-all"
+          >
+            <List className="h-4 w-4" />
+            All Queues
+            <Badge variant="secondary" className="ml-1">
+              {queueItems.filter(item => item.status === 'pending' || item.status === 'in_progress').length}
+            </Badge>
+          </Button>
+          {accessibleModules.map((module) => {
+            const moduleOpenCount = queueItems.filter(
+              item => item.module === module && (item.status === 'pending' || item.status === 'in_progress')
+            ).length;
+            const isActive = selectedModules.length === 1 && selectedModules[0] === module;
+            
+            return (
+              <Button
+                key={module}
+                variant={isActive ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleDepartmentTabClick(module)}
+                className={`flex items-center gap-2 ${isActive ? getModuleColor(module).replace('bg-', 'bg-') : ''}`}
+                data-testid={`tab-dept-${module}`}
+              >
+                <span>{getModuleIcon(module)}</span>
+                {moduleLabels[module]}
+                <Badge variant={isActive ? "outline" : "secondary"} className="ml-1">
+                  {moduleOpenCount}
+                </Badge>
+              </Button>
+            );
+          })}
         </div>
 
         {/* Filters and Search - Collapsible */}
