@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,7 +16,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { format } from "date-fns";
+import { format, startOfWeek, endOfWeek, getWeek, getYear, parseISO, isWithinInterval } from "date-fns";
 import type { OnboardingHire } from "@shared/schema";
 
 // District to Owner mapping based on last 4 digits
@@ -65,6 +66,7 @@ export default function WeeklyOnboarding() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showAssignedOnly, setShowAssignedOnly] = useState(false);
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
+  const [weekFilter, setWeekFilter] = useState<string>("all");
   const [selectedHire, setSelectedHire] = useState<OnboardingHire | null>(null);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [truckNumber, setTruckNumber] = useState("");
@@ -176,6 +178,30 @@ export default function WeeklyOnboarding() {
     },
   });
 
+  // Generate week options from hires data
+  const weekOptions = (() => {
+    const weeks = new Map<string, { start: Date; end: Date; label: string }>();
+    hires.forEach(hire => {
+      if (hire.serviceDate) {
+        const date = new Date(hire.serviceDate);
+        const weekStart = startOfWeek(date, { weekStartsOn: 0 }); // Sunday start
+        const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
+        const year = getYear(date);
+        const week = getWeek(date, { weekStartsOn: 0 });
+        const key = `${year}-W${week.toString().padStart(2, '0')}`;
+        if (!weeks.has(key)) {
+          weeks.set(key, {
+            start: weekStart,
+            end: weekEnd,
+            label: `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d, yyyy')} (Week ${week})`
+          });
+        }
+      }
+    });
+    // Sort by date ascending
+    return Array.from(weeks.entries()).sort((a, b) => a[1].start.getTime() - b[1].start.getTime());
+  })();
+
   const filteredHires = hires
     .filter(hire => {
       const matchesSearch = !searchQuery || 
@@ -184,7 +210,19 @@ export default function WeeklyOnboarding() {
       const matchesAssigned = !showAssignedOnly || hire.truckAssigned;
       const matchesUnassigned = !showUnassignedOnly || !hire.truckAssigned;
       
-      return matchesSearch && matchesAssigned && matchesUnassigned;
+      // Week filter
+      let matchesWeek = true;
+      if (weekFilter !== "all" && hire.serviceDate) {
+        const weekData = weekOptions.find(([key]) => key === weekFilter);
+        if (weekData) {
+          const date = new Date(hire.serviceDate);
+          matchesWeek = isWithinInterval(date, { start: weekData[1].start, end: weekData[1].end });
+        }
+      } else if (weekFilter !== "all" && !hire.serviceDate) {
+        matchesWeek = false;
+      }
+      
+      return matchesSearch && matchesAssigned && matchesUnassigned && matchesWeek;
     })
     .sort((a, b) => {
       // Sort by service date ascending (oldest to newest)
@@ -332,8 +370,8 @@ export default function WeeklyOnboarding() {
                     </Card>
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    <div className="relative flex-1 max-w-sm">
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="relative flex-1 max-w-sm min-w-[200px]">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         placeholder="Search by employee name..."
@@ -342,6 +380,20 @@ export default function WeeklyOnboarding() {
                         className="pl-9"
                         data-testid="input-search-hires"
                       />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-muted-foreground" />
+                      <Select value={weekFilter} onValueChange={setWeekFilter}>
+                        <SelectTrigger className="w-[280px]" data-testid="select-week-filter">
+                          <SelectValue placeholder="Filter by week" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Weeks</SelectItem>
+                          {weekOptions.map(([key, data]) => (
+                            <SelectItem key={key} value={key}>{data.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center space-x-2">
