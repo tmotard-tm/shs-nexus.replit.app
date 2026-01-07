@@ -139,8 +139,19 @@ export default function WeeklyOnboarding() {
     try {
       const response = await fetch('/api/onboarding-hires/export', {
         credentials: 'include',
+        headers: {
+          'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
       });
-      if (!response.ok) throw new Error('Export failed');
+      
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || `Export failed: ${response.status}`);
+        }
+        throw new Error(`Export failed: ${response.status} ${response.statusText}`);
+      }
       
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
@@ -157,6 +168,7 @@ export default function WeeklyOnboarding() {
         description: "Excel file downloaded successfully",
       });
     } catch (error: any) {
+      console.error('[Export XLSX] Error:', error);
       toast({
         title: "Export Failed",
         description: error.message || "Failed to export data",
