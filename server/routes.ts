@@ -1389,8 +1389,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // NTAO Queue Module routes
-  app.get("/api/ntao-queue", async (req, res) => {
+  app.get("/api/ntao-queue", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'ntao')) {
+        return res.status(403).json({ message: "Access denied to NTAO queue" });
+      }
       const queueItems = await storage.getNTAOQueueItems();
       res.json(queueItems);
     } catch (error) {
@@ -1398,8 +1402,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/ntao-queue/:id", async (req, res) => {
+  app.get("/api/ntao-queue/:id", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'ntao')) {
+        return res.status(403).json({ message: "Access denied to NTAO queue" });
+      }
       const queueItem = await storage.getNTAOQueueItem(req.params.id);
       if (!queueItem) {
         return res.status(404).json({ message: "NTAO queue item not found" });
@@ -1451,8 +1459,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/ntao-queue/:id/assign", async (req, res) => {
+  app.patch("/api/ntao-queue/:id/assign", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'ntao')) {
+        return res.status(403).json({ message: "Access denied to NTAO queue" });
+      }
       const { assigneeId } = req.body;
       if (!assigneeId) {
         return res.status(400).json({ message: "Assignee ID is required" });
@@ -1467,8 +1479,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/ntao-queue/:id/complete", async (req, res) => {
+  app.patch("/api/ntao-queue/:id/complete", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'ntao')) {
+        return res.status(403).json({ message: "Access denied to NTAO queue" });
+      }
       const { completedBy } = req.body;
       if (!completedBy) {
         return res.status(400).json({ message: "Completed by user ID is required" });
@@ -1484,8 +1500,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Assets Queue Module routes
-  app.get("/api/assets-queue", async (req, res) => {
+  app.get("/api/assets-queue", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
       const queueItems = await storage.getAssetsQueueItems();
       res.json(queueItems);
     } catch (error) {
@@ -1493,8 +1513,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/assets-queue/:id", async (req, res) => {
+  app.get("/api/assets-queue/:id", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
       const queueItem = await storage.getAssetsQueueItem(req.params.id);
       if (!queueItem) {
         return res.status(404).json({ message: "Assets queue item not found" });
@@ -1546,8 +1570,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/assets-queue/:id/assign", async (req, res) => {
+  app.patch("/api/assets-queue/:id/assign", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
       const { assigneeId } = req.body;
       if (!assigneeId) {
         return res.status(400).json({ message: "Assignee ID is required" });
@@ -1562,8 +1590,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/assets-queue/:id/complete", async (req, res) => {
+  app.patch("/api/assets-queue/:id/complete", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
       const { completedBy } = req.body;
       if (!completedBy) {
         return res.status(400).json({ message: "Completed by user ID is required" });
@@ -1579,8 +1611,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Inventory Queue Module routes
-  app.get("/api/inventory-queue", async (req, res) => {
+  app.get("/api/inventory-queue", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'inventory')) {
+        return res.status(403).json({ message: "Access denied to Inventory queue" });
+      }
       const queueItems = await storage.getInventoryQueueItems();
       res.json(queueItems);
     } catch (error) {
@@ -1588,8 +1624,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/inventory-queue/:id", async (req, res) => {
+  app.get("/api/inventory-queue/:id", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'inventory')) {
+        return res.status(403).json({ message: "Access denied to Inventory queue" });
+      }
       const queueItem = await storage.getInventoryQueueItem(req.params.id);
       if (!queueItem) {
         return res.status(404).json({ message: "Inventory queue item not found" });
@@ -1641,8 +1681,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/inventory-queue/:id/assign", async (req, res) => {
+  app.patch("/api/inventory-queue/:id/assign", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'inventory')) {
+        return res.status(403).json({ message: "Access denied to Inventory queue" });
+      }
       const { assigneeId } = req.body;
       if (!assigneeId) {
         return res.status(400).json({ message: "Assignee ID is required" });
@@ -1657,8 +1701,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/inventory-queue/:id/complete", async (req, res) => {
+  app.patch("/api/inventory-queue/:id/complete", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'inventory')) {
+        return res.status(403).json({ message: "Access denied to Inventory queue" });
+      }
       const { completedBy } = req.body;
       if (!completedBy) {
         return res.status(400).json({ message: "Completed by user ID is required" });
@@ -1674,8 +1722,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Fleet Queue Module routes
-  app.get("/api/fleet-queue", async (req, res) => {
+  app.get("/api/fleet-queue", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'fleet')) {
+        return res.status(403).json({ message: "Access denied to Fleet queue" });
+      }
       const queueItems = await storage.getFleetQueueItems();
       res.json(queueItems);
     } catch (error) {
@@ -1683,8 +1735,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/fleet-queue/:id", async (req, res) => {
+  app.get("/api/fleet-queue/:id", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'fleet')) {
+        return res.status(403).json({ message: "Access denied to Fleet queue" });
+      }
       const queueItem = await storage.getFleetQueueItem(req.params.id);
       if (!queueItem) {
         return res.status(404).json({ message: "Fleet queue item not found" });
@@ -1736,8 +1792,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/fleet-queue/:id/assign", async (req, res) => {
+  app.patch("/api/fleet-queue/:id/assign", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'fleet')) {
+        return res.status(403).json({ message: "Access denied to Fleet queue" });
+      }
       const { assigneeId } = req.body;
       if (!assigneeId) {
         return res.status(400).json({ message: "Assignee ID is required" });
@@ -1752,8 +1812,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/fleet-queue/:id/complete", async (req, res) => {
+  app.patch("/api/fleet-queue/:id/complete", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'fleet')) {
+        return res.status(403).json({ message: "Access denied to Fleet queue" });
+      }
       const { completedBy } = req.body;
       if (!completedBy) {
         return res.status(400).json({ message: "Completed by user ID is required" });
