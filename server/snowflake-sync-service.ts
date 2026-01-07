@@ -1199,10 +1199,11 @@ export class SnowflakeSyncService {
       }
 
       // Transform records using exact column names
+      // IMPORTANT: enterpriseId must be UPPERCASE for TPMS matching (TPMS uses uppercase LDAPID)
       const hires = rows.map(row => ({
         serviceDate: this.formatDateForDB(row.SERVICE_DT) || new Date().toISOString().split('T')[0],
         employeeName: row.EMPL_NAME?.trim() || 'Unknown',
-        enterpriseId: row.ENTERPRISE_ID?.trim() || null,
+        enterpriseId: row.ENTERPRISE_ID?.trim()?.toUpperCase() || null,
         workState: row.WORK_STATE?.trim() || null,
         actionReasonDescr: row.ACTION_REASON_DESCR?.trim() || null,
         jobTitle: row.JOBTITLE?.trim() || null,
@@ -1284,6 +1285,9 @@ export class SnowflakeSyncService {
 
       const snowflake = getSnowflakeService();
       
+      // Ensure connection is established before running queries
+      await snowflake.connect();
+      
       // Build list of enterprise IDs to look up
       const enterpriseIds = hiresWithIds.map(h => h.enterpriseId!.trim().toUpperCase());
       const idList = enterpriseIds.map(id => `'${id}'`).join(',');
@@ -1320,16 +1324,16 @@ export class SnowflakeSyncService {
         WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${idList})
       `;
 
-      // Query TPMS_EXTRACT for truck numbers
+      // Query TPMS_EXTRACT for truck numbers (column is ENTERPRISE_ID, not LDAPID)
       const tpmsQuery = `
         SELECT 
-          UPPER(TRIM(LDAPID)) as ENTERPRISE_ID,
-          TRUCKNO as TRUCK_NO
+          UPPER(TRIM(ENTERPRISE_ID)) as ENTERPRISE_ID,
+          TRUCK_NO
         FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-        WHERE UPPER(TRIM(LDAPID)) IN (${idList})
-          AND TRUCKNO IS NOT NULL
-          AND TRIM(TRUCKNO) != ''
-        QUALIFY ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(LDAPID)) ORDER BY FILE_DATE DESC) = 1
+        WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${idList})
+          AND TRUCK_NO IS NOT NULL
+          AND TRIM(TRUCK_NO) != ''
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(ENTERPRISE_ID)) ORDER BY FILE_DATE DESC) = 1
       `;
 
       console.log('[EnrichOnboarding] Querying Snowflake for HR data...');

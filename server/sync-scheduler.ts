@@ -102,8 +102,10 @@ export function startSyncScheduler(): void {
     // Run check every minute (development only)
     intervalId = setInterval(checkAndRunSync, CHECK_INTERVAL_MS);
     
-    // Also run an immediate check in case we're starting at the sync time
-    checkAndRunSync();
+    // Delay the initial check by 5 seconds to let Snowflake fully connect
+    setTimeout(() => {
+      checkAndRunSync();
+    }, 5000);
   } else {
     console.log('[Scheduler] Production mode detected - setInterval scheduler disabled');
     console.log('[Scheduler] Syncs should be triggered via Replit Scheduled Deployments');
