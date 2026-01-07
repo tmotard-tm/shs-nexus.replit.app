@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route, useLocation, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -28,10 +28,6 @@ import Dashboard from "@/pages/dashboard";
 import Integrations from "@/pages/integrations";
 import HolmanIntegration from "@/pages/holman-integration";
 import QueueManagement from "@/pages/queue-management";
-import NTAOQueuePage from "@/pages/ntao-queue";
-import AssetsQueuePage from "@/pages/assets-queue";
-import InventoryQueuePage from "@/pages/inventory-queue";
-import FleetQueuePage from "@/pages/fleet-queue";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
 import TemplateManagement from "@/pages/template-management";
@@ -227,28 +223,21 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
+      {/* Legacy queue page redirects - redirect to unified queue management with department filter */}
       <Route path="/ntao-queue">
-        <ProtectedRoute>
-          <NTAOQueuePage />
-        </ProtectedRoute>
+        <Redirect to="/queue-management?dept=ntao" />
       </Route>
 
       <Route path="/assets-queue">
-        <ProtectedRoute>
-          <AssetsQueuePage />
-        </ProtectedRoute>
+        <Redirect to="/queue-management?dept=assets" />
       </Route>
 
       <Route path="/inventory-queue">
-        <ProtectedRoute>
-          <InventoryQueuePage />
-        </ProtectedRoute>
+        <Redirect to="/queue-management?dept=inventory" />
       </Route>
 
       <Route path="/fleet-queue">
-        <ProtectedRoute>
-          <FleetQueuePage />
-        </ProtectedRoute>
+        <Redirect to="/queue-management?dept=fleet" />
       </Route>
 
       <Route path="/decommissions-queue">
