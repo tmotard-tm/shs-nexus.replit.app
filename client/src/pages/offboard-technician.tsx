@@ -1288,7 +1288,7 @@ export default function OffboardTechnician() {
                   </ul>
                 </div>
                 <p className="text-sm">
-                  Would you like to view and manage these tasks in the Queue Management dashboard?
+                  Would you like to view and manage these tasks in the Task Queue?
                 </p>
               </div>
             </AlertDialogDescription>
@@ -1312,7 +1312,7 @@ export default function OffboardTechnician() {
               }}
               className="bg-primary"
             >
-              Go to Queue Management
+              Go to Task Queue
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

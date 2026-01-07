@@ -60,7 +60,7 @@ const getStepsForRole = (role: string, departments?: string[]): OnboardingStep[]
     ...commonSteps,
     {
       id: "queue",
-      title: "Queue Management",
+      title: "Task Queue",
       description: "This is where you'll find tasks in your assigned departments. New tasks appear here automatically, and you can pick them up to start working.",
       targetSelector: '[data-testid="link-nav-queue-management"]',
       position: "right",
@@ -102,7 +102,7 @@ const getStepsForRole = (role: string, departments?: string[]): OnboardingStep[]
     },
     {
       id: "queue-management",
-      title: "Queue Management",
+      title: "Task Queue",
       description: "Manage work queues across all departments. Assign tasks, monitor progress, and ensure work is distributed efficiently.",
       targetSelector: '[data-testid="link-nav-queue-management"]',
       position: "right",

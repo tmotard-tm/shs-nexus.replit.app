@@ -16,7 +16,7 @@ Preferred communication style: Simple, everyday language.
 - **Routing**: Wouter
 - **Forms**: React Hook Form with Zod validation
 - **Authentication**: Context-based provider with localStorage persistence
-- **UI/UX**: Modern design, unified queue management with department tabs, deep-linking, and consolidated fleet management with stats dashboard, quick lookup, filters, and vehicle detail drawers.
+- **UI/UX**: Modern design, unified Task Queue with department tabs, deep-linking, and consolidated fleet management with stats dashboard, quick lookup, filters, and vehicle detail drawers.
 
 ## Backend
 - **Framework**: Express.js with TypeScript
@@ -42,7 +42,7 @@ Preferred communication style: Simple, everyday language.
 - **API Configuration**: Management of external API connections.
 - **Template Management**: CRUD operations for workflow templates.
 - **Activity Logging**: Comprehensive audit trail.
-- **Unified Queue Management**: Single interface for all department queues with department-specific views.
+- **Task Queue**: Single interface for all department queues with department-specific views.
 - **Snowflake Sync System**: Automated daily sync for `all_techs` (employee roster), `termed_techs` (recently terminated employees for offboarding), and TPMS data.
 - **TPMS Integration**: Syncs technician-vehicle assignments from Snowflake daily snapshots.
 - **Vehicle Assignment System**: Aggregates data from Snowflake (employees), TPMS (tech-truck assignments), and Holman (fleet details).

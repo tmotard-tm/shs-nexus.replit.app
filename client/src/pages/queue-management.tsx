@@ -711,7 +711,7 @@ export default function UnifiedQueueManagement() {
             <BackButton />
             <div>
               <h1 className="text-3xl font-bold tracking-tight text-foreground" data-testid="text-page-title">
-                Queue Management Dashboard
+                Task Queue
               </h1>
               <p className="text-muted-foreground mt-2">
                 Manage tasks across all department queues from one unified interface

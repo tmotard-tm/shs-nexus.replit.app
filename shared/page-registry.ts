@@ -135,8 +135,8 @@ export const PAGES: PageDefinition[] = [
   },
   {
     key: "queueManagement",
-    label: "Queue Management",
-    description: "Unified queue management interface",
+    label: "Task Queue",
+    description: "Unified task queue interface",
     path: "/queue-management",
     icon: Clock,
     category: "queues",

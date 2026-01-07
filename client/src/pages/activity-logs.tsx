@@ -143,7 +143,7 @@ const ACTION_LABELS: Record<string, string> = {
 const ENTITY_TYPE_OPTIONS = [
   { value: "all", label: "All Types" },
   { value: "auth", label: "Authentication" },
-  { value: "queue", label: "Queue Management" },
+  { value: "queue", label: "Task Queue" },
   { value: "user", label: "User Management" },
 ];
 
