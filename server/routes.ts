@@ -13,7 +13,7 @@ import rateLimit from "express-rate-limit";
 import DOMPurify from "isomorphic-dompurify";
 import bcrypt from "bcrypt";
 import { checkPasswordCompromised, validatePasswordRequirements } from "./password-screening";
-import * as ExcelJS from "exceljs";
+import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql, eq } from "drizzle-orm";
