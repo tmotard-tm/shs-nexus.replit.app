@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Edit, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Plus, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createInsertSchema } from "drizzle-zod";
@@ -53,9 +53,8 @@ type User = typeof users.$inferSelect;
 
 export default function UserManagement() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [managingUser, setManagingUser] = useState<User | null>(null);
   const [passwordResetUser, setPasswordResetUser] = useState<User | null>(null);
-  const [roleManagementUser, setRoleManagementUser] = useState<User | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("all");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -127,13 +126,13 @@ export default function UserManagement() {
     },
   });
 
-  // Update user mutation
+  // Update user mutation (for profile: username, email)
   const updateUserMutation = useMutation({
     mutationFn: ({ id, ...userData }: { id: string } & Partial<User>) =>
       apiRequest("PATCH", `/api/users/${id}`, userData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
-      setEditingUser(null);
+      setManagingUser(null);
       toast({
         title: "Success",
         description: "User updated successfully.",
@@ -188,13 +187,13 @@ export default function UserManagement() {
     },
   });
 
-  // Admin role management mutation
+  // Admin role management mutation (for access: role, departments)
   const roleUpdateMutation = useMutation({
     mutationFn: ({ userId, updates }: { userId: string; updates: { role?: string; departments?: string[] } }) =>
       apiRequest("POST", `/api/users/${userId}/update-role`, updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
-      setRoleManagementUser(null);
+      setManagingUser(null);
       toast({
         title: "Success",
         description: "User role and permissions updated successfully.",
@@ -249,8 +248,8 @@ export default function UserManagement() {
   };
 
   const onEditSubmit = (data: Partial<User>) => {
-    if (editingUser) {
-      updateUserMutation.mutate({ id: editingUser.id, ...data });
+    if (managingUser) {
+      updateUserMutation.mutate({ id: managingUser.id, ...data });
     }
   };
 
@@ -261,12 +260,25 @@ export default function UserManagement() {
   };
 
   const onRoleManagementSubmit = (data: { role: string; departments: string[] }) => {
-    if (roleManagementUser) {
+    if (managingUser) {
       roleUpdateMutation.mutate({ 
-        userId: roleManagementUser.id, 
+        userId: managingUser.id, 
         updates: data
       });
     }
+  };
+
+  // Handle opening the consolidated manage user dialog
+  const handleManageUserOpen = (user: User) => {
+    setManagingUser(user);
+    editForm.reset({
+      username: user.username,
+      email: user.email,
+    });
+    roleManagementForm.reset({
+      role: user.role,
+      departments: user.departments || [],
+    });
   };
 
   // Get current user info to check if superadmin
@@ -331,15 +343,6 @@ export default function UserManagement() {
     inventory: allUsers.filter((u: User) => u.departments?.includes('INVENTORY')).length,
     fleet: allUsers.filter((u: User) => u.departments?.includes('FLEET')).length,
     noDepartment: allUsers.filter((u: User) => !u.departments || u.departments.length === 0).length,
-  };
-
-  // Initialize role management form when user is selected
-  const handleRoleManagementOpen = (user: User) => {
-    setRoleManagementUser(user);
-    roleManagementForm.reset({
-      role: user.role as any,
-      departments: user.departments || []
-    });
   };
 
   // Initialize password reset form when user is selected
@@ -683,41 +686,24 @@ export default function UserManagement() {
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         {isSuperAdmin && (
-                          <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handlePasswordResetOpen(user)}
-                              data-testid={`button-reset-password-${user.id}`}
-                              title="Reset Password"
-                            >
-                              <Key className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleRoleManagementOpen(user)}
-                              data-testid={`button-manage-role-${user.id}`}
-                              title="Manage Role & Departments"
-                            >
-                              <Settings className="h-4 w-4" />
-                            </Button>
-                          </>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handlePasswordResetOpen(user)}
+                            data-testid={`button-reset-password-${user.id}`}
+                            title="Reset Password"
+                          >
+                            <Key className="h-4 w-4" />
+                          </Button>
                         )}
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => {
-                            setEditingUser(user);
-                            editForm.reset({
-                              username: user.username,
-                              email: user.email,
-                            });
-                          }}
-                          data-testid={`button-edit-${user.id}`}
-                          title="Edit Profile"
+                          onClick={() => handleManageUserOpen(user)}
+                          data-testid={`button-manage-user-${user.id}`}
+                          title="Manage User"
                         >
-                          <Edit className="h-4 w-4" />
+                          <Settings className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="outline"
@@ -738,44 +724,122 @@ export default function UserManagement() {
         </CardContent>
       </Card>
 
-      {/* Edit User Profile Dialog - For username/email only */}
-      <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
-        <DialogContent className="sm:max-w-[425px]">
+      {/* Consolidated Manage User Dialog - Profile & Access */}
+      <Dialog open={!!managingUser} onOpenChange={() => setManagingUser(null)}>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Edit User Profile</DialogTitle>
+            <DialogTitle>Manage User Settings</DialogTitle>
             <p className="text-sm text-muted-foreground">
-              Update basic profile information. Use "Manage Role & Departments" to change access settings.
+              Update settings for {managingUser?.username}
             </p>
           </DialogHeader>
-          <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
-            <div>
-              <Label htmlFor="edit-username">Username</Label>
-              <Input
-                id="edit-username"
-                data-testid="input-edit-username"
-                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
-                {...editForm.register("username")}
-              />
+          
+          <div className="space-y-6">
+            {/* Profile Section */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Profile</h3>
+              <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+                <div>
+                  <Label htmlFor="edit-username">Username</Label>
+                  <Input
+                    id="edit-username"
+                    data-testid="input-edit-username"
+                    className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
+                    {...editForm.register("username")}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-email">Email</Label>
+                  <Input
+                    id="edit-email"
+                    type="email"
+                    data-testid="input-edit-email"
+                    className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
+                    {...editForm.register("email")}
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button type="submit" size="sm" disabled={updateUserMutation.isPending} data-testid="button-update-profile">
+                    {updateUserMutation.isPending ? "Saving..." : "Save Profile"}
+                  </Button>
+                </div>
+              </form>
             </div>
-            <div>
-              <Label htmlFor="edit-email">Email</Label>
-              <Input
-                id="edit-email"
-                type="email"
-                data-testid="input-edit-email"
-                className="bg-blue-50 border-blue-300 text-blue-900 placeholder:text-blue-500 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100 dark:placeholder:text-blue-300"
-                {...editForm.register("email")}
-              />
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button type="button" variant="outline" onClick={() => setEditingUser(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={updateUserMutation.isPending} data-testid="button-update-user">
-                {updateUserMutation.isPending ? "Updating..." : "Update Profile"}
-              </Button>
-            </div>
-          </form>
+
+            {/* Access Section - Only visible to superadmins */}
+            {isSuperAdmin && (
+              <>
+                <hr className="border-border" />
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Access Control</h3>
+                  <form onSubmit={roleManagementForm.handleSubmit(onRoleManagementSubmit)} className="space-y-4">
+                    <div>
+                      <Label htmlFor="role">User Role</Label>
+                      <Select 
+                        value={roleManagementForm.watch("role")} 
+                        onValueChange={(value) => roleManagementForm.setValue("role", value)}
+                      >
+                        <SelectTrigger data-testid="select-manage-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableRoles.map(role => (
+                            <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Department Access</Label>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Select which department queues this user can access
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { code: 'NTAO', label: 'NTAO' },
+                          { code: 'ASSETS', label: 'Assets' },
+                          { code: 'INVENTORY', label: 'Inventory' },
+                          { code: 'FLEET', label: 'Fleet' }
+                        ].map(dept => (
+                          <div key={dept.code} className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id={`manage-dept-${dept.code}`}
+                              checked={roleManagementForm.watch("departments")?.includes(dept.code) || false}
+                              onChange={(e) => {
+                                const currentDepts = roleManagementForm.watch("departments") || [];
+                                if (e.target.checked) {
+                                  roleManagementForm.setValue("departments", [...currentDepts, dept.code]);
+                                } else {
+                                  roleManagementForm.setValue("departments", currentDepts.filter(d => d !== dept.code));
+                                }
+                              }}
+                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                              data-testid={`checkbox-manage-dept-${dept.code.toLowerCase()}`}
+                            />
+                            <Label htmlFor={`manage-dept-${dept.code}`} className="text-sm font-normal">
+                              {dept.label}
+                            </Label>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button type="submit" size="sm" disabled={roleUpdateMutation.isPending} data-testid="button-update-access">
+                        {roleUpdateMutation.isPending ? "Saving..." : "Save Access"}
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-4 border-t">
+            <Button variant="outline" onClick={() => setManagingUser(null)} data-testid="button-close-manage-user">
+              Close
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -872,90 +936,6 @@ export default function UserManagement() {
         </DialogContent>
       </Dialog>
 
-      {/* Admin Role Management Dialog */}
-      <Dialog open={!!roleManagementUser} onOpenChange={() => setRoleManagementUser(null)}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Manage User Role & Departments</DialogTitle>
-            <p className="text-sm text-muted-foreground">
-              Update role and department access for {roleManagementUser?.username}
-            </p>
-          </DialogHeader>
-          <form onSubmit={roleManagementForm.handleSubmit(onRoleManagementSubmit)} className="space-y-4">
-            <div>
-              <Label htmlFor="role">User Role</Label>
-              <Select 
-                value={roleManagementForm.watch("role")} 
-                onValueChange={(value) => roleManagementForm.setValue("role", value)}
-              >
-                <SelectTrigger data-testid="select-manage-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableRoles.map(role => (
-                    <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {roleManagementForm.formState.errors.role && (
-                <p className="text-sm text-red-500">{roleManagementForm.formState.errors.role.message}</p>
-              )}
-            </div>
-            <div>
-              <Label>Department Access</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Select which department queues this user can access
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { code: 'NTAO', label: 'NTAO' },
-                  { code: 'ASSETS', label: 'Assets' },
-                  { code: 'INVENTORY', label: 'Inventory' },
-                  { code: 'FLEET', label: 'Fleet' }
-                ].map(dept => (
-                  <div key={dept.code} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id={`manage-dept-${dept.code}`}
-                      checked={roleManagementForm.watch("departments")?.includes(dept.code) || false}
-                      onChange={(e) => {
-                        const currentDepts = roleManagementForm.watch("departments") || [];
-                        if (e.target.checked) {
-                          roleManagementForm.setValue("departments", [...currentDepts, dept.code]);
-                        } else {
-                          roleManagementForm.setValue("departments", currentDepts.filter(d => d !== dept.code));
-                        }
-                      }}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      data-testid={`checkbox-manage-dept-${dept.code.toLowerCase()}`}
-                    />
-                    <Label htmlFor={`manage-dept-${dept.code}`} className="text-sm font-normal">
-                      {dept.label}
-                    </Label>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setRoleManagementUser(null)}
-                data-testid="button-cancel-role-management"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={roleUpdateMutation.isPending}
-                data-testid="button-confirm-role-management"
-              >
-                {roleUpdateMutation.isPending ? "Updating..." : "Update Role & Access"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
