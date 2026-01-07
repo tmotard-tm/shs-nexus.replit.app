@@ -5923,6 +5923,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Export onboarding hires to XLSX
+  app.get("/api/onboarding-hires/export", requireAuth, async (req: any, res) => {
+    try {
+      const hires = await storage.getOnboardingHires();
+      
+      // Sort by service date ascending
+      hires.sort((a, b) => {
+        const dateA = a.serviceDate ? new Date(a.serviceDate).getTime() : 0;
+        const dateB = b.serviceDate ? new Date(b.serviceDate).getTime() : 0;
+        return dateA - dateB;
+      });
+
+      // District to Owner mapping
+      const districtOwnerMap: Record<string, string> = {
+        '3132': 'Monica, Cheryl & Machell', '3580': 'Monica, Cheryl & Machell',
+        '4766': 'Rob & Andrea', '6141': 'Monica, Cheryl & Machell',
+        '7084': 'Rob & Andrea', '7088': 'Carol & Tasha', '7108': 'Carol & Tasha',
+        '7323': 'Monica, Cheryl & Machell', '7435': 'Rob & Andrea',
+        '7670': 'Rob & Andrea', '7744': 'Rob & Andrea', '7983': 'Rob & Andrea',
+        '7995': 'Carol & Tasha', '8035': 'Rob & Andrea',
+        '8096': 'Monica, Cheryl & Machell', '8107': 'Carol & Tasha',
+        '8147': 'Carol & Tasha', '8158': 'Carol & Tasha',
+        '8162': 'Monica, Cheryl & Machell', '8169': 'Carol & Tasha',
+        '8175': 'Rob & Andrea', '8184': 'Carol & Tasha',
+        '8206': 'Monica, Cheryl & Machell', '8220': 'Monica, Cheryl & Machell',
+        '8228': 'Carol & Tasha', '8309': 'Monica, Cheryl & Machell',
+        '8366': 'Carol & Tasha', '8380': 'Rob & Andrea',
+        '8420': 'Monica, Cheryl & Machell', '8555': 'Monica, Cheryl & Machell',
+        '8935': 'Monica, Cheryl & Machell',
+      };
+      const getOwner = (d: string | null) => d ? (districtOwnerMap[d.slice(-4)] || '') : '';
+
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Weekly Onboarding');
+
+      worksheet.columns = [
+        { header: 'Service Date', key: 'serviceDate', width: 15 },
+        { header: 'Employee Name', key: 'employeeName', width: 25 },
+        { header: 'Emp. Status', key: 'employmentStatus', width: 15 },
+        { header: 'Enterprise ID', key: 'enterpriseId', width: 15 },
+        { header: 'Status', key: 'status', width: 12 },
+        { header: 'Truck #', key: 'truckNo', width: 12 },
+        { header: 'Job Title', key: 'jobTitle', width: 30 },
+        { header: 'District', key: 'district', width: 10 },
+        { header: 'Owner', key: 'owner', width: 25 },
+        { header: 'Zipcode', key: 'zipcode', width: 10 },
+        { header: 'City', key: 'city', width: 20 },
+        { header: 'Planning Area', key: 'planningArea', width: 20 },
+        { header: 'Address', key: 'address', width: 35 },
+        { header: 'Specialties', key: 'specialties', width: 20 },
+        { header: 'State', key: 'state', width: 8 },
+        { header: 'Action Reason', key: 'actionReason', width: 20 },
+      ];
+
+      hires.forEach(hire => {
+        worksheet.addRow({
+          serviceDate: hire.serviceDate ? new Date(hire.serviceDate).toLocaleDateString() : '',
+          employeeName: hire.employeeName || '',
+          employmentStatus: hire.employmentStatus || '',
+          enterpriseId: hire.enterpriseId || '',
+          status: hire.truckAssigned ? 'Assigned' : 'Pending',
+          truckNo: hire.assignedTruckNo || '',
+          jobTitle: hire.jobTitle || '',
+          district: hire.district || '',
+          owner: getOwner(hire.district),
+          zipcode: hire.zipcode || '',
+          city: hire.locationCity || '',
+          planningArea: hire.planningAreaName || '',
+          address: hire.address || '',
+          specialties: hire.specialties || '',
+          state: hire.workState || '',
+          actionReason: hire.actionReasonDescr || '',
+        });
+      });
+
+      // Style header row
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE0E0E0' }
+      };
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename=weekly-onboarding.xlsx');
+      
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (error: any) {
+      console.error("Error exporting onboarding hires:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Update onboarding hire (mark truck assigned)
   app.patch("/api/onboarding-hires/:id", requireAuth, async (req: any, res) => {
     try {

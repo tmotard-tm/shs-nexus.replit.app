@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle } from "lucide-react";
+import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle, Download } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -125,6 +125,36 @@ export default function WeeklyOnboarding() {
       });
     },
   });
+
+  const handleExportXlsx = async () => {
+    try {
+      const response = await fetch('/api/onboarding-hires/export', {
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error('Export failed');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `weekly-onboarding-${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast({
+        title: "Export Complete",
+        description: "Excel file downloaded successfully",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export Failed",
+        description: error.message || "Failed to export data",
+        variant: "destructive",
+      });
+    }
+  };
 
   const enrichMutation = useMutation({
     mutationFn: async () => {
@@ -251,6 +281,15 @@ export default function WeeklyOnboarding() {
                           Enrich from Snowflake
                         </>
                       )}
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={handleExportXlsx}
+                      data-testid="button-export-xlsx"
+                    >
+                      <Download className="h-3 w-3 mr-1" />
+                      Export XLSX
                     </Button>
                   </div>
                 </div>
@@ -380,8 +419,13 @@ export default function WeeklyOnboarding() {
                           <TableHead>Employee Name</TableHead>
                           <TableHead className="w-[100px]">Emp. Status</TableHead>
                           <TableHead className="w-[100px]">Enterprise ID</TableHead>
-                          <TableHead className="w-[60px]">State</TableHead>
-                          <TableHead>Action Reason</TableHead>
+                          <TableHead className="w-[90px]">Status</TableHead>
+                          <TableHead className="w-[100px]">
+                            <div className="flex items-center gap-1">
+                              <Truck className="h-4 w-4" />
+                              Truck #
+                            </div>
+                          </TableHead>
                           <TableHead className="min-w-[200px]">Job Title</TableHead>
                           <TableHead className="w-[80px]">District</TableHead>
                           <TableHead>Owner</TableHead>
@@ -390,13 +434,8 @@ export default function WeeklyOnboarding() {
                           <TableHead>Planning Area</TableHead>
                           <TableHead className="min-w-[200px]">Address</TableHead>
                           <TableHead>Specialties</TableHead>
-                          <TableHead className="w-[90px]">Status</TableHead>
-                          <TableHead className="w-[100px]">
-                            <div className="flex items-center gap-1">
-                              <Truck className="h-4 w-4" />
-                              Truck #
-                            </div>
-                          </TableHead>
+                          <TableHead className="w-[60px]">State</TableHead>
+                          <TableHead>Action Reason</TableHead>
                           <TableHead className="w-[100px]">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -411,16 +450,6 @@ export default function WeeklyOnboarding() {
                             <TableCell className="font-medium">{hire.employeeName}</TableCell>
                             <TableCell className="text-sm">{hire.employmentStatus || '-'}</TableCell>
                             <TableCell className="font-mono text-sm">{hire.enterpriseId || '-'}</TableCell>
-                            <TableCell>{hire.workState || '-'}</TableCell>
-                            <TableCell className="text-sm">{hire.actionReasonDescr || '-'}</TableCell>
-                            <TableCell className="text-sm">{hire.jobTitle || '-'}</TableCell>
-                            <TableCell>{hire.district || '-'}</TableCell>
-                            <TableCell className="text-sm">{getOwnerFromDistrict(hire.district)}</TableCell>
-                            <TableCell>{hire.zipcode || '-'}</TableCell>
-                            <TableCell className="text-sm">{hire.locationCity || '-'}</TableCell>
-                            <TableCell className="text-sm">{hire.planningAreaName || '-'}</TableCell>
-                            <TableCell className="text-sm">{hire.address || '-'}</TableCell>
-                            <TableCell className="text-sm">{hire.specialties || '-'}</TableCell>
                             <TableCell>
                               {hire.truckAssigned ? (
                                 <Badge variant="default" className="bg-green-600">
@@ -434,9 +463,17 @@ export default function WeeklyOnboarding() {
                                 </Badge>
                               )}
                             </TableCell>
-                            <TableCell>
-                              {hire.assignedTruckNo || '-'}
-                            </TableCell>
+                            <TableCell>{hire.assignedTruckNo || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.jobTitle || '-'}</TableCell>
+                            <TableCell>{hire.district || '-'}</TableCell>
+                            <TableCell className="text-sm">{getOwnerFromDistrict(hire.district)}</TableCell>
+                            <TableCell>{hire.zipcode || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.locationCity || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.planningAreaName || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.address || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.specialties || '-'}</TableCell>
+                            <TableCell>{hire.workState || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.actionReasonDescr || '-'}</TableCell>
                             <TableCell>
                               <Button 
                                 size="sm" 
