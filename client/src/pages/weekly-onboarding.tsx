@@ -126,15 +126,22 @@ export default function WeeklyOnboarding() {
     },
   });
 
-  const filteredHires = hires.filter(hire => {
-    const matchesSearch = !searchQuery || 
-      hire.employeeName?.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesAssigned = !showAssignedOnly || hire.truckAssigned;
-    const matchesUnassigned = !showUnassignedOnly || !hire.truckAssigned;
-    
-    return matchesSearch && matchesAssigned && matchesUnassigned;
-  });
+  const filteredHires = hires
+    .filter(hire => {
+      const matchesSearch = !searchQuery || 
+        hire.employeeName?.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesAssigned = !showAssignedOnly || hire.truckAssigned;
+      const matchesUnassigned = !showUnassignedOnly || !hire.truckAssigned;
+      
+      return matchesSearch && matchesAssigned && matchesUnassigned;
+    })
+    .sort((a, b) => {
+      // Sort by service date ascending (oldest to newest)
+      const dateA = a.serviceDate ? new Date(a.serviceDate).getTime() : 0;
+      const dateB = b.serviceDate ? new Date(b.serviceDate).getTime() : 0;
+      return dateA - dateB;
+    });
 
   const assignedCount = hires.filter(h => h.truckAssigned).length;
   const unassignedCount = hires.filter(h => !h.truckAssigned).length;
@@ -342,6 +349,7 @@ export default function WeeklyOnboarding() {
                           <TableHead className="w-[80px]">Zipcode</TableHead>
                           <TableHead>City</TableHead>
                           <TableHead>Planning Area</TableHead>
+                          <TableHead className="min-w-[200px]">Address</TableHead>
                           <TableHead>Specialties</TableHead>
                           <TableHead className="w-[90px]">Status</TableHead>
                           <TableHead className="w-[100px]">
@@ -372,6 +380,7 @@ export default function WeeklyOnboarding() {
                             <TableCell>{hire.zipcode || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.locationCity || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.planningAreaName || '-'}</TableCell>
+                            <TableCell className="text-sm">{hire.address || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.specialties || '-'}</TableCell>
                             <TableCell>
                               {hire.truckAssigned ? (
