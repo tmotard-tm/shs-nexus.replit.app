@@ -95,6 +95,24 @@ async function runSync(): Promise<void> {
       console.log('[Scheduled Sync] Continuing...');
     }
 
+    // Enrich onboarding hires with additional Snowflake data (HR, TPMS truck assignments)
+    console.log('\n--- Enriching Onboarding Hires from Snowflake ---');
+    console.log('[Scheduled Sync] Enriching hires with employment status, specialties, and TPMS truck data...');
+    
+    try {
+      const enrichResult = await syncService.enrichOnboardingHires();
+      
+      console.log(`[Scheduled Sync] Onboarding enrichment complete:`);
+      console.log(`  - Records enriched: ${enrichResult.enrichedCount}`);
+      if (enrichResult.errors && enrichResult.errors.length > 0) {
+        console.log(`  - Errors: ${enrichResult.errors.length}`);
+        enrichResult.errors.slice(0, 5).forEach((err: string) => console.log(`    - ${err}`));
+      }
+    } catch (enrichError) {
+      console.error('[Scheduled Sync] Onboarding enrichment failed (non-fatal):', enrichError);
+      console.log('[Scheduled Sync] Continuing...');
+    }
+
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log('\n' + '='.repeat(60));
     console.log(`[Scheduled Sync] COMPLETED SUCCESSFULLY`);

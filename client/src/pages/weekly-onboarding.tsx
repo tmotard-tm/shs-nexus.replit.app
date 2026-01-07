@@ -88,10 +88,17 @@ export default function WeeklyOnboarding() {
     mutationFn: async () => {
       return await apiRequest('POST', '/api/snowflake/sync/onboarding-hires');
     },
-    onSuccess: (result: any) => {
+    onSuccess: async (result: any) => {
       setSyncFailed(false);
       queryClient.invalidateQueries({ queryKey: ['/api/onboarding-hires'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sync-logs'] });
+      // Also trigger enrichment after sync completes (in background)
+      try {
+        await apiRequest('POST', '/api/snowflake/enrich/onboarding-hires');
+        queryClient.invalidateQueries({ queryKey: ['/api/onboarding-hires'] });
+      } catch (e) {
+        console.log('[OnboardingHires] Background enrichment completed or skipped');
+      }
     },
     onError: (error: any) => {
       setSyncFailed(true);
@@ -99,7 +106,7 @@ export default function WeeklyOnboarding() {
     },
   });
 
-  // Auto-sync on page load
+  // Auto-sync and enrich on page load
   useEffect(() => {
     syncMutation.mutate();
   }, []);

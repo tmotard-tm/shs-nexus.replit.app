@@ -3,8 +3,10 @@ import { isSnowflakeConfigured } from './snowflake-service';
 
 const SYNC_HOUR_EST = 5; // 5am EST
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
+const ENRICH_INTERVAL_HOURS = 12; // Enrich every 12 hours
 
 let lastSyncDate: string | null = null;
+let lastEnrichTime: number | null = null; // Timestamp of last enrichment
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -50,8 +52,35 @@ async function checkAndRunSync(): Promise<void> {
       lastSyncDate = currentDateStr;
       console.log(`[Scheduler] Scheduled sync completed successfully for ${currentDateStr}`);
     }
+
+    // Check if we need to run onboarding enrichment (every 12 hours)
+    await checkAndRunEnrichment();
   } catch (error) {
     console.error('[Scheduler] Error during scheduled sync:', error);
+  }
+}
+
+async function checkAndRunEnrichment(): Promise<void> {
+  try {
+    if (!isSnowflakeConfigured()) {
+      return;
+    }
+
+    const now = Date.now();
+    const twelveHoursMs = ENRICH_INTERVAL_HOURS * 60 * 60 * 1000;
+
+    // Run enrichment if we haven't run it yet or if 12 hours have passed
+    if (lastEnrichTime === null || (now - lastEnrichTime) >= twelveHoursMs) {
+      console.log(`[Scheduler] Running onboarding enrichment (every ${ENRICH_INTERVAL_HOURS} hours)`);
+      
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.enrichOnboardingHires();
+      
+      lastEnrichTime = now;
+      console.log(`[Scheduler] Onboarding enrichment complete: ${result.enrichedCount} records enriched`);
+    }
+  } catch (error) {
+    console.error('[Scheduler] Error during onboarding enrichment:', error);
   }
 }
 
