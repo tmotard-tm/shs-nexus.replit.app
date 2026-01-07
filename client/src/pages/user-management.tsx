@@ -237,7 +237,7 @@ export default function UserManagement() {
 
   const roleManagementForm = useForm<{ role: string; departments: string[] }>({
     resolver: zodResolver(z.object({
-      role: z.enum(["superadmin", "agent"]),
+      role: z.string().min(1, "Role is required"),
       departments: z.array(z.string())
     })),
   });
