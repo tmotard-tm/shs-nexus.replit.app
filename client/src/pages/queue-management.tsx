@@ -43,6 +43,7 @@ import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
 import { TechCombobox, TechRosterEntry } from "@/components/ui/tech-combobox";
+import { usePreviewRole } from "@/hooks/use-preview-role";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
 
 // Module labels for display
@@ -90,6 +91,7 @@ export default function UnifiedQueueManagement() {
   const { user } = useAuth();
   const { toast } = useToast();
   const { permissions } = usePermissions();
+  const { previewUser, isUserPreviewMode } = usePreviewRole();
   const [, navigate] = useLocation();
   const searchString = useSearch();
   
@@ -122,8 +124,14 @@ export default function UnifiedQueueManagement() {
   const [selectedReassignee, setSelectedReassignee] = useState<string>("");
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
 
-  // Get accessible modules for current user
-  const accessibleModules = user ? getUserAccessibleModules(user) : [];
+  // Get accessible modules for current user (use preview user departments when in preview mode)
+  const effectiveUser = isUserPreviewMode && previewUser ? {
+    ...user,
+    role: previewUser.role,
+    departments: previewUser.departments,
+  } as UserType : user;
+  
+  const accessibleModules = effectiveUser ? getUserAccessibleModules(effectiveUser) : [];
 
   // Handle URL parameters for department and employee filters
   useEffect(() => {
@@ -172,6 +180,21 @@ export default function UnifiedQueueManagement() {
       setSelectedModules(accessibleModules);
     }
   }, [searchString, user, accessibleModules.length]);
+
+  // Reset selected modules when preview user changes (department access changes)
+  useEffect(() => {
+    if (accessibleModules.length > 0) {
+      // Filter selectedModules to only include accessible ones
+      const validModules = selectedModules.filter(m => accessibleModules.includes(m));
+      if (validModules.length === 0) {
+        // If no valid modules, default to all accessible
+        setSelectedModules(accessibleModules);
+      } else if (validModules.length !== selectedModules.length) {
+        // If some modules were removed, update to only valid ones
+        setSelectedModules(validModules);
+      }
+    }
+  }, [previewUser?.id, previewUser?.departments?.join(',')]);
 
   // Handle department tab click - updates URL and selected modules
   const handleDepartmentTabClick = (module: QueueModule | 'all') => {
@@ -768,9 +791,8 @@ export default function UnifiedQueueManagement() {
               <Label className="text-sm font-medium">Show Queues ({(queueStats?.pending || 0) + (queueStats?.in_progress || 0)} - Total Open Tasks)</Label>
               <div className="flex flex-wrap gap-6">
                 {(Object.keys(moduleLabels) as QueueModule[]).map((module) => {
-                  const userAccessibleModules = user ? getUserAccessibleModules(user) : [];
-                  const userCanAccess = userAccessibleModules.includes(module);
-                  if (!userCanAccess) return null;
+                  // Only show checkboxes for modules the user has access to (respects preview mode)
+                  if (!accessibleModules.includes(module)) return null;
                   
                   const moduleOpenCount = queueItems.filter(
                     item => item.module === module && (item.status === 'pending' || item.status === 'in_progress')
