@@ -291,16 +291,20 @@ export default function UserManagement() {
         return 'destructive';
       case 'agent':
         return 'default';
+      case 'admin':
+        return 'secondary';
       case 'field':
         return 'secondary';
       default:
-        return 'outline';
+        return 'secondary';
     }
   };
 
   const getRoleIcon = (role: string) => {
     switch (role) {
       case 'superadmin':
+        return <Shield className="h-4 w-4" />;
+      case 'admin':
         return <Shield className="h-4 w-4" />;
       case 'agent':
         return <UserCheck className="h-4 w-4" />;
@@ -309,6 +313,12 @@ export default function UserManagement() {
       default:
         return <Users className="h-4 w-4" />;
     }
+  };
+
+  // Format role name for display (e.g., "superadmin" -> "Super Admin", "my_custom_role" -> "My Custom Role")
+  const formatRoleName = (role: string) => {
+    if (role === 'superadmin') return 'Super Admin';
+    return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
   // Filter users by department
@@ -664,7 +674,7 @@ export default function UserManagement() {
                     <TableCell>
                       <Badge variant={getRoleBadgeVariant(user.role)} className="flex items-center gap-1 w-fit" data-testid={`badge-role-${user.id}`}>
                         {getRoleIcon(user.role)}
-                        {user.role === 'superadmin' ? 'Super Admin' : 'Agent'}
+                        {formatRoleName(user.role)}
                       </Badge>
                     </TableCell>
                     <TableCell data-testid={`text-departments-${user.id}`}>
