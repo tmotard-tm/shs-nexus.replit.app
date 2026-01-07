@@ -787,11 +787,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sanitizedUpdates.username = usernameStr;
       }
       
-      // Validate role if being updated (simplified to just superadmin and agent)
+      // Validate role if being updated - check against roles in role_permissions table
       if (sanitizedUpdates.role) {
-        const validRoles = ['superadmin', 'agent'];
+        const rolePermissions = await storage.getAllRolePermissions();
+        const validRoles = rolePermissions.map((rp: { role: string }) => rp.role);
         if (!validRoles.includes(sanitizedUpdates.role)) {
-          return res.status(400).json({ message: "Invalid role specified. Must be 'superadmin' or 'agent'" });
+          return res.status(400).json({ message: `Invalid role specified. Valid roles are: ${validRoles.join(', ')}` });
         }
       }
       
@@ -1024,10 +1025,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const { role, departments } = req.body;
       
-      // Validate role if provided (simplified to superadmin and agent only)
-      const validRoles = ['superadmin', 'agent'];
+      // Validate role if provided - check against roles in role_permissions table
+      const rolePermissions = await storage.getAllRolePermissions();
+      const validRoles = rolePermissions.map((rp: { role: string }) => rp.role);
       if (role && !validRoles.includes(role)) {
-        return res.status(400).json({ message: "Invalid role specified. Must be 'superadmin' or 'agent'" });
+        return res.status(400).json({ message: `Invalid role specified. Valid roles are: ${validRoles.join(', ')}` });
       }
 
       // Validate departments if provided
