@@ -5125,22 +5125,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const permissions = req.body;
 
       // Permission hierarchy validation:
-      // - Developer (superadmin) can only edit Admin role
-      // - Admin can edit all other roles except Admin and Developer
+      // - Developer (superadmin) can edit ALL roles including their own
+      // - Admin can edit Agent and custom roles only (not Developer or Admin)
       const canEditRole = (): boolean => {
         if (currentUser.role === 'superadmin') {
-          return targetRole === 'admin';
+          // Developer can edit all roles
+          return true;
         }
         if (currentUser.role === 'admin') {
+          // Admin can edit all roles except Admin and Developer
           return targetRole !== 'admin' && targetRole !== 'superadmin';
         }
         return false;
       };
 
       if (!canEditRole()) {
-        if (currentUser.role === 'superadmin') {
-          return res.status(403).json({ message: "Developer can only edit Admin role permissions." });
-        }
         if (currentUser.role === 'admin') {
           return res.status(403).json({ message: "Admin cannot edit Developer or Admin role permissions." });
         }
@@ -5165,13 +5164,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create a new custom role (only Admin can create custom roles)
+  // Create a new custom role (Developer and Admin can create custom roles)
   app.post("/api/role-permissions", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      // Only Admin can create custom roles (Developer only manages Admin permissions)
-      if (!currentUser || currentUser.role !== 'admin') {
-        return res.status(403).json({ message: "Access denied. Only Admin users can create custom roles." });
+      // Developer and Admin can create custom roles
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Only Developer and Admin users can create custom roles." });
       }
 
       const { role, permissions } = req.body;
@@ -5214,13 +5213,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Delete a custom role (only Admin can delete custom roles)
+  // Delete a custom role (Developer and Admin can delete custom roles)
   app.delete("/api/role-permissions/:role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      // Only Admin can delete custom roles (Developer only manages Admin permissions)
-      if (!currentUser || currentUser.role !== 'admin') {
-        return res.status(403).json({ message: "Access denied. Only Admin users can delete custom roles." });
+      // Developer and Admin can delete custom roles
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Only Developer and Admin users can delete custom roles." });
       }
 
       const { role } = req.params;

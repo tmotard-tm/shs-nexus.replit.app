@@ -370,13 +370,13 @@ export default function RolePermissions() {
   };
 
   // Permission hierarchy for editing roles:
-  // - Developer (superadmin) can edit: Admin role only
-  // - Admin can edit: All other roles except Admin and Developer
+  // - Developer (superadmin) can edit: ALL roles including their own
+  // - Admin can edit: Agent and custom roles only (not Developer or Admin)
   const canEditRole = (targetRole: string): boolean => {
     const currentUserRole = user?.role;
     if (currentUserRole === 'superadmin') {
-      // Developer can only edit Admin role
-      return targetRole === 'admin';
+      // Developer can edit all roles including their own
+      return true;
     }
     if (currentUserRole === 'admin') {
       // Admin can edit all roles except Admin and Developer
@@ -387,17 +387,9 @@ export default function RolePermissions() {
 
   const getEditRestrictionMessage = (targetRole: string): string | undefined => {
     const currentUserRole = user?.role;
-    if (currentUserRole === 'superadmin') {
-      if (targetRole === 'superadmin') {
-        return "Developer role permissions cannot be modified.";
-      }
-      if (targetRole !== 'admin') {
-        return "As a Developer, you can only edit the Admin role permissions. Admin users manage permissions for other roles.";
-      }
-    }
     if (currentUserRole === 'admin') {
       if (targetRole === 'superadmin') {
-        return "Developer role permissions can only be viewed, not modified.";
+        return "Developer role permissions can only be modified by Developer users.";
       }
       if (targetRole === 'admin') {
         return "Admin role permissions can only be modified by Developer users.";
@@ -498,7 +490,7 @@ export default function RolePermissions() {
             <Settings className="h-8 w-8 text-primary" />
             <h1 className="text-3xl font-bold" data-testid="page-title">Role Permissions</h1>
           </div>
-          {user?.role === 'admin' && (
+          {(user?.role === 'superadmin' || user?.role === 'admin') && (
             <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
               <DialogTrigger asChild>
                 <Button data-testid="btn-create-role">
