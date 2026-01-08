@@ -324,7 +324,7 @@ export function Sidebar() {
                 <DropdownMenuSubContent className="min-w-48">
                   <DropdownMenuRadioGroup value={previewRole || 'none'} onValueChange={handlePreviewRoleChange}>
                     <DropdownMenuRadioItem value="none" data-testid="radio-view-as-superadmin">
-                      Super Admin (My Role)
+                      Developer (My Role)
                     </DropdownMenuRadioItem>
                     <DropdownMenuSeparator />
                     {availableRoles.map((role) => (

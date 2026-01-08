@@ -100,7 +100,7 @@ export default function UserManagement() {
   // Build list of available roles for dropdown
   const availableRoles = rolePermissions.map(rp => ({
     value: rp.role,
-    label: rp.role === 'superadmin' ? 'Super Admin' : 
+    label: rp.role === 'superadmin' ? 'Developer' : 
            rp.role === 'agent' ? 'Agent' : 
            rp.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
   }));
@@ -315,9 +315,9 @@ export default function UserManagement() {
     }
   };
 
-  // Format role name for display (e.g., "superadmin" -> "Super Admin", "my_custom_role" -> "My Custom Role")
+  // Format role name for display (e.g., "superadmin" -> "Developer", "my_custom_role" -> "My Custom Role")
   const formatRoleName = (role: string) => {
-    if (role === 'superadmin') return 'Super Admin';
+    if (role === 'superadmin') return 'Developer';
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 

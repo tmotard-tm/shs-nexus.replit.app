@@ -346,7 +346,7 @@ export function checkQueueModuleAccess(user: User | null, module: string): boole
 // Get user-friendly role display name
 export function getRoleDisplayName(role: string, user?: User): string {
   if (role === 'superadmin') {
-    return 'Super Admin';
+    return 'Developer';
   }
   
   // For agent users, show their primary department if available

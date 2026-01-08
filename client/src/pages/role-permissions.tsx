@@ -175,7 +175,7 @@ function RolePermissionsEditor({
     setHasChanges(true);
   };
 
-  const roleDisplayName = role === 'superadmin' ? 'Super Admin' : 
+  const roleDisplayName = role === 'superadmin' ? 'Developer' : 
                           role === 'agent' ? 'Agent' : 
                           role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 
@@ -346,7 +346,7 @@ export default function RolePermissions() {
   };
 
   const getRoleLabel = (role: string) => {
-    if (role === 'superadmin') return 'Super Admin';
+    if (role === 'superadmin') return 'Developer';
     if (role === 'agent') return 'Agent';
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };

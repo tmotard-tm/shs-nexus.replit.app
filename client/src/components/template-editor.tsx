@@ -673,7 +673,7 @@ export function TemplateEditor({
                               <SelectContent>
                                 <SelectItem value="field">Field</SelectItem>
                                 <SelectItem value="agent">Agent</SelectItem>
-                                <SelectItem value="superadmin">Super Admin</SelectItem>
+                                <SelectItem value="superadmin">Developer</SelectItem>
                               </SelectContent>
                             </Select>
                             <FormMessage />
