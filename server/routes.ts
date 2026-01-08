@@ -5079,8 +5079,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/role-permissions", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Role permissions require Developer or Admin role." });
       }
 
       const permissions = await storage.getAllRolePermissions();
@@ -5095,8 +5095,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/role-permissions/:role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Role permissions require Developer or Admin role." });
       }
 
       const { role } = req.params;
@@ -5117,22 +5117,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/role-permissions/:role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Role permissions require Developer or Admin role." });
       }
 
-      const { role } = req.params;
+      const { role: targetRole } = req.params;
       const permissions = req.body;
 
-      const updated = await storage.upsertRolePermission(role, permissions);
+      // Permission hierarchy validation:
+      // - Developer (superadmin) can only edit Admin role
+      // - Admin can edit all other roles except Admin and Developer
+      const canEditRole = (): boolean => {
+        if (currentUser.role === 'superadmin') {
+          return targetRole === 'admin';
+        }
+        if (currentUser.role === 'admin') {
+          return targetRole !== 'admin' && targetRole !== 'superadmin';
+        }
+        return false;
+      };
+
+      if (!canEditRole()) {
+        if (currentUser.role === 'superadmin') {
+          return res.status(403).json({ message: "Developer can only edit Admin role permissions." });
+        }
+        if (currentUser.role === 'admin') {
+          return res.status(403).json({ message: "Admin cannot edit Developer or Admin role permissions." });
+        }
+        return res.status(403).json({ message: "You do not have permission to edit this role." });
+      }
+
+      const updated = await storage.upsertRolePermission(targetRole, permissions);
       
       // Log activity
       await storage.createActivityLog({
         userId: currentUser.id,
         action: "role_permission_updated",
         entityType: "role_permission",
-        entityId: role,
-        details: `Role permissions for '${role}' updated`,
+        entityId: targetRole,
+        details: `Role permissions for '${targetRole}' updated by ${currentUser.role}`,
       });
 
       res.json(updated);
@@ -5142,12 +5165,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create a new custom role
+  // Create a new custom role (only Admin can create custom roles)
   app.post("/api/role-permissions", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      // Only Admin can create custom roles (Developer only manages Admin permissions)
+      if (!currentUser || currentUser.role !== 'admin') {
+        return res.status(403).json({ message: "Access denied. Only Admin users can create custom roles." });
       }
 
       const { role, permissions } = req.body;
@@ -5180,7 +5204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: "role_created",
         entityType: "role_permission",
         entityId: role,
-        details: `New role '${role}' created`,
+        details: `New role '${role}' created by Admin`,
       });
 
       res.status(201).json(created);
@@ -5190,19 +5214,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Delete a custom role (not superadmin or agent)
+  // Delete a custom role (only Admin can delete custom roles)
   app.delete("/api/role-permissions/:role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      // Only Admin can delete custom roles (Developer only manages Admin permissions)
+      if (!currentUser || currentUser.role !== 'admin') {
+        return res.status(403).json({ message: "Access denied. Only Admin users can delete custom roles." });
       }
 
       const { role } = req.params;
 
-      // Prevent deletion of core roles
-      if (role === 'superadmin' || role === 'agent') {
-        return res.status(400).json({ message: "Cannot delete core system roles (superadmin, agent)" });
+      // Prevent deletion of core roles (superadmin, admin, agent)
+      if (role === 'superadmin' || role === 'agent' || role === 'admin') {
+        return res.status(400).json({ message: "Cannot delete core system roles (Developer, Admin, Agent)" });
       }
 
       // Check if any users are assigned to this role
@@ -5224,7 +5249,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: "role_deleted",
         entityType: "role_permission",
         entityId: role,
-        details: `Role '${role}' deleted`,
+        details: `Role '${role}' deleted by Admin`,
       });
 
       res.json({ message: "Role deleted successfully" });

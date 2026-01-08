@@ -150,11 +150,15 @@ function RolePermissionsEditor({
   initialPermissions,
   onSave,
   isSaving,
+  canEdit,
+  editRestrictionMessage,
 }: {
   role: string;
   initialPermissions: RolePermissionSettings;
   onSave: (permissions: RolePermissionSettings) => void;
   isSaving: boolean;
+  canEdit: boolean;
+  editRestrictionMessage?: string;
 }) {
   const [permissions, setPermissions] = useState<RolePermissionSettings>(initialPermissions);
   const [hasChanges, setHasChanges] = useState(false);
@@ -165,11 +169,13 @@ function RolePermissionsEditor({
   }, [initialPermissions]);
 
   const handleChange = (path: string[], value: boolean) => {
+    if (!canEdit) return;
     setPermissions((prev) => setNestedValue(prev, path, value));
     setHasChanges(true);
   };
 
   const handleReset = () => {
+    if (!canEdit) return;
     const defaults = role === 'superadmin' ? DEFAULT_SUPERADMIN_PERMISSIONS : DEFAULT_AGENT_PERMISSIONS;
     setPermissions(defaults);
     setHasChanges(true);
@@ -180,6 +186,7 @@ function RolePermissionsEditor({
                           role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 
   const handleSave = () => {
+    if (!canEdit) return;
     onSave(permissions);
     setHasChanges(false);
   };
@@ -196,22 +203,33 @@ function RolePermissionsEditor({
               Unsaved Changes
             </Badge>
           )}
+          {!canEdit && (
+            <Badge variant="outline" className="text-muted-foreground border-muted-foreground">
+              View Only
+            </Badge>
+          )}
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleReset} data-testid={`btn-reset-${role}`}>
+          <Button variant="outline" size="sm" onClick={handleReset} disabled={!canEdit} data-testid={`btn-reset-${role}`}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Reset to Default
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={!hasChanges || isSaving} data-testid={`btn-save-${role}`}>
+          <Button size="sm" onClick={handleSave} disabled={!canEdit || !hasChanges || isSaving} data-testid={`btn-save-${role}`}>
             <Save className="h-4 w-4 mr-2" />
             {isSaving ? 'Saving...' : 'Save Changes'}
           </Button>
         </div>
       </div>
 
+      {!canEdit && editRestrictionMessage && (
+        <div className="bg-muted/50 border rounded-md p-3 text-sm text-muted-foreground">
+          {editRestrictionMessage}
+        </div>
+      )}
+
       <Separator />
 
-      <div className="space-y-2">
+      <div className={`space-y-2 ${!canEdit ? 'opacity-60 pointer-events-none' : ''}`}>
         {PERMISSION_TREE.map((node) => (
           <PermissionTreeNode
             key={node.key}
@@ -351,6 +369,43 @@ export default function RolePermissions() {
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
+  // Permission hierarchy for editing roles:
+  // - Developer (superadmin) can edit: Admin role only
+  // - Admin can edit: All other roles except Admin and Developer
+  const canEditRole = (targetRole: string): boolean => {
+    const currentUserRole = user?.role;
+    if (currentUserRole === 'superadmin') {
+      // Developer can only edit Admin role
+      return targetRole === 'admin';
+    }
+    if (currentUserRole === 'admin') {
+      // Admin can edit all roles except Admin and Developer
+      return targetRole !== 'admin' && targetRole !== 'superadmin';
+    }
+    return false;
+  };
+
+  const getEditRestrictionMessage = (targetRole: string): string | undefined => {
+    const currentUserRole = user?.role;
+    if (currentUserRole === 'superadmin') {
+      if (targetRole === 'superadmin') {
+        return "Developer role permissions cannot be modified.";
+      }
+      if (targetRole !== 'admin') {
+        return "As a Developer, you can only edit the Admin role permissions. Admin users manage permissions for other roles.";
+      }
+    }
+    if (currentUserRole === 'admin') {
+      if (targetRole === 'superadmin') {
+        return "Developer role permissions can only be viewed, not modified.";
+      }
+      if (targetRole === 'admin') {
+        return "Admin role permissions can only be modified by Developer users.";
+      }
+    }
+    return undefined;
+  };
+
   const allRoles = (() => {
     const coreRoles = ['superadmin', 'agent'];
     const customRoles = permissions
@@ -360,7 +415,8 @@ export default function RolePermissions() {
     return [...coreRoles, ...customRoles];
   })();
 
-  if (user?.role !== 'superadmin') {
+  // Allow both superadmin and admin to access this page
+  if (user?.role !== 'superadmin' && user?.role !== 'admin') {
     return (
       <div className="container mx-auto p-6">
         <Card>
@@ -368,7 +424,7 @@ export default function RolePermissions() {
             <div className="text-center">
               <Shield className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-semibold">Access Denied</h3>
-              <p className="text-muted-foreground">Only superadmins can manage role permissions.</p>
+              <p className="text-muted-foreground">Only Developer and Admin users can manage role permissions.</p>
             </div>
           </CardContent>
         </Card>
@@ -442,49 +498,51 @@ export default function RolePermissions() {
             <Settings className="h-8 w-8 text-primary" />
             <h1 className="text-3xl font-bold" data-testid="page-title">Role Permissions</h1>
           </div>
-          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button data-testid="btn-create-role">
-                <Plus className="h-4 w-4 mr-2" />
-                Create New Role
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create New Role</DialogTitle>
-                <DialogDescription>
-                  Create a custom role with its own permission settings. The role name should be lowercase with no spaces (use underscores instead).
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="role-name">Role Name</Label>
-                  <Input
-                    id="role-name"
-                    placeholder="e.g., team_lead, supervisor, viewer"
-                    value={newRoleName}
-                    onChange={(e) => setNewRoleName(e.target.value)}
-                    data-testid="input-role-name"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Use lowercase letters, numbers, and underscores only. The new role will start with Agent-level permissions.
-                  </p>
+          {user?.role === 'admin' && (
+            <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button data-testid="btn-create-role">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create New Role
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create New Role</DialogTitle>
+                  <DialogDescription>
+                    Create a custom role with its own permission settings. The role name should be lowercase with no spaces (use underscores instead).
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="role-name">Role Name</Label>
+                    <Input
+                      id="role-name"
+                      placeholder="e.g., team_lead, supervisor, viewer"
+                      value={newRoleName}
+                      onChange={(e) => setNewRoleName(e.target.value)}
+                      data-testid="input-role-name"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Use lowercase letters, numbers, and underscores only. The new role will start with Agent-level permissions.
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleCreateRole} 
-                  disabled={!newRoleName.trim() || createRoleMutation.isPending}
-                  data-testid="btn-confirm-create-role"
-                >
-                  {createRoleMutation.isPending ? 'Creating...' : 'Create Role'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={handleCreateRole} 
+                    disabled={!newRoleName.trim() || createRoleMutation.isPending}
+                    data-testid="btn-confirm-create-role"
+                  >
+                    {createRoleMutation.isPending ? 'Creating...' : 'Create Role'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
         <p className="text-muted-foreground">
           Configure which features and pages each role can access. Changes take effect immediately for all users with that role.
@@ -554,7 +612,7 @@ export default function RolePermissions() {
 
               {selectedRole && (
                 <div className="space-y-4">
-                  {isCustomRole(selectedRole) && (
+                  {isCustomRole(selectedRole) && canEditRole(selectedRole) && (
                     <div className="flex justify-end">
                       <AlertDialog open={deleteRole === selectedRole} onOpenChange={(open) => setDeleteRole(open ? selectedRole : null)}>
                         <AlertDialogTrigger asChild>
@@ -591,6 +649,8 @@ export default function RolePermissions() {
                     initialPermissions={getPermissionsForRole(selectedRole)}
                     onSave={(perms) => updateMutation.mutate({ role: selectedRole, permissions: perms })}
                     isSaving={updateMutation.isPending}
+                    canEdit={canEditRole(selectedRole)}
+                    editRestrictionMessage={getEditRestrictionMessage(selectedRole)}
                   />
                 </div>
               )}
