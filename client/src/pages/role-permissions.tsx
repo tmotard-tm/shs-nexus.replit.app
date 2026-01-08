@@ -337,7 +337,7 @@ export default function RolePermissions() {
     deleteRoleMutation.mutate(roleName);
   };
 
-  const isCustomRole = (role: string) => role !== 'superadmin' && role !== 'agent';
+  const isCustomRole = (role: string) => role !== 'superadmin' && role !== 'agent' && role !== 'admin';
 
   const getRoleIcon = (role: string) => {
     if (role === 'superadmin') return <Shield className="h-4 w-4 mr-2" />;
