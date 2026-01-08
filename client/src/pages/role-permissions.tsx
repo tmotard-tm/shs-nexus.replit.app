@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronDown, ChevronRight, Shield, Users, Save, RefreshCw, Settings, Plus, Trash2, UserCog } from "lucide-react";
@@ -514,7 +514,7 @@ export default function RolePermissions() {
             Permission Settings by Role
           </CardTitle>
           <CardDescription>
-            Select a role tab to view and modify its permissions. Each checkbox controls access to a specific feature.
+            Select a role to view and modify its permissions. Each checkbox controls access to a specific feature.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -528,66 +528,73 @@ export default function RolePermissions() {
               <p>Failed to load permissions. Please try again.</p>
             </div>
           ) : (
-            <Tabs value={selectedRole} onValueChange={setSelectedRole}>
-              <TabsList className="mb-4 flex-wrap h-auto gap-1">
-                {allRoles.map((role) => (
-                  <TabsTrigger key={role} value={role} data-testid={`tab-${role}`}>
-                    {getRoleIcon(role)}
-                    {getRoleLabel(role)}
-                    {isCustomRole(role) && (
-                      <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
-                        Custom
-                      </Badge>
-                    )}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+            <div className="space-y-6">
+              <div className="flex items-center gap-4">
+                <Label htmlFor="role-select" className="text-sm font-medium whitespace-nowrap">Select Role:</Label>
+                <Select value={selectedRole} onValueChange={setSelectedRole}>
+                  <SelectTrigger className="w-[280px]" data-testid="select-role">
+                    <SelectValue placeholder="Select a role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allRoles.map((role) => (
+                      <SelectItem key={role} value={role} data-testid={`option-${role}`}>
+                        <div className="flex items-center">
+                          {getRoleLabel(role)}
+                          {isCustomRole(role) && (
+                            <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
+                              Custom
+                            </Badge>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-              {allRoles.map((role) => (
-                <TabsContent key={role} value={role}>
-                  <div className="space-y-4">
-                    {isCustomRole(role) && (
-                      <div className="flex justify-end">
-                        <AlertDialog open={deleteRole === role} onOpenChange={(open) => setDeleteRole(open ? role : null)}>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="destructive" size="sm" data-testid={`btn-delete-${role}`}>
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete Role
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Role "{getRoleLabel(role)}"?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This action cannot be undone. This will permanently delete the role and its permission settings.
-                                <br /><br />
-                                <strong>Note:</strong> You cannot delete a role if there are users assigned to it. Reassign those users first.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction 
-                                onClick={() => handleDeleteRole(role)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                data-testid={`btn-confirm-delete-${role}`}
-                              >
-                                {deleteRoleMutation.isPending ? 'Deleting...' : 'Delete Role'}
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    )}
-                    <RolePermissionsEditor
-                      role={role}
-                      initialPermissions={getPermissionsForRole(role)}
-                      onSave={(perms) => updateMutation.mutate({ role, permissions: perms })}
-                      isSaving={updateMutation.isPending}
-                    />
-                  </div>
-                </TabsContent>
-              ))}
-            </Tabs>
+              {selectedRole && (
+                <div className="space-y-4">
+                  {isCustomRole(selectedRole) && (
+                    <div className="flex justify-end">
+                      <AlertDialog open={deleteRole === selectedRole} onOpenChange={(open) => setDeleteRole(open ? selectedRole : null)}>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="destructive" size="sm" data-testid={`btn-delete-${selectedRole}`}>
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete Role
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Role "{getRoleLabel(selectedRole)}"?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This action cannot be undone. This will permanently delete the role and its permission settings.
+                              <br /><br />
+                              <strong>Note:</strong> You cannot delete a role if there are users assigned to it. Reassign those users first.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction 
+                              onClick={() => handleDeleteRole(selectedRole)}
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              data-testid={`btn-confirm-delete-${selectedRole}`}
+                            >
+                              {deleteRoleMutation.isPending ? 'Deleting...' : 'Delete Role'}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  )}
+                  <RolePermissionsEditor
+                    role={selectedRole}
+                    initialPermissions={getPermissionsForRole(selectedRole)}
+                    onSave={(perms) => updateMutation.mutate({ role: selectedRole, permissions: perms })}
+                    isSaving={updateMutation.isPending}
+                  />
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
