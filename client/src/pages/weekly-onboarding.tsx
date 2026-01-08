@@ -471,7 +471,7 @@ export default function WeeklyOnboarding() {
                       <div style={{ height: '1px', width: '2000px' }} />
                     </div>
                     <div 
-                      className="overflow-x-auto"
+                      className="overflow-x-auto overflow-y-auto max-h-[600px]"
                       onScroll={(e) => {
                         const target = e.target as HTMLDivElement;
                         const topScroller = target.previousElementSibling as HTMLDivElement;
@@ -479,7 +479,7 @@ export default function WeeklyOnboarding() {
                       }}
                     >
                     <Table>
-                      <TableHeader>
+                      <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                         <TableRow>
                           <TableHead className="w-[110px]">
                             <div className="flex items-center gap-1">
