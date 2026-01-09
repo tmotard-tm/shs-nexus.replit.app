@@ -4,16 +4,15 @@ interface PMFAuthResponse {
   token_type: string;
 }
 
+interface PMFVehicleStatus {
+  id: number;
+  name: string;
+}
+
 export interface PMFVehicle {
   assetId: string;
   vin: string;
-  status: string;
-  make?: string;
-  model?: string;
-  year?: number;
   state?: string;
-  location?: string;
-  city?: string;
   [key: string]: any;
 }
 
@@ -23,6 +22,7 @@ export class PMFApiService {
   private clientId: string;
   private clientSecret: string;
   private tokenCache: { token: string; expiresAt: number } | null = null;
+  private statusMapCache: Map<number, string> | null = null;
 
   constructor() {
     this.authEndpoint = 'https://auth.parq.ai/connect/token';
@@ -88,31 +88,18 @@ export class PMFApiService {
     return this.authenticate();
   }
 
-  private async makeRequest<T>(
-    endpoint: string,
-    method: 'GET' | 'POST' = 'GET',
-    body?: any
-  ): Promise<T> {
+  private async makeRequest<T>(endpoint: string): Promise<T> {
     const token = await this.getAccessToken();
-
-    const headers: HeadersInit = {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    };
-
-    const options: RequestInit = {
-      method,
-      headers,
-    };
-
-    if (body && method === 'POST') {
-      options.body = JSON.stringify(body);
-    }
 
     const url = `${this.apiEndpoint}${endpoint}`;
     console.log('[PMF] Making request to:', url);
 
-    const response = await fetch(url, options);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
 
     console.log('[PMF] Response status:', response.status, response.statusText);
 
@@ -127,61 +114,83 @@ export class PMFApiService {
       throw new Error(`PMF API request failed: ${response.status} ${response.statusText}`);
     }
 
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      const text = await response.text();
-      console.error('[PMF] Expected JSON but got:', contentType, 'Preview:', text.substring(0, 500));
-      throw new Error(`PMF API returned non-JSON response: ${contentType}`);
+    return response.json();
+  }
+
+  private async getStatusMap(): Promise<Map<number, string>> {
+    if (this.statusMapCache) {
+      return this.statusMapCache;
     }
 
-    return response.json();
+    console.log('[PMF] Fetching vehicle statuses...');
+    const statuses = await this.makeRequest<PMFVehicleStatus[]>('/api/public/v1/vehicle/statuses');
+    console.log('[PMF] Raw statuses response:', JSON.stringify(statuses).substring(0, 500));
+    
+    if (!Array.isArray(statuses)) {
+      console.error('[PMF] Statuses response is not an array:', typeof statuses);
+      return new Map();
+    }
+    
+    this.statusMapCache = new Map(statuses.map(s => [s.id, s.name]));
+    console.log('[PMF] Loaded', this.statusMapCache.size, 'vehicle statuses:', Array.from(this.statusMapCache.values()).join(', '));
+    return this.statusMapCache;
   }
 
   async getAvailableVehicles(): Promise<PMFVehicle[]> {
     try {
-      const response = await this.makeRequest<any>('/api/vehicles');
-      
-      let vehicles: PMFVehicle[] = [];
-      if (Array.isArray(response)) {
-        vehicles = response;
-      } else if (response.data && Array.isArray(response.data)) {
-        vehicles = response.data;
-      } else if (response.items && Array.isArray(response.items)) {
-        vehicles = response.items;
-      } else if (response.vehicles && Array.isArray(response.vehicles)) {
-        vehicles = response.vehicles;
+      console.log('[PMF] Fetching available vehicles...');
+      console.log('[PMF] Getting status map first...');
+      const statusMap = await this.getStatusMap();
+      console.log('[PMF] Status map loaded, fetching vehicles...');
+      const vehicles = await this.makeRequest<any[]>('/api/public/v1/vehicle');
+      console.log('[PMF] Got', vehicles?.length || 0, 'vehicles from API');
+
+      if (!Array.isArray(vehicles)) {
+        console.error('[PMF] Vehicles response is not an array:', typeof vehicles);
+        return [];
       }
 
-      const availableVehicles = vehicles.filter((v: PMFVehicle) => {
-        const status = (v.status || '').toLowerCase();
-        return status === 'available' || status === 'active' || status === 'unassigned';
-      });
+      const availableVehicles = vehicles
+        .filter(v => {
+          const statusName = statusMap.get(v.vehicleStatusId)?.toLowerCase();
+          return statusName === 'available';
+        })
+        .map(v => ({
+          assetId: v.assetId || '',
+          vin: v.descriptor || '',
+          state: v.state || v.locationState || v.garagingState || '',
+          ...v
+        }));
 
       console.log('[PMF] Found', availableVehicles.length, 'available vehicles out of', vehicles.length, 'total');
+      
+      if (availableVehicles.length > 0) {
+        console.log('[PMF] Sample vehicle fields:', Object.keys(availableVehicles[0]).join(', '));
+        console.log('[PMF] Sample vehicle state:', availableVehicles[0].state);
+      }
+      
       return availableVehicles;
-    } catch (error) {
-      console.error('[PMF] Error fetching available vehicles:', error);
+    } catch (error: any) {
+      console.error('[PMF] Error fetching available vehicles:', error.message || error);
       throw error;
     }
   }
 
   async getAllVehicles(): Promise<PMFVehicle[]> {
     try {
-      const response = await this.makeRequest<any>('/api/vehicles');
-      
-      let vehicles: PMFVehicle[] = [];
-      if (Array.isArray(response)) {
-        vehicles = response;
-      } else if (response.data && Array.isArray(response.data)) {
-        vehicles = response.data;
-      } else if (response.items && Array.isArray(response.items)) {
-        vehicles = response.items;
-      } else if (response.vehicles && Array.isArray(response.vehicles)) {
-        vehicles = response.vehicles;
-      }
+      const statusMap = await this.getStatusMap();
+      const vehicles = await this.makeRequest<any[]>('/api/public/v1/vehicle');
 
-      console.log('[PMF] Fetched', vehicles.length, 'total vehicles');
-      return vehicles;
+      const mappedVehicles = vehicles.map(v => ({
+        assetId: v.assetId || '',
+        vin: v.descriptor || '',
+        status: statusMap.get(v.vehicleStatusId) || 'unknown',
+        state: v.state || v.locationState || v.garagingState || '',
+        ...v
+      }));
+
+      console.log('[PMF] Fetched', mappedVehicles.length, 'total vehicles');
+      return mappedVehicles;
     } catch (error) {
       console.error('[PMF] Error fetching vehicles:', error);
       throw error;
@@ -190,7 +199,7 @@ export class PMFApiService {
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      const token = await this.getAccessToken();
+      await this.getAccessToken();
       return {
         success: true,
         message: 'Successfully authenticated with PMF/PARQ AI API'
