@@ -578,21 +578,26 @@ export default function WeeklyOnboarding() {
                                   return vehicleState === hireState;
                                 });
                                 return stateVehicles.length > 0 ? (
-                                  <div className="max-h-[100px] overflow-y-auto">
-                                    {stateVehicles.slice(0, 5).map((v: any, idx: number) => (
-                                      <div key={idx} className="text-xs font-mono whitespace-nowrap">
-                                        {v.assetId || v.asset_id || v.AssetId || 'N/A'} / {v.vin || v.VIN ? (v.vin || v.VIN).slice(-6) : 'N/A'}
-                                      </div>
-                                    ))}
-                                    {stateVehicles.length > 5 && (
-                                      <div className="text-xs text-muted-foreground mt-1">
-                                        +{stateVehicles.length - 5} more
-                                      </div>
-                                    )}
+                                  <div className="space-y-1">
+                                    <div className="font-semibold text-green-600 dark:text-green-400">
+                                      {stateVehicles.length} Available in {hireState}
+                                    </div>
+                                    <div className="max-h-[80px] overflow-y-auto">
+                                      {stateVehicles.slice(0, 5).map((v: any, idx: number) => (
+                                        <div key={idx} className="text-xs font-mono whitespace-nowrap text-muted-foreground">
+                                          {v.assetId || v.asset_id || v.AssetId || 'N/A'}
+                                        </div>
+                                      ))}
+                                      {stateVehicles.length > 5 && (
+                                        <div className="text-xs text-muted-foreground">
+                                          +{stateVehicles.length - 5} more
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 ) : (
                                   <span className="text-muted-foreground">
-                                    {hireState ? `None in ${hireState}` : 'No state'}
+                                    {hireState ? `0 in ${hireState}` : 'No state'}
                                   </span>
                                 );
                               })()}

@@ -27,11 +27,13 @@ export class PMFApiService {
   constructor() {
     this.authEndpoint = 'https://auth.parq.ai/connect/token';
     this.apiEndpoint = 'https://api.parq.ai';
-    this.clientId = process.env.PMF_CLIENT_ID || '';
-    this.clientSecret = process.env.PMF_CLIENT_SECRET || '';
+    this.clientId = (process.env.PMF_CLIENT_ID || '').trim();
+    this.clientSecret = (process.env.PMF_CLIENT_SECRET || '').trim();
 
     if (!this.clientId || !this.clientSecret) {
       console.warn('[PMF] API credentials not fully configured');
+    } else {
+      console.log('[PMF] API credentials loaded - clientId length:', this.clientId.length, ', secret length:', this.clientSecret.length);
     }
   }
 
@@ -45,6 +47,7 @@ export class PMFApiService {
 
   private async authenticate(): Promise<string> {
     console.log('[PMF] Attempting authentication to:', this.authEndpoint);
+    console.log('[PMF] Using client_id:', this.clientId, '(length:', this.clientId.length, ')');
 
     const params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
@@ -158,7 +161,7 @@ export class PMFApiService {
         .map(v => ({
           assetId: v.assetId || '',
           vin: v.descriptor || '',
-          state: v.state || v.locationState || v.garagingState || '',
+          state: v.state || v.locationState || v.garagingState || v.licensePlateState || '',
           ...v
         }));
 
@@ -166,7 +169,13 @@ export class PMFApiService {
       
       if (availableVehicles.length > 0) {
         console.log('[PMF] Sample vehicle fields:', Object.keys(availableVehicles[0]).join(', '));
-        console.log('[PMF] Sample vehicle state:', availableVehicles[0].state);
+        console.log('[PMF] Sample vehicle state:', availableVehicles[0].state, '| licensePlateState:', availableVehicles[0].licensePlateState);
+        const statesByCount: Record<string, number> = {};
+        availableVehicles.forEach(v => {
+          const st = v.state || 'UNKNOWN';
+          statesByCount[st] = (statesByCount[st] || 0) + 1;
+        });
+        console.log('[PMF] Vehicles by state:', JSON.stringify(statesByCount));
       }
       
       return availableVehicles;
