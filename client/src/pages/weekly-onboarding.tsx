@@ -479,35 +479,35 @@ export default function WeeklyOnboarding() {
                       }}
                     >
                     <Table>
-                      <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
-                        <TableRow>
-                          <TableHead className="w-[110px]">
+                      <TableHeader className="sticky top-0 z-10">
+                        <TableRow className="bg-background">
+                          <TableHead className="w-[110px] bg-background sticky top-0">
                             <div className="flex items-center gap-1">
                               <Calendar className="h-4 w-4" />
                               Service Date
                             </div>
                           </TableHead>
-                          <TableHead>Employee Name</TableHead>
-                          <TableHead className="w-[100px]">Emp. Status</TableHead>
-                          <TableHead className="w-[100px]">Enterprise ID</TableHead>
-                          <TableHead className="w-[90px]">Status</TableHead>
-                          <TableHead className="w-[100px]">
+                          <TableHead className="bg-background sticky top-0">Employee Name</TableHead>
+                          <TableHead className="w-[100px] bg-background sticky top-0">Emp. Status</TableHead>
+                          <TableHead className="w-[100px] bg-background sticky top-0">Enterprise ID</TableHead>
+                          <TableHead className="w-[90px] bg-background sticky top-0">Status</TableHead>
+                          <TableHead className="w-[100px] bg-background sticky top-0">
                             <div className="flex items-center gap-1">
                               <Truck className="h-4 w-4" />
                               Truck #
                             </div>
                           </TableHead>
-                          <TableHead className="min-w-[200px]">Job Title</TableHead>
-                          <TableHead className="w-[80px]">District</TableHead>
-                          <TableHead>Owner</TableHead>
-                          <TableHead className="w-[80px]">Zipcode</TableHead>
-                          <TableHead>City</TableHead>
-                          <TableHead>Planning Area</TableHead>
-                          <TableHead className="min-w-[200px]">Address</TableHead>
-                          <TableHead>Specialties</TableHead>
-                          <TableHead className="w-[60px]">State</TableHead>
-                          <TableHead>Action Reason</TableHead>
-                          <TableHead className="w-[100px]">Actions</TableHead>
+                          <TableHead className="min-w-[200px] bg-background sticky top-0">Job Title</TableHead>
+                          <TableHead className="w-[80px] bg-background sticky top-0">District</TableHead>
+                          <TableHead className="bg-background sticky top-0">Owner</TableHead>
+                          <TableHead className="w-[80px] bg-background sticky top-0">Zipcode</TableHead>
+                          <TableHead className="bg-background sticky top-0">City</TableHead>
+                          <TableHead className="bg-background sticky top-0">Planning Area</TableHead>
+                          <TableHead className="min-w-[200px] bg-background sticky top-0">Address</TableHead>
+                          <TableHead className="bg-background sticky top-0">Specialties</TableHead>
+                          <TableHead className="w-[60px] bg-background sticky top-0">State</TableHead>
+                          <TableHead className="bg-background sticky top-0">Action Reason</TableHead>
+                          <TableHead className="w-[100px] bg-background sticky top-0">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
