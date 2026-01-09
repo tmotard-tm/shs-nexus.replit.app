@@ -18,6 +18,7 @@ import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql, eq } from "drizzle-orm";
 import { holmanApiService } from "./holman-api-service";
+import { pmfApiService } from "./pmf-api-service";
 
 // Initialize session cleanup on startup
 try {
@@ -6892,6 +6893,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error seeding data sources:", error);
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ============================================
+  // PMF/PARQ AI API Routes
+  // ============================================
+  console.log("Registering PMF/PARQ AI API routes...");
+
+  // Test PMF connection
+  app.get("/api/pmf/test", requireAuth, async (req: any, res) => {
+    try {
+      const result = await pmfApiService.testConnection();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error testing PMF connection:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get available vehicles from PMF
+  app.get("/api/pmf/vehicles/available", requireAuth, async (req: any, res) => {
+    try {
+      const vehicles = await pmfApiService.getAvailableVehicles();
+      res.json({ success: true, vehicles });
+    } catch (error: any) {
+      console.error("Error fetching available PMF vehicles:", error);
+      res.status(500).json({ success: false, message: error.message, vehicles: [] });
+    }
+  });
+
+  // Get all vehicles from PMF
+  app.get("/api/pmf/vehicles", requireAuth, async (req: any, res) => {
+    try {
+      const vehicles = await pmfApiService.getAllVehicles();
+      res.json({ success: true, vehicles });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicles:", error);
+      res.status(500).json({ success: false, message: error.message, vehicles: [] });
     }
   });
 

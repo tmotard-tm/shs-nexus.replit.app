@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle, Download } from "lucide-react";
+import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle, Download, Car } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -79,6 +79,12 @@ export default function WeeklyOnboarding() {
   const { data: syncLogs = [] } = useQuery<any[]>({
     queryKey: ['/api/sync-logs'],
   });
+
+  const { data: pmfData, isLoading: pmfLoading } = useQuery<{ success: boolean; vehicles: any[]; message?: string }>({
+    queryKey: ['/api/pmf/vehicles/available'],
+  });
+
+  const availableVehicles = pmfData?.vehicles || [];
 
   const lastSync = syncLogs.find(log => log.syncType === 'onboarding_hires');
 
@@ -508,6 +514,12 @@ export default function WeeklyOnboarding() {
                           <TableHead className="w-[60px] bg-background sticky top-0">State</TableHead>
                           <TableHead className="bg-background sticky top-0">Action Reason</TableHead>
                           <TableHead className="w-[100px] bg-background sticky top-0">Actions</TableHead>
+                          <TableHead className="min-w-[200px] bg-background sticky top-0">
+                            <div className="flex items-center gap-1">
+                              <Car className="h-4 w-4" />
+                              Available Vehicles
+                            </div>
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -555,6 +567,26 @@ export default function WeeklyOnboarding() {
                                 <Truck className="h-4 w-4 mr-1" />
                                 {hire.truckAssigned ? 'Edit' : 'Assign'}
                               </Button>
+                            </TableCell>
+                            <TableCell className="text-sm">
+                              {pmfLoading ? (
+                                <span className="text-muted-foreground">Loading...</span>
+                              ) : availableVehicles.length > 0 ? (
+                                <div className="max-h-[100px] overflow-y-auto">
+                                  {availableVehicles.slice(0, 5).map((v: any, idx: number) => (
+                                    <div key={idx} className="text-xs font-mono whitespace-nowrap">
+                                      {v.assetId || v.asset_id || 'N/A'} / {v.vin ? v.vin.slice(-6) : 'N/A'}
+                                    </div>
+                                  ))}
+                                  {availableVehicles.length > 5 && (
+                                    <div className="text-xs text-muted-foreground mt-1">
+                                      +{availableVehicles.length - 5} more
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">No vehicles available</span>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}

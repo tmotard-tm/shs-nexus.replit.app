@@ -81,3 +81,4 @@ Preferred communication style: Simple, everyday language.
 - **Snowflake**: Data warehouse for technician rosters and TPMS data.
 - **Holman**: Vehicle fleet details and assignment updates.
 - **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments.
+- **PMF/PARQ AI**: Fleet vehicle availability API (Base: https://api.parq.ai, Auth: https://auth.parq.ai/connect/token). Displays available vehicles in Weekly Onboarding.
