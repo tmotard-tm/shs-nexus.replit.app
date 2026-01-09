@@ -13,7 +13,155 @@ export interface PMFVehicle {
   assetId: string;
   vin: string;
   state?: string;
+  site?: string;
   [key: string]: any;
+}
+
+const SITE_TO_STATE_MAP: Record<string, string> = {
+  'DFW': 'TX',
+  'DALLAS': 'TX',
+  'HOUSTON': 'TX',
+  'SAN ANTONIO': 'TX',
+  'AUSTIN': 'TX',
+  'LAX': 'CA',
+  'LOS ANGELES': 'CA',
+  'SAN DIEGO': 'CA',
+  'SAN FRANCISCO': 'CA',
+  'SACRAMENTO': 'CA',
+  'SFO': 'CA',
+  'NYC': 'NY',
+  'NEW YORK': 'NY',
+  'BUFFALO': 'NY',
+  'ATL': 'GA',
+  'ATLANTA': 'GA',
+  'MIA': 'FL',
+  'MIAMI': 'FL',
+  'ORLANDO': 'FL',
+  'TAMPA': 'FL',
+  'JAX': 'FL',
+  'JACKSONVILLE': 'FL',
+  'CHI': 'IL',
+  'CHICAGO': 'IL',
+  'DEN': 'CO',
+  'DENVER': 'CO',
+  'PHX': 'AZ',
+  'PHOENIX': 'AZ',
+  'SEA': 'WA',
+  'SEATTLE': 'WA',
+  'BOS': 'MA',
+  'BOSTON': 'MA',
+  'DET': 'MI',
+  'DETROIT': 'MI',
+  'MSP': 'MN',
+  'MINNEAPOLIS': 'MN',
+  'CLT': 'NC',
+  'CHARLOTTE': 'NC',
+  'RALEIGH': 'NC',
+  'PHL': 'PA',
+  'PHILADELPHIA': 'PA',
+  'PITTSBURGH': 'PA',
+  'DC': 'DC',
+  'WASHINGTON': 'DC',
+  'DMV': 'DC',
+  'LAS': 'NV',
+  'LAS VEGAS': 'NV',
+  'PDX': 'OR',
+  'PORTLAND': 'OR',
+  'SLC': 'UT',
+  'SALT LAKE': 'UT',
+  'STL': 'MO',
+  'ST LOUIS': 'MO',
+  'KANSAS CITY': 'MO',
+  'IND': 'IN',
+  'INDIANAPOLIS': 'IN',
+  'CLE': 'OH',
+  'CLEVELAND': 'OH',
+  'COLUMBUS': 'OH',
+  'CINCINNATI': 'OH',
+  'NAS': 'TN',
+  'NASHVILLE': 'TN',
+  'MEMPHIS': 'TN',
+  'OKC': 'OK',
+  'OKLAHOMA CITY': 'OK',
+  'NOLA': 'LA',
+  'NEW ORLEANS': 'LA',
+};
+
+const STATE_NAME_TO_ABBREV: Record<string, string> = {
+  'ALABAMA': 'AL',
+  'ALASKA': 'AK',
+  'ARIZONA': 'AZ',
+  'ARKANSAS': 'AR',
+  'CALIFORNIA': 'CA',
+  'COLORADO': 'CO',
+  'CONNECTICUT': 'CT',
+  'DELAWARE': 'DE',
+  'FLORIDA': 'FL',
+  'GEORGIA': 'GA',
+  'HAWAII': 'HI',
+  'IDAHO': 'ID',
+  'ILLINOIS': 'IL',
+  'INDIANA': 'IN',
+  'IOWA': 'IA',
+  'KANSAS': 'KS',
+  'KENTUCKY': 'KY',
+  'LOUISIANA': 'LA',
+  'MAINE': 'ME',
+  'MARYLAND': 'MD',
+  'MASSACHUSETTS': 'MA',
+  'MICHIGAN': 'MI',
+  'MINNESOTA': 'MN',
+  'MISSISSIPPI': 'MS',
+  'MISSOURI': 'MO',
+  'MONTANA': 'MT',
+  'NEBRASKA': 'NE',
+  'NEVADA': 'NV',
+  'NEW HAMPSHIRE': 'NH',
+  'NEW JERSEY': 'NJ',
+  'NEW MEXICO': 'NM',
+  'NEW YORK': 'NY',
+  'NORTH CAROLINA': 'NC',
+  'NORTH DAKOTA': 'ND',
+  'OHIO': 'OH',
+  'OKLAHOMA': 'OK',
+  'OREGON': 'OR',
+  'PENNSYLVANIA': 'PA',
+  'RHODE ISLAND': 'RI',
+  'SOUTH CAROLINA': 'SC',
+  'SOUTH DAKOTA': 'SD',
+  'TENNESSEE': 'TN',
+  'TEXAS': 'TX',
+  'UTAH': 'UT',
+  'VERMONT': 'VT',
+  'VIRGINIA': 'VA',
+  'WASHINGTON': 'WA',
+  'WEST VIRGINIA': 'WV',
+  'WISCONSIN': 'WI',
+  'WYOMING': 'WY',
+  'DISTRICT OF COLUMBIA': 'DC',
+};
+
+function normalizeStateToAbbrev(state: string | undefined | null): string {
+  if (!state) return '';
+  const normalized = state.toUpperCase().trim();
+  if (normalized.length === 2) {
+    return normalized;
+  }
+  return STATE_NAME_TO_ABBREV[normalized] || normalized;
+}
+
+function mapSiteToState(site: string | undefined | null): string {
+  if (!site) return '';
+  const normalized = site.toUpperCase().trim();
+  if (SITE_TO_STATE_MAP[normalized]) {
+    return SITE_TO_STATE_MAP[normalized];
+  }
+  for (const [key, state] of Object.entries(SITE_TO_STATE_MAP)) {
+    if (normalized.includes(key) || key.includes(normalized)) {
+      return state;
+    }
+  }
+  return '';
 }
 
 export class PMFApiService {
@@ -158,24 +306,54 @@ export class PMFApiService {
           const statusName = statusMap.get(v.vehicleStatusId)?.toLowerCase();
           return statusName === 'available';
         })
-        .map(v => ({
-          assetId: v.assetId || '',
-          vin: v.descriptor || '',
-          state: v.state || v.locationState || v.garagingState || v.licensePlateState || '',
-          ...v
-        }));
+        .map(v => {
+          const siteField = v.site || v.lot || v.siteName || v.lotName || v.location || v.locationName || '';
+          const stateFromSite = mapSiteToState(siteField);
+          const directState = v.state || v.locationState || v.garagingState || v.licensePlateState || '';
+          const finalState = normalizeStateToAbbrev(stateFromSite || directState);
+          return {
+            assetId: v.assetId || '',
+            vin: v.descriptor || '',
+            site: siteField,
+            state: finalState,
+            ...v
+          };
+        });
 
       console.log('[PMF] Found', availableVehicles.length, 'available vehicles out of', vehicles.length, 'total');
       
+      if (vehicles.length > 0) {
+        const rawSample = vehicles[0];
+        console.log('[PMF] Raw API fields:', Object.keys(rawSample).join(', '));
+        const relevantFields: string[] = [];
+        Object.keys(rawSample).forEach(key => {
+          const lowerKey = key.toLowerCase();
+          if (lowerKey.includes('site') || lowerKey.includes('lot') || lowerKey.includes('state') || 
+              lowerKey.includes('location') || lowerKey.includes('address') || lowerKey.includes('region') ||
+              lowerKey.includes('city') || lowerKey.includes('asset')) {
+            relevantFields.push(`${key}=${rawSample[key]}`);
+          }
+        });
+        console.log('[PMF] Sample relevant fields:', relevantFields.join(' | '));
+      }
+      
       if (availableVehicles.length > 0) {
-        console.log('[PMF] Sample vehicle fields:', Object.keys(availableVehicles[0]).join(', '));
-        console.log('[PMF] Sample vehicle state:', availableVehicles[0].state, '| licensePlateState:', availableVehicles[0].licensePlateState);
+        console.log('[PMF] Processed vehicle - assetId:', availableVehicles[0].assetId, '| site:', availableVehicles[0].site, '| state:', availableVehicles[0].state);
         const statesByCount: Record<string, number> = {};
+        const sitesByCount: Record<string, number> = {};
         availableVehicles.forEach(v => {
           const st = v.state || 'UNKNOWN';
           statesByCount[st] = (statesByCount[st] || 0) + 1;
+          const site = v.site || 'UNKNOWN';
+          sitesByCount[site] = (sitesByCount[site] || 0) + 1;
         });
         console.log('[PMF] Vehicles by state:', JSON.stringify(statesByCount));
+        console.log('[PMF] Vehicles by site:', JSON.stringify(sitesByCount));
+        
+        const texasVehicles = availableVehicles.filter(v => v.state === 'TX');
+        if (texasVehicles.length > 0) {
+          console.log('[PMF] Texas vehicles:', texasVehicles.map(v => v.assetId).join(', '));
+        }
       }
       
       return availableVehicles;
@@ -190,13 +368,20 @@ export class PMFApiService {
       const statusMap = await this.getStatusMap();
       const vehicles = await this.makeRequest<any[]>('/api/public/v1/vehicle');
 
-      const mappedVehicles = vehicles.map(v => ({
-        assetId: v.assetId || '',
-        vin: v.descriptor || '',
-        status: statusMap.get(v.vehicleStatusId) || 'unknown',
-        state: v.state || v.locationState || v.garagingState || '',
-        ...v
-      }));
+      const mappedVehicles = vehicles.map(v => {
+        const siteField = v.site || v.lot || v.siteName || v.lotName || v.location || v.locationName || '';
+        const stateFromSite = mapSiteToState(siteField);
+        const directState = v.state || v.locationState || v.garagingState || '';
+        const finalState = normalizeStateToAbbrev(stateFromSite || directState);
+        return {
+          assetId: v.assetId || '',
+          vin: v.descriptor || '',
+          status: statusMap.get(v.vehicleStatusId) || 'unknown',
+          site: siteField,
+          state: finalState,
+          ...v
+        };
+      });
 
       console.log('[PMF] Fetched', mappedVehicles.length, 'total vehicles');
       return mappedVehicles;

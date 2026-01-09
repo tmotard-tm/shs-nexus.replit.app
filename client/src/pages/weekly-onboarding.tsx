@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle, Download, Car } from "lucide-react";
+import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle, Download, Car, ChevronDown, ChevronUp } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -71,6 +71,7 @@ export default function WeeklyOnboarding() {
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [truckNumber, setTruckNumber] = useState("");
   const [notes, setNotes] = useState("");
+  const [pmfSectionExpanded, setPmfSectionExpanded] = useState(true);
 
   const { data: hires = [], isLoading } = useQuery<OnboardingHire[]>({
     queryKey: ['/api/onboarding-hires'],
@@ -428,44 +429,58 @@ export default function WeeklyOnboarding() {
                     </Card>
                   </div>
 
-                  {/* PMF Available Vehicles by State Summary */}
+                  {/* PMF Available Vehicles by State Summary - Collapsible */}
                   {!pmfLoading && sortedStates.length > 0 && (
                     <Card className="border-purple-200 dark:border-purple-800">
-                      <CardHeader className="pb-2">
-                        <div className="flex items-center gap-2">
-                          <Car className="h-5 w-5 text-purple-600" />
-                          <CardTitle className="text-base">PMF Available Vehicles by State</CardTitle>
-                          <Badge variant="outline" className="ml-2">
-                            {sortedStates.length} states
-                          </Badge>
+                      <CardHeader 
+                        className="pb-2 cursor-pointer hover:bg-purple-50 dark:hover:bg-purple-950 transition-colors"
+                        onClick={() => setPmfSectionExpanded(!pmfSectionExpanded)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Car className="h-5 w-5 text-purple-600" />
+                            <CardTitle className="text-base">PMF Available Vehicles by State</CardTitle>
+                            <Badge variant="outline" className="ml-2">
+                              {sortedStates.length} states
+                            </Badge>
+                          </div>
+                          <div className="h-8 w-8 p-0 flex items-center justify-center rounded-md hover:bg-accent">
+                            {pmfSectionExpanded ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            )}
+                          </div>
                         </div>
                       </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
-                          {sortedStates.map(([state, data]) => (
-                            <div 
-                              key={state}
-                              className="bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-lg p-2 hover:bg-purple-100 dark:hover:bg-purple-900 transition-colors"
-                              title={`Asset IDs: ${data.assetIds.slice(0, 10).join(', ')}${data.assetIds.length > 10 ? ` +${data.assetIds.length - 10} more` : ''}`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="font-bold text-purple-700 dark:text-purple-300">{state}</span>
-                                <Badge variant="secondary" className="bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200">
-                                  {data.count}
-                                </Badge>
+                      {pmfSectionExpanded && (
+                        <CardContent>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                            {sortedStates.map(([state, data]) => (
+                              <div 
+                                key={state}
+                                className="bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-lg p-2 hover:bg-purple-100 dark:hover:bg-purple-900 transition-colors"
+                                title={`Asset IDs: ${data.assetIds.slice(0, 10).join(', ')}${data.assetIds.length > 10 ? ` +${data.assetIds.length - 10} more` : ''}`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-purple-700 dark:text-purple-300">{state}</span>
+                                  <Badge variant="secondary" className="bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200">
+                                    {data.count}
+                                  </Badge>
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground max-h-[40px] overflow-hidden">
+                                  {data.assetIds.slice(0, 3).map((id, idx) => (
+                                    <div key={idx} className="font-mono truncate">{id}</div>
+                                  ))}
+                                  {data.assetIds.length > 3 && (
+                                    <div className="text-purple-600 dark:text-purple-400">+{data.assetIds.length - 3} more</div>
+                                  )}
+                                </div>
                               </div>
-                              <div className="mt-1 text-xs text-muted-foreground max-h-[40px] overflow-hidden">
-                                {data.assetIds.slice(0, 3).map((id, idx) => (
-                                  <div key={idx} className="font-mono truncate">{id}</div>
-                                ))}
-                                {data.assetIds.length > 3 && (
-                                  <div className="text-purple-600 dark:text-purple-400">+{data.assetIds.length - 3} more</div>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
+                            ))}
+                          </div>
+                        </CardContent>
+                      )}
                     </Card>
                   )}
 
