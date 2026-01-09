@@ -259,6 +259,26 @@ export default function WeeklyOnboarding() {
   const assignedCount = hires.filter(h => h.truckAssigned).length;
   const unassignedCount = hires.filter(h => !h.truckAssigned).length;
 
+  // Aggregate PMF available vehicles by state
+  const vehiclesByState = availableVehicles.reduce((acc: Record<string, { count: number; assetIds: string[] }>, v: any) => {
+    const state = (v.state || v.location || v.State || v.Location || v.locationState || v.garagingState || '').toUpperCase().trim();
+    if (state) {
+      if (!acc[state]) {
+        acc[state] = { count: 0, assetIds: [] };
+      }
+      acc[state].count++;
+      const assetId = v.assetId || v.asset_id || v.AssetId || '';
+      if (assetId) {
+        acc[state].assetIds.push(assetId);
+      }
+    }
+    return acc;
+  }, {} as Record<string, { count: number; assetIds: string[] }>);
+
+  // Sort states alphabetically for display
+  const sortedStates = Object.entries(vehiclesByState).sort((a, b) => a[0].localeCompare(b[0]));
+  const totalAvailableVehicles = availableVehicles.length;
+
   const handleOpenAssignDialog = (hire: OnboardingHire) => {
     setSelectedHire(hire);
     setTruckNumber(hire.assignedTruckNo || "");
@@ -359,7 +379,7 @@ export default function WeeklyOnboarding() {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-col gap-4 mb-6">
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-4 gap-4">
                     <Card className="bg-blue-50 dark:bg-blue-950">
                       <CardContent className="p-4">
                         <div className="flex items-center justify-between">
@@ -393,7 +413,72 @@ export default function WeeklyOnboarding() {
                         </div>
                       </CardContent>
                     </Card>
+                    <Card className="bg-purple-50 dark:bg-purple-950">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-muted-foreground">PMF Available Vehicles</p>
+                            <p className="text-2xl font-bold">
+                              {pmfLoading ? '...' : totalAvailableVehicles}
+                            </p>
+                          </div>
+                          <Car className="h-8 w-8 text-purple-600" />
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
+
+                  {/* PMF Available Vehicles by State Summary */}
+                  {!pmfLoading && sortedStates.length > 0 && (
+                    <Card className="border-purple-200 dark:border-purple-800">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center gap-2">
+                          <Car className="h-5 w-5 text-purple-600" />
+                          <CardTitle className="text-base">PMF Available Vehicles by State</CardTitle>
+                          <Badge variant="outline" className="ml-2">
+                            {sortedStates.length} states
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+                          {sortedStates.map(([state, data]) => (
+                            <div 
+                              key={state}
+                              className="bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-lg p-2 hover:bg-purple-100 dark:hover:bg-purple-900 transition-colors"
+                              title={`Asset IDs: ${data.assetIds.slice(0, 10).join(', ')}${data.assetIds.length > 10 ? ` +${data.assetIds.length - 10} more` : ''}`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-purple-700 dark:text-purple-300">{state}</span>
+                                <Badge variant="secondary" className="bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200">
+                                  {data.count}
+                                </Badge>
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground max-h-[40px] overflow-hidden">
+                                {data.assetIds.slice(0, 3).map((id, idx) => (
+                                  <div key={idx} className="font-mono truncate">{id}</div>
+                                ))}
+                                {data.assetIds.length > 3 && (
+                                  <div className="text-purple-600 dark:text-purple-400">+{data.assetIds.length - 3} more</div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {!pmfLoading && pmfData && !pmfData.success && (
+                    <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950">
+                      <CardContent className="p-4">
+                        <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                          <AlertCircle className="h-5 w-5" />
+                          <span>Failed to load PMF vehicle data: {pmfData.message || 'Unknown error'}</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
                   <div className="flex items-center gap-4 flex-wrap">
                     <div className="relative flex-1 max-w-sm min-w-[200px]">
