@@ -16,7 +16,8 @@ import { checkPasswordCompromised, validatePasswordRequirements } from "./passwo
 import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
-import { sql, eq } from "drizzle-orm";
+import { sql, eq, and, gte, lte, inArray, desc, SQL } from "drizzle-orm";
+import { queueItems } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { pmfApiService } from "./pmf-api-service";
 
@@ -4531,53 +4532,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Metrics and Export Routes
   
-  // Helper function to build queue item query filters with robust array parsing
-  const buildQueueFilters = (query: any) => {
-    const filters: string[] = [];
+  // Helper function to parse array parameters correctly
+  const parseArrayParam = (param: any): string[] => {
+    if (!param) return [];
+    
+    if (Array.isArray(param)) {
+      return param.filter(item => item && typeof item === 'string');
+    }
+    
+    if (typeof param === 'string') {
+      return param.split(',').map(item => item.trim()).filter(item => item.length > 0);
+    }
+    
+    return [];
+  };
 
-    // Helper function to parse array parameters correctly
-    const parseArrayParam = (param: any): string[] => {
-      if (!param) return [];
-      
-      // If it's already an array, use it directly
-      if (Array.isArray(param)) {
-        return param.filter(item => item && typeof item === 'string');
-      }
-      
-      // If it's a string, handle comma-separated values or single values
-      if (typeof param === 'string') {
-        // Split by comma and filter out empty strings
-        return param.split(',').map(item => item.trim()).filter(item => item.length > 0);
-      }
-      
-      return [];
-    };
-
-    // Helper function to safely quote values for SQL
-    const quoteSqlValue = (value: any): string => {
-      if (value === null || value === undefined) return 'NULL';
-      if (typeof value === 'string') {
-        return `'${value.replace(/'/g, "''")}'`; // Escape single quotes
-      }
-      return String(value);
-    };
+  // Helper function to build queue item query filters using Drizzle's parameterized queries
+  const buildQueueFiltersParameterized = (query: any): SQL | undefined => {
+    const conditions: SQL[] = [];
 
     // Date range filters
     if (query.from_ts || query.from) {
-      const fromDate = query.from_ts || query.from;
-      filters.push(`created_at >= ${quoteSqlValue(new Date(fromDate).toISOString())}`);
+      const fromDate = new Date(query.from_ts || query.from);
+      conditions.push(gte(queueItems.createdAt, fromDate));
     }
     if (query.to_ts || query.to) {
-      const toDate = query.to_ts || query.to;
-      filters.push(`created_at <= ${quoteSqlValue(new Date(toDate).toISOString())}`);
+      const toDate = new Date(query.to_ts || query.to);
+      conditions.push(lte(queueItems.createdAt, toDate));
     }
 
     // Department filter (robust array support)
     if (query.departments) {
       const departments = parseArrayParam(query.departments);
       if (departments.length > 0) {
-        const quotedDepts = departments.map(dept => quoteSqlValue(dept)).join(',');
-        filters.push(`department = ANY(ARRAY[${quotedDepts}])`);
+        conditions.push(inArray(queueItems.department, departments));
       }
     }
 
@@ -4585,8 +4573,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (query.statuses) {
       const statuses = parseArrayParam(query.statuses);
       if (statuses.length > 0) {
-        const quotedStatuses = statuses.map(status => quoteSqlValue(status)).join(',');
-        filters.push(`status = ANY(ARRAY[${quotedStatuses}])`);
+        conditions.push(inArray(queueItems.status, statuses));
       }
     }
 
@@ -4594,12 +4581,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (query.assignees) {
       const assignees = parseArrayParam(query.assignees);
       if (assignees.length > 0) {
-        const quotedAssignees = assignees.map(assignee => quoteSqlValue(assignee)).join(',');
-        filters.push(`assigned_to = ANY(ARRAY[${quotedAssignees}])`);
+        conditions.push(inArray(queueItems.assignedTo, assignees));
       }
     }
 
-    return { filters };
+    return conditions.length > 0 ? and(...conditions) : undefined;
   };
 
   // Metrics API Route
@@ -4711,42 +4697,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { filters } = buildQueueFilters(req.query);
-      const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+      const whereCondition = buildQueueFiltersParameterized(req.query);
 
-      const query = `
-        SELECT 
-          id,
-          title,
-          description,
-          status,
-          priority,
-          assigned_to as assignee,
-          requester_id,
-          department,
-          team,
-          workflow_type as type,
-          notes,
-          scheduled_for,
-          attempts,
-          last_error,
-          completed_at,
-          started_at,
-          first_response_at,
-          workflow_id,
-          workflow_step,
-          created_at,
-          updated_at
-        FROM queue_items 
-        ${whereClause}
-        ORDER BY created_at DESC
-      `;
-
-      const result = await db.execute(sql.raw(query));
-      const rows = result.rows;
+      const results = await db
+        .select({
+          id: queueItems.id,
+          title: queueItems.title,
+          description: queueItems.description,
+          status: queueItems.status,
+          priority: queueItems.priority,
+          assignee: queueItems.assignedTo,
+          requester_id: queueItems.requesterId,
+          department: queueItems.department,
+          team: queueItems.team,
+          type: queueItems.workflowType,
+          notes: queueItems.notes,
+          scheduled_for: queueItems.scheduledFor,
+          attempts: queueItems.attempts,
+          last_error: queueItems.lastError,
+          completed_at: queueItems.completedAt,
+          started_at: queueItems.startedAt,
+          first_response_at: queueItems.firstResponseAt,
+          workflow_id: queueItems.workflowId,
+          workflow_step: queueItems.workflowStep,
+          created_at: queueItems.createdAt,
+          updated_at: queueItems.updatedAt,
+        })
+        .from(queueItems)
+        .where(whereCondition)
+        .orderBy(desc(queueItems.createdAt));
 
       // Sanitize all rows to prevent formula injection
-      const sanitizedRows = (rows as any[]).map(row => sanitizeRowForExport(row));
+      const sanitizedRows = results.map(row => sanitizeRowForExport(row));
 
       // Create CSV content
       const columns = [
@@ -4791,52 +4773,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { filters } = buildQueueFilters(req.query);
-      const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+      const whereCondition = buildQueueFiltersParameterized(req.query);
 
-      const query = `
-        SELECT 
-          id,
-          title,
-          description,
-          status,
-          priority,
-          assigned_to as assignee,
-          requester_id,
-          department,
-          team,
-          workflow_type as type,
-          notes,
-          scheduled_for,
-          attempts,
-          last_error,
-          completed_at,
-          started_at,
-          first_response_at,
-          workflow_id,
-          workflow_step,
-          created_at,
-          updated_at,
-          CASE 
-            WHEN completed_at IS NOT NULL AND created_at IS NOT NULL THEN
-              EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600
-            ELSE NULL
-          END as response_time_hours,
-          CASE 
-            WHEN first_response_at IS NOT NULL AND created_at IS NOT NULL THEN
-              EXTRACT(EPOCH FROM (first_response_at - created_at)) / 3600
-            ELSE NULL  
-          END as first_response_time_hours
-        FROM queue_items 
-        ${whereClause}
-        ORDER BY created_at DESC
-      `;
+      const results = await db
+        .select({
+          id: queueItems.id,
+          title: queueItems.title,
+          description: queueItems.description,
+          status: queueItems.status,
+          priority: queueItems.priority,
+          assignee: queueItems.assignedTo,
+          requester_id: queueItems.requesterId,
+          department: queueItems.department,
+          team: queueItems.team,
+          type: queueItems.workflowType,
+          notes: queueItems.notes,
+          scheduled_for: queueItems.scheduledFor,
+          attempts: queueItems.attempts,
+          last_error: queueItems.lastError,
+          completed_at: queueItems.completedAt,
+          started_at: queueItems.startedAt,
+          first_response_at: queueItems.firstResponseAt,
+          workflow_id: queueItems.workflowId,
+          workflow_step: queueItems.workflowStep,
+          created_at: queueItems.createdAt,
+          updated_at: queueItems.updatedAt,
+        })
+        .from(queueItems)
+        .where(whereCondition)
+        .orderBy(desc(queueItems.createdAt));
 
-      const result = await db.execute(sql.raw(query));
-      const rows = result.rows;
+      // Compute derived fields and sanitize rows to prevent formula injection
+      const sanitizedRows = results.map(row => {
+        const createdAt = row.created_at ? new Date(row.created_at).getTime() : null;
+        const completedAt = row.completed_at ? new Date(row.completed_at).getTime() : null;
+        const firstResponseAt = row.first_response_at ? new Date(row.first_response_at).getTime() : null;
 
-      // Sanitize all rows to prevent formula injection
-      const sanitizedRows = (rows as any[]).map(row => sanitizeRowForExport(row));
+        return sanitizeRowForExport({
+          ...row,
+          response_time_hours: (completedAt && createdAt) 
+            ? (completedAt - createdAt) / (1000 * 60 * 60) 
+            : null,
+          first_response_time_hours: (firstResponseAt && createdAt) 
+            ? (firstResponseAt - createdAt) / (1000 * 60 * 60) 
+            : null,
+        });
+      });
 
       // Create Excel workbook
       const workbook = new ExcelJS.Workbook();
