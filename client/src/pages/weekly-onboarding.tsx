@@ -571,22 +571,31 @@ export default function WeeklyOnboarding() {
                             <TableCell className="text-sm">
                               {pmfLoading ? (
                                 <span className="text-muted-foreground">Loading...</span>
-                              ) : availableVehicles.length > 0 ? (
-                                <div className="max-h-[100px] overflow-y-auto">
-                                  {availableVehicles.slice(0, 5).map((v: any, idx: number) => (
-                                    <div key={idx} className="text-xs font-mono whitespace-nowrap">
-                                      {v.assetId || v.asset_id || 'N/A'} / {v.vin ? v.vin.slice(-6) : 'N/A'}
-                                    </div>
-                                  ))}
-                                  {availableVehicles.length > 5 && (
-                                    <div className="text-xs text-muted-foreground mt-1">
-                                      +{availableVehicles.length - 5} more
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground">No vehicles available</span>
-                              )}
+                              ) : (() => {
+                                const hireState = (hire.workState || '').toUpperCase().trim();
+                                const stateVehicles = availableVehicles.filter((v: any) => {
+                                  const vehicleState = (v.state || v.location || v.State || v.Location || '').toUpperCase().trim();
+                                  return vehicleState === hireState;
+                                });
+                                return stateVehicles.length > 0 ? (
+                                  <div className="max-h-[100px] overflow-y-auto">
+                                    {stateVehicles.slice(0, 5).map((v: any, idx: number) => (
+                                      <div key={idx} className="text-xs font-mono whitespace-nowrap">
+                                        {v.assetId || v.asset_id || v.AssetId || 'N/A'} / {v.vin || v.VIN ? (v.vin || v.VIN).slice(-6) : 'N/A'}
+                                      </div>
+                                    ))}
+                                    {stateVehicles.length > 5 && (
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        +{stateVehicles.length - 5} more
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    {hireState ? `None in ${hireState}` : 'No state'}
+                                  </span>
+                                );
+                              })()}
                             </TableCell>
                           </TableRow>
                         ))}

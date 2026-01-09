@@ -11,6 +11,9 @@ export interface PMFVehicle {
   make?: string;
   model?: string;
   year?: number;
+  state?: string;
+  location?: string;
+  city?: string;
   [key: string]: any;
 }
 
