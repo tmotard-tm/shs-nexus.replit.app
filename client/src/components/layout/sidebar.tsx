@@ -72,12 +72,12 @@ export function Sidebar() {
 
   const { data: rolePermissions = [] } = useQuery<RolePermission[]>({
     queryKey: ['/api/role-permissions'],
-    enabled: user?.role === 'superadmin',
+    enabled: user?.role === 'developer',
   });
 
   const { data: allUsers = [] } = useQuery<User[]>({
     queryKey: ['/api/users'],
-    enabled: user?.role === 'superadmin',
+    enabled: user?.role === 'developer',
   });
 
   const filteredUsers = useMemo(() => {
@@ -94,7 +94,7 @@ export function Sidebar() {
 
   const availableRoles = useMemo(() => {
     return rolePermissions
-      .filter(rp => rp.role !== 'superadmin')
+      .filter(rp => rp.role !== 'developer')
       .map(rp => ({
         value: rp.role as UserRole,
         label: rp.role === 'agent' ? 'Agent' : 
@@ -309,7 +309,7 @@ export function Sidebar() {
           <DropdownMenuSeparator />
 
           {/* View as Role - Super Admin Only */}
-          {user.role === 'superadmin' && (
+          {user.role === 'developer' && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger className="flex items-center gap-3" data-testid="menu-view-as-role">
                 <Eye className="h-4 w-4" />
@@ -323,7 +323,7 @@ export function Sidebar() {
               <DropdownMenuPortal>
                 <DropdownMenuSubContent className="min-w-48">
                   <DropdownMenuRadioGroup value={previewRole || 'none'} onValueChange={handlePreviewRoleChange}>
-                    <DropdownMenuRadioItem value="none" data-testid="radio-view-as-superadmin">
+                    <DropdownMenuRadioItem value="none" data-testid="radio-view-as-developer">
                       Developer (My Role)
                     </DropdownMenuRadioItem>
                     <DropdownMenuSeparator />
@@ -339,7 +339,7 @@ export function Sidebar() {
           )}
 
           {/* View as User - Super Admin Only */}
-          {user.role === 'superadmin' && (
+          {user.role === 'developer' && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger className="flex items-center gap-3" data-testid="menu-view-as-user">
                 <UserIcon className="h-4 w-4" />

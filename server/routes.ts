@@ -358,7 +358,7 @@ function departmentToQueueModule(department: string): QueueModule | null {
 // Check if user has access to a specific queue module
 function hasQueueAccess(user: any, module: QueueModule): boolean {
   // Superadmin has access to everything
-  if (user.role === 'superadmin') {
+  if (user.role === 'developer') {
     return true;
   }
   
@@ -373,7 +373,7 @@ function hasQueueAccess(user: any, module: QueueModule): boolean {
 
 // Get accessible queue modules for a user
 function getAccessibleQueueModules(user: any): QueueModule[] {
-  if (user.role === 'superadmin') {
+  if (user.role === 'developer') {
     return ['ntao', 'assets', 'inventory', 'fleet'];
   }
   
@@ -573,11 +573,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Not found" });
       }
 
-      // Authentication and authorization check - require superadmin role
+      // Authentication and authorization check - require developer role
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
+      if (!currentUser || currentUser.role !== 'developer') {
         return res.status(403).json({ 
-          message: "Access denied. Test user creation requires superadmin role and development environment." 
+          message: "Access denied. Test user creation requires developer role and development environment." 
         });
       }
 
@@ -601,7 +601,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           { username: "inventory_user", role: "inventory" },
           { username: "ntao_user", role: "ntao" },
           { username: "field_user", role: "field" },
-          { username: "superadmin", role: "superadmin" }
+          { username: "developer", role: "developer" }
         ]
       });
     } catch (error) {
@@ -696,8 +696,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/users", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Access denied. User management requires superadmin or admin role." });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. User management requires developer or admin role." });
       }
       
       const userData = insertUserSchema.parse(req.body);
@@ -736,8 +736,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/users/:id", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Access denied. User management requires superadmin or admin role." });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. User management requires developer or admin role." });
       }
       
       const { id } = req.params;
@@ -840,8 +840,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/users/:id", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Access denied. User management requires superadmin or admin role." });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. User management requires developer or admin role." });
       }
       
       const { id } = req.params;
@@ -886,8 +886,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/users/:id/reset-password", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Password reset requires superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Password reset requires developer role." });
       }
       
       const { id } = req.params;
@@ -1014,8 +1014,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/users/:id/update-role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Role management requires superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Role management requires developer role." });
       }
       
       const { id } = req.params;
@@ -2117,8 +2117,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/productivity-stats", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Productivity dashboard requires superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Productivity dashboard requires developer role." });
       }
 
       // Get today's date range
@@ -2240,8 +2240,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/productivity-export/:department", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Export requires superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Export requires developer role." });
       }
 
       const { department } = req.params;
@@ -2481,9 +2481,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid user" });
       }
       
-      // Only superadmins can release tasks assigned to others
-      if (currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmins can release tasks" });
+      // Only developers can release tasks assigned to others
+      if (currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developers can release tasks" });
       }
       
       const { module, id } = req.params;
@@ -2537,9 +2537,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid user" });
       }
       
-      // Only superadmins can reassign tasks
-      if (currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmins can reassign tasks" });
+      // Only developers can reassign tasks
+      if (currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developers can reassign tasks" });
       }
       
       const { module, id } = req.params;
@@ -4690,10 +4690,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid user" });
       }
 
-      // Server-side authorization: require superadmin or admin role for exports
-      if (!currentUser || !['superadmin', 'admin'].includes(currentUser.role)) {
+      // Server-side authorization: require developer or admin role for exports
+      if (!currentUser || !['developer', 'admin'].includes(currentUser.role)) {
         return res.status(403).json({ 
-          message: "Access denied. Export functionality requires superadmin or admin role." 
+          message: "Access denied. Export functionality requires developer or admin role." 
         });
       }
 
@@ -4766,10 +4766,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid user" });
       }
 
-      // Server-side authorization: require superadmin or admin role for exports
-      if (!currentUser || !['superadmin', 'admin'].includes(currentUser.role)) {
+      // Server-side authorization: require developer or admin role for exports
+      if (!currentUser || !['developer', 'admin'].includes(currentUser.role)) {
         return res.status(403).json({ 
-          message: "Access denied. Export functionality requires superadmin or admin role." 
+          message: "Access denied. Export functionality requires developer or admin role." 
         });
       }
 
@@ -4884,10 +4884,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // GET /api/templates - fetch all templates
   app.get("/api/templates", requireAuth, async (req: any, res) => {
     try {
-      // Check if user is superadmin
+      // Check if user is developer
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Template management requires developer role." });
       }
 
       const templates = await storage.getAllTemplates();
@@ -4901,10 +4901,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/templates - create new template
   app.post("/api/templates", requireAuth, async (req: any, res) => {
     try {
-      // Check if user is superadmin
+      // Check if user is developer
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Template management requires developer role." });
       }
 
       const templateData = insertTemplateSchema.parse(req.body);
@@ -4945,10 +4945,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PATCH /api/templates/:id - update template
   app.patch("/api/templates/:id", requireAuth, async (req: any, res) => {
     try {
-      // Check if user is superadmin
+      // Check if user is developer
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Template management requires developer role." });
       }
 
       const { id } = req.params;
@@ -4988,10 +4988,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // DELETE /api/templates/:id - delete template
   app.delete("/api/templates/:id", requireAuth, async (req: any, res) => {
     try {
-      // Check if user is superadmin
+      // Check if user is developer
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Template management requires developer role." });
       }
 
       const { id } = req.params;
@@ -5026,10 +5026,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PATCH /api/templates/:id/toggle-status - toggle template active status
   app.patch("/api/templates/:id/toggle-status", requireAuth, async (req: any, res) => {
     try {
-      // Check if user is superadmin
+      // Check if user is developer
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Template management requires superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Template management requires developer role." });
       }
 
       const { id } = req.params;
@@ -5062,7 +5062,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/role-permissions", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
         return res.status(403).json({ message: "Access denied. Role permissions require Developer or Admin role." });
       }
 
@@ -5078,7 +5078,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/role-permissions/:role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
         return res.status(403).json({ message: "Access denied. Role permissions require Developer or Admin role." });
       }
 
@@ -5100,7 +5100,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/role-permissions/:role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
         return res.status(403).json({ message: "Access denied. Role permissions require Developer or Admin role." });
       }
 
@@ -5108,16 +5108,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const permissions = req.body;
 
       // Permission hierarchy validation:
-      // - Developer (superadmin) can edit ALL roles including their own
+      // - Developer (developer) can edit ALL roles including their own
       // - Admin can edit Agent and custom roles only (not Developer or Admin)
       const canEditRole = (): boolean => {
-        if (currentUser.role === 'superadmin') {
+        if (currentUser.role === 'developer') {
           // Developer can edit all roles
           return true;
         }
         if (currentUser.role === 'admin') {
           // Admin can edit all roles except Admin and Developer
-          return targetRole !== 'admin' && targetRole !== 'superadmin';
+          return targetRole !== 'admin' && targetRole !== 'developer';
         }
         return false;
       };
@@ -5152,7 +5152,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
       // Developer and Admin can create custom roles
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
         return res.status(403).json({ message: "Access denied. Only Developer and Admin users can create custom roles." });
       }
 
@@ -5201,14 +5201,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
       // Developer and Admin can delete custom roles
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
         return res.status(403).json({ message: "Access denied. Only Developer and Admin users can delete custom roles." });
       }
 
       const { role } = req.params;
 
-      // Prevent deletion of core roles (superadmin, admin, agent)
-      if (role === 'superadmin' || role === 'agent' || role === 'admin') {
+      // Prevent deletion of core roles (developer, admin, agent)
+      if (role === 'developer' || role === 'agent' || role === 'admin') {
         return res.status(400).json({ message: "Cannot delete core system roles (Developer, Admin, Agent)" });
       }
 
@@ -5245,14 +5245,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/role-permissions/seed", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Access denied. Role permissions require superadmin role." });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Role permissions require developer role." });
       }
 
       // Import default permissions from client lib
       const { DEFAULT_SUPERADMIN_PERMISSIONS, DEFAULT_AGENT_PERMISSIONS } = await import('../client/src/lib/role-permissions');
 
-      const superadminPermission = await storage.upsertRolePermission('superadmin', DEFAULT_SUPERADMIN_PERMISSIONS);
+      const developerPermission = await storage.upsertRolePermission('developer', DEFAULT_SUPERADMIN_PERMISSIONS);
       const agentPermission = await storage.upsertRolePermission('agent', DEFAULT_AGENT_PERMISSIONS);
 
       // Log activity
@@ -5261,12 +5261,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: "role_permissions_seeded",
         entityType: "role_permission",
         entityId: "all",
-        details: "Default role permissions seeded for superadmin and agent roles",
+        details: "Default role permissions seeded for developer and agent roles",
       });
 
       res.json({
         message: "Default role permissions seeded successfully",
-        permissions: [superadminPermission, agentPermission]
+        permissions: [developerPermission, agentPermission]
       });
     } catch (error) {
       console.error("Error seeding role permissions:", error);
@@ -5889,8 +5889,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/snowflake/sync/termed-techs", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer users can trigger manual syncs" });
       }
       
       const syncService = getSnowflakeSyncService();
@@ -5905,8 +5905,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/snowflake/sync/all-techs", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer users can trigger manual syncs" });
       }
       
       const syncService = getSnowflakeSyncService();
@@ -5921,8 +5921,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/snowflake/sync/truck-inventory", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer users can trigger manual syncs" });
       }
       
       const syncService = getSnowflakeSyncService();
@@ -5938,8 +5938,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/snowflake/sync/tpms", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer users can trigger manual syncs" });
       }
       
       const syncService = getSnowflakeSyncService();
@@ -5955,8 +5955,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/snowflake/sync/onboarding-hires", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Only superadmin users can trigger manual syncs" });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer users can trigger manual syncs" });
       }
       
       const syncService = getSnowflakeSyncService();
@@ -5972,8 +5972,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/snowflake/enrich/onboarding-hires", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || (currentUser.role !== 'superadmin' && currentUser.role !== 'admin')) {
-        return res.status(403).json({ message: "Only superadmin users can trigger enrichment" });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer users can trigger enrichment" });
       }
       
       const syncService = getSnowflakeSyncService();
@@ -6125,8 +6125,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/onboarding-hires/bulk", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can bulk import" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can bulk import" });
       }
 
       const { records } = req.body;
@@ -6368,8 +6368,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/mapping/sources", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can create data sources" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can create data sources" });
       }
       const source = await storage.createIntegrationDataSource(req.body);
       res.status(201).json(source);
@@ -6382,8 +6382,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/mapping/sources/:id", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can update data sources" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can update data sources" });
       }
       const source = await storage.updateIntegrationDataSource(req.params.id, req.body);
       if (!source) {
@@ -6399,8 +6399,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/mapping/sources/:id", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can delete data sources" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can delete data sources" });
       }
       const deleted = await storage.deleteIntegrationDataSource(req.params.id);
       if (!deleted) {
@@ -6427,8 +6427,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/mapping/sources/:sourceId/fields", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can create fields" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can create fields" });
       }
       const field = await storage.createDataSourceField({
         ...req.body,
@@ -6444,8 +6444,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/mapping/sources/:sourceId/fields/bulk", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can create fields" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can create fields" });
       }
       const fields = await storage.createDataSourceFieldsBulk(
         req.body.fields.map((f: any) => ({ ...f, sourceId: req.params.sourceId }))
@@ -6489,8 +6489,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/mapping/sets", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can create mapping sets" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can create mapping sets" });
       }
       const set = await storage.createMappingSet({
         ...req.body,
@@ -6506,8 +6506,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/mapping/sets/:id", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can update mapping sets" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can update mapping sets" });
       }
       const set = await storage.updateMappingSet(req.params.id, req.body);
       if (!set) {
@@ -6523,8 +6523,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/mapping/sets/:id", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can delete mapping sets" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can delete mapping sets" });
       }
       const deleted = await storage.deleteMappingSet(req.params.id);
       if (!deleted) {
@@ -6541,8 +6541,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/mapping/sets/:id/nodes", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can update nodes" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can update nodes" });
       }
       const nodes = await storage.upsertMappingNodes(req.params.id, req.body.nodes || []);
       res.json(nodes);
@@ -6556,8 +6556,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/mapping/sets/:id/mappings", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can update mappings" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can update mappings" });
       }
       const mappings = await storage.upsertFieldMappings(req.params.id, req.body.mappings || []);
       res.json(mappings);
@@ -6570,8 +6570,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/mapping/sets/:id/mappings", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can create mappings" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can create mappings" });
       }
       const mapping = await storage.createFieldMapping({
         ...req.body,
@@ -6587,8 +6587,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/mapping/mappings/:id", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can delete mappings" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can delete mappings" });
       }
       const deleted = await storage.deleteFieldMapping(req.params.id);
       if (!deleted) {
@@ -6605,8 +6605,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/mapping/seed-sources", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'superadmin') {
-        return res.status(403).json({ message: "Only superadmin users can seed data sources" });
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can seed data sources" });
       }
 
       // Define sources with their fields
@@ -6992,8 +6992,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Start TPMS cache sync (loops through all techs and calls TPMS API)
   app.post("/api/tpms/cache/sync", requireAuth, async (req: any, res) => {
     try {
-      if (req.user.role !== 'superadmin') {
-        return res.status(403).json({ success: false, message: 'Only superadmins can trigger TPMS sync' });
+      if (req.user.role !== 'developer') {
+        return res.status(403).json({ success: false, message: 'Only developers can trigger TPMS sync' });
       }
 
       const syncService = getTpmsCacheSyncService();
@@ -7067,8 +7067,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Start TPMS fleet initial sync (processes all fleet vehicles)
   app.post("/api/tpms/fleet-sync/start", requireAuth, async (req: any, res) => {
     try {
-      if (req.user.role !== 'superadmin') {
-        return res.status(403).json({ success: false, message: 'Only superadmins can trigger fleet sync' });
+      if (req.user.role !== 'developer') {
+        return res.status(403).json({ success: false, message: 'Only developers can trigger fleet sync' });
       }
 
       const tpmsService = getTPMSService();
@@ -7228,7 +7228,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/vehicle-assignments", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || !['superadmin', 'admin', 'agent'].includes(currentUser.role)) {
+      if (!currentUser || !['developer', 'admin', 'agent'].includes(currentUser.role)) {
         return res.status(403).json({ message: "Insufficient permissions" });
       }
       
@@ -7261,7 +7261,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/vehicle-assignments/:techRacfid", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || !['superadmin', 'admin', 'agent'].includes(currentUser.role)) {
+      if (!currentUser || !['developer', 'admin', 'agent'].includes(currentUser.role)) {
         return res.status(403).json({ message: "Insufficient permissions" });
       }
       

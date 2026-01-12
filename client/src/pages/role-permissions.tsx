@@ -176,12 +176,12 @@ function RolePermissionsEditor({
 
   const handleReset = () => {
     if (!canEdit) return;
-    const defaults = role === 'superadmin' ? DEFAULT_SUPERADMIN_PERMISSIONS : DEFAULT_AGENT_PERMISSIONS;
+    const defaults = role === 'developer' ? DEFAULT_SUPERADMIN_PERMISSIONS : DEFAULT_AGENT_PERMISSIONS;
     setPermissions(defaults);
     setHasChanges(true);
   };
 
-  const roleDisplayName = role === 'superadmin' ? 'Developer' : 
+  const roleDisplayName = role === 'developer' ? 'Developer' : 
                           role === 'agent' ? 'Agent' : 
                           role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 
@@ -195,7 +195,7 @@ function RolePermissionsEditor({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Badge variant={role === 'superadmin' ? 'default' : 'secondary'}>
+          <Badge variant={role === 'developer' ? 'default' : 'secondary'}>
             {roleDisplayName}
           </Badge>
           {hasChanges && (
@@ -247,7 +247,7 @@ function RolePermissionsEditor({
 export default function RolePermissions() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const [selectedRole, setSelectedRole] = useState<string>("superadmin");
+  const [selectedRole, setSelectedRole] = useState<string>("developer");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newRoleName, setNewRoleName] = useState("");
   const [deleteRole, setDeleteRole] = useState<string | null>(null);
@@ -311,7 +311,7 @@ export default function RolePermissions() {
       });
       setDeleteRole(null);
       if (selectedRole === roleName) {
-        setSelectedRole("superadmin");
+        setSelectedRole("developer");
       }
     },
     onError: (error: any) => {
@@ -355,32 +355,32 @@ export default function RolePermissions() {
     deleteRoleMutation.mutate(roleName);
   };
 
-  const isCustomRole = (role: string) => role !== 'superadmin' && role !== 'agent' && role !== 'admin';
+  const isCustomRole = (role: string) => role !== 'developer' && role !== 'agent' && role !== 'admin';
 
   const getRoleIcon = (role: string) => {
-    if (role === 'superadmin') return <Shield className="h-4 w-4 mr-2" />;
+    if (role === 'developer') return <Shield className="h-4 w-4 mr-2" />;
     if (role === 'agent') return <Users className="h-4 w-4 mr-2" />;
     return <UserCog className="h-4 w-4 mr-2" />;
   };
 
   const getRoleLabel = (role: string) => {
-    if (role === 'superadmin') return 'Developer';
+    if (role === 'developer') return 'Developer';
     if (role === 'agent') return 'Agent';
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
   // Permission hierarchy for editing roles:
-  // - Developer (superadmin) can edit: ALL roles including their own
+  // - Developer (developer) can edit: ALL roles including their own
   // - Admin can edit: Agent and custom roles only (not Developer or Admin)
   const canEditRole = (targetRole: string): boolean => {
     const currentUserRole = user?.role;
-    if (currentUserRole === 'superadmin') {
+    if (currentUserRole === 'developer') {
       // Developer can edit all roles including their own
       return true;
     }
     if (currentUserRole === 'admin') {
       // Admin can edit all roles except Admin and Developer
-      return targetRole !== 'admin' && targetRole !== 'superadmin';
+      return targetRole !== 'admin' && targetRole !== 'developer';
     }
     return false;
   };
@@ -388,7 +388,7 @@ export default function RolePermissions() {
   const getEditRestrictionMessage = (targetRole: string): string | undefined => {
     const currentUserRole = user?.role;
     if (currentUserRole === 'admin') {
-      if (targetRole === 'superadmin') {
+      if (targetRole === 'developer') {
         return "Developer role permissions can only be modified by Developer users.";
       }
       if (targetRole === 'admin') {
@@ -399,7 +399,7 @@ export default function RolePermissions() {
   };
 
   const allRoles = (() => {
-    const coreRoles = ['superadmin', 'agent'];
+    const coreRoles = ['developer', 'agent'];
     const customRoles = permissions
       ?.map(p => p.role)
       .filter(r => !coreRoles.includes(r))
@@ -407,8 +407,8 @@ export default function RolePermissions() {
     return [...coreRoles, ...customRoles];
   })();
 
-  // Allow both superadmin and admin to access this page
-  if (user?.role !== 'superadmin' && user?.role !== 'admin') {
+  // Allow both developer and admin to access this page
+  if (user?.role !== 'developer' && user?.role !== 'admin') {
     return (
       <div className="container mx-auto p-6">
         <Card>
@@ -472,7 +472,7 @@ export default function RolePermissions() {
   };
 
   const getPermissionsForRole = (role: string): RolePermissionSettings => {
-    const defaults = role === 'superadmin' ? DEFAULT_SUPERADMIN_PERMISSIONS : DEFAULT_AGENT_PERMISSIONS;
+    const defaults = role === 'developer' ? DEFAULT_SUPERADMIN_PERMISSIONS : DEFAULT_AGENT_PERMISSIONS;
     const rolePermission = permissions?.find(p => p.role === role);
     if (rolePermission) {
       return deepMerge(defaults, rolePermission.permissions) as RolePermissionSettings;
@@ -490,7 +490,7 @@ export default function RolePermissions() {
             <Settings className="h-8 w-8 text-primary" />
             <h1 className="text-3xl font-bold" data-testid="page-title">Role Permissions</h1>
           </div>
-          {(user?.role === 'superadmin' || user?.role === 'admin') && (
+          {(user?.role === 'developer' || user?.role === 'admin') && (
             <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
               <DialogTrigger asChild>
                 <Button data-testid="btn-create-role">

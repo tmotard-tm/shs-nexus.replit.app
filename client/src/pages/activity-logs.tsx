@@ -214,15 +214,15 @@ export default function ActivityLogs() {
     fastestField?: string;
   } | null>(null);
 
-  // Redirect non-superadmin users
+  // Redirect non-developer users
   useEffect(() => {
-    if (user && user.role !== "superadmin") {
+    if (user && user.role !== "developer") {
       setLocation("/");
     }
   }, [user, setLocation]);
 
   // Show nothing while checking auth or redirecting
-  if (!user || user.role !== "superadmin") {
+  if (!user || user.role !== "developer") {
     return null;
   }
 

@@ -38,7 +38,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 
-// Form validation schema - simplified for superadmin/agent roles only
+// Form validation schema - simplified for developer/agent roles only
 const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 const createUserSchema = insertUserSchema.extend({
   confirmPassword: z.string().min(6),
@@ -100,7 +100,7 @@ export default function UserManagement() {
   // Build list of available roles for dropdown
   const availableRoles = rolePermissions.map(rp => ({
     value: rp.role,
-    label: rp.role === 'superadmin' ? 'Developer' : 
+    label: rp.role === 'developer' ? 'Developer' : 
            rp.role === 'agent' ? 'Agent' : 
            rp.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
   }));
@@ -208,7 +208,7 @@ export default function UserManagement() {
     },
   });
 
-  // Form setup - simplified for superadmin/agent roles only
+  // Form setup - simplified for developer/agent roles only
   const form = useForm<CreateUserFormData>({
     resolver: zodResolver(createUserSchema),
     defaultValues: {
@@ -281,13 +281,13 @@ export default function UserManagement() {
     });
   };
 
-  // Get current user info to check if superadmin
+  // Get current user info to check if developer
   const { user: currentUser } = useAuth();
-  const isSuperAdmin = currentUser?.role === 'superadmin';
+  const isSuperAdmin = currentUser?.role === 'developer';
 
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
-      case 'superadmin':
+      case 'developer':
         return 'destructive';
       case 'agent':
         return 'default';
@@ -302,7 +302,7 @@ export default function UserManagement() {
 
   const getRoleIcon = (role: string) => {
     switch (role) {
-      case 'superadmin':
+      case 'developer':
         return <Shield className="h-4 w-4" />;
       case 'admin':
         return <Shield className="h-4 w-4" />;
@@ -315,9 +315,9 @@ export default function UserManagement() {
     }
   };
 
-  // Format role name for display (e.g., "superadmin" -> "Developer", "my_custom_role" -> "My Custom Role")
+  // Format role name for display (e.g., "developer" -> "Developer", "my_custom_role" -> "My Custom Role")
   const formatRoleName = (role: string) => {
-    if (role === 'superadmin') return 'Developer';
+    if (role === 'developer') return 'Developer';
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
@@ -339,7 +339,7 @@ export default function UserManagement() {
 
   // Define colors for role cards
   const roleCardStyles: Record<string, { iconColor: string; textColor: string; icon: typeof Shield }> = {
-    superadmin: { iconColor: 'text-red-500', textColor: 'text-red-600', icon: Shield },
+    developer: { iconColor: 'text-red-500', textColor: 'text-red-600', icon: Shield },
     agent: { iconColor: 'text-blue-500', textColor: 'text-blue-600', icon: UserCheck },
   };
 
@@ -776,7 +776,7 @@ export default function UserManagement() {
               </form>
             </div>
 
-            {/* Access Section - Only visible to superadmins */}
+            {/* Access Section - Only visible to developers */}
             {isSuperAdmin && (
               <>
                 <hr className="border-border" />

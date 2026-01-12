@@ -302,7 +302,7 @@ export default function TestRepairResults() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="font-medium">Test User</p>
-                    <p className="text-muted-foreground">tmotard (superadmin)</p>
+                    <p className="text-muted-foreground">tmotard (developer)</p>
                   </div>
                   <div>
                     <p className="font-medium">Test Date</p>

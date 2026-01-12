@@ -280,11 +280,11 @@ export default function TemplateManagement() {
     toggleStatusMutation.mutate(template.id);
   };
 
-  // Get current user info to check if superadmin
+  // Get current user info to check if developer
   const { user: currentUser } = useAuth();
-  const isSuperAdmin = currentUser?.role === 'superadmin';
+  const isSuperAdmin = currentUser?.role === 'developer';
 
-  // If not superadmin, show access denied
+  // If not developer, show access denied
   if (!isSuperAdmin) {
     return (
       <div className="p-6 space-y-6">
@@ -307,7 +307,7 @@ export default function TemplateManagement() {
             <CardTitle className="text-destructive">Access Denied</CardTitle>
           </CardHeader>
           <CardContent>
-            <p>You do not have permission to access template management. Only superadmin users can manage templates.</p>
+            <p>You do not have permission to access template management. Only developer users can manage templates.</p>
           </CardContent>
         </Card>
       </div>

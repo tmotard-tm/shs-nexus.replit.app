@@ -73,7 +73,7 @@ function departmentToQueueModule(department: string): QueueModule | null {
 // Get accessible queue modules for a user
 function getUserAccessibleModules(user: UserType): QueueModule[] {
   // Superadmin has access to everything
-  if (user.role === 'superadmin') {
+  if (user.role === 'developer') {
     return ['ntao', 'assets', 'inventory', 'fleet'];
   }
   
@@ -388,7 +388,7 @@ export default function UnifiedQueueManagement() {
     },
   });
 
-  // Release queue item mutation (superadmin only)
+  // Release queue item mutation (developer only)
   const releaseMutation = useMutation({
     mutationFn: async ({ module, id }: { module: QueueModule; id: string }) => {
       const response = await apiRequest("PATCH", `/api/queues/${module}/${id}/release`);
@@ -418,7 +418,7 @@ export default function UnifiedQueueManagement() {
     },
   });
 
-  // Reassign queue item mutation (superadmin only)
+  // Reassign queue item mutation (developer only)
   const reassignMutation = useMutation({
     mutationFn: async ({ module, id, assigneeId }: { module: QueueModule; id: string; assigneeId: string }) => {
       const response = await apiRequest("PATCH", `/api/queues/${module}/${id}/reassign`, {
