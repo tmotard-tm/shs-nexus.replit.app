@@ -243,7 +243,7 @@ export function Sidebar() {
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
               <Settings className="h-4 w-4 text-primary-foreground" />
             </div>
-            <span className="font-semibold text-sm">Admin Platform</span>
+            <span className="font-semibold text-sm">Driveline</span>
             <div className="ml-auto">
               <ThemeToggle />
             </div>
