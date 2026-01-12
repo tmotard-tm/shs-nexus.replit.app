@@ -6,15 +6,15 @@ import { z } from "zod";
 // Queue module types for unified queue access
 export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet';
 
-// Role types - simplified to just superadmin and agent
-export type UserRole = 'superadmin' | 'agent';
+// Role types - Developer, Admin, and Agent
+export type UserRole = 'developer' | 'admin' | 'agent';
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
-  role: text("role").notNull().default("agent"), // superadmin, agent (simplified from 9 roles)
+  role: text("role").notNull().default("agent"), // developer, agent (simplified from 9 roles)
   departments: text("departments").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET']
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => {
@@ -28,7 +28,7 @@ export const users = pgTable("users", {
 // Role permissions table - stores hierarchical UI visibility settings per role
 export const rolePermissions = pgTable("role_permissions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  role: text("role").notNull().unique(), // 'superadmin' or 'agent'
+  role: text("role").notNull().unique(), // 'developer', 'admin', or 'agent'
   permissions: jsonb("permissions").notNull(), // Hierarchical permission object
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -1011,7 +1011,7 @@ export const workTemplateSchema = z.object({
   description: z.string().optional(),
   estimatedDuration: z.number().optional(), // Total estimated time in minutes
   difficulty: z.enum(["easy", "medium", "hard"]).default("medium"),
-  requiredRole: z.enum(["field", "agent", "superadmin"]).default("field"),
+  requiredRole: z.enum(["field", "agent", "developer"]).default("field"),
   steps: z.array(workTemplateStepSchema),
   finalDisposition: z.object({
     required: z.boolean().default(true),
@@ -1073,7 +1073,7 @@ export const templateFilterSchema = z.object({
   department: z.enum(["FLEET", "INVENTORY", "ASSETS", "NTAO"]).optional(), // NTAO = National Truck Assortment
   workflowType: z.string().optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
-  requiredRole: z.enum(["field", "agent", "superadmin"]).optional(),
+  requiredRole: z.enum(["field", "agent", "developer"]).optional(),
   isActive: z.boolean().optional()
 });
 

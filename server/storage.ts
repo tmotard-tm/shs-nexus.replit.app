@@ -386,7 +386,7 @@ export class MemStorage implements IStorage {
       return;
     }
     
-    // Create Enterprise ID users with simplified role system (superadmin/agent only)
+    // Create Enterprise ID users with simplified role system (developer/agent only)
     const enterpriseUsers: User[] = [
       // EMERGENCY LOGIN - Use this account if other users can't login due to password requirements
       {
@@ -394,7 +394,7 @@ export class MemStorage implements IStorage {
         username: "emergency-admin",
         email: "emergency@sears.com",
         password: bcrypt.hashSync("emergency-admin-2025-login!", 10),
-        role: "superadmin",
+        role: "developer",
         departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
         createdAt: new Date(),
       },
@@ -422,7 +422,7 @@ export class MemStorage implements IStorage {
         username: "ADMIN123",
         email: "admin@sears.com",
         password: bcrypt.hashSync("passwords", 10),
-        role: "superadmin",
+        role: "developer",
         departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
         createdAt: new Date(),
       },
@@ -456,9 +456,9 @@ export class MemStorage implements IStorage {
       {
         id: "2d5bcbc2-12bb-4ab3-9996-8b65cab409c8", // Fixed UUID for SUPER001 to maintain session consistency
         username: "SUPER001",
-        email: "superadmin@sears.com",
+        email: "developer@sears.com",
         password: bcrypt.hashSync("passwords", 10),
-        role: "superadmin",
+        role: "developer",
         departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
         createdAt: new Date(),
       },

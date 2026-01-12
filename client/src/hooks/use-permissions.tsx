@@ -75,23 +75,23 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
   const { data: allPermissions, isLoading, refetch } = useQuery<RolePermission[]>({
     queryKey: ['/api/role-permissions'],
-    enabled: !!user && user.role === 'superadmin',
+    enabled: !!user && user.role === 'developer',
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
 
   const { data: rolePermission } = useQuery<RolePermission>({
     queryKey: ['/api/role-permissions', user?.role],
-    enabled: !!user && user.role !== 'superadmin',
+    enabled: !!user && user.role !== 'developer',
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
 
   const effectiveRole = useMemo(() => {
-    if (user?.role === 'superadmin' && previewUser) {
+    if (user?.role === 'developer' && previewUser) {
       return previewUser.role;
     }
-    if (user?.role === 'superadmin' && previewRole) {
+    if (user?.role === 'developer' && previewRole) {
       return previewRole;
     }
     return (user?.role as UserRole) || 'agent';
@@ -104,7 +104,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
     const userRole = user.role as UserRole;
     
-    if (userRole === 'superadmin' && previewUser && allPermissions) {
+    if (userRole === 'developer' && previewUser && allPermissions) {
       const previewDefaults = getDefaultPermissions(previewUser.role);
       const found = allPermissions.find(p => p.role === previewUser.role);
       if (found) {
@@ -113,7 +113,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       return previewDefaults;
     }
     
-    if (userRole === 'superadmin' && previewRole && allPermissions) {
+    if (userRole === 'developer' && previewRole && allPermissions) {
       const previewDefaults = getDefaultPermissions(previewRole);
       const found = allPermissions.find(p => p.role === previewRole);
       if (found) {
@@ -124,14 +124,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
     const defaults = getDefaultPermissions(userRole);
 
-    if (userRole === 'superadmin' && allPermissions) {
-      const found = allPermissions.find(p => p.role === 'superadmin');
+    if (userRole === 'developer' && allPermissions) {
+      const found = allPermissions.find(p => p.role === 'developer');
       if (found) {
         return deepMergePermissions(defaults, found.permissions);
       }
     }
 
-    if (userRole !== 'superadmin' && rolePermission) {
+    if (userRole !== 'developer' && rolePermission) {
       return deepMergePermissions(defaults, rolePermission.permissions);
     }
 

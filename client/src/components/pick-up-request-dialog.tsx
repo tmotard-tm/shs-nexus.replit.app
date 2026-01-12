@@ -31,8 +31,8 @@ export function PickUpRequestDialog({
   // Filter agents based on department and role
   const getEligibleAgents = () => {
     const filtered = users.filter(user => {
-      // Always include superadmins
-      if (user.role === "superadmin") {
+      // Always include developers
+      if (user.role === "developer") {
         return true;
       }
 
@@ -110,7 +110,7 @@ export function PickUpRequestDialog({
                     >
                       {agent.username} 
                       {agent.id === currentUser?.id && " (You)"}
-                      {agent.role === "superadmin" && " (Admin)"}
+                      {agent.role === "developer" && " (Admin)"}
                       {agent.departments && agent.departments.length > 0 && 
                         ` - ${agent.departments.join(", ")}`
                       }

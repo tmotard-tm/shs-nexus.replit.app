@@ -4,7 +4,7 @@ import { usePreviewRole } from "@/hooks/use-preview-role";
 import { usePermissions } from "@/hooks/use-permissions";
 
 const ROLE_LABELS: Record<string, string> = {
-  superadmin: 'Developer',
+  developer: 'Developer',
   agent: 'Agent',
 };
 

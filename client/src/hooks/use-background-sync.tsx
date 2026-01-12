@@ -11,7 +11,7 @@ import { useStatusBar } from "@/components/status-bar";
  * The server now handles syncing:
  * - On startup (development mode)
  * - Via scheduled deployment (production mode - see replit.md)
- * - Manual sync available via superadmin UI on the Integrations page
+ * - Manual sync available via developer UI on the Integrations page
  * 
  * This hook now only checks if employee data is available and shows
  * an info message if data is missing or stale.
@@ -49,8 +49,8 @@ export function useBackgroundSync() {
         // Handle non-OK responses explicitly
         if (!response.ok) {
           console.log(`Employee roster check returned ${response.status}`);
-          // Only show warning for superadmins who can actually sync
-          if (user.role === 'superadmin') {
+          // Only show warning for developers who can actually sync
+          if (user.role === 'developer') {
             showStatus(
               "Employee roster not available. Sync from Snowflake Integration page.",
               "info",
@@ -68,8 +68,8 @@ export function useBackgroundSync() {
         const isEmpty = !records || (Array.isArray(records) && records.length === 0);
         
         if (isEmpty) {
-          // Only show warning for superadmins who can actually sync
-          if (user.role === 'superadmin') {
+          // Only show warning for developers who can actually sync
+          if (user.role === 'developer') {
             showStatus(
               "Employee roster not synced. Sync from Snowflake Integration page.",
               "info",

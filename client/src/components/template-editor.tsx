@@ -76,7 +76,7 @@ const templateEditorSchema = z.object({
   description: z.string().optional(),
   estimatedDuration: z.coerce.number().min(0).optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).default("medium"),
-  requiredRole: z.enum(["field", "agent", "superadmin"]).default("field"),
+  requiredRole: z.enum(["field", "agent", "developer"]).default("field"),
   
   // Steps array - enhanced with all fields from workTemplateSchema
   steps: z.array(z.object({
@@ -673,7 +673,7 @@ export function TemplateEditor({
                               <SelectContent>
                                 <SelectItem value="field">Field</SelectItem>
                                 <SelectItem value="agent">Agent</SelectItem>
-                                <SelectItem value="superadmin">Developer</SelectItem>
+                                <SelectItem value="developer">Developer</SelectItem>
                               </SelectContent>
                             </Select>
                             <FormMessage />

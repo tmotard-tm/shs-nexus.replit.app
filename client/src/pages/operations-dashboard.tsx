@@ -357,7 +357,7 @@ export default function OperationsDashboard() {
   };
 
   // Check if user has permission to view operations dashboard
-  if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+  if (!user || (user.role !== 'developer' && user.role !== 'admin')) {
     return (
       <MainContent>
         <TopBar title="Operations Dashboard" breadcrumbs={["Home", "Operations Dashboard"]} />

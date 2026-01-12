@@ -1,7 +1,7 @@
 import { storage } from "./storage";
 import bcrypt from "bcrypt";
 
-// Create sample users for testing - simplified to just superadmin and agent roles
+// Create sample users for testing - simplified to just developer and agent roles
 export async function createTestUsers() {
   console.log("Creating test users for role-based access control testing...");
 
@@ -42,10 +42,10 @@ export async function createTestUsers() {
       departments: ["NTAO", "ASSETS"]
     },
     {
-      username: "superadmin",
+      username: "developer",
       email: "admin@test.com", 
       password: "test123",
-      role: "superadmin",
+      role: "developer",
       departments: ["NTAO", "ASSETS", "INVENTORY", "FLEET"]
     }
   ];
@@ -84,5 +84,5 @@ export async function createTestUsers() {
   console.log("- inventory_agent / test123 (Agent with Inventory access)");
   console.log("- ntao_agent / test123 (Agent with NTAO access)"); 
   console.log("- multi_dept_agent / test123 (Agent with NTAO + Assets access)");
-  console.log("- superadmin / test123 (Super Admin with all access)");
+  console.log("- developer / test123 (Super Admin with all access)");
 }

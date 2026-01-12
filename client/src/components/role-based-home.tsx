@@ -32,6 +32,6 @@ export function RoleBasedHome() {
     );
   }
 
-  // If user should stay on home page (superadmin, field workers), show AssistanceSelection
+  // If user should stay on home page (developer, field workers), show AssistanceSelection
   return <AssistanceSelection />;
 }

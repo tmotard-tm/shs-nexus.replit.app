@@ -11,7 +11,7 @@
 3. **Synchronization** - Bi-directional sync keeps local and external systems aligned, queue-based updates to Holman ensure reliability, change detection triggers automated responses, and audit logging tracks every modification.
 
 ## Technical Stack
-Built with React, TypeScript, and Express.js, the platform provides role-based interfaces for superadmins and agents to handle API access, Snowflake queries, system configurations, and user permissions. Features a modern UI with shadcn/ui and Tailwind CSS, comprehensive request tracking, and activity logging.
+Built with React, TypeScript, and Express.js, the platform provides role-based interfaces for Developers, Admins, and Agents to handle API access, Snowflake queries, system configurations, and user permissions. Features a modern UI with shadcn/ui and Tailwind CSS, comprehensive request tracking, and activity logging.
 
 # User Preferences
 
@@ -43,9 +43,9 @@ Preferred communication style: Simple, everyday language.
 
 ## Authentication & Authorization
 - **Authentication**: Username/password, session management via cookies.
-- **Authorization**: Simplified role-based access control (superadmin, agent, and custom roles).
+- **Authorization**: Simplified role-based access control (Developer, Admin, Agent).
 - **Department Access**: Users assigned via a `departments` array.
-- **Role Permissions System**: Granular UI visibility control for pages, sections, features, and actions, managed via a hierarchical checkbox tree by superadmins. Permissions are stored in a `role_permissions` table (JSONB).
+- **Role Permissions System**: Granular UI visibility control for pages, sections, features, and actions, managed via a hierarchical checkbox tree by Developers. Permissions are stored in a `role_permissions` table (JSONB).
 
 ## Key Features
 - **Multi-role Dashboard**: Role-specific interfaces.

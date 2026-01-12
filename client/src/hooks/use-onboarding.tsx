@@ -82,7 +82,7 @@ const getStepsForRole = (role: string, departments?: string[]): OnboardingStep[]
     },
   ];
 
-  const superadminSteps: OnboardingStep[] = [
+  const developerSteps: OnboardingStep[] = [
     ...commonSteps,
     {
       id: "dashboard",
@@ -167,8 +167,8 @@ const getStepsForRole = (role: string, departments?: string[]): OnboardingStep[]
     },
   ];
 
-  if (role === 'superadmin') {
-    return superadminSteps;
+  if (role === 'developer') {
+    return developerSteps;
   }
 
   if (role === 'agent') {

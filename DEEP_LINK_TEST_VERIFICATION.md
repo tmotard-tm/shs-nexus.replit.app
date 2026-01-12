@@ -133,16 +133,16 @@ if (preserveHash && currentUrl.hash) {
 ```typescript
 // form-permissions.ts lines 4-10
 export const FORM_ACCESS_MAP = {
-  'create-vehicle': ['superadmin', 'agent'],
-  'assign-vehicle': ['superadmin', 'agent'], 
-  'onboarding': ['superadmin', 'agent'],
-  'offboarding': ['superadmin', 'agent'],
-  'byov-enrollment': ['superadmin', 'agent', 'field'],
+  'create-vehicle': ['developer', 'agent'],
+  'assign-vehicle': ['developer', 'agent'], 
+  'onboarding': ['developer', 'agent'],
+  'offboarding': ['developer', 'agent'],
+  'byov-enrollment': ['developer', 'agent', 'field'],
 } as const;
 ```
 
 **✅ VERIFIED:**
-- ✅ `superadmin` and `agent` roles: Full access to all forms
+- ✅ `developer` and `agent` roles: Full access to all forms
 - ✅ `field` role: Limited access (only BYOV enrollment)
 - ✅ Unknown roles: Denied by default (secure)
 - ✅ Access denied redirects preserve parameters

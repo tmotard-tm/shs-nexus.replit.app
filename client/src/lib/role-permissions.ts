@@ -239,7 +239,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
 
 // Get default permissions for a role
 export function getDefaultPermissions(role: UserRole): RolePermissionSettings {
-  if (role === 'superadmin') {
+  if (role === 'developer') {
     return DEFAULT_SUPERADMIN_PERMISSIONS;
   }
   return DEFAULT_AGENT_PERMISSIONS;
@@ -260,7 +260,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
   const userRole = user.role as UserRole;
   
   // Superadmin can access everything
-  if (userRole === 'superadmin') {
+  if (userRole === 'developer') {
     return true;
   }
 
@@ -318,7 +318,7 @@ export function getAccessibleQueueModules(user: User | null): string[] {
   const userRole = user.role as UserRole;
   
   // Superadmin gets all queues
-  if (userRole === 'superadmin') {
+  if (userRole === 'developer') {
     return ['ntao', 'assets', 'inventory', 'fleet'];
   }
 
@@ -345,7 +345,7 @@ export function checkQueueModuleAccess(user: User | null, module: string): boole
 
 // Get user-friendly role display name
 export function getRoleDisplayName(role: string, user?: User): string {
-  if (role === 'superadmin') {
+  if (role === 'developer') {
     return 'Developer';
   }
   
@@ -378,7 +378,7 @@ export function getUserLandingPage(user: User | null): string {
   const userRole = user.role as UserRole;
 
   // Superadmin gets the home/dashboard
-  if (userRole === 'superadmin') {
+  if (userRole === 'developer') {
     return '/';
   }
 
@@ -402,7 +402,7 @@ export function getAppTitle(user: User | null): string {
     return 'Operations Portal';
   }
   
-  if (user.role === 'superadmin') {
+  if (user.role === 'developer') {
     return 'Admin Platform';
   }
   
@@ -415,7 +415,7 @@ export function getTutorialTitle(user: User | null): string {
     return 'Portal Tutorial';
   }
   
-  if (user.role === 'superadmin') {
+  if (user.role === 'developer') {
     return 'Admin Tutorial';
   }
   
