@@ -19,7 +19,7 @@ import {
 export default function About() {
   return (
     <MainContent>
-      <TopBar title="About Driveline" breadcrumbs={["Home", "About"]} />
+      <TopBar title="About Nexus" breadcrumbs={["Home", "About"]} />
       
       <main className="p-6 max-w-5xl mx-auto">
         <BackButton href="/" />
@@ -31,7 +31,7 @@ export default function About() {
                 <Settings className="h-10 w-10 text-primary-foreground" />
               </div>
             </div>
-            <h1 className="text-4xl font-bold tracking-tight">Driveline</h1>
+            <h1 className="text-4xl font-bold tracking-tight">Nexus</h1>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
               Enterprise task management operations platform designed to automate repetitive tasks, 
               centralize scattered information, and synchronize updates across multiple systems in real-time.
@@ -213,7 +213,7 @@ export default function About() {
           </Card>
 
           <div className="text-center text-sm text-muted-foreground py-4">
-            <p>Driveline eliminates manual data entry, reduces errors, and provides a single source of truth.</p>
+            <p>Nexus eliminates manual data entry, reduces errors, and provides a single source of truth.</p>
           </div>
         </div>
       </main>

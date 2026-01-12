@@ -1,6 +1,6 @@
 # Overview
 
-**Driveline** is an enterprise task management operations platform designed to **automate repetitive tasks**, **centralize scattered information**, and **synchronize updates across multiple systems** in real-time. Built for service organizations managing large technician workforces and vehicle fleets, it eliminates manual data entry, reduces errors, and provides a single source of truth.
+**Nexus** is an enterprise task management operations platform designed to **automate repetitive tasks**, **centralize scattered information**, and **synchronize updates across multiple systems** in real-time. Built for service organizations managing large technician workforces and vehicle fleets, it eliminates manual data entry, reduces errors, and provides a single source of truth.
 
 ## Core Value Propositions
 

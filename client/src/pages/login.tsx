@@ -129,7 +129,7 @@ export default function Login() {
               <Settings className="h-6 w-6 text-primary-foreground" />
             </div>
           </div>
-          <CardTitle className="text-2xl" data-testid="text-login-title">Driveline</CardTitle>
+          <CardTitle className="text-2xl" data-testid="text-login-title">Nexus</CardTitle>
           <CardDescription data-testid="text-login-description" className="text-sm text-muted-foreground leading-relaxed">
             Enterprise task management operations platform designed to automate repetitive tasks, centralize scattered information, and synchronize updates across multiple systems.
           </CardDescription>

@@ -305,7 +305,7 @@ export const PAGES: PageDefinition[] = [
   },
   {
     key: "about",
-    label: "About Driveline",
+    label: "About Nexus",
     description: "Platform overview and capabilities",
     path: "/about",
     icon: Info,
