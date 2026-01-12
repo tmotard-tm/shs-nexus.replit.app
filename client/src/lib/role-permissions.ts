@@ -51,6 +51,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
     helpAndTutorial: {
       enabled: true,
       tutorial: true,
+      about: true,
     },
   },
   pageFeatures: {
@@ -169,6 +170,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
     helpAndTutorial: {
       enabled: true,
       tutorial: true,
+      about: true,
     },
   },
   pageFeatures: {

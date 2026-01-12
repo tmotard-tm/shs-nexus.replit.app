@@ -418,15 +418,6 @@ export function Sidebar() {
             </DropdownMenuSub>
           )}
 
-          <DropdownMenuItem
-            onClick={handleStartTutorial}
-            className="flex items-center gap-3 cursor-pointer text-muted-foreground"
-            data-testid="button-start-tutorial"
-          >
-            <HelpCircle className="h-4 w-4" />
-            Help & Tutorial
-          </DropdownMenuItem>
-
           <DropdownMenuSeparator />
 
           <div className="px-3 py-2 border-t border-border mt-2">
