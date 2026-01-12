@@ -14,6 +14,7 @@ import {
   Key,
   Database,
   UserPlus,
+  Info,
   type LucideIcon
 } from "lucide-react";
 
@@ -301,6 +302,15 @@ export const PAGES: PageDefinition[] = [
     icon: Settings,
     category: "helpAndTutorial",
     permissionKey: "tutorial",
+  },
+  {
+    key: "about",
+    label: "About Driveline",
+    description: "Platform overview and capabilities",
+    path: "/about",
+    icon: Info,
+    category: "helpAndTutorial",
+    permissionKey: "about",
   },
 ];
 

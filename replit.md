@@ -1,6 +1,17 @@
 # Overview
 
-This full-stack admin platform, built with React, TypeScript, and Express.js, manages access requests and API configurations. It provides role-based interfaces for superadmins and agents to handle API access, Snowflake queries, system configurations, and user permissions. The platform features a modern UI with shadcn/ui and Tailwind CSS, comprehensive request tracking, and activity logging. Key ambitions include streamlining access management, enhancing system configuration capabilities, and providing granular control over user roles and permissions.
+**Driveline** is an enterprise task management operations platform designed to **automate repetitive tasks**, **centralize scattered information**, and **synchronize updates across multiple systems** in real-time. Built for service organizations managing large technician workforces and vehicle fleets, it eliminates manual data entry, reduces errors, and provides a single source of truth.
+
+## Core Value Propositions
+
+1. **Automation** - Auto-creation of onboarding/offboarding tasks from HR data, workflow templates that guide agents through complex processes, scheduled syncs that eliminate manual data entry, and email automation for routine communications.
+
+2. **Centralization** - Single interface consolidating 4+ external systems (Snowflake, Holman, TPMS, PMF), unified search across employees, vehicles, and assignments, one source of truth eliminating spreadsheet chaos, and role-based views showing users exactly what they need.
+
+3. **Synchronization** - Bi-directional sync keeps local and external systems aligned, queue-based updates to Holman ensure reliability, change detection triggers automated responses, and audit logging tracks every modification.
+
+## Technical Stack
+Built with React, TypeScript, and Express.js, the platform provides role-based interfaces for superadmins and agents to handle API access, Snowflake queries, system configurations, and user permissions. Features a modern UI with shadcn/ui and Tailwind CSS, comprehensive request tracking, and activity logging.
 
 # User Preferences
 

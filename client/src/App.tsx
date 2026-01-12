@@ -45,6 +45,7 @@ import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import TestRepairResults from "@/pages/test-repair-results";
+import About from "@/pages/about";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
@@ -317,6 +318,12 @@ function Router() {
           <MainContent>
             <ActivityLogs />
           </MainContent>
+        </ProtectedRoute>
+      </Route>
+      
+      <Route path="/about">
+        <ProtectedRoute>
+          <About />
         </ProtectedRoute>
       </Route>
       
