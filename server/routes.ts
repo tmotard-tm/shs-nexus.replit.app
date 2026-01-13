@@ -493,15 +493,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         path: '/' // Ensure cookie is available for all paths
       });
 
-      // Log successful login
+      // Log successful login with role info for debugging
       await storage.createActivityLog({
         userId: user.id,
         action: 'login_success',
         entityType: 'auth',
         entityId: user.id,
-        details: `User "${user.username}" logged in successfully from IP: ${ipAddress}`,
+        details: `User "${user.username}" (role: ${user.role}) logged in successfully from IP: ${ipAddress}`,
       });
 
+      console.log(`[LOGIN] User ${user.username} logged in with role: ${user.role}`);
       res.json({ user: { ...user, password: undefined } });
     } catch (error) {
       res.status(500).json({ message: "Login failed" });
