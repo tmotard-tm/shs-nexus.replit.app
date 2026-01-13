@@ -1,15 +1,15 @@
 import { User } from "@shared/schema";
 
 // Form access mapping - defines which roles can access which forms
-// Simplified to just developer and agent roles
+// Roles: developer (full access), admin (management), agent (basic operations)
 export const FORM_ACCESS_MAP = {
-  'create-vehicle': ['developer', 'agent'],
-  'assign-vehicle': ['developer', 'agent'],
-  'onboarding': ['developer', 'agent'],
-  'offboarding': ['developer', 'agent'],
-  'byov-enrollment': ['developer', 'agent'],
-  'user-management': ['developer'],
-  'template-management': ['developer'],
+  'create-vehicle': ['developer', 'admin', 'agent'],
+  'assign-vehicle': ['developer', 'admin', 'agent'],
+  'onboarding': ['developer', 'admin', 'agent'],
+  'offboarding': ['developer', 'admin', 'agent'],
+  'byov-enrollment': ['developer', 'admin', 'agent'],
+  'user-management': ['developer', 'admin'],
+  'template-management': ['developer', 'admin'],
 } as const;
 
 export type FormKey = keyof typeof FORM_ACCESS_MAP;

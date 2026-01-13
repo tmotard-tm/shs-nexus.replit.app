@@ -120,6 +120,126 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
   },
 };
 
+// Default permissions for Admin role - has most management features but not developer tools
+export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
+  homePage: true,
+  quickActions: {
+    enabled: true,
+    taskQueue: true,
+    offboarding: true,
+    onboarding: true,
+    assignVehicle: true,
+    weeklyOnboarding: true,
+    createVehicle: true,
+  },
+  sidebar: {
+    enabled: true,
+    dashboards: {
+      enabled: true,
+      dashboard: true,
+      vehicleAssignmentDash: true,
+      operationsDash: true,
+    },
+    queues: {
+      enabled: true,
+      queueManagement: true,
+      ntaoQueue: true,
+      assetsQueue: true,
+      inventoryQueue: true,
+      fleetQueue: true,
+    },
+    management: {
+      enabled: true,
+      storageSpots: true,
+      integrations: false,
+      userManagement: true,
+      templateManagement: true,
+      rolePermissions: false,
+      fleetManagement: true,
+      weeklyOnboarding: true,
+      vehicleAssignments: true,
+      techRoster: true,
+    },
+    activities: {
+      enabled: true,
+      activityLogs: true,
+    },
+    account: {
+      enabled: true,
+      changePassword: true,
+    },
+    helpAndTutorial: {
+      enabled: true,
+      tutorial: true,
+      about: true,
+    },
+  },
+  pageFeatures: {
+    queueManagement: {
+      enabled: true,
+      filters: {
+        enabled: true,
+        queueCheckboxes: true,
+        statusCards: true,
+        employeeSearch: true,
+        workflowTypeFilter: true,
+        assignedAgentFilter: true,
+        dateFilters: true,
+        sortOrder: true,
+      },
+      taskActions: {
+        enabled: true,
+        viewTask: true,
+        startWork: true,
+        continueWork: true,
+        pickUpForMe: true,
+        assignToOther: true,
+      },
+      adminActions: {
+        enabled: true,
+        releaseTask: true,
+        reassignTask: true,
+      },
+    },
+    userManagement: {
+      enabled: true,
+      createUser: true,
+      editUser: true,
+      deleteUser: false,
+      resetPassword: true,
+      changeRole: false,
+    },
+    templateManagement: {
+      enabled: true,
+      createTemplate: true,
+      editTemplate: true,
+      deleteTemplate: false,
+      toggleStatus: true,
+    },
+    fleetManagement: {
+      enabled: true,
+      viewVehicles: true,
+      syncToHolman: true,
+      unassignVehicle: true,
+      viewHistory: true,
+    },
+    vehicleAssignments: {
+      enabled: true,
+      viewAssignments: true,
+      createAssignment: true,
+      editAssignment: true,
+      deleteAssignment: false,
+      syncFromTPMS: true,
+    },
+    storageSpots: {
+      enabled: true,
+      createSpot: true,
+      editSpot: true,
+      deleteSpot: false,
+    },
+  },
+};
+
 export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
   homePage: true,
   quickActions: {
@@ -244,6 +364,9 @@ export function getDefaultPermissions(role: UserRole): RolePermissionSettings {
   if (role === 'developer') {
     return DEFAULT_SUPERADMIN_PERMISSIONS;
   }
+  if (role === 'admin') {
+    return DEFAULT_ADMIN_PERMISSIONS;
+  }
   return DEFAULT_AGENT_PERMISSIONS;
 }
 
@@ -261,9 +384,18 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
 
   const userRole = user.role as UserRole;
   
-  // Superadmin can access everything
+  // Developer can access everything
   if (userRole === 'developer') {
     return true;
+  }
+  
+  // Admin can access most routes (permissions-based)
+  if (userRole === 'admin') {
+    // Admin-specific route restrictions
+    const adminRestrictedRoutes = ['/role-permissions', '/integrations'];
+    if (adminRestrictedRoutes.includes(route)) {
+      return false;
+    }
   }
 
   // Use provided permissions or fall back to defaults
@@ -351,6 +483,10 @@ export function getRoleDisplayName(role: string, user?: User): string {
     return 'Developer';
   }
   
+  if (role === 'admin') {
+    return 'Admin';
+  }
+  
   // For agent users, show their primary department if available
   if (role === 'agent' && user?.departments?.length) {
     const primaryDept = user.departments[0];
@@ -379,8 +515,13 @@ export function getUserLandingPage(user: User | null): string {
 
   const userRole = user.role as UserRole;
 
-  // Superadmin gets the home/dashboard
+  // Developer gets the home/dashboard
   if (userRole === 'developer') {
+    return '/';
+  }
+
+  // Admin gets the home/dashboard
+  if (userRole === 'admin') {
     return '/';
   }
 
