@@ -20,14 +20,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Check for stored user session
         const storedUser = localStorage.getItem("user");
         if (storedUser) {
-          // Verify the session is still valid on the server
-          const response = await fetch("/api/users", {
+          const parsedUser = JSON.parse(storedUser);
+          
+          // Fetch fresh user data from server to get updated role/permissions
+          const response = await fetch(`/api/users/${parsedUser.id}`, {
             credentials: "include",
           });
           
           if (response.ok) {
-            // Session is valid, keep the stored user
-            setUser(JSON.parse(storedUser));
+            // Session is valid, use fresh user data from server
+            const freshUserData = await response.json();
+            setUser(freshUserData);
+            localStorage.setItem("user", JSON.stringify(freshUserData));
           } else if (response.status === 401) {
             // Session expired or invalid, clear storage
             console.log("Session expired, clearing stored user");
@@ -36,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             // Other error, still keep stored user but log the issue
             console.warn("Error verifying session:", response.status, response.statusText);
-            setUser(JSON.parse(storedUser));
+            setUser(parsedUser);
           }
         }
       } catch (error) {

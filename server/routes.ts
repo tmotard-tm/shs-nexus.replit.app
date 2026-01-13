@@ -693,6 +693,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/users/:id", requireAuth, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const user = await storage.getUser(id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      res.json({ ...user, password: undefined });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
   app.post("/api/users", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
