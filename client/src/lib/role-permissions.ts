@@ -422,6 +422,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/storage-spots': () => perms.sidebar.management.storageSpots,
     '/integrations': () => perms.sidebar.management.integrations,
     '/tech-roster': () => perms.sidebar.management.techRoster,
+    '/weekly-onboarding': () => perms.sidebar.management.weeklyOnboarding,
     '/role-permissions': () => perms.sidebar.management.rolePermissions,
     '/activity': () => perms.sidebar.activities.activityLogs,
     '/activity-logs': () => perms.sidebar.activities.activityLogs,
