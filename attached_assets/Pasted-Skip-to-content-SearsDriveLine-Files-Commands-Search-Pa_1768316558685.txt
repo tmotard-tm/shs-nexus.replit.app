@@ -1,0 +1,354 @@
+Skip to content
+
+SearsDriveLine
+Files
+Commands
+Search
+Packager files
+Config files
+/
+
+npm run dev
+7m
+ • 
+8 minutes ago
+Production
+Status
+Timothy published about 14 hours ago
+Visibility
+Public
+Domain
+https://SearsDriveLine.replit.app
+Type
+Autoscale
+(4 vCPU / 8 GiB RAM / 3 Max)
+See all usage
+Database
+Production database connected
+Your production database is ready! Your app can now save and manage live user data securely.
+a7f1787d
+LU
+
+LucaBuccilli1
+LucaBuccilli1
+published 4 days ago
+89d273e7
+LU
+
+LucaBuccilli1
+LucaBuccilli1
+published 5 days ago
+1c594893
+LU
+
+LucaBuccilli1
+LucaBuccilli1
+published 6 days ago
+ed0f16f6
+LU
+
+LucaBuccilli1
+LucaBuccilli1
+published 6 days ago
+ca0730f2
+LU
+
+LucaBuccilli1
+LucaBuccilli1
+published 6 days ago
+2a3ce7d3
+LU
+
+LucaBuccilli1
+LucaBuccilli1
+published 7 days ago
+5640c74e
+LU
+
+LucaBuccilli1
+LucaBuccilli1
+published 13 days ago
+07c1ced9
+LU
+
+LucaBuccilli1
+LucaBuccilli1
+published 13 days ago
+35792ebd
+LU
+
+LucaBuccilli1
+LucaBuccilli1
+published 13 days ago
+15a918d1
+TM
+
+tmotard
+Timothy
+published 14 days ago
+af170f71
+TM
+
+tmotard
+Timothy
+published about 1 month ago
+82de27e2
+TM
+
+tmotard
+Timothy
+published about 1 month ago
+313dd369
+TM
+
+tmotard
+Timothy
+published about 1 month ago
+a283d608
+SW
+
+stephenwong10
+Stephen
+published about 1 month ago
+70726264
+TM
+
+tmotard
+Timothy
+published about 1 month ago
+ad3241c4
+TM
+
+tmotard
+Timothy
+failed to publish about 1 month ago
+36fcc72f
+SW
+
+stephenwong10
+Stephen
+published about 1 month ago
+8bc76edc
+SW
+
+stephenwong10
+Stephen
+published about 1 month ago
+4294df39
+SW
+
+stephenwong10
+Stephen
+published about 1 month ago
+Secrets
+Secrets are accessible to anyone who has access to this App. To restrict secret access, you must update App invite permissions. For more information, visit our documentation.
+DATABASE_URL
+••••••••
+PGDATABASE
+••••••••
+PGHOST
+••••••••
+PGPORT
+••••••••
+PGUSER
+••••••••
+PGPASSWORD
+••••••••
+HOLMAN_API_ENDPOINT
+••••••••
+HOLMAN_AUTH_ENDPOINT
+••••••••
+HOLMAN_CLIENT_ID
+••••••••
+HOLMAN_CLIENT_SECRET
+••••••••
+TPMS_API_ENDPOINT
+••••••••
+TPMS_AUTHORIZATION
+••••••••
+TPMS_AUTH_ENDPOINT
+••••••••
+SNOWFLAKE_ACCOUNT
+••••••••
+SNOWFLAKE_DATABASE
+••••••••
+SNOWFLAKE_USER
+••••••••
+SNOWFLAKE_WAREHOUSE
+••••••••
+SNOWFLAKE_PRIVATE_KEY
+••••••••
+SENDGRID_API_KEY
+••••••••
+SESSION_SECRET
+••••••••
+PROD_DATABASE_URL
+••••••••
+DEV_DATABASE_URL
+••••••••
+PMF_CLIENT_ID
+••••••••
+PMF_CLIENT_SECRET
+••••••••
+Configurations
+Configurations are similar to secrets, but should only be used for non-sensitive information. They're useful for having a variable that's different between your published app and when testing on Replit.
+You're viewing your database in read-only mode.
+Enable Editing
+
+
+Back to Tables
+Search...
+
+
+
+
+
+
+
+
+
+Prettify
+Shift + Alt + F
+
+Run
+Ctrl+Enter
+
+1
+UPDATE users SET password = '$2b$10$e6/j62pU4VNJf./tfD80WuIxzXRYtWyXGiUNiVbLcI/wT.4kbsIKy' WHERE username = 'lbuccil';SELECT * FROM <table> LIMIT 10;
+
+
+
+0 rows • 679ms
+
+
+Search...
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Published your App
+Checkpoint made
+Add an about page to the help menu and update user permissions
+Worked for 2 minutes
+Change any reference Sears Drive Line, Sears Drive Line Management Systems, DriveLine, on any iteration around those statements to Nexus
+
+Checkpoint made
+Update system branding and references to Nexus
+Worked for 2 minutes
+Give me some background image options related to Nexus to pick from
+
+I want to view images based on a search of the word nexus
+
+yes
+
+Start building
+Checkpoint made
+•
+Free
+Transitioned from Plan to Build mode
+Checkpoint made
+Saved progress at the end of the loop
+Worked for 1 minute
+Not the phone, Nexus as in the centralized hub or syncronization hub
+
+Checkpoint made
+Add abstract background images for the enterprise platform
+Worked for 1 minute
+Delete any of the images in the stock images folder that are not being used in production or development
+
+Checkpoint made
+Remove all unused stock images from the project assets
+Worked for 49 seconds
+None of those work, I will work on that later
+
+Checkpoint made
+Remove unused background images from the asset library
+Worked for 10 seconds
+Produce a video that gives a complete and thorough overview of Nexus use the about dialog to help guide and narrate the video
+
+not at this time
+
+Checkpoint made
+•
+Free
+•
+Publish
+Published your App
+can we add /chnage the password for lbuccil user to to be TheFixI$Done#
+
+so how do I then convert that new password to the production database so I can actually log in
+
+I can only access the development database - the production database is separate and I cannot modify it directly for security reasons.
+
+To update the password in production, you have a few options:
+
+Option 1: Use the Replit Database Pane
+
+Open the Database tool in Replit's sidebar
+Switch to the Production database
+Run this SQL query:
+UPDATE users SET password = '$2b$10$e6/j62pU4VNJf./tfD80WuIxzXRYtWyXGiUNiVbLcI/wT.4kbsIKy' WHERE username = 'lbuccil';
+Option 2: Use the App's Password Reset Feature
+If the app has an admin password reset feature, you could use that through the production interface.
+
+The hashed password value I generated above is:
+
+$2b$10$e6/j62pU4VNJf./tfD80WuIxzXRYtWyXGiUNiVbLcI/wT.4kbsIKy
+This is the bcrypt hash for TheFixI$Done# - just copy and use it in the production database query.
+
+Worked for 17 seconds
+can you give me another login for a super admin/ developper account so I can login into production
+
+$2b$10$x6m6Olxq/NMbi389kk6bN.yWMpQVFrFCYsXnDsRR2os1HjUGDWcK2
+
+can you decode the following bcrypt hash password
+
+Bcrypt hashes cannot be decoded - that's by design. Bcrypt is a one-way hashing algorithm, meaning the original password is mathematically impossible to recover from the hash.
+
+This is what makes password hashing secure - even if someone gets access to the database, they can't figure out the original passwords.
+
+What you can do instead:
+
+If you know what password it might be, I can hash that password and compare the hashes to verify if it matches
+Or, simply update the password to something new (like we just did for lbuccil)
+Would you like me to test a specific password against that hash to see if it matches?
+
+Worked for 14 seconds
+
+Scroll to latest
+for this  query you provided
+
+UPDATE users SET password = '$2b$10$e6/j62pU4VNJf./tfD80WuIxzXRYtWyXGiUNiVbLcI/wT.4kbsIKy' WHERE username = 'lbuccil';
+
+is returns 
+
+sybt
