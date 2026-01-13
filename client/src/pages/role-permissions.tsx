@@ -17,7 +17,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import type { RolePermissionSettings } from "@shared/schema";
-import { DEFAULT_SUPERADMIN_PERMISSIONS, DEFAULT_AGENT_PERMISSIONS } from "@/lib/role-permissions";
+import { DEFAULT_SUPERADMIN_PERMISSIONS, DEFAULT_ADMIN_PERMISSIONS, DEFAULT_AGENT_PERMISSIONS } from "@/lib/role-permissions";
 import { generatePermissionTree, type PermissionNode } from "@shared/page-registry";
 
 interface RolePermission {
@@ -176,12 +176,15 @@ function RolePermissionsEditor({
 
   const handleReset = () => {
     if (!canEdit) return;
-    const defaults = role === 'developer' ? DEFAULT_SUPERADMIN_PERMISSIONS : DEFAULT_AGENT_PERMISSIONS;
+    const defaults = role === 'developer' ? DEFAULT_SUPERADMIN_PERMISSIONS : 
+                     role === 'admin' ? DEFAULT_ADMIN_PERMISSIONS : 
+                     DEFAULT_AGENT_PERMISSIONS;
     setPermissions(defaults);
     setHasChanges(true);
   };
 
   const roleDisplayName = role === 'developer' ? 'Developer' : 
+                          role === 'admin' ? 'Admin' :
                           role === 'agent' ? 'Agent' : 
                           role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 
@@ -359,12 +362,14 @@ export default function RolePermissions() {
 
   const getRoleIcon = (role: string) => {
     if (role === 'developer') return <Shield className="h-4 w-4 mr-2" />;
+    if (role === 'admin') return <Shield className="h-4 w-4 mr-2" />;
     if (role === 'agent') return <Users className="h-4 w-4 mr-2" />;
     return <UserCog className="h-4 w-4 mr-2" />;
   };
 
   const getRoleLabel = (role: string) => {
     if (role === 'developer') return 'Developer';
+    if (role === 'admin') return 'Admin';
     if (role === 'agent') return 'Agent';
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
@@ -399,7 +404,7 @@ export default function RolePermissions() {
   };
 
   const allRoles = (() => {
-    const coreRoles = ['developer', 'agent'];
+    const coreRoles = ['developer', 'admin', 'agent'];
     const customRoles = permissions
       ?.map(p => p.role)
       .filter(r => !coreRoles.includes(r))

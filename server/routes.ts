@@ -5264,9 +5264,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Import default permissions from client lib
-      const { DEFAULT_SUPERADMIN_PERMISSIONS, DEFAULT_AGENT_PERMISSIONS } = await import('../client/src/lib/role-permissions');
+      const { DEFAULT_SUPERADMIN_PERMISSIONS, DEFAULT_ADMIN_PERMISSIONS, DEFAULT_AGENT_PERMISSIONS } = await import('../client/src/lib/role-permissions');
 
       const developerPermission = await storage.upsertRolePermission('developer', DEFAULT_SUPERADMIN_PERMISSIONS);
+      const adminPermission = await storage.upsertRolePermission('admin', DEFAULT_ADMIN_PERMISSIONS);
       const agentPermission = await storage.upsertRolePermission('agent', DEFAULT_AGENT_PERMISSIONS);
 
       // Log activity
@@ -5275,12 +5276,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: "role_permissions_seeded",
         entityType: "role_permission",
         entityId: "all",
-        details: "Default role permissions seeded for developer and agent roles",
+        details: "Default role permissions seeded for developer, admin, and agent roles",
       });
 
       res.json({
         message: "Default role permissions seeded successfully",
-        permissions: [developerPermission, agentPermission]
+        permissions: [developerPermission, adminPermission, agentPermission]
       });
     } catch (error) {
       console.error("Error seeding role permissions:", error);

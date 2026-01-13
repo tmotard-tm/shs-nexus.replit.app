@@ -101,6 +101,7 @@ export default function UserManagement() {
   const availableRoles = rolePermissions.map(rp => ({
     value: rp.role,
     label: rp.role === 'developer' ? 'Developer' : 
+           rp.role === 'admin' ? 'Admin' :
            rp.role === 'agent' ? 'Agent' : 
            rp.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
   }));
@@ -318,6 +319,8 @@ export default function UserManagement() {
   // Format role name for display (e.g., "developer" -> "Developer", "my_custom_role" -> "My Custom Role")
   const formatRoleName = (role: string) => {
     if (role === 'developer') return 'Developer';
+    if (role === 'admin') return 'Admin';
+    if (role === 'agent') return 'Agent';
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
@@ -340,6 +343,7 @@ export default function UserManagement() {
   // Define colors for role cards
   const roleCardStyles: Record<string, { iconColor: string; textColor: string; icon: typeof Shield }> = {
     developer: { iconColor: 'text-red-500', textColor: 'text-red-600', icon: Shield },
+    admin: { iconColor: 'text-orange-500', textColor: 'text-orange-600', icon: Shield },
     agent: { iconColor: 'text-blue-500', textColor: 'text-blue-600', icon: UserCheck },
   };
 

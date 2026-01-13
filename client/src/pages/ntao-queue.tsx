@@ -42,7 +42,7 @@ export default function NTAOQueuePage() {
   });
 
   // Only show NTAO users in assignment
-  const ntaoUsers = users.filter(u => u.departments?.includes("NTAO") || u.role === "developer");
+  const ntaoUsers = users.filter(u => u.departments?.includes("NTAO") || u.role === "developer" || u.role === "admin");
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>

@@ -73,7 +73,7 @@ interface TpmsSyncState {
 export default function FleetManagement() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const isSuperAdmin = user?.role === 'developer';
+  const isSuperAdmin = user?.role === 'developer' || user?.role === 'admin';
   
   // Search and filters state
   const [searchQuery, setSearchQuery] = useState("");

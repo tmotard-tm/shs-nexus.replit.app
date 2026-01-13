@@ -42,7 +42,7 @@ export default function AssetsQueuePage() {
   });
 
   // Only show Assets Management users in assignment
-  const assetsUsers = users.filter(u => u.departments?.includes("ASSETS") || u.role === "developer");
+  const assetsUsers = users.filter(u => u.departments?.includes("ASSETS") || u.role === "developer" || u.role === "admin");
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>

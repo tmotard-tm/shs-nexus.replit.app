@@ -451,8 +451,8 @@ export function getAccessibleQueueModules(user: User | null): string[] {
 
   const userRole = user.role as UserRole;
   
-  // Superadmin gets all queues
-  if (userRole === 'developer') {
+  // Developer and Admin get all queues
+  if (userRole === 'developer' || userRole === 'admin') {
     return ['ntao', 'assets', 'inventory', 'fleet'];
   }
 

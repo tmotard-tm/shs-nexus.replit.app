@@ -97,7 +97,8 @@ export function Sidebar() {
       .filter(rp => rp.role !== 'developer')
       .map(rp => ({
         value: rp.role as UserRole,
-        label: rp.role === 'agent' ? 'Agent' : 
+        label: rp.role === 'admin' ? 'Admin' :
+               rp.role === 'agent' ? 'Agent' : 
                rp.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
       }));
   }, [rolePermissions]);
