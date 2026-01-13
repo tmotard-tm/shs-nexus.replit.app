@@ -673,9 +673,19 @@ export default function WeeklyOnboarding() {
                                 <span className="text-muted-foreground">Loading...</span>
                               ) : (() => {
                                 const hireState = (hire.workState || '').toUpperCase().trim();
+                                const excludedAssetIds = ['33001', '33002', '33003', '33004', '33005', '33006'];
                                 const stateVehicles = availableVehicles.filter((v: any) => {
                                   const vehicleState = (v.state || v.location || v.State || v.Location || '').toUpperCase().trim();
-                                  return vehicleState === hireState;
+                                  if (vehicleState !== hireState) return false;
+                                  const make = (v.make || v.Make || '').toUpperCase();
+                                  const model = (v.model || v.Model || '').toUpperCase();
+                                  if (make.includes('RAM') || model.includes('RAM')) return false;
+                                  if (make.includes('PROMASTER 3500') || model.includes('PROMASTER 3500')) return false;
+                                  if (make.includes('PROMASTER') && make.includes('3500')) return false;
+                                  if (model.includes('PROMASTER') && model.includes('3500')) return false;
+                                  const assetId = String(v.assetId || v.asset_id || v.AssetId || '');
+                                  if (excludedAssetIds.includes(assetId)) return false;
+                                  return true;
                                 });
                                 return stateVehicles.length > 0 ? (
                                   <div className="space-y-1">
