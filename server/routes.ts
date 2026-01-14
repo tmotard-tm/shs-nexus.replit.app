@@ -7344,7 +7344,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // Helper function to calculate dashboard data from rental details
-  function calculateRentalDashboardData(rentalDetails: any[], isSampleData: boolean = false) {
+  function calculateRentalDashboardData(rentalDetails: any[]) {
     const buckets = ["28 plus days", "21 plus days", "14 plus days", "Less than 14 days"];
     const grandTotal = rentalDetails.length;
     
@@ -7389,60 +7389,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }))
       .sort((a, b) => b.count - a.count);
 
-    // For historical progress:
-    // - For LIVE data: Only include current snapshot (no fabricated history)
-    // - For SAMPLE data: Include benchmark data from Excel wireframe for demo purposes
+    // For historical progress: Only include current snapshot
+    // Historical data comes from the rental_snapshots table
     const progressHistory = [];
     const today = new Date();
     
-    if (isSampleData) {
-      // Sample/demo mode: Use Excel wireframe benchmark data to show how historical tracking works
-      const benchmarkData = [
-        { total: 399, buckets: [172, 55, 40, 132] }, // Benchmark (8/29)
-        { total: 422, buckets: [217, 55, 46, 104] }, // 9/2
-        { total: 422, buckets: [217, 55, 46, 104] }, // 9/3
-        { total: 392, buckets: [214, 27, 56, 95] },  // 9/5
-        { total: 385, buckets: [210, 30, 52, 93] },  // Projected
-        { total: 378, buckets: [205, 32, 50, 91] },  // Projected
-        { total: grandTotal, buckets: summary.map(s => s.rentalsOpen) }, // Current
-      ];
-      
-      for (let i = 0; i < benchmarkData.length; i++) {
-        const date = new Date(today);
-        date.setDate(date.getDate() - (benchmarkData.length - 1 - i));
-        const data = benchmarkData[i];
-        const dataTotal = data.total;
-        const dataOver14 = data.buckets[0] + data.buckets[1] + data.buckets[2];
-        
-        progressHistory.push({
-          date: date.toISOString().split('T')[0],
-          buckets: buckets.map((bucket, idx) => ({
-            bucket,
-            rentalsOpen: data.buckets[idx],
-            percentOfTotal: dataTotal > 0 ? data.buckets[idx] / dataTotal : 0,
-            changeMtd: data.buckets[idx] - benchmarkData[0].buckets[idx]
-          })),
-          grandTotal: dataTotal,
-          totalOver14Days: dataOver14,
-          percentOver14Days: dataTotal > 0 ? dataOver14 / dataTotal : 0
-        });
-      }
-    } else {
-      // Live mode: Only include current snapshot
-      // Historical data would require a persistent snapshot table to be implemented
-      progressHistory.push({
-        date: today.toISOString().split('T')[0],
-        buckets: summary.map(s => ({
-          bucket: s.bucket,
-          rentalsOpen: s.rentalsOpen,
-          percentOfTotal: s.percentOfTotal,
-          changeMtd: 0 // No historical comparison available yet
-        })),
-        grandTotal,
-        totalOver14Days,
-        percentOver14Days: grandTotal > 0 ? totalOver14Days / grandTotal : 0
-      });
-    }
+    progressHistory.push({
+      date: today.toISOString().split('T')[0],
+      buckets: summary.map(s => ({
+        bucket: s.bucket,
+        rentalsOpen: s.rentalsOpen,
+        percentOfTotal: s.percentOfTotal,
+        changeMtd: 0
+      })),
+      grandTotal,
+      totalOver14Days,
+      percentOver14Days: grandTotal > 0 ? totalOver14Days / grandTotal : 0
+    });
 
     return {
       currentSnapshot: {
@@ -7458,77 +7421,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
       progressHistory,
       rentalDetails,
       lastUpdated: new Date().toISOString(),
-      isLiveData: !isSampleData
+      isLiveData: true
     };
   }
 
-  // Generate sample rental data for development/demo matching Excel wireframe distribution
-  function generateSampleRentalData() {
-    const sampleRentals: any[] = [];
-    const names = ["JOHN SMITH", "JANE DOE", "MIKE JOHNSON", "SARAH WILLIAMS", "CHRIS BROWN", 
-                   "ALEX DAVIS", "EMILY GARCIA", "RYAN MARTINEZ", "LISA ANDERSON", "DAVID WILSON"];
-    const enterpriseIds = ["JSMITH", "JDOE", "MJOHN", "SWILL", "CBROWN", "ADAVIS", "EGARCI", "RMARTI", "LANDER", "DWILSO"];
+  // Helper function to build dashboard data from a cached snapshot
+  async function buildDashboardFromCache(snapshot: any, historicalSnapshots: any[]) {
+    const rentalDetails = (snapshot.rentalDetails as any[]) || [];
+    const buckets = ["28 plus days", "21 plus days", "14 plus days", "Less than 14 days"];
     
-    // Distribution based on Excel wireframe: 28+ (43%), 21+ (14%), 14+ (10%), <14 (33%)
-    const distributions = [
-      { bucket: "28 plus days", count: 172, minDays: 28, maxDays: 90 },
-      { bucket: "21 plus days", count: 55, minDays: 21, maxDays: 27 },
-      { bucket: "14 plus days", count: 40, minDays: 14, maxDays: 20 },
-      { bucket: "Less than 14 days", count: 132, minDays: 1, maxDays: 13 }
+    // Build summary from snapshot data
+    const summary = [
+      { bucket: "28 plus days", rentalsOpen: snapshot.bucket28Plus, percentOfTotal: snapshot.grandTotal > 0 ? snapshot.bucket28Plus / snapshot.grandTotal : 0, avgDaysOpen: 0 },
+      { bucket: "21 plus days", rentalsOpen: snapshot.bucket21To27, percentOfTotal: snapshot.grandTotal > 0 ? snapshot.bucket21To27 / snapshot.grandTotal : 0, avgDaysOpen: 0 },
+      { bucket: "14 plus days", rentalsOpen: snapshot.bucket14To20, percentOfTotal: snapshot.grandTotal > 0 ? snapshot.bucket14To20 / snapshot.grandTotal : 0, avgDaysOpen: 0 },
+      { bucket: "Less than 14 days", rentalsOpen: snapshot.bucketUnder14, percentOfTotal: snapshot.grandTotal > 0 ? snapshot.bucketUnder14 / snapshot.grandTotal : 0, avgDaysOpen: 0 },
     ];
-    
-    let rentalId = 10000;
-    distributions.forEach(dist => {
-      for (let i = 0; i < dist.count; i++) {
-        // Use deterministic values based on index for consistency
-        const daysOpen = dist.minDays + (i % (dist.maxDays - dist.minDays + 1));
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - daysOpen);
-        const nameIdx = i % names.length;
-        const isEnterprise = i % 4 !== 0; // 75% Enterprise
-        // Distribute across vendors: Enterprise (60%), Hertz (25%), Penske (10%), Other (5%)
-        const vendors = ["Enterprise", "Enterprise", "Enterprise", "Hertz", "Penske"];
-        const source = vendors[i % vendors.length];
-        
-        sampleRentals.push({
-          truckNumber: String(rentalId++).padStart(5, '0'),
-          rentalStartDate: startDate.toISOString(),
-          rentalDays: dist.bucket,
-          rentalUnderName: names[nameIdx],
-          rentalTechEnterpriseId: enterpriseIds[nameIdx],
-          truckAssignedToInTpms: i % 3 === 0 ? null : names[(nameIdx + 1) % names.length],
-          truckAssignedToEnterpriseId: i % 3 === 0 ? null : enterpriseIds[(nameIdx + 1) % enterpriseIds.length],
-          employmentServiceDate: new Date(2020 + (i % 5), (i % 12), (i % 28) + 1).toISOString(),
-          isEnterprise: source === "Enterprise",
-          daysOpen,
-          source
-        });
-      }
-    });
 
-    return calculateRentalDashboardData(sampleRentals, true);
+    // Build progress history from historical snapshots
+    const progressHistory = historicalSnapshots.map(snap => ({
+      date: snap.snapshotDate,
+      buckets: [
+        { bucket: "28 plus days" as const, rentalsOpen: snap.bucket28Plus, percentOfTotal: snap.grandTotal > 0 ? snap.bucket28Plus / snap.grandTotal : 0, changeMtd: 0 },
+        { bucket: "21 plus days" as const, rentalsOpen: snap.bucket21To27, percentOfTotal: snap.grandTotal > 0 ? snap.bucket21To27 / snap.grandTotal : 0, changeMtd: 0 },
+        { bucket: "14 plus days" as const, rentalsOpen: snap.bucket14To20, percentOfTotal: snap.grandTotal > 0 ? snap.bucket14To20 / snap.grandTotal : 0, changeMtd: 0 },
+        { bucket: "Less than 14 days" as const, rentalsOpen: snap.bucketUnder14, percentOfTotal: snap.grandTotal > 0 ? snap.bucketUnder14 / snap.grandTotal : 0, changeMtd: 0 },
+      ],
+      grandTotal: snap.grandTotal,
+      totalOver14Days: snap.totalOver14Days,
+      percentOver14Days: snap.grandTotal > 0 ? snap.totalOver14Days / snap.grandTotal : 0
+    })).sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      currentSnapshot: {
+        date: snapshot.snapshotDate,
+        summary,
+        grandTotal: snapshot.grandTotal,
+        totalOver14Days: snapshot.totalOver14Days,
+        percentOver14Days: snapshot.grandTotal > 0 ? snapshot.totalOver14Days / snapshot.grandTotal : 0,
+        enterpriseTotal: snapshot.enterpriseTotal,
+        nonEnterpriseTotal: snapshot.nonEnterpriseTotal,
+        vendorBreakdown: (snapshot.vendorBreakdown as any[]) || []
+      },
+      progressHistory,
+      rentalDetails,
+      lastUpdated: snapshot.createdAt?.toISOString() || new Date().toISOString(),
+      isLiveData: false,
+      isCachedData: true
+    };
   }
 
   app.get("/api/rental-reduction/dashboard", requireAuth, async (req: any, res) => {
     try {
+      // Helper function to return cached data
+      const returnCachedData = async () => {
+        const historicalSnapshots = await storage.getRentalSnapshots(30);
+        if (historicalSnapshots.length === 0) {
+          return null; // No cached data available
+        }
+        // Get the most recent snapshot
+        const latestSnapshot = historicalSnapshots[0];
+        return await buildDashboardFromCache(latestSnapshot, historicalSnapshots);
+      };
+
       // Check if Snowflake is configured
       if (!isSnowflakeConfigured()) {
-        // Return sample data for development/demo when Snowflake is not configured
-        const sampleData = generateSampleRentalData();
-        return res.json(sampleData);
+        // Try to return cached data when Snowflake is not configured
+        console.log('[Rental] Snowflake not configured, checking for cached data...');
+        const cachedData = await returnCachedData();
+        if (cachedData) {
+          console.log('[Rental] Returning cached rental data');
+          return res.json(cachedData);
+        }
+        return res.status(503).json({ 
+          message: "Snowflake is not configured and no cached rental data is available.",
+          error: "NO_DATA_AVAILABLE"
+        });
       }
 
       // Fetch from Snowflake VW_RENTAL_LIST
       const snowflake = getSnowflakeService();
       
       try {
-        // First, get the actual column names from the view
-        const schemaQuery = `
-          SELECT COLUMN_NAME 
-          FROM PARTS_SUPPLYCHAIN.INFORMATION_SCHEMA.COLUMNS 
-          WHERE TABLE_SCHEMA = 'FLEET' AND TABLE_NAME = 'VW_RENTAL_LIST'
-        `;
-        
         let rows: any[] = [];
         try {
           // Try to get data with common column name patterns
@@ -7539,15 +7513,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           `;
           rows = await snowflake.executeQuery(query);
         } catch (queryError: any) {
-          console.error('Snowflake query failed, using sample data:', queryError.message);
-          const sampleData = generateSampleRentalData();
-          return res.json(sampleData);
+          console.error('[Rental] Snowflake query failed, checking for cached data:', queryError.message);
+          const cachedData = await returnCachedData();
+          if (cachedData) {
+            console.log('[Rental] Returning cached rental data after Snowflake failure');
+            return res.json(cachedData);
+          }
+          return res.status(503).json({ 
+            message: "Failed to fetch rental data from Snowflake and no cached data is available.",
+            error: "SNOWFLAKE_ERROR"
+          });
         }
         
         if (!rows || rows.length === 0) {
-          console.log('No rental data returned from Snowflake, using sample data');
-          const sampleData = generateSampleRentalData();
-          return res.json(sampleData);
+          console.log('[Rental] No rental data returned from Snowflake, checking for cached data');
+          const cachedData = await returnCachedData();
+          if (cachedData) {
+            return res.json(cachedData);
+          }
+          return res.status(503).json({ 
+            message: "No rental data available from Snowflake and no cached data exists.",
+            error: "NO_DATA_AVAILABLE"
+          });
         }
         
         // Log the first row to see actual column names (for debugging)
@@ -7663,9 +7650,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         res.json(dashboardData);
       } catch (error: any) {
-        console.error("Outer error in rental dashboard:", error);
-        const sampleData = generateSampleRentalData();
-        return res.json(sampleData);
+        console.error("[Rental] Outer error in rental dashboard:", error);
+        // Try to return cached data on error
+        const cachedData = await returnCachedData();
+        if (cachedData) {
+          console.log('[Rental] Returning cached rental data after outer error');
+          return res.json(cachedData);
+        }
+        return res.status(503).json({ 
+          message: "Failed to fetch rental data and no cached data is available.",
+          error: "FETCH_ERROR"
+        });
       }
     } catch (error: any) {
       console.error("Error fetching rental reduction data:", error);
