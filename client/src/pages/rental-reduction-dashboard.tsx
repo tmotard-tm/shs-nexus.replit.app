@@ -149,31 +149,29 @@ export default function RentalReductionDashboard() {
 
   if (error) {
     return (
-      <>
+      <MainContent>
         <TopBar title="Rental Reduction" breadcrumbs={["Home", "Dashboards", "Rental Reduction"]} />
-        <MainContent>
-          <div className="p-6">
-            <Card className="border-destructive">
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 text-destructive">
-                  <AlertTriangle className="h-5 w-5" />
-                  <span>Failed to load rental data. Please try again later.</span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </MainContent>
-      </>
+        <main className="p-6">
+          <BackButton />
+          <Card className="border-destructive mt-4">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-5 w-5" />
+                <span>Failed to load rental data. Please try again later.</span>
+              </div>
+            </CardContent>
+          </Card>
+        </main>
+      </MainContent>
     );
   }
 
   return (
-    <>
+    <MainContent>
       <TopBar title="Rental Reduction Dashboard" breadcrumbs={["Home", "Dashboards", "Rental Reduction"]} />
-      <MainContent>
-        <div className="p-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <BackButton />
+      <main className="p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <BackButton />
             <div className="flex items-center gap-2">
               {data && !data.isLiveData && (
                 <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-300">
@@ -830,8 +828,7 @@ export default function RentalReductionDashboard() {
               </div>
             </>
           ) : null}
-        </div>
-      </MainContent>
-    </>
+      </main>
+    </MainContent>
   );
 }
