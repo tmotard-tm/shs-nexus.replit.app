@@ -7836,6 +7836,172 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Fleet Overview Statistics - Technician and Vehicle Assignment Summary
+  app.get("/api/fleet-overview/statistics", requireAuth, async (req: any, res) => {
+    try {
+      // Generate sample data when Snowflake is not available
+      const generateSampleFleetStats = () => ({
+        isLiveData: false,
+        lastUpdated: new Date().toISOString(),
+        technicians: {
+          totalActiveTechs: 1639,
+          modifiedDutyTechs: 15,
+          activeRoutableTechs: 1624,
+          byovTechnicians: 92,
+          techsRequiringTruck: 1532,
+        },
+        assignments: {
+          trucksAssignedInTpms: 1581,
+          trucksAssignedExclByov: 1478,
+          techsWithNoTruck: 58,
+          modifiedDutyNoTruck: 4,
+          activeTechsNeedingTruck: 54,
+          techsWithDeclinedRepairTruck: 87,
+        },
+        vehicles: {
+          totalActiveHolmanVehicles: 2116,
+          trucksAssigned: 1488,
+          sentToAuction: 25,
+          declinedRepairUnassigned: 155,
+          totalSpares: 448,
+        },
+      });
+
+      if (!isSnowflakeConfigured()) {
+        return res.json(generateSampleFleetStats());
+      }
+
+      const snowflake = getSnowflakeService();
+      
+      try {
+        // Query TPMS truck assignment data
+        const tpmsQuery = `
+          SELECT 
+            TRUCK_NUMBER_NORM,
+            FULL_NAME,
+            ENTERPRISE_ID,
+            DISTRICT,
+            TECH_NO,
+            TRUCK_NO,
+            LAST_NAME,
+            FIRST_NAME,
+            STATUS,
+            FILE_DATE
+          FROM PARTS_SUPPLYCHAIN.FLEET.VW_TPMS_TRUCK_ASSIGNMENT
+        `;
+        
+        const tpmsRows = await snowflake.executeQuery(tpmsQuery);
+        
+        if (!tpmsRows || tpmsRows.length === 0) {
+          return res.json(generateSampleFleetStats());
+        }
+        
+        // Calculate technician statistics
+        const totalActiveTechs = tpmsRows.length;
+        
+        // Modified duty: techs with STATUS containing 'modified' or 'MD'
+        const modifiedDutyTechs = tpmsRows.filter((r: any) => {
+          const status = (r.STATUS || '').toLowerCase();
+          return status.includes('modified') || status.includes('md') || status === 'mod duty';
+        }).length;
+        
+        // BYOV: techs with STATUS containing 'byov' or specific indicator
+        const byovTechnicians = tpmsRows.filter((r: any) => {
+          const status = (r.STATUS || '').toLowerCase();
+          return status.includes('byov') || status.includes('byo');
+        }).length;
+        
+        const activeRoutableTechs = totalActiveTechs - modifiedDutyTechs;
+        
+        // Truck assignment analysis
+        const techsWithTruck = tpmsRows.filter((r: any) => 
+          r.TRUCK_NO && r.TRUCK_NO.toString().trim() !== ''
+        ).length;
+        
+        const techsWithNoTruck = totalActiveTechs - techsWithTruck;
+        
+        // Modified duty techs without trucks
+        const modifiedDutyNoTruck = tpmsRows.filter((r: any) => {
+          const status = (r.STATUS || '').toLowerCase();
+          const isModDuty = status.includes('modified') || status.includes('md') || status === 'mod duty';
+          const noTruck = !r.TRUCK_NO || r.TRUCK_NO.toString().trim() === '';
+          return isModDuty && noTruck;
+        }).length;
+        
+        // Techs requiring truck = total - BYOV
+        const techsRequiringTruck = totalActiveTechs - byovTechnicians;
+        
+        // Assigned trucks excluding BYOV
+        const trucksAssignedExclByov = techsWithTruck - tpmsRows.filter((r: any) => {
+          const status = (r.STATUS || '').toLowerCase();
+          const isByov = status.includes('byov') || status.includes('byo');
+          const hasTruck = r.TRUCK_NO && r.TRUCK_NO.toString().trim() !== '';
+          return isByov && hasTruck;
+        }).length;
+        
+        // Active techs needing truck (excl. mod duty)
+        const activeTechsNeedingTruck = tpmsRows.filter((r: any) => {
+          const status = (r.STATUS || '').toLowerCase();
+          const isModDuty = status.includes('modified') || status.includes('md') || status === 'mod duty';
+          const isByov = status.includes('byov') || status.includes('byo');
+          const noTruck = !r.TRUCK_NO || r.TRUCK_NO.toString().trim() === '';
+          return !isModDuty && !isByov && noTruck;
+        }).length;
+        
+        // Get Holman vehicle statistics from cache using db directly
+        const { holmanVehiclesCache } = await import('@shared/schema');
+        const holmanVehicles = await db
+          .select()
+          .from(holmanVehiclesCache)
+          .where(eq(holmanVehiclesCache.statusCode, 1));
+        
+        const totalActiveHolmanVehicles = holmanVehicles.length;
+        const trucksAssigned = holmanVehicles.filter((v: any) => 
+          v.holmanTechAssigned || v.tpmsAssignedTechId
+        ).length;
+        
+        // Note: These would need additional data sources or Holman fields
+        const sentToAuction = 0; // Placeholder - needs Holman status field
+        const declinedRepairUnassigned = 0; // Placeholder - needs Holman status field
+        const techsWithDeclinedRepairTruck = 0; // Placeholder - needs Holman status field
+        const totalSpares = totalActiveHolmanVehicles - trucksAssigned;
+        
+        res.json({
+          isLiveData: true,
+          lastUpdated: new Date().toISOString(),
+          technicians: {
+            totalActiveTechs,
+            modifiedDutyTechs,
+            activeRoutableTechs,
+            byovTechnicians,
+            techsRequiringTruck,
+          },
+          assignments: {
+            trucksAssignedInTpms: techsWithTruck,
+            trucksAssignedExclByov,
+            techsWithNoTruck,
+            modifiedDutyNoTruck,
+            activeTechsNeedingTruck,
+            techsWithDeclinedRepairTruck,
+          },
+          vehicles: {
+            totalActiveHolmanVehicles,
+            trucksAssigned,
+            sentToAuction,
+            declinedRepairUnassigned,
+            totalSpares,
+          },
+        });
+      } catch (queryError: any) {
+        console.error('Snowflake query failed for fleet statistics:', queryError.message);
+        return res.json(generateSampleFleetStats());
+      }
+    } catch (error: any) {
+      console.error("Error fetching fleet overview statistics:", error);
+      res.status(500).json({ message: "Failed to fetch fleet statistics", error: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack
