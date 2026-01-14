@@ -1501,6 +1501,38 @@ export type TpmsSyncState = typeof tpmsSyncState.$inferSelect;
 export type InsertTpmsSyncState = z.infer<typeof insertTpmsSyncStateSchema>;
 
 // ===============================
+// Rental Snapshots - Historical tracking for rental reduction dashboard
+// ===============================
+
+export const rentalSnapshots = pgTable("rental_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  snapshotDate: date("snapshot_date").notNull(),
+  grandTotal: integer("grand_total").notNull(),
+  totalOver14Days: integer("total_over_14_days").notNull(),
+  enterpriseTotal: integer("enterprise_total").notNull(),
+  nonEnterpriseTotal: integer("non_enterprise_total").notNull(),
+  bucket28Plus: integer("bucket_28_plus").notNull(),
+  bucket21To27: integer("bucket_21_to_27").notNull(),
+  bucket14To20: integer("bucket_14_to_20").notNull(),
+  bucketUnder14: integer("bucket_under_14").notNull(),
+  vendorBreakdown: jsonb("vendor_breakdown"), // Array of vendor stats
+  rentalDetails: jsonb("rental_details"), // Full rental list for that day
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    dateIdx: index("rental_snapshots_date_idx").on(table.snapshotDate),
+  };
+});
+
+export const insertRentalSnapshotSchema = createInsertSchema(rentalSnapshots).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type RentalSnapshot = typeof rentalSnapshots.$inferSelect;
+export type InsertRentalSnapshot = z.infer<typeof insertRentalSnapshotSchema>;
+
+// ===============================
 // Rental Reduction Dashboard Types
 // ===============================
 
