@@ -84,9 +84,7 @@ function Router() {
       
       <Route path="/dashboard">
         <ProtectedRoute>
-          <MainContent>
-            <Dashboard />
-          </MainContent>
+          <Dashboard />
         </ProtectedRoute>
       </Route>
       
@@ -101,9 +99,7 @@ function Router() {
 
       <Route path="/operations">
         <ProtectedRoute>
-          <MainContent>
-            <OperationsDashboard />
-          </MainContent>
+          <OperationsDashboard />
         </ProtectedRoute>
       </Route>
 
