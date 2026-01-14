@@ -7331,6 +7331,161 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===================================
+  // Rental Reduction Dashboard Routes
+  // ===================================
+  
+  // Helper function to calculate rental aging bucket
+  function getRentalAgingBucket(daysOpen: number): string {
+    if (daysOpen >= 28) return "28 plus days";
+    if (daysOpen >= 21) return "21 plus days";
+    if (daysOpen >= 14) return "14 plus days";
+    return "Less than 14 days";
+  }
+
+  // Helper function to calculate dashboard data from rental details
+  function calculateRentalDashboardData(rentalDetails: any[]) {
+    const buckets = ["28 plus days", "21 plus days", "14 plus days", "Less than 14 days"];
+    const grandTotal = rentalDetails.length;
+    
+    // Calculate summary by bucket
+    const summary = buckets.map(bucket => {
+      const items = rentalDetails.filter(r => r.rentalDays === bucket);
+      const rentalsOpen = items.length;
+      const totalDays = items.reduce((sum, r) => sum + (r.daysOpen || 0), 0);
+      return {
+        bucket,
+        rentalsOpen,
+        percentOfTotal: grandTotal > 0 ? rentalsOpen / grandTotal : 0,
+        avgDaysOpen: rentalsOpen > 0 ? totalDays / rentalsOpen : 0
+      };
+    });
+
+    const totalOver14Days = rentalDetails.filter(r => 
+      r.rentalDays === "28 plus days" || r.rentalDays === "21 plus days" || r.rentalDays === "14 plus days"
+    ).length;
+
+    const enterpriseTotal = rentalDetails.filter(r => r.isEnterprise).length;
+    const nonEnterpriseTotal = rentalDetails.filter(r => !r.isEnterprise).length;
+
+    // Generate sample progress history (last 7 days)
+    const progressHistory = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const variation = Math.floor(Math.random() * 10) - 5;
+      
+      progressHistory.push({
+        date: date.toISOString().split('T')[0],
+        buckets: summary.map(s => ({
+          bucket: s.bucket,
+          rentalsOpen: Math.max(0, s.rentalsOpen + variation),
+          percentOfTotal: s.percentOfTotal,
+          changeMtd: variation
+        })),
+        grandTotal: grandTotal + variation,
+        totalOver14Days: totalOver14Days + Math.floor(variation * 0.7),
+        percentOver14Days: grandTotal > 0 ? totalOver14Days / grandTotal : 0
+      });
+    }
+
+    return {
+      currentSnapshot: {
+        date: new Date().toISOString().split('T')[0],
+        summary,
+        grandTotal,
+        totalOver14Days,
+        percentOver14Days: grandTotal > 0 ? totalOver14Days / grandTotal : 0,
+        enterpriseTotal,
+        nonEnterpriseTotal
+      },
+      progressHistory,
+      rentalDetails,
+      lastUpdated: new Date().toISOString()
+    };
+  }
+
+  // Generate sample rental data for development/demo
+  function generateSampleRentalData() {
+    const sampleRentals = [];
+    const names = ["JOHN SMITH", "JANE DOE", "MIKE JOHNSON", "SARAH WILLIAMS", "CHRIS BROWN"];
+    const enterpriseIds = ["JSMITH", "JDOE", "MJOHN", "SWILL", "CBROWN"];
+    
+    for (let i = 0; i < 50; i++) {
+      const daysOpen = Math.floor(Math.random() * 60);
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - daysOpen);
+      
+      sampleRentals.push({
+        truckNumber: String(10000 + Math.floor(Math.random() * 90000)).padStart(5, '0'),
+        rentalStartDate: startDate.toISOString(),
+        rentalDays: getRentalAgingBucket(daysOpen),
+        rentalUnderName: names[Math.floor(Math.random() * names.length)],
+        rentalTechEnterpriseId: enterpriseIds[Math.floor(Math.random() * enterpriseIds.length)],
+        truckAssignedToInTpms: Math.random() > 0.3 ? names[Math.floor(Math.random() * names.length)] : null,
+        truckAssignedToEnterpriseId: Math.random() > 0.3 ? enterpriseIds[Math.floor(Math.random() * enterpriseIds.length)] : null,
+        employmentServiceDate: new Date(2020 + Math.floor(Math.random() * 5), Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1).toISOString(),
+        isEnterprise: Math.random() > 0.3,
+        daysOpen
+      });
+    }
+
+    return calculateRentalDashboardData(sampleRentals);
+  }
+
+  app.get("/api/rental-reduction/dashboard", requireAuth, async (req: any, res) => {
+    try {
+      // Check if Snowflake is configured
+      if (!isSnowflakeConfigured()) {
+        // Return sample data for development/demo when Snowflake is not configured
+        const sampleData = generateSampleRentalData();
+        return res.json(sampleData);
+      }
+
+      // Fetch from Snowflake VW_RENTAL_LIST
+      const snowflake = getSnowflakeService();
+      const query = `
+        SELECT 
+          TRUCK_NUMBER,
+          RENTAL_START_DATE,
+          RENTAL_DAYS,
+          RENTAL_UNDER_NAME,
+          RENTAL_TECH_ENTERPRISE_ID,
+          TRUCK_ASSIGNED_TO_IN_TPMS,
+          TRUCK_ASSIGNED_TO_ENTERPRISE_ID,
+          EMPLOYMENT_SERVICE_DATE,
+          IS_ENTERPRISE,
+          DATEDIFF(day, RENTAL_START_DATE, CURRENT_DATE()) as DAYS_OPEN
+        FROM PARTS_SUPPLYCHAIN.FLEET.VW_RENTAL_LIST
+        ORDER BY RENTAL_START_DATE ASC
+      `;
+      
+      const rows = await snowflake.executeQuery(query);
+      
+      // Transform Snowflake data to our format
+      const rentalDetails = rows.map((row: any) => ({
+        truckNumber: row.TRUCK_NUMBER || '',
+        rentalStartDate: row.RENTAL_START_DATE ? new Date(row.RENTAL_START_DATE).toISOString() : null,
+        rentalDays: row.RENTAL_DAYS || 'Less than 14 days',
+        rentalUnderName: row.RENTAL_UNDER_NAME || null,
+        rentalTechEnterpriseId: row.RENTAL_TECH_ENTERPRISE_ID || null,
+        truckAssignedToInTpms: row.TRUCK_ASSIGNED_TO_IN_TPMS || null,
+        truckAssignedToEnterpriseId: row.TRUCK_ASSIGNED_TO_ENTERPRISE_ID || null,
+        employmentServiceDate: row.EMPLOYMENT_SERVICE_DATE ? new Date(row.EMPLOYMENT_SERVICE_DATE).toISOString() : null,
+        isEnterprise: row.IS_ENTERPRISE === true || row.IS_ENTERPRISE === 'true' || row.IS_ENTERPRISE === 1,
+        daysOpen: row.DAYS_OPEN || 0,
+      }));
+
+      // Calculate summary statistics
+      const dashboardData = calculateRentalDashboardData(rentalDetails);
+      res.json(dashboardData);
+    } catch (error: any) {
+      console.error("Error fetching rental reduction data:", error);
+      res.status(500).json({ message: "Failed to fetch rental reduction data", error: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack

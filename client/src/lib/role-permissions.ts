@@ -19,6 +19,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       dashboard: true,
       vehicleAssignmentDash: true,
       operationsDash: true,
+      rentalReductionDash: true,
     },
     queues: {
       enabled: true,
@@ -139,6 +140,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       dashboard: true,
       vehicleAssignmentDash: true,
       operationsDash: true,
+      rentalReductionDash: true,
     },
     queues: {
       enabled: true,
@@ -258,6 +260,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       dashboard: false,
       vehicleAssignmentDash: false,
       operationsDash: false,
+      rentalReductionDash: false,
     },
     queues: {
       enabled: true,
