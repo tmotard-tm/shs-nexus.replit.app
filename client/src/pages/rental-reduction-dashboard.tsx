@@ -172,11 +172,6 @@ export default function RentalReductionDashboard() {
         <div className="flex items-center justify-between">
           <BackButton />
             <div className="flex items-center gap-2">
-              {data && (data as any).isCachedData && (
-                <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-300">
-                  Cached Data
-                </Badge>
-              )}
               {canCaptureSnapshot && (
                 <Button 
                   variant="outline" 
