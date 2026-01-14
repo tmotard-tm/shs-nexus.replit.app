@@ -138,7 +138,7 @@ export const PAGES: PageDefinition[] = [
     key: "rentalReductionDash",
     label: "Rental Reduction",
     description: "Rental reduction tracking and reporting dashboard",
-    path: "/rental-reduction",
+    path: "/rental-reduction-dashboard",
     icon: Truck,
     category: "dashboards",
     permissionKey: "rentalReductionDash",
