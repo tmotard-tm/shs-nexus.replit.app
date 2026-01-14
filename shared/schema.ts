@@ -1497,3 +1497,62 @@ export const insertTpmsSyncStateSchema = createInsertSchema(tpmsSyncState).omit(
 
 export type TpmsSyncState = typeof tpmsSyncState.$inferSelect;
 export type InsertTpmsSyncState = z.infer<typeof insertTpmsSyncStateSchema>;
+
+// ===============================
+// Rental Reduction Dashboard Types
+// ===============================
+
+// Snowflake VW_RENTAL_LIST data structure
+export interface RentalListItem {
+  truckNumber: string;
+  rentalStartDate: string | null;
+  rentalDays: string; // "28 plus days", "21 plus days", "14 plus days", "Less than 14 days"
+  rentalUnderName: string | null;
+  rentalTechEnterpriseId: string | null;
+  truckAssignedToInTpms: string | null;
+  truckAssignedToEnterpriseId: string | null;
+  employmentServiceDate: string | null;
+  isEnterprise: boolean;
+  daysOpen: number;
+}
+
+// Aging bucket categories for rental reporting
+export type RentalAgingBucket = "28 plus days" | "21 plus days" | "14 plus days" | "Less than 14 days";
+
+// Summary statistics by aging bucket
+export interface RentalAgingSummary {
+  bucket: RentalAgingBucket;
+  rentalsOpen: number;
+  percentOfTotal: number;
+  avgDaysOpen: number;
+}
+
+// Running progress snapshot for a specific date
+export interface RentalProgressSnapshot {
+  date: string;
+  buckets: {
+    bucket: RentalAgingBucket;
+    rentalsOpen: number;
+    percentOfTotal: number;
+    changeMtd: number;
+  }[];
+  grandTotal: number;
+  totalOver14Days: number;
+  percentOver14Days: number;
+}
+
+// Complete rental reduction dashboard data
+export interface RentalReductionDashboardData {
+  currentSnapshot: {
+    date: string;
+    summary: RentalAgingSummary[];
+    grandTotal: number;
+    totalOver14Days: number;
+    percentOver14Days: number;
+    enterpriseTotal: number;
+    nonEnterpriseTotal: number;
+  };
+  progressHistory: RentalProgressSnapshot[];
+  rentalDetails: RentalListItem[];
+  lastUpdated: string;
+}

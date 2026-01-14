@@ -135,6 +135,15 @@ export const PAGES: PageDefinition[] = [
     permissionKey: "operationsDash",
   },
   {
+    key: "rentalReductionDash",
+    label: "Rental Reduction",
+    description: "Rental reduction tracking and reporting dashboard",
+    path: "/rental-reduction",
+    icon: Truck,
+    category: "dashboards",
+    permissionKey: "rentalReductionDash",
+  },
+  {
     key: "queueManagement",
     label: "Task Queue",
     description: "Unified task queue interface",

@@ -35,6 +35,7 @@ import RolePermissions from "@/pages/role-permissions";
 import ChangePassword from "@/pages/change-password";
 import AnalyticsBoard from "@/pages/analytics-board";
 import OperationsDashboard from "@/pages/operations-dashboard";
+import RentalReductionDashboard from "@/pages/rental-reduction-dashboard";
 import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import TaskWorkPage from "@/pages/task-work";
@@ -102,6 +103,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <OperationsDashboard />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/rental-reduction">
+        <ProtectedRoute>
+          <MainContent>
+            <RentalReductionDashboard />
           </MainContent>
         </ProtectedRoute>
       </Route>
