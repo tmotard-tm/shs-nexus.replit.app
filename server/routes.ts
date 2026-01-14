@@ -7368,6 +7368,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const enterpriseTotal = rentalDetails.filter(r => r.isEnterprise).length;
     const nonEnterpriseTotal = rentalDetails.filter(r => !r.isEnterprise).length;
 
+    // Calculate vendor breakdown from SOURCE column
+    const vendorCounts = new Map<string, { count: number; totalDays: number; over14: number }>();
+    rentalDetails.forEach(r => {
+      const vendor = r.source || 'Unknown';
+      const existing = vendorCounts.get(vendor) || { count: 0, totalDays: 0, over14: 0 };
+      existing.count++;
+      existing.totalDays += r.daysOpen || 0;
+      if (r.daysOpen >= 14) existing.over14++;
+      vendorCounts.set(vendor, existing);
+    });
+    
+    const vendorBreakdown = Array.from(vendorCounts.entries())
+      .map(([vendor, stats]) => ({
+        vendor,
+        count: stats.count,
+        percentOfTotal: grandTotal > 0 ? stats.count / grandTotal : 0,
+        avgDaysOpen: stats.count > 0 ? stats.totalDays / stats.count : 0,
+        over14Days: stats.over14
+      }))
+      .sort((a, b) => b.count - a.count);
+
     // For historical progress:
     // - For LIVE data: Only include current snapshot (no fabricated history)
     // - For SAMPLE data: Include benchmark data from Excel wireframe for demo purposes
@@ -7431,7 +7452,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalOver14Days,
         percentOver14Days: grandTotal > 0 ? totalOver14Days / grandTotal : 0,
         enterpriseTotal,
-        nonEnterpriseTotal
+        nonEnterpriseTotal,
+        vendorBreakdown
       },
       progressHistory,
       rentalDetails,
@@ -7464,6 +7486,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         startDate.setDate(startDate.getDate() - daysOpen);
         const nameIdx = i % names.length;
         const isEnterprise = i % 4 !== 0; // 75% Enterprise
+        // Distribute across vendors: Enterprise (60%), Hertz (25%), Penske (10%), Other (5%)
+        const vendors = ["Enterprise", "Enterprise", "Enterprise", "Hertz", "Penske"];
+        const source = vendors[i % vendors.length];
         
         sampleRentals.push({
           truckNumber: String(rentalId++).padStart(5, '0'),
@@ -7474,8 +7499,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           truckAssignedToInTpms: i % 3 === 0 ? null : names[(nameIdx + 1) % names.length],
           truckAssignedToEnterpriseId: i % 3 === 0 ? null : enterpriseIds[(nameIdx + 1) % enterpriseIds.length],
           employmentServiceDate: new Date(2020 + (i % 5), (i % 12), (i % 28) + 1).toISOString(),
-          isEnterprise,
-          daysOpen
+          isEnterprise: source === "Enterprise",
+          daysOpen,
+          source
         });
       }
     });

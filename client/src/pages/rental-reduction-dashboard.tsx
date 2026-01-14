@@ -301,6 +301,47 @@ export default function RentalReductionDashboard() {
                       </CardContent>
                     </Card>
                   </div>
+
+                  {/* Vendor Breakdown Section */}
+                  {data.currentSnapshot.vendorBreakdown && data.currentSnapshot.vendorBreakdown.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Breakdown by Rental Vendor</CardTitle>
+                        <CardDescription>Distribution of rentals across vendors (SOURCE)</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b">
+                                <th className="text-left p-2 font-medium">Vendor</th>
+                                <th className="text-right p-2 font-medium">Count</th>
+                                <th className="text-right p-2 font-medium">% of Total</th>
+                                <th className="text-right p-2 font-medium">Avg Days</th>
+                                <th className="text-right p-2 font-medium">Over 14 Days</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {data.currentSnapshot.vendorBreakdown.map((vendor) => (
+                                <tr key={vendor.vendor} className="border-b hover:bg-muted/50">
+                                  <td className="p-2 font-medium">{vendor.vendor}</td>
+                                  <td className="p-2 text-right">{vendor.count}</td>
+                                  <td className="p-2 text-right">{(vendor.percentOfTotal * 100).toFixed(1)}%</td>
+                                  <td className="p-2 text-right">{vendor.avgDaysOpen.toFixed(0)}</td>
+                                  <td className={cn(
+                                    "p-2 text-right",
+                                    vendor.over14Days > 0 ? "text-destructive font-medium" : ""
+                                  )}>
+                                    {vendor.over14Days}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="progress" className="space-y-4">

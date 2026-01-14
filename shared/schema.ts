@@ -1543,6 +1543,15 @@ export interface RentalProgressSnapshot {
   percentOver14Days: number;
 }
 
+// Vendor breakdown statistics
+export interface RentalVendorBreakdown {
+  vendor: string;
+  count: number;
+  percentOfTotal: number;
+  avgDaysOpen: number;
+  over14Days: number;
+}
+
 // Complete rental reduction dashboard data
 export interface RentalReductionDashboardData {
   currentSnapshot: {
@@ -1553,6 +1562,7 @@ export interface RentalReductionDashboardData {
     percentOver14Days: number;
     enterpriseTotal: number;
     nonEnterpriseTotal: number;
+    vendorBreakdown: RentalVendorBreakdown[];
   };
   progressHistory: RentalProgressSnapshot[];
   rentalDetails: RentalListItem[];
