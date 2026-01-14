@@ -107,6 +107,16 @@ export default function RentalReductionDashboard() {
           <div className="flex items-center justify-between">
             <BackButton />
             <div className="flex items-center gap-2">
+              {data && !data.isLiveData && (
+                <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-300">
+                  Sample Data
+                </Badge>
+              )}
+              {data?.isLiveData && (
+                <Badge variant="default" className="bg-green-100 text-green-800 border-green-300">
+                  Live Data
+                </Badge>
+              )}
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -277,10 +287,25 @@ export default function RentalReductionDashboard() {
                 </TabsContent>
 
                 <TabsContent value="progress" className="space-y-4">
+                  {data.isLiveData && data.progressHistory.length <= 1 && (
+                    <Card className="border-amber-200 bg-amber-50/50">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 text-amber-800">
+                          <Clock className="h-5 w-5" />
+                          <span>Historical trend data requires daily snapshot persistence. Currently showing live snapshot only. Contact your administrator to enable historical tracking.</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                   <Card>
                     <CardHeader>
                       <CardTitle>Rental Reduction Trend</CardTitle>
-                      <CardDescription>Track progress over time - comparing to benchmark</CardDescription>
+                      <CardDescription>
+                        {data.isLiveData && data.progressHistory.length <= 1 
+                          ? "Current snapshot - historical tracking not yet enabled"
+                          : "Track progress over time - comparing to benchmark"
+                        }
+                      </CardDescription>
                     </CardHeader>
                     <CardContent>
                       <div className="h-[400px]">

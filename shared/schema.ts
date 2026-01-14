@@ -1557,4 +1557,5 @@ export interface RentalReductionDashboardData {
   progressHistory: RentalProgressSnapshot[];
   rentalDetails: RentalListItem[];
   lastUpdated: string;
+  isLiveData?: boolean; // True when data comes from Snowflake, false for sample data
 }

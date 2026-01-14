@@ -7344,7 +7344,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // Helper function to calculate dashboard data from rental details
-  function calculateRentalDashboardData(rentalDetails: any[]) {
+  function calculateRentalDashboardData(rentalDetails: any[], isSampleData: boolean = false) {
     const buckets = ["28 plus days", "21 plus days", "14 plus days", "Less than 14 days"];
     const grandTotal = rentalDetails.length;
     
@@ -7368,24 +7368,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const enterpriseTotal = rentalDetails.filter(r => r.isEnterprise).length;
     const nonEnterpriseTotal = rentalDetails.filter(r => !r.isEnterprise).length;
 
-    // Generate sample progress history (last 7 days)
+    // For historical progress:
+    // - For LIVE data: Only include current snapshot (no fabricated history)
+    // - For SAMPLE data: Include benchmark data from Excel wireframe for demo purposes
     const progressHistory = [];
     const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const variation = Math.floor(Math.random() * 10) - 5;
+    
+    if (isSampleData) {
+      // Sample/demo mode: Use Excel wireframe benchmark data to show how historical tracking works
+      const benchmarkData = [
+        { total: 399, buckets: [172, 55, 40, 132] }, // Benchmark (8/29)
+        { total: 422, buckets: [217, 55, 46, 104] }, // 9/2
+        { total: 422, buckets: [217, 55, 46, 104] }, // 9/3
+        { total: 392, buckets: [214, 27, 56, 95] },  // 9/5
+        { total: 385, buckets: [210, 30, 52, 93] },  // Projected
+        { total: 378, buckets: [205, 32, 50, 91] },  // Projected
+        { total: grandTotal, buckets: summary.map(s => s.rentalsOpen) }, // Current
+      ];
       
+      for (let i = 0; i < benchmarkData.length; i++) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - (benchmarkData.length - 1 - i));
+        const data = benchmarkData[i];
+        const dataTotal = data.total;
+        const dataOver14 = data.buckets[0] + data.buckets[1] + data.buckets[2];
+        
+        progressHistory.push({
+          date: date.toISOString().split('T')[0],
+          buckets: buckets.map((bucket, idx) => ({
+            bucket,
+            rentalsOpen: data.buckets[idx],
+            percentOfTotal: dataTotal > 0 ? data.buckets[idx] / dataTotal : 0,
+            changeMtd: data.buckets[idx] - benchmarkData[0].buckets[idx]
+          })),
+          grandTotal: dataTotal,
+          totalOver14Days: dataOver14,
+          percentOver14Days: dataTotal > 0 ? dataOver14 / dataTotal : 0
+        });
+      }
+    } else {
+      // Live mode: Only include current snapshot
+      // Historical data would require a persistent snapshot table to be implemented
       progressHistory.push({
-        date: date.toISOString().split('T')[0],
+        date: today.toISOString().split('T')[0],
         buckets: summary.map(s => ({
           bucket: s.bucket,
-          rentalsOpen: Math.max(0, s.rentalsOpen + variation),
+          rentalsOpen: s.rentalsOpen,
           percentOfTotal: s.percentOfTotal,
-          changeMtd: variation
+          changeMtd: 0 // No historical comparison available yet
         })),
-        grandTotal: grandTotal + variation,
-        totalOver14Days: totalOver14Days + Math.floor(variation * 0.7),
+        grandTotal,
+        totalOver14Days,
         percentOver14Days: grandTotal > 0 ? totalOver14Days / grandTotal : 0
       });
     }
@@ -7402,36 +7435,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       },
       progressHistory,
       rentalDetails,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
+      isLiveData: !isSampleData
     };
   }
 
-  // Generate sample rental data for development/demo
+  // Generate sample rental data for development/demo matching Excel wireframe distribution
   function generateSampleRentalData() {
-    const sampleRentals = [];
-    const names = ["JOHN SMITH", "JANE DOE", "MIKE JOHNSON", "SARAH WILLIAMS", "CHRIS BROWN"];
-    const enterpriseIds = ["JSMITH", "JDOE", "MJOHN", "SWILL", "CBROWN"];
+    const sampleRentals: any[] = [];
+    const names = ["JOHN SMITH", "JANE DOE", "MIKE JOHNSON", "SARAH WILLIAMS", "CHRIS BROWN", 
+                   "ALEX DAVIS", "EMILY GARCIA", "RYAN MARTINEZ", "LISA ANDERSON", "DAVID WILSON"];
+    const enterpriseIds = ["JSMITH", "JDOE", "MJOHN", "SWILL", "CBROWN", "ADAVIS", "EGARCI", "RMARTI", "LANDER", "DWILSO"];
     
-    for (let i = 0; i < 50; i++) {
-      const daysOpen = Math.floor(Math.random() * 60);
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - daysOpen);
-      
-      sampleRentals.push({
-        truckNumber: String(10000 + Math.floor(Math.random() * 90000)).padStart(5, '0'),
-        rentalStartDate: startDate.toISOString(),
-        rentalDays: getRentalAgingBucket(daysOpen),
-        rentalUnderName: names[Math.floor(Math.random() * names.length)],
-        rentalTechEnterpriseId: enterpriseIds[Math.floor(Math.random() * enterpriseIds.length)],
-        truckAssignedToInTpms: Math.random() > 0.3 ? names[Math.floor(Math.random() * names.length)] : null,
-        truckAssignedToEnterpriseId: Math.random() > 0.3 ? enterpriseIds[Math.floor(Math.random() * enterpriseIds.length)] : null,
-        employmentServiceDate: new Date(2020 + Math.floor(Math.random() * 5), Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1).toISOString(),
-        isEnterprise: Math.random() > 0.3,
-        daysOpen
-      });
-    }
+    // Distribution based on Excel wireframe: 28+ (43%), 21+ (14%), 14+ (10%), <14 (33%)
+    const distributions = [
+      { bucket: "28 plus days", count: 172, minDays: 28, maxDays: 90 },
+      { bucket: "21 plus days", count: 55, minDays: 21, maxDays: 27 },
+      { bucket: "14 plus days", count: 40, minDays: 14, maxDays: 20 },
+      { bucket: "Less than 14 days", count: 132, minDays: 1, maxDays: 13 }
+    ];
+    
+    let rentalId = 10000;
+    distributions.forEach(dist => {
+      for (let i = 0; i < dist.count; i++) {
+        // Use deterministic values based on index for consistency
+        const daysOpen = dist.minDays + (i % (dist.maxDays - dist.minDays + 1));
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - daysOpen);
+        const nameIdx = i % names.length;
+        const isEnterprise = i % 4 !== 0; // 75% Enterprise
+        
+        sampleRentals.push({
+          truckNumber: String(rentalId++).padStart(5, '0'),
+          rentalStartDate: startDate.toISOString(),
+          rentalDays: dist.bucket,
+          rentalUnderName: names[nameIdx],
+          rentalTechEnterpriseId: enterpriseIds[nameIdx],
+          truckAssignedToInTpms: i % 3 === 0 ? null : names[(nameIdx + 1) % names.length],
+          truckAssignedToEnterpriseId: i % 3 === 0 ? null : enterpriseIds[(nameIdx + 1) % enterpriseIds.length],
+          employmentServiceDate: new Date(2020 + (i % 5), (i % 12), (i % 28) + 1).toISOString(),
+          isEnterprise,
+          daysOpen
+        });
+      }
+    });
 
-    return calculateRentalDashboardData(sampleRentals);
+    return calculateRentalDashboardData(sampleRentals, true);
   }
 
   app.get("/api/rental-reduction/dashboard", requireAuth, async (req: any, res) => {
