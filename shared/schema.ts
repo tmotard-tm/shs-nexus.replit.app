@@ -1506,7 +1506,7 @@ export type InsertTpmsSyncState = z.infer<typeof insertTpmsSyncStateSchema>;
 
 export const rentalSnapshots = pgTable("rental_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  snapshotDate: date("snapshot_date").notNull(),
+  snapshotDate: date("snapshot_date").notNull().unique(), // Unique constraint: one snapshot per day
   grandTotal: integer("grand_total").notNull(),
   totalOver14Days: integer("total_over_14_days").notNull(),
   enterpriseTotal: integer("enterprise_total").notNull(),

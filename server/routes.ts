@@ -7602,6 +7602,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Calculate summary statistics and merge with historical data
         const dashboardData = calculateRentalDashboardData(rentalDetails);
+        const todayStr = new Date().toISOString().split('T')[0];
         
         // Fetch historical snapshots from database
         try {
@@ -7619,13 +7620,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
               grandTotal: snap.grandTotal,
               totalOver14Days: snap.totalOver14Days,
               percentOver14Days: snap.grandTotal > 0 ? snap.totalOver14Days / snap.grandTotal : 0
-            })).sort((a, b) => a.date.localeCompare(b.date));
+            }));
             
-            // Replace progress history with stored data
-            dashboardData.progressHistory = storedHistory;
+            // Dedupe: filter out today's stored snapshot if exists, add current live data
+            const historyWithoutToday = storedHistory.filter(s => s.date !== todayStr);
+            const currentLiveSnapshot = {
+              date: todayStr,
+              buckets: dashboardData.currentSnapshot.summary.map(s => ({
+                bucket: s.bucket,
+                rentalsOpen: s.rentalsOpen,
+                percentOfTotal: s.percentOfTotal,
+                changeMtd: 0
+              })),
+              grandTotal: dashboardData.currentSnapshot.grandTotal,
+              totalOver14Days: dashboardData.currentSnapshot.totalOver14Days,
+              percentOver14Days: dashboardData.currentSnapshot.percentOver14Days
+            };
+            
+            // Merge historical with current live and sort by date
+            dashboardData.progressHistory = [...historyWithoutToday, currentLiveSnapshot]
+              .sort((a, b) => a.date.localeCompare(b.date));
           }
         } catch (historyError) {
           console.warn('Could not fetch historical snapshots:', historyError);
+          // Fallback: ensure progressHistory contains at least current live data
+          if (!dashboardData.progressHistory || dashboardData.progressHistory.length === 0) {
+            const todayStr = new Date().toISOString().split('T')[0];
+            dashboardData.progressHistory = [{
+              date: todayStr,
+              buckets: dashboardData.currentSnapshot.summary.map(s => ({
+                bucket: s.bucket,
+                rentalsOpen: s.rentalsOpen,
+                percentOfTotal: s.percentOfTotal,
+                changeMtd: 0
+              })),
+              grandTotal: dashboardData.currentSnapshot.grandTotal,
+              totalOver14Days: dashboardData.currentSnapshot.totalOver14Days,
+              percentOver14Days: dashboardData.currentSnapshot.percentOver14Days
+            }];
+          }
         }
         
         res.json(dashboardData);

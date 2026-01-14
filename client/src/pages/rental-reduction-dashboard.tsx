@@ -1,5 +1,7 @@
 import { useState, useMemo, Fragment } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -19,7 +21,8 @@ import {
   Car,
   AlertTriangle,
   CheckCircle,
-  RefreshCw
+  RefreshCw,
+  Camera
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -44,11 +47,41 @@ const CHART_CONFIG = {
 
 export default function RentalReductionDashboard() {
   const [filterType, setFilterType] = useState<"all" | "enterprise" | "nonEnterprise">("all");
+  const { toast } = useToast();
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<RentalReductionDashboardData>({
     queryKey: ["/api/rental-reduction/dashboard"],
     refetchInterval: 5 * 60 * 1000,
   });
+
+  // Snapshot capture mutation
+  const captureSnapshotMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/rental-reduction/snapshot");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: "Unknown error" }));
+        throw new Error(errorData.message || `Failed with status ${response.status}`);
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Snapshot Captured",
+        description: `Saved ${data.stats.grandTotal} rentals for ${data.snapshotDate}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/rental-reduction/dashboard"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Snapshot Failed",
+        description: error.message || "Could not capture snapshot. Ensure Snowflake is configured.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Check if snapshot capture is available (only for live data mode)
+  const canCaptureSnapshot = data?.isLiveData === true;
 
   const filteredDetails = useMemo(() => {
     if (!data?.rentalDetails) return [];
@@ -126,6 +159,17 @@ export default function RentalReductionDashboard() {
                 <RefreshCw className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")} />
                 Refresh
               </Button>
+              {canCaptureSnapshot && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => captureSnapshotMutation.mutate()}
+                  disabled={captureSnapshotMutation.isPending}
+                >
+                  <Camera className={cn("h-4 w-4 mr-2", captureSnapshotMutation.isPending && "animate-pulse")} />
+                  {captureSnapshotMutation.isPending ? "Saving..." : "Capture Snapshot"}
+                </Button>
+              )}
               <Button variant="outline" size="sm">
                 <Download className="h-4 w-4 mr-2" />
                 Export
@@ -345,12 +389,34 @@ export default function RentalReductionDashboard() {
                 </TabsContent>
 
                 <TabsContent value="progress" className="space-y-4">
-                  {data.isLiveData && data.progressHistory.length <= 1 && (
+                  {canCaptureSnapshot && data.progressHistory.length <= 1 && (
                     <Card className="border-amber-200 bg-amber-50/50">
                       <CardContent className="pt-6">
-                        <div className="flex items-center gap-2 text-amber-800">
-                          <Clock className="h-5 w-5" />
-                          <span>Historical trend data requires daily snapshot persistence. Currently showing live snapshot only. Contact your administrator to enable historical tracking.</span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-amber-800">
+                            <Clock className="h-5 w-5" />
+                            <span>No historical snapshots found. Click "Capture Snapshot" to start tracking trends over time.</span>
+                          </div>
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => captureSnapshotMutation.mutate()}
+                            disabled={captureSnapshotMutation.isPending}
+                            className="ml-4"
+                          >
+                            <Camera className={cn("h-4 w-4 mr-2", captureSnapshotMutation.isPending && "animate-pulse")} />
+                            {captureSnapshotMutation.isPending ? "Saving..." : "Capture Now"}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                  {canCaptureSnapshot && data.progressHistory.length > 1 && (
+                    <Card className="border-green-200 bg-green-50/50">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 text-green-800">
+                          <CheckCircle className="h-5 w-5" />
+                          <span>Historical tracking enabled. Showing {data.progressHistory.length} snapshots over the past 30 days.</span>
                         </div>
                       </CardContent>
                     </Card>
