@@ -149,7 +149,7 @@ export default function RentalReductionDashboard() {
   if (error) {
     return (
       <MainContent>
-        <TopBar title="Rental Reduction" breadcrumbs={["Home", "Dashboards", "Rental Reduction"]} />
+        <TopBar title="Rental" breadcrumbs={["Home", "Dashboards", "Rental"]} />
         <main className="p-6">
           <BackButton />
           <Card className="border-destructive mt-4">
@@ -167,7 +167,7 @@ export default function RentalReductionDashboard() {
 
   return (
     <MainContent>
-      <TopBar title="Rental Reduction Dashboard" breadcrumbs={["Home", "Dashboards", "Rental Reduction"]} />
+      <TopBar title="Rental Dashboard" breadcrumbs={["Home", "Dashboards", "Rental"]} />
       <main className="p-6 space-y-6">
         <div className="flex items-center justify-between">
           <BackButton />
@@ -437,7 +437,7 @@ export default function RentalReductionDashboard() {
                   )}
                   <Card>
                     <CardHeader>
-                      <CardTitle>Rental Reduction Trend</CardTitle>
+                      <CardTitle>Rental Trend</CardTitle>
                       <CardDescription>
                         {data.isLiveData && data.progressHistory.length <= 1 
                           ? "Current snapshot - historical tracking not yet enabled"
