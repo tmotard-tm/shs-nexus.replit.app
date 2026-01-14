@@ -7542,21 +7542,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             daysOpen = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
           }
           
-          // Map the RENTAL_DAYS bucket to our format
-          let agingBucket = rentalDaysBucket;
-          if (rentalDaysBucket && typeof rentalDaysBucket === 'string') {
-            // The view may have values like "28+ Days", "21+ Days", etc.
-            if (rentalDaysBucket.includes('28') || daysOpen >= 28) {
-              agingBucket = '28 plus days';
-            } else if (rentalDaysBucket.includes('21') || daysOpen >= 21) {
-              agingBucket = '21 plus days';
-            } else if (rentalDaysBucket.includes('14') || daysOpen >= 14) {
-              agingBucket = '14 plus days';
-            } else {
-              agingBucket = 'Less than 14 days';
-            }
+          // Map the RENTAL_DAYS bucket to our format - MUTUALLY EXCLUSIVE buckets
+          // 28+ days, 21-27 days, 14-20 days, <14 days
+          let agingBucket: string;
+          if (daysOpen >= 28) {
+            agingBucket = '28 plus days';
+          } else if (daysOpen >= 21) {
+            agingBucket = '21 plus days';  // 21-27 days only
+          } else if (daysOpen >= 14) {
+            agingBucket = '14 plus days';  // 14-20 days only
           } else {
-            agingBucket = getRentalAgingBucket(daysOpen);
+            agingBucket = 'Less than 14 days';  // 0-13 days
           }
           
           // Determine if Enterprise based on SOURCE column (e.g., "Enterprise" vs other vendors)
