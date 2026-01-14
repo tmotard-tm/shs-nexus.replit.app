@@ -148,7 +148,7 @@ export default function RentalReductionDashboard() {
             </div>
           ) : data ? (
             <>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-4 md:grid-cols-5">
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium">Total Open Rentals</CardTitle>
@@ -162,35 +162,52 @@ export default function RentalReductionDashboard() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="border-red-200">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Rentals Over 14 Days</CardTitle>
-                    <AlertTriangle className="h-4 w-4 text-destructive" />
+                    <CardTitle className="text-sm font-medium">28+ Days</CardTitle>
+                    <AlertTriangle className="h-4 w-4 text-red-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-destructive">{data.currentSnapshot.totalOver14Days}</div>
-                    <p className="text-xs text-muted-foreground">
-                      {(data.currentSnapshot.percentOver14Days * 100).toFixed(1)}% of total rentals
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">28+ Days Critical</CardTitle>
-                    <Clock className="h-4 w-4 text-destructive" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-destructive">
+                    <div className="text-2xl font-bold text-red-600">
                       {data.currentSnapshot.summary.find(s => s.bucket === "28 plus days")?.rentalsOpen || 0}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Avg {(data.currentSnapshot.summary.find(s => s.bucket === "28 plus days")?.avgDaysOpen || 0).toFixed(0)} days open
+                      {((data.currentSnapshot.summary.find(s => s.bucket === "28 plus days")?.percentOfTotal || 0) * 100).toFixed(1)}% of total
                     </p>
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="border-orange-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">21-27 Days</CardTitle>
+                    <Clock className="h-4 w-4 text-orange-500" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-orange-600">
+                      {data.currentSnapshot.summary.find(s => s.bucket === "21 plus days")?.rentalsOpen || 0}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {((data.currentSnapshot.summary.find(s => s.bucket === "21 plus days")?.percentOfTotal || 0) * 100).toFixed(1)}% of total
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-yellow-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">14-20 Days</CardTitle>
+                    <Clock className="h-4 w-4 text-yellow-500" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-yellow-600">
+                      {data.currentSnapshot.summary.find(s => s.bucket === "14 plus days")?.rentalsOpen || 0}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {((data.currentSnapshot.summary.find(s => s.bucket === "14 plus days")?.percentOfTotal || 0) * 100).toFixed(1)}% of total
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-green-200">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium">Under 14 Days</CardTitle>
                     <CheckCircle className="h-4 w-4 text-green-500" />
