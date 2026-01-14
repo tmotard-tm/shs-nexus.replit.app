@@ -7949,15 +7949,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }).length;
         
         // Get Holman vehicle statistics from cache using db directly
+        // Filter to match Holman sync service: isActive=true, statusCode=1, allowed divisions
         const { holmanVehiclesCache } = await import('@shared/schema');
+        const ALLOWED_DIVISIONS = ['01', 'RF'];
         const holmanVehicles = await db
           .select()
           .from(holmanVehiclesCache)
-          .where(eq(holmanVehiclesCache.statusCode, 1));
+          .where(and(
+            eq(holmanVehiclesCache.isActive, true),
+            eq(holmanVehiclesCache.statusCode, 1),
+            inArray(holmanVehiclesCache.division, ALLOWED_DIVISIONS)
+          ));
         
         const totalActiveHolmanVehicles = holmanVehicles.length;
         const trucksAssigned = holmanVehicles.filter((v: any) => 
-          v.holmanTechAssigned || v.tpmsAssignedTechId
+          (v.holmanTechAssigned && v.holmanTechAssigned.trim() !== '') || 
+          (v.tpmsAssignedTechId && v.tpmsAssignedTechId.trim() !== '')
         ).length;
         
         // Note: These would need additional data sources or Holman fields
