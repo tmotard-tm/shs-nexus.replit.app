@@ -109,9 +109,7 @@ function Router() {
 
       <Route path="/rental-reduction-dashboard">
         <ProtectedRoute>
-          <MainContent>
-            <RentalReductionDashboard />
-          </MainContent>
+          <RentalReductionDashboard />
         </ProtectedRoute>
       </Route>
       
