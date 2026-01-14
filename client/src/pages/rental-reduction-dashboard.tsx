@@ -21,7 +21,6 @@ import {
   Car,
   AlertTriangle,
   CheckCircle,
-  RefreshCw,
   Camera,
   Truck,
   Users
@@ -51,7 +50,7 @@ export default function RentalReductionDashboard() {
   const [filterType, setFilterType] = useState<"all" | "enterprise" | "nonEnterprise">("all");
   const { toast } = useToast();
 
-  const { data, isLoading, error, refetch, isFetching } = useQuery<RentalReductionDashboardData>({
+  const { data, isLoading, error } = useQuery<RentalReductionDashboardData>({
     queryKey: ["/api/rental-reduction/dashboard"],
     refetchInterval: 5 * 60 * 1000,
   });
@@ -183,15 +182,6 @@ export default function RentalReductionDashboard() {
                   Live Data
                 </Badge>
               )}
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => refetch()}
-                disabled={isFetching}
-              >
-                <RefreshCw className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")} />
-                Refresh
-              </Button>
               {canCaptureSnapshot && (
                 <Button 
                   variant="outline" 
