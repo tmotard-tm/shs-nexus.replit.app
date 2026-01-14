@@ -7527,32 +7527,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Log the first row to see actual column names (for debugging)
         console.log('[Rental] First row columns:', Object.keys(rows[0]));
         
-        // Transform Snowflake data to our format - handle various column naming conventions
+        // Transform Snowflake data to our format using actual column names from VW_RENTAL_LIST
         const rentalDetails = rows.map((row: any) => {
-          // Try different possible column names
-          const truckNumber = row.TRUCK_NUMBER || row.TRUCK_NO || row.VEHICLE_NUMBER || row.UNIT_NUMBER || '';
-          const rentalStartDate = row.RENTAL_START_DATE || row.START_DATE || row.RENTAL_DATE || null;
-          const rentalDays = row.RENTAL_DAYS || row.AGING_BUCKET || row.DAYS_BUCKET || 'Less than 14 days';
-          const daysOpen = row.DAYS_OPEN || row.DAYS_ON_RENT || row.RENTAL_DURATION || 0;
+          // Use actual column names from the view
+          const truckNumber = row.TRUCK_LISTED_FOR_RENTAL || row.TRUCK_NUMBER || '';
+          const rentalStartDate = row.RENTAL_START_DATE || null;
+          const rentalDaysBucket = row.RENTAL_DAYS || 'Less than 14 days';
           
-          // Calculate aging bucket if not provided
-          let agingBucket = rentalDays;
-          if (typeof rentalDays === 'number' || !rentalDays.includes('days')) {
+          // Calculate days open from the start date if not provided
+          let daysOpen = 0;
+          if (rentalStartDate) {
+            const startDate = new Date(rentalStartDate);
+            const today = new Date();
+            daysOpen = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+          }
+          
+          // Map the RENTAL_DAYS bucket to our format
+          let agingBucket = rentalDaysBucket;
+          if (rentalDaysBucket && typeof rentalDaysBucket === 'string') {
+            // The view may have values like "28+ Days", "21+ Days", etc.
+            if (rentalDaysBucket.includes('28') || daysOpen >= 28) {
+              agingBucket = '28 plus days';
+            } else if (rentalDaysBucket.includes('21') || daysOpen >= 21) {
+              agingBucket = '21 plus days';
+            } else if (rentalDaysBucket.includes('14') || daysOpen >= 14) {
+              agingBucket = '14 plus days';
+            } else {
+              agingBucket = 'Less than 14 days';
+            }
+          } else {
             agingBucket = getRentalAgingBucket(daysOpen);
           }
+          
+          // Determine if Enterprise based on SOURCE column (e.g., "Enterprise" vs other vendors)
+          const isEnterprise = row.SOURCE?.toLowerCase()?.includes('enterprise') || false;
           
           return {
             truckNumber,
             rentalStartDate: rentalStartDate ? new Date(rentalStartDate).toISOString() : null,
             rentalDays: agingBucket,
-            rentalUnderName: row.RENTAL_UNDER_NAME || row.TECH_NAME || row.RENTER_NAME || null,
-            rentalTechEnterpriseId: row.RENTAL_TECH_ENTERPRISE_ID || row.TECH_ID || row.RACFID || null,
-            truckAssignedToInTpms: row.TRUCK_ASSIGNED_TO_IN_TPMS || row.TPMS_TECH || null,
-            truckAssignedToEnterpriseId: row.TRUCK_ASSIGNED_TO_ENTERPRISE_ID || row.TPMS_TECH_ID || null,
-            employmentServiceDate: (row.EMPLOYMENT_SERVICE_DATE || row.HIRE_DATE) 
-              ? new Date(row.EMPLOYMENT_SERVICE_DATE || row.HIRE_DATE).toISOString() : null,
-            isEnterprise: row.IS_ENTERPRISE === true || row.IS_ENTERPRISE === 'true' || row.IS_ENTERPRISE === 1 || row.IS_ENTERPRISE === 'Y',
-            daysOpen: Number(daysOpen) || 0,
+            rentalUnderName: row.RENTAL_UNDER_NAME || null,
+            rentalTechEnterpriseId: row.RENTAL_TECH_ENTERPRISE_ID || null,
+            truckAssignedToInTpms: row.TRUCK_ASSIGNED_TO_IN_TPMS || null,
+            truckAssignedToEnterpriseId: row.TRUCK_ASSIGNED_TO_IN_TPMS_ENTERPRISE_ID || null,
+            employmentServiceDate: row.LU_EMPLOYMENT_SERVICE_DATE 
+              ? new Date(row.LU_EMPLOYMENT_SERVICE_DATE).toISOString() : null,
+            isEnterprise,
+            daysOpen,
+            source: row.SOURCE || null,
           };
         });
 

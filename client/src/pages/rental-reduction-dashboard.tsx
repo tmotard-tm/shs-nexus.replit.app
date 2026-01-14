@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
@@ -369,11 +369,11 @@ export default function RentalReductionDashboard() {
                               <tr className="border-b text-muted-foreground text-xs">
                                 <th></th>
                                 {data.progressHistory.slice(-5).map((_, idx) => (
-                                  <>
-                                    <th key={`open-${idx}`} className="p-2">Open</th>
-                                    <th key={`pct-${idx}`} className="p-2">%</th>
-                                    <th key={`chg-${idx}`} className="p-2">Chg</th>
-                                  </>
+                                  <Fragment key={`header-${idx}`}>
+                                    <th className="p-2">Open</th>
+                                    <th className="p-2">%</th>
+                                    <th className="p-2">Chg</th>
+                                  </Fragment>
                                 ))}
                               </tr>
                             </thead>
@@ -384,16 +384,16 @@ export default function RentalReductionDashboard() {
                                   {data.progressHistory.slice(-5).map((snapshot, idx) => {
                                     const bucketData = snapshot.buckets.find(b => b.bucket === bucket);
                                     return (
-                                      <>
-                                        <td key={`open-${idx}`} className="p-2 text-center">{bucketData?.rentalsOpen || 0}</td>
-                                        <td key={`pct-${idx}`} className="p-2 text-center">{((bucketData?.percentOfTotal || 0) * 100).toFixed(1)}%</td>
-                                        <td key={`chg-${idx}`} className={cn(
+                                      <Fragment key={`${bucket}-${idx}`}>
+                                        <td className="p-2 text-center">{bucketData?.rentalsOpen || 0}</td>
+                                        <td className="p-2 text-center">{((bucketData?.percentOfTotal || 0) * 100).toFixed(1)}%</td>
+                                        <td className={cn(
                                           "p-2 text-center",
                                           (bucketData?.changeMtd || 0) > 0 ? "text-destructive" : (bucketData?.changeMtd || 0) < 0 ? "text-green-600" : ""
                                         )}>
                                           {(bucketData?.changeMtd || 0) > 0 ? "+" : ""}{bucketData?.changeMtd || 0}
                                         </td>
-                                      </>
+                                      </Fragment>
                                     );
                                   })}
                                 </tr>
@@ -401,21 +401,21 @@ export default function RentalReductionDashboard() {
                               <tr className="border-t-2 font-bold">
                                 <td className="p-2">Grand Total</td>
                                 {data.progressHistory.slice(-5).map((snapshot, idx) => (
-                                  <>
-                                    <td key={`total-${idx}`} className="p-2 text-center">{snapshot.grandTotal}</td>
-                                    <td key={`pct-${idx}`} className="p-2 text-center">100%</td>
-                                    <td key={`chg-${idx}`} className="p-2 text-center">-</td>
-                                  </>
+                                  <Fragment key={`total-${idx}`}>
+                                    <td className="p-2 text-center">{snapshot.grandTotal}</td>
+                                    <td className="p-2 text-center">100%</td>
+                                    <td className="p-2 text-center">-</td>
+                                  </Fragment>
                                 ))}
                               </tr>
                               <tr className="bg-destructive/10 font-semibold">
                                 <td className="p-2">Total &gt;14 Days</td>
                                 {data.progressHistory.slice(-5).map((snapshot, idx) => (
-                                  <>
-                                    <td key={`over14-${idx}`} className="p-2 text-center">{snapshot.totalOver14Days}</td>
-                                    <td key={`pct-${idx}`} className="p-2 text-center">{(snapshot.percentOver14Days * 100).toFixed(1)}%</td>
-                                    <td key={`chg-${idx}`} className="p-2 text-center">-</td>
-                                  </>
+                                  <Fragment key={`over14-${idx}`}>
+                                    <td className="p-2 text-center">{snapshot.totalOver14Days}</td>
+                                    <td className="p-2 text-center">{(snapshot.percentOver14Days * 100).toFixed(1)}%</td>
+                                    <td className="p-2 text-center">-</td>
+                                  </Fragment>
                                 ))}
                               </tr>
                             </tbody>
