@@ -177,11 +177,6 @@ export default function RentalReductionDashboard() {
                   Sample Data
                 </Badge>
               )}
-              {data?.isLiveData && (
-                <Badge variant="default" className="bg-green-100 text-green-800 border-green-300">
-                  Live Data
-                </Badge>
-              )}
               {canCaptureSnapshot && (
                 <Button 
                   variant="outline" 
