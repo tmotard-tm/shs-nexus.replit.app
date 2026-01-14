@@ -103,7 +103,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/rental-reduction-dashboard">
+      <Route path="/rental-dashboard">
         <ProtectedRoute>
           <RentalReductionDashboard />
         </ProtectedRoute>
