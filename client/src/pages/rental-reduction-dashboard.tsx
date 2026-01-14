@@ -22,7 +22,9 @@ import {
   AlertTriangle,
   CheckCircle,
   RefreshCw,
-  Camera
+  Camera,
+  Truck,
+  Users
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -82,6 +84,39 @@ export default function RentalReductionDashboard() {
 
   // Check if snapshot capture is available (only for live data mode)
   const canCaptureSnapshot = data?.isLiveData === true;
+
+  // Fleet Overview Statistics query
+  interface FleetOverviewStats {
+    isLiveData: boolean;
+    lastUpdated: string;
+    technicians: {
+      totalActiveTechs: number;
+      modifiedDutyTechs: number;
+      activeRoutableTechs: number;
+      byovTechnicians: number;
+      techsRequiringTruck: number;
+    };
+    assignments: {
+      trucksAssignedInTpms: number;
+      trucksAssignedExclByov: number;
+      techsWithNoTruck: number;
+      modifiedDutyNoTruck: number;
+      activeTechsNeedingTruck: number;
+      techsWithDeclinedRepairTruck: number;
+    };
+    vehicles: {
+      totalActiveHolmanVehicles: number;
+      trucksAssigned: number;
+      sentToAuction: number;
+      declinedRepairUnassigned: number;
+      totalSpares: number;
+    };
+  }
+
+  const { data: fleetStats, isLoading: fleetStatsLoading } = useQuery<FleetOverviewStats>({
+    queryKey: ["/api/fleet-overview/statistics"],
+    refetchInterval: 5 * 60 * 1000,
+  });
 
   const filteredDetails = useMemo(() => {
     if (!data?.rentalDetails) return [];
@@ -272,6 +307,7 @@ export default function RentalReductionDashboard() {
                   <TabsTrigger value="summary">Summary</TabsTrigger>
                   <TabsTrigger value="progress">Running Progress</TabsTrigger>
                   <TabsTrigger value="details">Rental Details</TabsTrigger>
+                  <TabsTrigger value="fleet-overview">Fleet Overview</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="summary" className="space-y-4">
@@ -623,6 +659,167 @@ export default function RentalReductionDashboard() {
                           </p>
                         )}
                       </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="fleet-overview" className="space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <Users className="h-5 w-5" />
+                            Fleet Overview Statistics
+                          </CardTitle>
+                          <CardDescription>
+                            Technician and vehicle assignment summary from TPMS and Holman
+                          </CardDescription>
+                        </div>
+                        {fleetStats && !fleetStats.isLiveData && (
+                          <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-300">
+                            Sample Data
+                          </Badge>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {fleetStatsLoading ? (
+                        <div className="space-y-4">
+                          {[1,2,3].map(i => (
+                            <Skeleton key={i} className="h-24 w-full" />
+                          ))}
+                        </div>
+                      ) : fleetStats ? (
+                        <div className="space-y-6">
+                          <div className="grid md:grid-cols-3 gap-6">
+                            <Card className="border-blue-200 bg-blue-50/30">
+                              <CardHeader className="pb-2">
+                                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                                  <Users className="h-4 w-4 text-blue-600" />
+                                  Technician Summary
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <table className="w-full text-sm">
+                                  <tbody>
+                                    <tr className="border-b">
+                                      <td className="py-2 font-semibold">Total Technicians in TPMS (Active Techs):</td>
+                                      <td className="py-2 text-right font-bold text-blue-700">{fleetStats.technicians.totalActiveTechs.toLocaleString()}</td>
+                                    </tr>
+                                    <tr className="border-b text-muted-foreground">
+                                      <td className="py-2 pl-4 italic">Service Tech - Modified Duty:</td>
+                                      <td className="py-2 text-right">{fleetStats.technicians.modifiedDutyTechs}</td>
+                                    </tr>
+                                    <tr className="border-b">
+                                      <td className="py-2 font-semibold">Active Routable Technicians (excl. Modified Duty):</td>
+                                      <td className="py-2 text-right font-bold">{fleetStats.technicians.activeRoutableTechs.toLocaleString()}</td>
+                                    </tr>
+                                    <tr className="border-b text-muted-foreground">
+                                      <td className="py-2 pl-4 italic">BYOV Technicians:</td>
+                                      <td className="py-2 text-right">{fleetStats.technicians.byovTechnicians}</td>
+                                    </tr>
+                                    <tr>
+                                      <td className="py-2 font-semibold">Total Techs requiring a truck assignment:</td>
+                                      <td className="py-2 text-right font-bold">{fleetStats.technicians.techsRequiringTruck.toLocaleString()}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </CardContent>
+                            </Card>
+
+                            <Card className="border-green-200 bg-green-50/30">
+                              <CardHeader className="pb-2">
+                                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                                  <Truck className="h-4 w-4 text-green-600" />
+                                  Assignment Status
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <table className="w-full text-sm">
+                                  <tbody>
+                                    <tr className="border-b text-muted-foreground">
+                                      <td className="py-2 pl-4 italic">Trucks Assigned in TPMS (incl. modified):</td>
+                                      <td className="py-2 text-right">{fleetStats.assignments.trucksAssignedInTpms.toLocaleString()}</td>
+                                    </tr>
+                                    <tr className="border-b">
+                                      <td className="py-2 font-semibold">Trucks Assigned in TPMS (excl BYOV):</td>
+                                      <td className="py-2 text-right font-bold">{fleetStats.assignments.trucksAssignedExclByov.toLocaleString()}</td>
+                                    </tr>
+                                    <tr className="border-b text-muted-foreground">
+                                      <td className="py-2 pl-4 italic">No Truck Assigned (All Techs):</td>
+                                      <td className="py-2 text-right">{fleetStats.assignments.techsWithNoTruck}</td>
+                                    </tr>
+                                    <tr className="border-b text-muted-foreground">
+                                      <td className="py-2 pl-4 italic">Truck not assigned for modified duty tech:</td>
+                                      <td className="py-2 text-right">{fleetStats.assignments.modifiedDutyNoTruck}</td>
+                                    </tr>
+                                    <tr className="border-b">
+                                      <td className="py-2 font-semibold text-amber-700">Active techs needing truck (excl. mod duty):</td>
+                                      <td className="py-2 text-right font-bold text-amber-700">{fleetStats.assignments.activeTechsNeedingTruck}</td>
+                                    </tr>
+                                    <tr>
+                                      <td className="py-2 font-semibold text-red-700">Techs with declined repair truck:</td>
+                                      <td className="py-2 text-right font-bold text-red-700">{fleetStats.assignments.techsWithDeclinedRepairTruck}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </CardContent>
+                            </Card>
+
+                            <Card className="border-purple-200 bg-purple-50/30">
+                              <CardHeader className="pb-2">
+                                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                                  <Car className="h-4 w-4 text-purple-600" />
+                                  Holman Vehicles
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <table className="w-full text-sm">
+                                  <tbody>
+                                    <tr className="border-b">
+                                      <td className="py-2 font-semibold">Total Active Holman Vehicles (excl BYOV):</td>
+                                      <td className="py-2 text-right font-bold text-purple-700">{fleetStats.vehicles.totalActiveHolmanVehicles.toLocaleString()}</td>
+                                    </tr>
+                                    <tr className="border-b">
+                                      <td className="py-2 font-semibold">Trucks Assigned (excl BYOV):</td>
+                                      <td className="py-2 text-right font-bold">{fleetStats.vehicles.trucksAssigned.toLocaleString()}</td>
+                                    </tr>
+                                    <tr className="border-b text-muted-foreground">
+                                      <td className="py-2 pl-4 italic">Trucks marked "Sent to Auction":</td>
+                                      <td className="py-2 text-right">{fleetStats.vehicles.sentToAuction}</td>
+                                    </tr>
+                                    <tr className="border-b text-muted-foreground">
+                                      <td className="py-2 pl-4 italic">Unassigned trucks "Declined Repair":</td>
+                                      <td className="py-2 text-right">{fleetStats.vehicles.declinedRepairUnassigned}</td>
+                                    </tr>
+                                    <tr>
+                                      <td className="py-2 font-semibold">Total Spares (not declined/auction):</td>
+                                      <td className="py-2 text-right font-bold text-green-700">{fleetStats.vehicles.totalSpares}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </CardContent>
+                            </Card>
+                          </div>
+
+                          <Card className="border-amber-200 bg-amber-50/30">
+                            <CardContent className="pt-4">
+                              <div className="flex items-center gap-2 text-amber-800 text-sm">
+                                <AlertTriangle className="h-4 w-4" />
+                                <span>
+                                  <strong>Note:</strong> "Sent to Auction" and "Declined Repair" counts require additional data sources (Holman status fields).
+                                  Contact your administrator to configure these data sources.
+                                </span>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-muted-foreground">
+                          Unable to load fleet statistics.
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
