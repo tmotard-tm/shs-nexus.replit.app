@@ -51,6 +51,8 @@ import {
   type RolePermission,
   type InsertRolePermission,
   type RolePermissionSettings,
+  type RentalSnapshot,
+  type InsertRentalSnapshot,
   users,
   requests,
   apiConfigurations,
@@ -75,6 +77,7 @@ import {
   mappingNodes,
   fieldMappings,
   rolePermissions,
+  rentalSnapshots,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -343,6 +346,14 @@ export interface IStorage {
   updateRolePermission(role: string, permissions: RolePermissionSettings): Promise<RolePermission | undefined>;
   deleteRolePermission(role: string): Promise<boolean>;
   getUsersByRole(role: string): Promise<User[]>;
+
+  // Rental Snapshots Module (Historical tracking for rental reduction dashboard)
+  getRentalSnapshot(id: string): Promise<RentalSnapshot | undefined>;
+  getRentalSnapshotByDate(date: string): Promise<RentalSnapshot | undefined>;
+  getRentalSnapshots(daysBack?: number): Promise<RentalSnapshot[]>;
+  createRentalSnapshot(snapshot: InsertRentalSnapshot): Promise<RentalSnapshot>;
+  upsertRentalSnapshot(snapshot: InsertRentalSnapshot): Promise<RentalSnapshot>;
+  deleteRentalSnapshot(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -3134,6 +3145,26 @@ export class MemStorage implements IStorage {
   async getUsersByRole(_role: string): Promise<User[]> {
     throw new Error("MemStorage does not support getUsersByRole. Use DatabaseStorage.");
   }
+
+  // Rental Snapshots Module (MemStorage stubs)
+  async getRentalSnapshot(_id: string): Promise<RentalSnapshot | undefined> {
+    throw new Error("MemStorage does not support rental snapshots. Use DatabaseStorage.");
+  }
+  async getRentalSnapshotByDate(_date: string): Promise<RentalSnapshot | undefined> {
+    throw new Error("MemStorage does not support rental snapshots. Use DatabaseStorage.");
+  }
+  async getRentalSnapshots(_daysBack?: number): Promise<RentalSnapshot[]> {
+    throw new Error("MemStorage does not support rental snapshots. Use DatabaseStorage.");
+  }
+  async createRentalSnapshot(_snapshot: InsertRentalSnapshot): Promise<RentalSnapshot> {
+    throw new Error("MemStorage does not support rental snapshots. Use DatabaseStorage.");
+  }
+  async upsertRentalSnapshot(_snapshot: InsertRentalSnapshot): Promise<RentalSnapshot> {
+    throw new Error("MemStorage does not support rental snapshots. Use DatabaseStorage.");
+  }
+  async deleteRentalSnapshot(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support rental snapshots. Use DatabaseStorage.");
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -5052,6 +5083,68 @@ export class DatabaseStorage implements IStorage {
 
   async getUsersByRole(role: string): Promise<User[]> {
     return await db.select().from(users).where(eq(users.role, role));
+  }
+
+  // Rental Snapshots Module
+  async getRentalSnapshot(id: string): Promise<RentalSnapshot | undefined> {
+    const [snapshot] = await db.select().from(rentalSnapshots).where(eq(rentalSnapshots.id, id));
+    return snapshot;
+  }
+
+  async getRentalSnapshotByDate(date: string): Promise<RentalSnapshot | undefined> {
+    const [snapshot] = await db.select().from(rentalSnapshots).where(eq(rentalSnapshots.snapshotDate, date));
+    return snapshot;
+  }
+
+  async getRentalSnapshots(daysBack: number = 30): Promise<RentalSnapshot[]> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+    const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+    
+    return await db.select()
+      .from(rentalSnapshots)
+      .where(sql`${rentalSnapshots.snapshotDate} >= ${cutoffDateStr}`)
+      .orderBy(desc(rentalSnapshots.snapshotDate));
+  }
+
+  async createRentalSnapshot(snapshot: InsertRentalSnapshot): Promise<RentalSnapshot> {
+    const [created] = await db.insert(rentalSnapshots)
+      .values(snapshot)
+      .returning();
+    return created;
+  }
+
+  async upsertRentalSnapshot(snapshot: InsertRentalSnapshot): Promise<RentalSnapshot> {
+    // Check if snapshot for this date exists
+    const existing = await this.getRentalSnapshotByDate(snapshot.snapshotDate);
+    
+    if (existing) {
+      // Update existing snapshot
+      const [updated] = await db.update(rentalSnapshots)
+        .set({
+          grandTotal: snapshot.grandTotal,
+          totalOver14Days: snapshot.totalOver14Days,
+          enterpriseTotal: snapshot.enterpriseTotal,
+          nonEnterpriseTotal: snapshot.nonEnterpriseTotal,
+          bucket28Plus: snapshot.bucket28Plus,
+          bucket21To27: snapshot.bucket21To27,
+          bucket14To20: snapshot.bucket14To20,
+          bucketUnder14: snapshot.bucketUnder14,
+          vendorBreakdown: snapshot.vendorBreakdown,
+          rentalDetails: snapshot.rentalDetails,
+        })
+        .where(eq(rentalSnapshots.id, existing.id))
+        .returning();
+      return updated;
+    } else {
+      // Create new snapshot
+      return await this.createRentalSnapshot(snapshot);
+    }
+  }
+
+  async deleteRentalSnapshot(id: string): Promise<boolean> {
+    const result = await db.delete(rentalSnapshots).where(eq(rentalSnapshots.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Migration method to bulk-insert data from MemStorage
