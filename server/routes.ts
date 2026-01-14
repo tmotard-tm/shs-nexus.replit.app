@@ -7600,8 +7600,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
           };
         });
 
-        // Calculate summary statistics
+        // Calculate summary statistics and merge with historical data
         const dashboardData = calculateRentalDashboardData(rentalDetails);
+        
+        // Fetch historical snapshots from database
+        try {
+          const historicalSnapshots = await storage.getRentalSnapshots(30);
+          if (historicalSnapshots.length > 0) {
+            // Build progress history from stored snapshots
+            const storedHistory = historicalSnapshots.map(snap => ({
+              date: snap.snapshotDate,
+              buckets: [
+                { bucket: "28 plus days" as const, rentalsOpen: snap.bucket28Plus, percentOfTotal: snap.grandTotal > 0 ? snap.bucket28Plus / snap.grandTotal : 0, changeMtd: 0 },
+                { bucket: "21 plus days" as const, rentalsOpen: snap.bucket21To27, percentOfTotal: snap.grandTotal > 0 ? snap.bucket21To27 / snap.grandTotal : 0, changeMtd: 0 },
+                { bucket: "14 plus days" as const, rentalsOpen: snap.bucket14To20, percentOfTotal: snap.grandTotal > 0 ? snap.bucket14To20 / snap.grandTotal : 0, changeMtd: 0 },
+                { bucket: "Less than 14 days" as const, rentalsOpen: snap.bucketUnder14, percentOfTotal: snap.grandTotal > 0 ? snap.bucketUnder14 / snap.grandTotal : 0, changeMtd: 0 },
+              ],
+              grandTotal: snap.grandTotal,
+              totalOver14Days: snap.totalOver14Days,
+              percentOver14Days: snap.grandTotal > 0 ? snap.totalOver14Days / snap.grandTotal : 0
+            })).sort((a, b) => a.date.localeCompare(b.date));
+            
+            // Replace progress history with stored data
+            dashboardData.progressHistory = storedHistory;
+          }
+        } catch (historyError) {
+          console.warn('Could not fetch historical snapshots:', historyError);
+        }
+        
         res.json(dashboardData);
       } catch (error: any) {
         console.error("Outer error in rental dashboard:", error);
@@ -7611,6 +7637,169 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error fetching rental reduction data:", error);
       res.status(500).json({ message: "Failed to fetch rental reduction data", error: error.message });
+    }
+  });
+
+  // Capture a snapshot of current rental data (for historical tracking)
+  app.post("/api/rental-reduction/snapshot", requireAuth, async (req: any, res) => {
+    try {
+      // Check if Snowflake is configured
+      if (!isSnowflakeConfigured()) {
+        return res.status(400).json({ message: "Snowflake not configured. Cannot capture live snapshot." });
+      }
+
+      // Fetch current data from Snowflake
+      const snowflake = getSnowflakeService();
+      
+      try {
+        const query = `
+          SELECT *
+          FROM PARTS_SUPPLYCHAIN.FLEET.VW_RENTAL_LIST
+          LIMIT 1000
+        `;
+        const rows = await snowflake.executeQuery(query);
+        
+        if (!rows || rows.length === 0) {
+          return res.status(400).json({ message: "No rental data available to snapshot." });
+        }
+        
+        // Transform and calculate statistics
+        const rentalDetails = rows.map((row: any) => {
+          const truckNumber = row.TRUCK_LISTED_FOR_RENTAL || row.TRUCK_NUMBER || '';
+          const rentalStartDate = row.RENTAL_START_DATE || null;
+          
+          let daysOpen = 0;
+          if (rentalStartDate) {
+            const startDate = new Date(rentalStartDate);
+            const today = new Date();
+            daysOpen = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+          }
+          
+          let agingBucket: string;
+          if (daysOpen >= 28) {
+            agingBucket = '28 plus days';
+          } else if (daysOpen >= 21) {
+            agingBucket = '21 plus days';
+          } else if (daysOpen >= 14) {
+            agingBucket = '14 plus days';
+          } else {
+            agingBucket = 'Less than 14 days';
+          }
+          
+          const isEnterprise = row.SOURCE?.toLowerCase()?.includes('enterprise') || false;
+          
+          return {
+            truckNumber,
+            rentalStartDate: rentalStartDate ? new Date(rentalStartDate).toISOString() : null,
+            rentalDays: agingBucket,
+            rentalUnderName: row.RENTAL_UNDER_NAME || null,
+            rentalTechEnterpriseId: row.RENTAL_TECH_ENTERPRISE_ID || null,
+            truckAssignedToInTpms: row.TRUCK_ASSIGNED_TO_IN_TPMS || null,
+            truckAssignedToEnterpriseId: row.TRUCK_ASSIGNED_TO_IN_TPMS_ENTERPRISE_ID || null,
+            employmentServiceDate: row.LU_EMPLOYMENT_SERVICE_DATE 
+              ? new Date(row.LU_EMPLOYMENT_SERVICE_DATE).toISOString() : null,
+            isEnterprise,
+            daysOpen,
+            source: row.SOURCE || null,
+          };
+        });
+        
+        // Calculate bucket counts
+        const bucket28Plus = rentalDetails.filter(r => r.rentalDays === '28 plus days').length;
+        const bucket21To27 = rentalDetails.filter(r => r.rentalDays === '21 plus days').length;
+        const bucket14To20 = rentalDetails.filter(r => r.rentalDays === '14 plus days').length;
+        const bucketUnder14 = rentalDetails.filter(r => r.rentalDays === 'Less than 14 days').length;
+        
+        const grandTotal = rentalDetails.length;
+        const totalOver14Days = bucket28Plus + bucket21To27 + bucket14To20;
+        const enterpriseTotal = rentalDetails.filter(r => r.isEnterprise).length;
+        const nonEnterpriseTotal = grandTotal - enterpriseTotal;
+        
+        // Calculate vendor breakdown
+        const vendorCounts = new Map<string, { count: number; totalDays: number; over14: number }>();
+        rentalDetails.forEach(r => {
+          const vendor = (r as any).source || 'Unknown';
+          const existing = vendorCounts.get(vendor) || { count: 0, totalDays: 0, over14: 0 };
+          existing.count++;
+          existing.totalDays += r.daysOpen || 0;
+          if (r.daysOpen >= 14) existing.over14++;
+          vendorCounts.set(vendor, existing);
+        });
+        
+        const vendorBreakdown = Array.from(vendorCounts.entries())
+          .map(([vendor, stats]) => ({
+            vendor,
+            count: stats.count,
+            percentOfTotal: grandTotal > 0 ? stats.count / grandTotal : 0,
+            avgDaysOpen: stats.count > 0 ? stats.totalDays / stats.count : 0,
+            over14Days: stats.over14
+          }))
+          .sort((a, b) => b.count - a.count);
+        
+        // Save snapshot to database
+        const today = new Date().toISOString().split('T')[0];
+        const snapshot = await storage.upsertRentalSnapshot({
+          snapshotDate: today,
+          grandTotal,
+          totalOver14Days,
+          enterpriseTotal,
+          nonEnterpriseTotal,
+          bucket28Plus,
+          bucket21To27,
+          bucket14To20,
+          bucketUnder14,
+          vendorBreakdown,
+          rentalDetails,
+        });
+        
+        res.json({ 
+          message: "Snapshot captured successfully",
+          snapshotDate: today,
+          stats: {
+            grandTotal,
+            totalOver14Days,
+            bucket28Plus,
+            bucket21To27,
+            bucket14To20,
+            bucketUnder14
+          },
+          snapshotId: snapshot.id
+        });
+      } catch (queryError: any) {
+        console.error('Snowflake query failed during snapshot:', queryError.message);
+        res.status(500).json({ message: "Failed to capture snapshot from Snowflake", error: queryError.message });
+      }
+    } catch (error: any) {
+      console.error("Error capturing rental snapshot:", error);
+      res.status(500).json({ message: "Failed to capture rental snapshot", error: error.message });
+    }
+  });
+
+  // Get historical snapshots
+  app.get("/api/rental-reduction/snapshots", requireAuth, async (req: any, res) => {
+    try {
+      const daysBack = parseInt(req.query.daysBack as string) || 30;
+      const snapshots = await storage.getRentalSnapshots(daysBack);
+      
+      res.json({
+        count: snapshots.length,
+        snapshots: snapshots.map(snap => ({
+          id: snap.id,
+          date: snap.snapshotDate,
+          grandTotal: snap.grandTotal,
+          totalOver14Days: snap.totalOver14Days,
+          enterpriseTotal: snap.enterpriseTotal,
+          nonEnterpriseTotal: snap.nonEnterpriseTotal,
+          bucket28Plus: snap.bucket28Plus,
+          bucket21To27: snap.bucket21To27,
+          bucket14To20: snap.bucket14To20,
+          bucketUnder14: snap.bucketUnder14,
+          createdAt: snap.createdAt
+        }))
+      });
+    } catch (error: any) {
+      console.error("Error fetching rental snapshots:", error);
+      res.status(500).json({ message: "Failed to fetch rental snapshots", error: error.message });
     }
   });
 
