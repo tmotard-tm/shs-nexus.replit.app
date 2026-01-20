@@ -1,39 +1,108 @@
 // scripts/refreshDevFromProd.js
 const { Client } = require("pg");
 
-// Order matters where foreign keys exist.
-// Parents first: integration_data_sources, mapping_sets, data_source_fields,
-// then mapping_nodes + field_mappings. Others can be anywhere.
-const TABLES = [
-  // FK parents / core mapping tables
-  { schema: "public", name: "integration_data_sources" },
-  { schema: "public", name: "mapping_sets" },
-  { schema: "public", name: "data_source_fields" },
-  { schema: "public", name: "mapping_nodes" },
-  { schema: "public", name: "field_mappings" },
+const CHUNK_SIZE = 500; // rows per batch insert – tweak if needed
 
-  // Other tables (no FKs in your schema)
-  { schema: "public", name: "activity_logs" },
-  { schema: "public", name: "all_techs" },
-  { schema: "public", name: "api_configurations" },
-  { schema: "public", name: "queue_items" },
-  { schema: "public", name: "requests" },
-  { schema: "public", name: "role_permissions" },
-  { schema: "public", name: "sessions" },
-  { schema: "public", name: "storage_spots" },
-  { schema: "public", name: "sync_logs" },
-  { schema: "public", name: "tech_vehicle_assignment_history" },
-  { schema: "public", name: "tech_vehicle_assignments" },
-  { schema: "public", name: "templates" },
-  { schema: "public", name: "termed_techs" },
-  { schema: "public", name: "users" },
-  { schema: "public", name: "vehicles" },
-
-  // Drizzle migrations table (separate schema)
-  { schema: "drizzle", name: "__drizzle_migrations" },
+// Tables to exclude from sync (if any)
+const EXCLUDED_TABLES = [
+  // Add table names here if you want to exclude them from sync
+  // e.g., 'sensitive_data', 'temp_table'
 ];
 
-const CHUNK_SIZE = 500; // rows per batch insert – tweak if needed
+// Dynamically discover all tables from the database
+async function discoverTables(client) {
+  console.log("Discovering tables from database...");
+  
+  // Get all tables from public schema and drizzle schema
+  const tablesRes = await client.query(`
+    SELECT table_schema, table_name
+    FROM information_schema.tables
+    WHERE table_type = 'BASE TABLE'
+      AND (table_schema = 'public' OR table_schema = 'drizzle')
+    ORDER BY table_schema, table_name
+  `);
+  
+  const allTables = tablesRes.rows.map(r => ({
+    schema: r.table_schema,
+    name: r.table_name
+  }));
+  
+  // Filter out excluded tables
+  const tables = allTables.filter(t => 
+    !EXCLUDED_TABLES.includes(t.name) && 
+    !EXCLUDED_TABLES.includes(`${t.schema}.${t.name}`)
+  );
+  
+  console.log(`Found ${tables.length} tables to sync:`);
+  tables.forEach(t => console.log(`  - ${t.schema}.${t.name}`));
+  
+  // Sort tables by foreign key dependencies (parents first)
+  return await sortTablesByDependencies(client, tables);
+}
+
+// Sort tables so parent tables (referenced by FKs) come before child tables
+async function sortTablesByDependencies(client, tables) {
+  // Get all foreign key relationships
+  const fkRes = await client.query(`
+    SELECT 
+      tc.table_schema,
+      tc.table_name,
+      ccu.table_schema AS referenced_schema,
+      ccu.table_name AS referenced_table
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.constraint_column_usage ccu 
+      ON tc.constraint_name = ccu.constraint_name
+      AND tc.table_schema = ccu.table_schema
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND (tc.table_schema = 'public' OR tc.table_schema = 'drizzle')
+  `);
+  
+  // Build dependency graph: child -> [parents]
+  const dependencies = {};
+  tables.forEach(t => {
+    const key = `${t.schema}.${t.name}`;
+    dependencies[key] = [];
+  });
+  
+  fkRes.rows.forEach(fk => {
+    const child = `${fk.table_schema}.${fk.table_name}`;
+    const parent = `${fk.referenced_schema}.${fk.referenced_table}`;
+    if (dependencies[child] && dependencies[parent] !== undefined) {
+      if (!dependencies[child].includes(parent)) {
+        dependencies[child].push(parent);
+      }
+    }
+  });
+  
+  // Topological sort (Kahn's algorithm)
+  const sorted = [];
+  const visited = new Set();
+  
+  function visit(tableKey) {
+    if (visited.has(tableKey)) return;
+    visited.add(tableKey);
+    
+    // Visit all parents first
+    const parents = dependencies[tableKey] || [];
+    parents.forEach(parent => visit(parent));
+    
+    sorted.push(tableKey);
+  }
+  
+  // Visit all tables
+  Object.keys(dependencies).forEach(key => visit(key));
+  
+  // Convert back to table objects
+  const sortedTables = sorted.map(key => {
+    const [schema, name] = key.split('.');
+    return { schema, name };
+  });
+  
+  console.log("\nTables sorted by dependencies (parents first):");
+  sortedTables.forEach((t, i) => console.log(`  ${i + 1}. ${t.schema}.${t.name}`));
+  
+  return sortedTables;
+}
 
 async function copyTable(prod, dev, { schema, name }) {
   const fullName = `"${schema}"."${name}"`;
@@ -116,15 +185,24 @@ async function main() {
   await dev.connect();
 
   try {
+    // Dynamically discover all tables from prod database
+    const tables = await discoverTables(prod);
+    
+    if (tables.length === 0) {
+      console.log("No tables found to sync.");
+      return;
+    }
+    
     // Wrap the whole dev side in a transaction
     await dev.query("BEGIN");
 
-    for (const table of TABLES) {
+    for (const table of tables) {
       await copyTable(prod, dev, table);
     }
 
     await dev.query("COMMIT");
     console.log("\n✅ Dev database successfully refreshed from prod.");
+    console.log(`   Synced ${tables.length} tables.`);
   } catch (err) {
     console.error("\n❌ Error during refresh, rolling back dev changes:");
     console.error(err);
