@@ -609,10 +609,10 @@ export default function WeeklyOnboarding() {
                             </div>
                           </TableHead>
                           <TableHead className="bg-background sticky top-0">Employee Name</TableHead>
-                          <TableHead className="w-[140px] bg-background sticky top-0">
+                          <TableHead className="w-[100px] bg-background sticky top-0">
                             <Select value={empStatusFilter} onValueChange={setEmpStatusFilter}>
-                              <SelectTrigger className="h-7 text-xs border-0 bg-transparent hover:bg-accent px-1">
-                                <span>Emp. Status</span>
+                              <SelectTrigger className="h-auto p-0 border-0 bg-transparent shadow-none font-medium text-muted-foreground hover:text-foreground cursor-pointer [&>svg]:ml-1 [&>svg]:h-3 [&>svg]:w-3">
+                                Emp. Status
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="all">All Statuses</SelectItem>
