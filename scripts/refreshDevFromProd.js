@@ -4,6 +4,11 @@ const { Client } = pg;
 
 const CHUNK_SIZE = 500; // rows per batch insert – tweak if needed
 
+// Properly escape a SQL identifier by doubling any embedded double-quotes
+function escapeIdentifier(identifier) {
+  return `"${identifier.replace(/"/g, '""')}"`;
+}
+
 // Tables to exclude from sync (if any)
 const EXCLUDED_TABLES = [
   // Add table names here if you want to exclude them from sync
@@ -106,7 +111,7 @@ async function sortTablesByDependencies(client, tables) {
 }
 
 async function copyTable(prod, dev, { schema, name }) {
-  const fullName = `"${schema}"."${name}"`;
+  const fullName = `${escapeIdentifier(schema)}.${escapeIdentifier(name)}`;
   console.log(`\n==> Copying ${fullName}`);
 
   // Get ordered column list from prod
@@ -126,7 +131,7 @@ async function copyTable(prod, dev, { schema, name }) {
     return;
   }
 
-  const colList = columns.map((c) => `"${c}"`).join(", ");
+  const colList = columns.map((c) => escapeIdentifier(c)).join(", ");
 
   // Read all data from prod
   const dataRes = await prod.query(`SELECT ${colList} FROM ${fullName}`);
