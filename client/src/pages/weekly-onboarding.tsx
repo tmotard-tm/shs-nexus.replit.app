@@ -67,6 +67,7 @@ export default function WeeklyOnboarding() {
   const [showAssignedOnly, setShowAssignedOnly] = useState(false);
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [weekFilter, setWeekFilter] = useState<string>("all");
+  const [empStatusFilter, setEmpStatusFilter] = useState<string>("all");
   const [selectedHire, setSelectedHire] = useState<OnboardingHire | null>(null);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [truckNumber, setTruckNumber] = useState("");
@@ -228,6 +229,17 @@ export default function WeeklyOnboarding() {
     return Array.from(weeks.entries()).sort((a, b) => a[1].start.getTime() - b[1].start.getTime());
   })();
 
+  // Get unique employment status options from hires data
+  const empStatusOptions = (() => {
+    const statuses = new Set<string>();
+    hires.forEach(hire => {
+      if (hire.employmentStatus) {
+        statuses.add(hire.employmentStatus);
+      }
+    });
+    return Array.from(statuses).sort();
+  })();
+
   const filteredHires = hires
     .filter(hire => {
       const matchesSearch = !searchQuery || 
@@ -248,7 +260,10 @@ export default function WeeklyOnboarding() {
         matchesWeek = false;
       }
       
-      return matchesSearch && matchesAssigned && matchesUnassigned && matchesWeek;
+      // Employment status filter
+      const matchesEmpStatus = empStatusFilter === "all" || hire.employmentStatus === empStatusFilter;
+      
+      return matchesSearch && matchesAssigned && matchesUnassigned && matchesWeek && matchesEmpStatus;
     })
     .sort((a, b) => {
       // Sort by service date ascending (oldest to newest)
@@ -594,7 +609,19 @@ export default function WeeklyOnboarding() {
                             </div>
                           </TableHead>
                           <TableHead className="bg-background sticky top-0">Employee Name</TableHead>
-                          <TableHead className="w-[100px] bg-background sticky top-0">Emp. Status</TableHead>
+                          <TableHead className="w-[140px] bg-background sticky top-0">
+                            <Select value={empStatusFilter} onValueChange={setEmpStatusFilter}>
+                              <SelectTrigger className="h-7 text-xs border-0 bg-transparent hover:bg-accent px-1">
+                                <SelectValue placeholder="Emp. Status" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Statuses</SelectItem>
+                                {empStatusOptions.map((status) => (
+                                  <SelectItem key={status} value={status}>{status}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableHead>
                           <TableHead className="w-[100px] bg-background sticky top-0">Enterprise ID</TableHead>
                           <TableHead className="w-[90px] bg-background sticky top-0">Status</TableHead>
                           <TableHead className="w-[100px] bg-background sticky top-0">
