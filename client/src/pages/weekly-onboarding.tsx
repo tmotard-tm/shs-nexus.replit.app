@@ -612,7 +612,7 @@ export default function WeeklyOnboarding() {
                           <TableHead className="w-[140px] bg-background sticky top-0">
                             <Select value={empStatusFilter} onValueChange={setEmpStatusFilter}>
                               <SelectTrigger className="h-7 text-xs border-0 bg-transparent hover:bg-accent px-1">
-                                <SelectValue placeholder="Emp. Status" />
+                                <span>Emp. Status</span>
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="all">All Statuses</SelectItem>
