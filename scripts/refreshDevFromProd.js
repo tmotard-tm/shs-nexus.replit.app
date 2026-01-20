@@ -1,5 +1,6 @@
 // scripts/refreshDevFromProd.js
-const { Client } = require("pg");
+import pg from "pg";
+const { Client } = pg;
 
 const CHUNK_SIZE = 500; // rows per batch insert – tweak if needed
 
