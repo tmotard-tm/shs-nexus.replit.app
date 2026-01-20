@@ -606,7 +606,6 @@ export default function WeeklyOnboarding() {
                           <TableHead className="min-w-[200px] bg-background sticky top-0">Job Title</TableHead>
                           <TableHead className="w-[80px] bg-background sticky top-0">District</TableHead>
                           <TableHead className="bg-background sticky top-0">Owner</TableHead>
-                          <TableHead className="w-[80px] bg-background sticky top-0">Zipcode</TableHead>
                           <TableHead className="bg-background sticky top-0">City</TableHead>
                           <TableHead className="bg-background sticky top-0">Planning Area</TableHead>
                           <TableHead className="min-w-[200px] bg-background sticky top-0">Address</TableHead>
@@ -650,7 +649,6 @@ export default function WeeklyOnboarding() {
                             <TableCell className="text-sm">{hire.jobTitle || '-'}</TableCell>
                             <TableCell>{hire.district || '-'}</TableCell>
                             <TableCell className="text-sm">{getOwnerFromDistrict(hire.district)}</TableCell>
-                            <TableCell>{hire.zipcode || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.locationCity || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.planningAreaName || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.address || '-'}</TableCell>
