@@ -367,7 +367,10 @@ export class PMFApiService {
           
           // Extract state from license plate (primary method for matching)
           const licensePlate = v.licensePlate || v.plateNumber || v.plate || '';
-          const plateState = extractStateFromLicensePlate(licensePlate);
+          // First check if API provides licensePlateState directly, then try to extract from plate
+          const apiPlateState = normalizeStateToAbbrev(v.licensePlateState || '');
+          const extractedPlateState = extractStateFromLicensePlate(licensePlate);
+          const plateState = apiPlateState || extractedPlateState;
           
           // Use plate state as primary, fall back to location state
           const finalState = plateState || locationState;
