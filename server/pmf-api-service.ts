@@ -150,6 +150,59 @@ function normalizeStateToAbbrev(state: string | undefined | null): string {
   return STATE_NAME_TO_ABBREV[normalized] || normalized;
 }
 
+// Valid US state abbreviations for validation
+const VALID_STATE_ABBREVS = new Set([
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
+  'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
+  'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+  'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+  'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC'
+]);
+
+// Extract state abbreviation from license plate
+// Examples: "XDNJ33" -> extracts "NJ" from positions after first 2 chars
+// "ABC123 - TX" -> extracts "TX" after the dash
+function extractStateFromLicensePlate(licensePlate: string | undefined | null): string {
+  if (!licensePlate) return '';
+  const plate = licensePlate.toUpperCase().trim();
+  
+  // Check for format with dash separator: "XDNJ33 - NJ" or "ABC123-TX"
+  if (plate.includes('-')) {
+    const parts = plate.split('-');
+    const afterDash = parts[parts.length - 1].trim();
+    if (afterDash.length === 2 && VALID_STATE_ABBREVS.has(afterDash)) {
+      return afterDash;
+    }
+  }
+  
+  // Check for embedded state code pattern: "XDNJ33" where state is at position 2-3
+  // This handles plates like "XDNJ33" where "NJ" is the state
+  if (plate.length >= 4) {
+    const potentialState = plate.substring(2, 4);
+    if (VALID_STATE_ABBREVS.has(potentialState)) {
+      return potentialState;
+    }
+  }
+  
+  // Check for state at the beginning (like "NJ12345")
+  if (plate.length >= 2) {
+    const firstTwo = plate.substring(0, 2);
+    if (VALID_STATE_ABBREVS.has(firstTwo)) {
+      return firstTwo;
+    }
+  }
+  
+  // Check for state at the end (like "12345TX")
+  if (plate.length >= 2) {
+    const lastTwo = plate.substring(plate.length - 2);
+    if (VALID_STATE_ABBREVS.has(lastTwo)) {
+      return lastTwo;
+    }
+  }
+  
+  return '';
+}
+
 function mapSiteToState(site: string | undefined | null): string {
   if (!site) return '';
   const normalized = site.toUpperCase().trim();
@@ -310,12 +363,23 @@ export class PMFApiService {
           const siteField = v.site || v.lot || v.siteName || v.lotName || v.location || v.locationName || '';
           const stateFromSite = mapSiteToState(siteField);
           const directState = v.state || v.locationState || v.garagingState || v.licensePlateState || '';
-          const finalState = normalizeStateToAbbrev(stateFromSite || directState);
+          const locationState = normalizeStateToAbbrev(stateFromSite || directState);
+          
+          // Extract state from license plate (primary method for matching)
+          const licensePlate = v.licensePlate || v.plateNumber || v.plate || '';
+          const plateState = extractStateFromLicensePlate(licensePlate);
+          
+          // Use plate state as primary, fall back to location state
+          const finalState = plateState || locationState;
+          
           return {
             assetId: v.assetId || '',
             vin: v.descriptor || '',
             site: siteField,
             state: finalState,
+            plateState: plateState,
+            locationState: locationState,
+            licensePlate: licensePlate,
             ...v
           };
         });

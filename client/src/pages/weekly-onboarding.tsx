@@ -275,21 +275,27 @@ export default function WeeklyOnboarding() {
   const assignedCount = hires.filter(h => h.truckAssigned).length;
   const unassignedCount = hires.filter(h => !h.truckAssigned).length;
 
-  // Aggregate PMF available vehicles by state
-  const vehiclesByState = availableVehicles.reduce((acc: Record<string, { count: number; assetIds: string[] }>, v: any) => {
-    const state = (v.state || v.location || v.State || v.Location || v.locationState || v.garagingState || '').toUpperCase().trim();
+  // Aggregate PMF available vehicles by state (using license plate state)
+  const vehiclesByState = availableVehicles.reduce((acc: Record<string, { count: number; assetIds: string[]; plates: string[] }>, v: any) => {
+    // Use plateState (from license plate) as primary, fall back to location-based state
+    const plateState = (v.plateState || '').toUpperCase().trim();
+    const state = plateState || (v.state || '').toUpperCase().trim();
     if (state) {
       if (!acc[state]) {
-        acc[state] = { count: 0, assetIds: [] };
+        acc[state] = { count: 0, assetIds: [], plates: [] };
       }
       acc[state].count++;
       const assetId = v.assetId || v.asset_id || v.AssetId || '';
+      const licensePlate = v.licensePlate || '';
       if (assetId) {
         acc[state].assetIds.push(assetId);
       }
+      if (licensePlate) {
+        acc[state].plates.push(licensePlate);
+      }
     }
     return acc;
-  }, {} as Record<string, { count: number; assetIds: string[] }>);
+  }, {} as Record<string, { count: number; assetIds: string[]; plates: string[] }>);
 
   // Sort states alphabetically for display
   const sortedStates = Object.entries(vehiclesByState).sort((a, b) => a[0].localeCompare(b[0]));
@@ -700,7 +706,9 @@ export default function WeeklyOnboarding() {
                                 const hireState = (hire.workState || '').toUpperCase().trim();
                                 const excludedAssetIds = ['33001', '33002', '33003', '33004', '33005', '33006'];
                                 const stateVehicles = availableVehicles.filter((v: any) => {
-                                  const vehicleState = (v.state || v.location || v.State || v.Location || '').toUpperCase().trim();
+                                  // Use plateState (extracted from license plate) for matching, fall back to state
+                                  const vehiclePlateState = (v.plateState || '').toUpperCase().trim();
+                                  const vehicleState = vehiclePlateState || (v.state || '').toUpperCase().trim();
                                   if (vehicleState !== hireState) return false;
                                   const make = (v.make || v.Make || '').toUpperCase();
                                   const model = (v.model || v.Model || '').toUpperCase();
@@ -720,7 +728,7 @@ export default function WeeklyOnboarding() {
                                     <div className="max-h-[80px] overflow-y-auto">
                                       {stateVehicles.slice(0, 5).map((v: any, idx: number) => (
                                         <div key={idx} className="text-xs font-mono whitespace-nowrap text-muted-foreground">
-                                          {v.assetId || v.asset_id || v.AssetId || 'N/A'}
+                                          {v.assetId || v.asset_id || v.AssetId || 'N/A'} {v.licensePlate ? `(${v.licensePlate})` : ''}
                                         </div>
                                       ))}
                                       {stateVehicles.length > 5 && (
