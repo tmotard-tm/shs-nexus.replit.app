@@ -51,7 +51,8 @@ const moduleLabels = {
   ntao: "NTAO — National Truck Assortment",
   assets: "Assets Management", 
   inventory: "Inventory Control",
-  fleet: "Fleet Management"
+  fleet: "Fleet Management",
+  tools: "Tools"
 };
 
 // Department code to queue module mapping
@@ -65,6 +66,8 @@ function departmentToQueueModule(department: string): QueueModule | null {
       return 'inventory';
     case 'FLEET':
       return 'fleet';
+    case 'TOOLS':
+      return 'tools';
     default:
       return null;
   }
@@ -74,7 +77,7 @@ function departmentToQueueModule(department: string): QueueModule | null {
 function getUserAccessibleModules(user: UserType): QueueModule[] {
   // Superadmin has access to everything
   if (user.role === 'developer') {
-    return ['ntao', 'assets', 'inventory', 'fleet'];
+    return ['ntao', 'assets', 'inventory', 'fleet', 'tools'];
   }
   
   // Use departments array to determine accessible modules
@@ -521,6 +524,7 @@ export default function UnifiedQueueManagement() {
       case "assets": return "bg-green-500";
       case "inventory": return "bg-blue-500";
       case "fleet": return "bg-orange-500";
+      case "tools": return "bg-teal-500";
       default: return "bg-gray-500";
     }
   };
@@ -571,6 +575,7 @@ export default function UnifiedQueueManagement() {
       case "assets": return "🏢";
       case "inventory": return "📦";
       case "fleet": return "🚐";
+      case "tools": return "🔧";
       default: return "📋";
     }
   };
