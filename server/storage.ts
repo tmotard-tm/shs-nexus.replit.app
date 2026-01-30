@@ -166,6 +166,9 @@ export interface IStorage {
   assignToolsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
   startWorkToolsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
   completeToolsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
+  
+  // BYOV Blocking Logic (Sprint 2)
+  getFleetTaskByWorkflowId(workflowId: string): Promise<QueueItem | undefined>;
 
   // Queue operations
   cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined>;
@@ -2068,6 +2071,16 @@ export class MemStorage implements IStorage {
     await this.triggerNextWorkflowStep(updatedItem);
     
     return updatedItem;
+  }
+
+  async getFleetTaskByWorkflowId(workflowId: string): Promise<QueueItem | undefined> {
+    const items = Array.from(this.fleetQueueItems.values());
+    for (const item of items) {
+      if (item.workflowId === workflowId && item.department === 'FLEET') {
+        return item;
+      }
+    }
+    return undefined;
   }
 
 
@@ -4474,6 +4487,17 @@ export class DatabaseStorage implements IStorage {
       })
       .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Tools')))
       .returning();
+    return result[0];
+  }
+
+  async getFleetTaskByWorkflowId(workflowId: string): Promise<QueueItem | undefined> {
+    const result = await db.select()
+      .from(queueItems)
+      .where(and(
+        eq(queueItems.workflowId, workflowId),
+        eq(queueItems.department, 'FLEET')
+      ))
+      .limit(1);
     return result[0];
   }
 

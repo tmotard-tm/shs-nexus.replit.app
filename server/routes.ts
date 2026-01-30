@@ -20,6 +20,7 @@ import { sql, eq, and, gte, lte, inArray, desc, SQL } from "drizzle-orm";
 import { queueItems } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { pmfApiService } from "./pmf-api-service";
+import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
 
 // Initialize session cleanup on startup
 try {
@@ -1874,7 +1875,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!queueItem) {
         return res.status(404).json({ message: "Tools queue item not found" });
       }
-      res.json(queueItem);
+      
+      // Sprint 2: Compute current blocking status based on Fleet task (if non-BYOV)
+      let currentBlockingStatus = {
+        status: queueItem.isByov ? 'ROUTING_RECEIVED' : 'AWAITING_ROUTING',
+        routingPath: queueItem.fleetRoutingDecision || null,
+        blockedActions: queueItem.blockedActions || [],
+      };
+      
+      if (!queueItem.isByov && queueItem.workflowId) {
+        const fleetTask = await storage.getFleetTaskByWorkflowId(queueItem.workflowId);
+        if (fleetTask && fleetTask.status === 'completed') {
+          currentBlockingStatus = {
+            status: 'ROUTING_RECEIVED',
+            routingPath: fleetTask.fleetRoutingDecision || 'Fleet Routing',
+            blockedActions: [],
+          };
+        }
+      }
+      
+      res.json({
+        ...queueItem,
+        currentBlockingStatus,
+      });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch Tools queue item" });
     }
@@ -1893,6 +1916,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
+      // Sprint 2: Extract truck number and apply BYOV detection
+      let truckNumber: string | null = null;
+      try {
+        const parsedData = typeof validatedData.data === 'string' 
+          ? JSON.parse(validatedData.data) 
+          : validatedData.data;
+        truckNumber = parsedData?.vehicle?.truckNo || 
+                      parsedData?.vehicle?.vehicleNumber || 
+                      parsedData?.truckNumber || 
+                      null;
+      } catch (e) {
+        console.warn('Could not parse truck number for BYOV detection:', e);
+      }
+      
+      const byovStatus = getInitialToolsTaskStatus(truckNumber);
+      
       const queueItemData = {
         ...validatedData,
         requesterId: "anonymous",
@@ -1900,9 +1939,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "pending" as const,
         attempts: 0,
         scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
+        isByov: byovStatus.isByov,
+        blockedActions: byovStatus.blockedActions,
+        fleetRoutingDecision: byovStatus.routingPath,
+        routingReceivedAt: byovStatus.isByov ? new Date() : null,
+        assignedTo: TOOLS_OWNER.id,
       };
       
       const queueItem = await storage.createToolsQueueItem(queueItemData);
+      console.log(`[Tools Queue] Created task with BYOV status: isByov=${byovStatus.isByov}, truckNo=${truckNumber}, blockedActions=${byovStatus.blockedActions.join(',') || 'none'}`);
       
       res.status(201).json({ 
         id: queueItem.id, 

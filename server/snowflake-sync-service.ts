@@ -3,6 +3,7 @@ import { getTPMSService } from './tpms-service';
 import { storage } from './storage';
 import { randomUUID } from 'crypto';
 import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCachedAssignment } from '@shared/schema';
+import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -395,7 +396,18 @@ export class SnowflakeSyncService {
             } else if (deptUpper === 'INVENTORY CONTROL' || deptUpper === 'INVENTORY') {
               createdItem = await storage.createInventoryQueueItem(queueItem);
             } else if (deptUpper === 'TOOLS') {
-              createdItem = await storage.createToolsQueueItem(queueItem);
+              // Sprint 2: Apply BYOV detection and blocking logic
+              const byovStatus = getInitialToolsTaskStatus(vehicleNumber);
+              const toolsQueueItem = {
+                ...queueItem,
+                isByov: byovStatus.isByov,
+                blockedActions: byovStatus.blockedActions,
+                fleetRoutingDecision: byovStatus.routingPath,
+                routingReceivedAt: byovStatus.isByov ? new Date() : null,
+                assignedTo: TOOLS_OWNER.id,
+              };
+              createdItem = await storage.createToolsQueueItem(toolsQueueItem);
+              console.log(`[Sync] Tools task BYOV status: isByov=${byovStatus.isByov}, truckNo=${vehicleNumber}, blockedActions=${byovStatus.blockedActions.join(',') || 'none'}`);
             } else {
               // Default to Fleet for FLEET and any unknown departments
               createdItem = await storage.createFleetQueueItem(queueItem);
