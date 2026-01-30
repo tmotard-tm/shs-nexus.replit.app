@@ -93,3 +93,57 @@ Preferred communication style: Simple, everyday language.
 - **Holman**: Vehicle fleet details and assignment updates.
 - **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments.
 - **PMF/PARQ AI**: Fleet vehicle availability API (Base: https://api.parq.ai, Auth: https://auth.parq.ai/connect/token). Displays available vehicles in Weekly Onboarding.
+
+# Recent Changes
+
+## 2026-01-30: Offboarding Workflow Enhancements
+
+### Sprint 1: Tools Queue ✅
+- Added Tools queue as Day 0 task #5 in offboarding workflow
+- Schema columns: `isByov`, `fleetRoutingDecision`, `routingReceivedAt`, `blockedActions`
+- New endpoints: GET/POST `/api/tools-queue`, GET `/api/tools-queue/:id`
+
+### Sprint 2: BYOV Detection + Blocking ✅
+- BYOV (Bring Your Own Vehicle) = truck numbers starting with "88"
+- New utility file: `server/byov-utils.ts`
+- BYOV tasks bypass Fleet routing wait
+- Non-BYOV tasks blocked until Fleet task completes
+- Tools tasks auto-assigned to Joefree Semilla
+
+### Key Files Changed
+- `server/byov-utils.ts` (NEW) - BYOV detection utilities
+- `server/storage.ts` - Added `getFleetTaskByWorkflowId()`
+- `server/routes.ts` - Tools queue endpoints + dynamic blocking status
+- `server/snowflake-sync-service.ts` - BYOV integration in task creation
+
+---
+
+# Session Handoff
+
+## Last Session: 2026-01-30
+
+### Summary
+Completed Sprint 1 (Tools Queue) and Sprint 2 (BYOV Detection + Blocking Logic) of the Nexus Offboarding Workflow Enhancements.
+
+### Current State
+- App runs without errors
+- All Sprint 1 + Sprint 2 acceptance criteria met
+- BYOV detection working (trucks starting with "88")
+- Blocking logic implemented (dynamic status computation)
+
+### Blockers
+None.
+
+### Pending Decisions
+None - PM approved all implementation approaches.
+
+### Recommended Next Steps
+1. **Sprint 3**: Add `currentBlockingStatus` to Tools queue list endpoint
+2. **Sprint 3**: Build Tools task card UI with BYOV status display
+3. **Sprint 3**: Implement action buttons with blocking enforcement
+4. **Sprint 3**: Add visual indicators for blocked vs unblocked state
+
+### Documentation
+- See `docs/SYSTEM_ARCHITECTURE.md` for full system overview
+- See `docs/changelog/2026-01-30.md` for detailed changes
+- See `docs/backlog.md` for feature tracking
