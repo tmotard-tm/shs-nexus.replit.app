@@ -455,6 +455,42 @@ export default function OffboardTechnician() {
         })
       });
 
+      // Tools task - Day 0 task #5 (Sprint 1: Schema + Task Creation)
+      await apiRequest("POST", "/api/tools-queue", {
+        workflowType: "offboarding",
+        title: `Day 0: Recover Equipment & Tools - ${technicianOffboard.techName}`,
+        description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${technicianOffboard.techName} (${technicianOffboard.techRacfId}). Truck ${technicianOffboard.vehicleNumber}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+        priority: "high",
+        workflowId: workflowId,
+        data: JSON.stringify({
+          workflowType: "offboarding_sequence",
+          step: "tools_recover_equipment_day0",
+          workflowStep: 5,
+          phase: "day0",
+          isDay0Task: true,
+          submitterInfo: user ? {
+            id: user.id,
+            name: user.username || user.email,
+            email: user.email
+          } : {
+            id: "anonymous",
+            name: "Anonymous User",
+            email: null
+          },
+          ...sharedTriggerData,
+          instructions: [
+            "Contact Employee immediately to arrange equipment return",
+            "Recover company phone and verify it's company-issued",
+            "Collect any tablets, mobile hotspots, or other devices",
+            "Retrieve company credit cards (coordinate with OneCard Help Desk if needed)",
+            "Check for accessories (chargers, cases, cables)",
+            "Wipe all device data per security protocol",
+            "Update asset management system with returned items",
+            "Complete Day 0 task - mark complete once all equipment recovered"
+          ]
+        })
+      });
+
       try {
         await apiRequest("POST", "/api/send-deactivation-email", {
           employeeName: technicianOffboard.techName,
@@ -485,7 +521,7 @@ export default function OffboardTechnician() {
 
     toast({
       title: "Two-Phase Offboarding Started",
-      description: `Phase 1 (Day 0) tasks created for ${technicianOffboard.techName}: NTAO — National Truck Assortment, Equipment, Fleet, and Inventory teams. Phase 2 tasks will auto-trigger after all Day 0 tasks complete.`,
+      description: `Phase 1 (Day 0) tasks created for ${technicianOffboard.techName}: NTAO, Assets, Fleet, Inventory, and Tools teams. Phase 2 tasks will auto-trigger after all Day 0 tasks complete.`,
     });
     
     // Store the tech name for the success dialog

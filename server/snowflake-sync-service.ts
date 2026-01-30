@@ -322,6 +322,25 @@ export class SnowflakeSyncService {
                 "Complete Day 0 task - detailed Inventory work will follow in Phase 2"
               ],
             },
+            // Tools task - Day 0 task #5 (Sprint 1: Schema + Task Creation)
+            {
+              title: `Day 0: Recover Equipment & Tools - ${tech.techName}`,
+              description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${tech.techName} (${tech.techRacfid}). Truck ${vehicleNumber || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+              department: 'Tools',
+              step: 'tools_recover_equipment_day0',
+              subtask: 'Tools',
+              workflowStep: 5,
+              instructions: [
+                "Contact Employee immediately to arrange equipment return",
+                "Recover company phone and verify it's company-issued",
+                "Collect any tablets, mobile hotspots, or other devices",
+                "Retrieve company credit cards (coordinate with OneCard Help Desk if needed)",
+                "Check for accessories (chargers, cases, cables)",
+                "Wipe all device data per security protocol",
+                "Update asset management system with returned items",
+                "Complete Day 0 task - mark complete once all equipment recovered"
+              ],
+            },
           ];
 
           let firstCreatedItemId: string | null = null;
@@ -375,6 +394,8 @@ export class SnowflakeSyncService {
               createdItem = await storage.createAssetsQueueItem(queueItem);
             } else if (deptUpper === 'INVENTORY CONTROL' || deptUpper === 'INVENTORY') {
               createdItem = await storage.createInventoryQueueItem(queueItem);
+            } else if (deptUpper === 'TOOLS') {
+              createdItem = await storage.createToolsQueueItem(queueItem);
             } else {
               // Default to Fleet for FLEET and any unknown departments
               createdItem = await storage.createFleetQueueItem(queueItem);

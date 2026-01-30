@@ -158,6 +158,15 @@ export interface IStorage {
   startWorkFleetQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
   completeFleetQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
 
+  // Tools Queue Module (Sprint 1: Schema + Task Creation)
+  getToolsQueueItem(id: string): Promise<QueueItem | undefined>;
+  getToolsQueueItems(): Promise<QueueItem[]>;
+  createToolsQueueItem(item: InsertQueueItem): Promise<QueueItem>;
+  updateToolsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined>;
+  assignToolsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
+  startWorkToolsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
+  completeToolsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
+
   // Queue operations
   cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined>;
   
@@ -370,6 +379,7 @@ export class MemStorage implements IStorage {
   private assetsQueueItems: Map<string, QueueItem>;
   private inventoryQueueItems: Map<string, QueueItem>;
   private fleetQueueItems: Map<string, QueueItem>;
+  private toolsQueueItems: Map<string, QueueItem>;
 
   constructor() {
     this.requests = new Map();
@@ -385,6 +395,7 @@ export class MemStorage implements IStorage {
     this.assetsQueueItems = new Map();
     this.inventoryQueueItems = new Map();
     this.fleetQueueItems = new Map();
+    this.toolsQueueItems = new Map();
     
     this.initializeDefaultData();
   }
@@ -699,6 +710,10 @@ export class MemStorage implements IStorage {
         dependsOn: null,
         autoTrigger: false,
         triggerData: null,
+        isByov: false,
+        fleetRoutingDecision: null,
+        routingReceivedAt: null,
+        blockedActions: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -750,6 +765,10 @@ export class MemStorage implements IStorage {
         dependsOn: null,
         autoTrigger: false,
         triggerData: null,
+        isByov: false,
+        fleetRoutingDecision: null,
+        routingReceivedAt: null,
+        blockedActions: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -798,6 +817,10 @@ export class MemStorage implements IStorage {
         dependsOn: null,
         autoTrigger: false,
         triggerData: null,
+        isByov: false,
+        fleetRoutingDecision: null,
+        routingReceivedAt: null,
+        blockedActions: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       }
@@ -1521,6 +1544,10 @@ export class MemStorage implements IStorage {
       dependsOn: insertItem.dependsOn || null,
       autoTrigger: insertItem.autoTrigger || false,
       triggerData: insertItem.triggerData || null,
+      isByov: insertItem.isByov ?? false,
+      fleetRoutingDecision: insertItem.fleetRoutingDecision || null,
+      routingReceivedAt: insertItem.routingReceivedAt || null,
+      blockedActions: insertItem.blockedActions || null,
       id,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1630,6 +1657,10 @@ export class MemStorage implements IStorage {
       dependsOn: insertItem.dependsOn || null,
       autoTrigger: insertItem.autoTrigger || false,
       triggerData: insertItem.triggerData || null,
+      isByov: insertItem.isByov ?? false,
+      fleetRoutingDecision: insertItem.fleetRoutingDecision || null,
+      routingReceivedAt: insertItem.routingReceivedAt || null,
+      blockedActions: insertItem.blockedActions || null,
       id,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1739,6 +1770,10 @@ export class MemStorage implements IStorage {
       dependsOn: insertItem.dependsOn || null,
       autoTrigger: insertItem.autoTrigger || false,
       triggerData: insertItem.triggerData || null,
+      isByov: insertItem.isByov ?? false,
+      fleetRoutingDecision: insertItem.fleetRoutingDecision || null,
+      routingReceivedAt: insertItem.routingReceivedAt || null,
+      blockedActions: insertItem.blockedActions || null,
       id,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1848,6 +1883,10 @@ export class MemStorage implements IStorage {
       dependsOn: insertItem.dependsOn || null,
       autoTrigger: insertItem.autoTrigger || false,
       triggerData: insertItem.triggerData || null,
+      isByov: insertItem.isByov ?? false,
+      fleetRoutingDecision: insertItem.fleetRoutingDecision || null,
+      routingReceivedAt: insertItem.routingReceivedAt || null,
+      blockedActions: insertItem.blockedActions || null,
       id,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1916,6 +1955,114 @@ export class MemStorage implements IStorage {
       updatedAt: new Date() 
     };
     this.fleetQueueItems.set(id, updatedItem);
+
+    // Check if this completes a workflow step and trigger next step
+    await this.triggerNextWorkflowStep(updatedItem);
+    
+    return updatedItem;
+  }
+
+  // Tools Queue Module (Sprint 1: Schema + Task Creation)
+  async getToolsQueueItem(id: string): Promise<QueueItem | undefined> {
+    return this.toolsQueueItems.get(id);
+  }
+
+  async getToolsQueueItems(): Promise<QueueItem[]> {
+    return Array.from(this.toolsQueueItems.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async createToolsQueueItem(insertItem: InsertQueueItem): Promise<QueueItem> {
+    const id = randomUUID();
+    const item: QueueItem = {
+      ...insertItem,
+      status: insertItem.status || "pending",
+      priority: insertItem.priority || "medium",
+      assignedTo: insertItem.assignedTo || null,
+      department: "Tools",
+      team: insertItem.team || null,
+      data: insertItem.data || null,
+      metadata: insertItem.metadata || null,
+      notes: insertItem.notes || null,
+      scheduledFor: insertItem.scheduledFor || null,
+      attempts: insertItem.attempts || 0,
+      lastError: insertItem.lastError || null,
+      completedAt: insertItem.completedAt || null,
+      startedAt: insertItem.startedAt || null,
+      firstResponseAt: insertItem.firstResponseAt || null,
+      workflowId: insertItem.workflowId || null,
+      workflowStep: insertItem.workflowStep || null,
+      dependsOn: insertItem.dependsOn || null,
+      autoTrigger: insertItem.autoTrigger || false,
+      triggerData: insertItem.triggerData || null,
+      isByov: insertItem.isByov || false,
+      fleetRoutingDecision: insertItem.fleetRoutingDecision || null,
+      routingReceivedAt: insertItem.routingReceivedAt || null,
+      blockedActions: insertItem.blockedActions || null,
+      id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.toolsQueueItems.set(id, item);
+    return item;
+  }
+
+  async updateToolsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const item = this.toolsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { ...item, ...updates, updatedAt: new Date() };
+    this.toolsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async assignToolsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    const item = this.toolsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { 
+      ...item, 
+      assignedTo: assigneeId,
+      status: "pending",
+      updatedAt: new Date() 
+    };
+    this.toolsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async startWorkToolsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    const item = this.toolsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    if (item.assignedTo !== workerId || (item.status !== "pending" && item.status !== "in_progress")) {
+      return undefined;
+    }
+    
+    if (item.status === "in_progress") {
+      return item;
+    }
+    
+    const updatedItem = { 
+      ...item, 
+      status: "in_progress",
+      updatedAt: new Date() 
+    };
+    this.toolsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async completeToolsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const item = this.toolsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = { 
+      ...item, 
+      status: "completed",
+      completedAt: new Date(),
+      updatedAt: new Date() 
+    };
+    this.toolsQueueItems.set(id, updatedItem);
 
     // Check if this completes a workflow step and trigger next step
     await this.triggerNextWorkflowStep(updatedItem);
@@ -4253,6 +4400,83 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  // Tools Queue Module (Sprint 1: Schema + Task Creation)
+  async getToolsQueueItem(id: string): Promise<QueueItem | undefined> {
+    const result = await db.select().from(queueItems)
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Tools')))
+      .limit(1);
+    return result[0];
+  }
+
+  async getToolsQueueItems(): Promise<QueueItem[]> {
+    return await db.select().from(queueItems)
+      .where(eq(queueItems.department, 'Tools'))
+      .orderBy(desc(queueItems.createdAt));
+  }
+
+  async createToolsQueueItem(item: InsertQueueItem): Promise<QueueItem> {
+    const result = await db.insert(queueItems).values({
+      ...item,
+      department: 'Tools'
+    }).returning();
+    return result[0];
+  }
+
+  async updateToolsQueueItem(id: string, updates: Partial<QueueItem>): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({...updates, updatedAt: new Date()})
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Tools')))
+      .returning();
+    return result[0];
+  }
+
+  async assignToolsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
+    return await this.updateToolsQueueItem(id, { 
+      assignedTo: assigneeId, 
+      status: 'pending'
+    });
+  }
+
+  async startWorkToolsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined> {
+    return await db.transaction(async (tx) => {
+      const item = await tx.select().from(queueItems)
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Tools')))
+        .limit(1);
+      
+      if (!item[0] || item[0].assignedTo !== workerId || 
+          (item[0].status !== 'pending' && item[0].status !== 'in_progress')) {
+        return undefined;
+      }
+
+      if (item[0].status === 'in_progress') {
+        return item[0];
+      }
+
+      const result = await tx.update(queueItems)
+        .set({ 
+          status: 'in_progress', 
+          startedAt: new Date(),
+          updatedAt: new Date() 
+        })
+        .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Tools')))
+        .returning();
+      
+      return result[0];
+    });
+  }
+
+  async completeToolsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({ 
+        status: 'completed', 
+        completedAt: new Date(),
+        updatedAt: new Date() 
+      })
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Tools')))
+      .returning();
+    return result[0];
+  }
+
   // Queue operations
   async cancelQueueItem(id: string, reason: string): Promise<QueueItem | undefined> {
     const result = await db.update(queueItems)
@@ -4490,7 +4714,8 @@ export class DatabaseStorage implements IStorage {
       'ntao': 'NTAO',
       'assets': 'Assets Management', 
       'inventory': 'Inventory Control',
-      'fleet': 'Fleet Management'
+      'fleet': 'Fleet Management',
+      'tools': 'Tools'
     };
 
     const departments = modules.map(m => departmentMap[m]);
@@ -4523,7 +4748,8 @@ export class DatabaseStorage implements IStorage {
       'ntao': 'NTAO',
       'assets': 'Assets Management', 
       'inventory': 'Inventory Control',
-      'fleet': 'Fleet Management'
+      'fleet': 'Fleet Management',
+      'tools': 'Tools'
     };
 
     const departments = modules.map(m => departmentMap[m]);
@@ -4552,7 +4778,8 @@ export class DatabaseStorage implements IStorage {
       'ntao': 'NTAO',
       'assets': 'Assets Management', 
       'inventory': 'Inventory Control',
-      'fleet': 'Fleet Management'
+      'fleet': 'Fleet Management',
+      'tools': 'Tools'
     };
 
     const result = await db.select().from(queueItems)
@@ -4566,7 +4793,8 @@ export class DatabaseStorage implements IStorage {
       'ntao': 'NTAO',
       'assets': 'Assets Management', 
       'inventory': 'Inventory Control',
-      'fleet': 'Fleet Management'
+      'fleet': 'Fleet Management',
+      'tools': 'Tools'
     };
 
     const result = await db.update(queueItems)
@@ -4588,7 +4816,8 @@ export class DatabaseStorage implements IStorage {
       'ntao': 'NTAO',
       'assets': 'Assets Management', 
       'inventory': 'Inventory Control',
-      'fleet': 'Fleet Management'
+      'fleet': 'Fleet Management',
+      'tools': 'Tools'
     };
 
     return await db.transaction(async (tx) => {
@@ -4623,7 +4852,8 @@ export class DatabaseStorage implements IStorage {
       'ntao': 'NTAO',
       'assets': 'Assets Management', 
       'inventory': 'Inventory Control',
-      'fleet': 'Fleet Management'
+      'fleet': 'Fleet Management',
+      'tools': 'Tools'
     };
 
     const result = await db.update(queueItems)
@@ -4775,7 +5005,8 @@ export class DatabaseStorage implements IStorage {
       'ntao': 'NTAO',
       'assets': 'Assets Management', 
       'inventory': 'Inventory Control',
-      'fleet': 'Fleet Management'
+      'fleet': 'Fleet Management',
+      'tools': 'Tools'
     };
 
     for (const module of modules) {
@@ -4799,7 +5030,8 @@ export class DatabaseStorage implements IStorage {
       'ntao': 'NTAO',
       'assets': 'Assets Management', 
       'inventory': 'Inventory Control',
-      'fleet': 'Fleet Management'
+      'fleet': 'Fleet Management',
+      'tools': 'Tools'
     };
 
     for (const module of modules) {

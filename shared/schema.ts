@@ -4,7 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Queue module types for unified queue access
-export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet';
+export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet' | 'tools';
 
 // Role types - Developer, Admin, and Agent
 export type UserRole = 'developer' | 'admin' | 'agent';
@@ -235,6 +235,11 @@ export const queueItems = pgTable("queue_items", {
   dependsOn: varchar("depends_on"), // ID of task that must be completed before this one
   autoTrigger: boolean("auto_trigger").notNull().default(false), // Whether this task should auto-trigger when dependencies complete
   triggerData: text("trigger_data"), // Data for auto-triggered tasks
+  // Tools queue fields (Sprint 1: Schema + Task Creation)
+  isByov: boolean("is_byov").default(false), // Is this a Bring Your Own Vehicle tech?
+  fleetRoutingDecision: text("fleet_routing_decision"), // Routing decision from Fleet
+  routingReceivedAt: timestamp("routing_received_at"), // When routing decision was received
+  blockedActions: text("blocked_actions").array(), // Array of blocked action identifiers
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {

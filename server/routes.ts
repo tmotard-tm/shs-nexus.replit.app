@@ -374,7 +374,7 @@ function hasQueueAccess(user: any, module: QueueModule): boolean {
 // Get accessible queue modules for a user
 function getAccessibleQueueModules(user: any): QueueModule[] {
   if (user.role === 'developer') {
-    return ['ntao', 'assets', 'inventory', 'fleet'];
+    return ['ntao', 'assets', 'inventory', 'fleet', 'tools'];
   }
   
   if (user.departments && Array.isArray(user.departments)) {
@@ -1850,6 +1850,114 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Tools Queue Module routes (Sprint 1: Schema + Task Creation)
+  app.get("/api/tools-queue", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
+        return res.status(403).json({ message: "Access denied to Tools queue" });
+      }
+      const queueItems = await storage.getToolsQueueItems();
+      res.json(queueItems);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Tools queue items" });
+    }
+  });
+
+  app.get("/api/tools-queue/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
+        return res.status(403).json({ message: "Access denied to Tools queue" });
+      }
+      const queueItem = await storage.getToolsQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Tools queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch Tools queue item" });
+    }
+  });
+
+  app.post("/api/tools-queue", checkAnonymousRateLimit, async (req, res) => {
+    try {
+      const sanitizedData = sanitizeInput(req.body);
+      const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
+      
+      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'TOOLS', validatedData.workflowId);
+      if (duplicateCheck.isDuplicate) {
+        return res.status(409).json({ 
+          message: duplicateCheck.message || "Duplicate submission detected",
+          code: "DUPLICATE_OFFBOARDING"
+        });
+      }
+      
+      const queueItemData = {
+        ...validatedData,
+        requesterId: "anonymous",
+        department: "Tools" as const,
+        status: "pending" as const,
+        attempts: 0,
+        scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
+      };
+      
+      const queueItem = await storage.createToolsQueueItem(queueItemData);
+      
+      res.status(201).json({ 
+        id: queueItem.id, 
+        status: queueItem.status, 
+        message: "Queue item created successfully" 
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid form data", errors: error.errors });
+      }
+      console.error('Tools queue creation error:', error);
+      res.status(500).json({ message: "Failed to submit form" });
+    }
+  });
+
+  app.patch("/api/tools-queue/:id/assign", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
+        return res.status(403).json({ message: "Access denied to Tools queue" });
+      }
+      const { assigneeId } = req.body;
+      if (!assigneeId) {
+        return res.status(400).json({ message: "Assignee ID is required" });
+      }
+      const queueItem = await storage.assignToolsQueueItem(req.params.id, assigneeId);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Tools queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to assign Tools queue item" });
+    }
+  });
+
+  app.patch("/api/tools-queue/:id/complete", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
+        return res.status(403).json({ message: "Access denied to Tools queue" });
+      }
+      const { completedBy } = req.body;
+      if (!completedBy) {
+        return res.status(400).json({ message: "Completed by user ID is required" });
+      }
+      const queueItem = await storage.completeToolsQueueItem(req.params.id, completedBy);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Tools queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to complete Tools queue item" });
+    }
+  });
+
 
   // Check for existing open offboarding tasks for an employee
   app.get("/api/offboarding/check-existing", async (req, res) => {
@@ -1878,7 +1986,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taskId = req.params.id;
       
       // Try to find the task in each queue module
-      const modules: QueueModule[] = ["ntao", "assets", "inventory", "fleet"];
+      const modules: QueueModule[] = ["ntao", "assets", "inventory", "fleet", "tools"];
       
       for (const module of modules) {
         const queueItem = await storage.getUnifiedQueueItem(module, taskId);
@@ -2169,11 +2277,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           completedToday: 0,
           avgResponseTime: 0,
           activeStaff: 0
+        },
+        tools: {
+          name: "Tools",
+          description: "Equipment Recovery & Management",
+          completedToday: 0,
+          avgResponseTime: 0,
+          activeStaff: 0
         }
       };
 
       // Calculate stats for each department
-      for (const module of ['ntao', 'assets', 'inventory', 'fleet'] as QueueModule[]) {
+      for (const module of ['ntao', 'assets', 'inventory', 'fleet', 'tools'] as QueueModule[]) {
         let queueItems: any[] = [];
         
         try {
@@ -2189,6 +2304,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               break;
             case 'fleet':
               queueItems = await storage.getFleetQueueItems();
+              break;
+            case 'tools':
+              queueItems = await storage.getToolsQueueItems();
               break;
           }
         } catch (error) {
