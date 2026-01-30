@@ -2159,7 +2159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requestedModules = modulesParam.split(',').map(m => m.trim()) as any[];
       
       // Validate modules
-      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'tools'];
       const invalidModules = requestedModules.filter(m => !validModules.includes(m));
       if (invalidModules.length > 0) {
         return res.status(400).json({ 
@@ -2205,7 +2205,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requestedModules = modulesParam.split(',').map(m => m.trim()) as any[];
       
       // Validate modules
-      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'tools'];
       const invalidModules = requestedModules.filter(m => !validModules.includes(m));
       if (invalidModules.length > 0) {
         return res.status(400).json({ 
