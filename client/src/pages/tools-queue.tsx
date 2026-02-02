@@ -464,6 +464,24 @@ export default function ToolsQueuePage() {
     }
   };
 
+  const getCardBorderClass = (item: ToolsQueueItem): string => {
+    const variant = getCardVariant(item);
+    switch (variant) {
+      case 'byov':
+        return 'border-l-4 border-l-green-500';
+      case 'blocked':
+        return 'border-l-4 border-l-yellow-500';
+      case 'pmf':
+        return 'border-l-4 border-l-blue-500';
+      case 'pepboys':
+        return 'border-l-4 border-l-red-500';
+      case 'reassigned':
+        return 'border-l-4 border-l-purple-500';
+      default:
+        return 'border-l-4 border-l-yellow-500';
+    }
+  };
+
   const pendingItems = queueItems.filter(item => item.status === "pending");
   const inProgressItems = queueItems.filter(item => item.status === "in_progress");
   const completedItems = queueItems.filter(item => item.status === "completed");
@@ -562,7 +580,7 @@ export default function ToolsQueuePage() {
             ) : (
               <div className="grid gap-4">
                 {pendingItems.map((item) => (
-                  <Card key={item.id} className="hover:shadow-md transition-shadow cursor-pointer border-l-4 border-l-yellow-400"
+                  <Card key={item.id} className={`hover:shadow-md transition-shadow cursor-pointer ${getCardBorderClass(item)}`}
                         onClick={() => setPickUpItem(item)}>
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between">
