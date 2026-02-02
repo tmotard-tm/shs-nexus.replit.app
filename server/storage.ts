@@ -2373,13 +2373,18 @@ export class MemStorage implements IStorage {
     try {
       const vehicleType = triggerData.vehicleType || triggerData.vehicle?.type || 'sears-fleet';
       
-      console.log(`Creating Phase 2 Fleet tasks for vehicle type: ${vehicleType}`);
+      // Extract tech name and vehicle number from various possible locations in trigger data
+      const techName = triggerData.techName || triggerData.employee?.name || 'Unknown Technician';
+      const vehicleNumber = triggerData.vehicleNumber || triggerData.vehicle?.vehicleNumber || triggerData.vehicle?.truckNo || 'Unknown Vehicle';
+      const employeeId = triggerData.employeeId || triggerData.employee?.racfId || triggerData.racfId || '';
+      
+      console.log(`Creating Phase 2 Fleet tasks for ${techName} (vehicle: ${vehicleNumber}, type: ${vehicleType})`);
 
       // Phase 2 Task 1: Vehicle Retrieval and Transport (Day 1-3)
       const retrievalTask = {
         workflowType: "offboarding",
-        title: `Phase 2: Vehicle Retrieval - ${triggerData.vehicle?.vehicleNumber}`,
-        description: `PHASE 2 (Day 1-3): Retrieve vehicle from Employee and transport to appropriate location. Vehicle: ${triggerData.vehicle?.vehicleNumber}. Employee: ${triggerData.employee?.name} (${triggerData.employee?.racfId}). All Day 0 tasks completed - proceed with Phase 2.`,
+        title: `Phase 2: Vehicle Retrieval - ${techName}`,
+        description: `PHASE 2 (Day 1-3): Retrieve vehicle from ${techName} and transport to appropriate location. Vehicle: ${vehicleNumber}. Employee ID: ${employeeId}. All Day 0 tasks completed - proceed with Phase 2.`,
         priority: "medium",
         requesterId: "system",
         department: "Fleet Management",
@@ -2392,6 +2397,9 @@ export class MemStorage implements IStorage {
           step: "fleet_vehicle_retrieval_phase2",
           phase: "phase2",
           vehicleType: vehicleType,
+          techName: techName,
+          vehicleNumber: vehicleNumber,
+          employeeId: employeeId,
           ...triggerData,
           instructions: this.getVehicleRetrievalInstructions(vehicleType)
         })
@@ -2400,8 +2408,8 @@ export class MemStorage implements IStorage {
       // Phase 2 Task 2: Shop Coordination (Day 3-5)
       const shopTask = {
         workflowType: "offboarding",
-        title: `Phase 2: Shop Coordination - ${triggerData.vehicle?.vehicleNumber}`,
-        description: `PHASE 2 (Day 3-5): Coordinate vehicle processing at shop/service center. Vehicle: ${triggerData.vehicle?.vehicleNumber}. Complete maintenance, inventory, and preparation for reassignment.`,
+        title: `Phase 2: Shop Coordination - ${techName}`,
+        description: `PHASE 2 (Day 3-5): Coordinate vehicle processing at shop/service center. Vehicle: ${vehicleNumber} (${techName}). Complete maintenance, inventory, and preparation for reassignment.`,
         priority: "medium",
         requesterId: "system",
         department: "Fleet Management",
@@ -2414,6 +2422,9 @@ export class MemStorage implements IStorage {
           step: "fleet_shop_coordination_phase2",
           phase: "phase2",
           vehicleType: vehicleType,
+          techName: techName,
+          vehicleNumber: vehicleNumber,
+          employeeId: employeeId,
           ...triggerData,
           instructions: this.getShopCoordinationInstructions(vehicleType)
         })
@@ -5671,13 +5682,18 @@ export class DatabaseStorage implements IStorage {
     try {
       const vehicleType = triggerData.vehicleType || triggerData.vehicle?.type || 'sears-fleet';
       
-      console.log(`Creating Phase 2 Fleet tasks for vehicle type: ${vehicleType}`);
+      // Extract tech name and vehicle number from various possible locations in trigger data
+      const techName = triggerData.techName || triggerData.employee?.name || 'Unknown Technician';
+      const vehicleNumber = triggerData.vehicleNumber || triggerData.vehicle?.vehicleNumber || triggerData.vehicle?.truckNo || 'Unknown Vehicle';
+      const employeeId = triggerData.employeeId || triggerData.employee?.racfId || triggerData.racfId || '';
+      
+      console.log(`Creating Phase 2 Fleet tasks for ${techName} (vehicle: ${vehicleNumber}, type: ${vehicleType})`);
 
       // Phase 2 Task 1: Vehicle Retrieval and Transport (Day 1-3)
       const retrievalTask = {
         workflowType: "offboarding",
-        title: `Phase 2: Vehicle Retrieval - ${triggerData.vehicle?.vehicleNumber}`,
-        description: `PHASE 2 (Day 1-3): Retrieve vehicle from Employee and transport to appropriate location. Vehicle: ${triggerData.vehicle?.vehicleNumber}. Employee: ${triggerData.employee?.name} (${triggerData.employee?.racfId}). All Day 0 tasks completed - proceed with Phase 2.`,
+        title: `Phase 2: Vehicle Retrieval - ${techName}`,
+        description: `PHASE 2 (Day 1-3): Retrieve vehicle from ${techName} and transport to appropriate location. Vehicle: ${vehicleNumber}. Employee ID: ${employeeId}. All Day 0 tasks completed - proceed with Phase 2.`,
         priority: "medium",
         requesterId: "system",
         department: "Fleet Management",
@@ -5690,6 +5706,9 @@ export class DatabaseStorage implements IStorage {
           step: "fleet_vehicle_retrieval_phase2",
           phase: "phase2",
           vehicleType: vehicleType,
+          techName: techName,
+          vehicleNumber: vehicleNumber,
+          employeeId: employeeId,
           ...triggerData,
           instructions: this.getVehicleRetrievalInstructions(vehicleType)
         })
@@ -5698,8 +5717,8 @@ export class DatabaseStorage implements IStorage {
       // Phase 2 Task 2: Shop Coordination (Day 3-5)
       const shopTask = {
         workflowType: "offboarding",
-        title: `Phase 2: Shop Coordination - ${triggerData.vehicle?.vehicleNumber}`,
-        description: `PHASE 2 (Day 3-5): Coordinate vehicle processing at shop/service center. Vehicle: ${triggerData.vehicle?.vehicleNumber}. Complete maintenance, inventory, and preparation for reassignment.`,
+        title: `Phase 2: Shop Coordination - ${techName}`,
+        description: `PHASE 2 (Day 3-5): Coordinate vehicle processing at shop/service center. Vehicle: ${vehicleNumber} (${techName}). Complete maintenance, inventory, and preparation for reassignment.`,
         priority: "medium",
         requesterId: "system",
         department: "Fleet Management",
@@ -5712,6 +5731,9 @@ export class DatabaseStorage implements IStorage {
           step: "fleet_shop_coordination_phase2",
           phase: "phase2",
           vehicleType: vehicleType,
+          techName: techName,
+          vehicleNumber: vehicleNumber,
+          employeeId: employeeId,
           ...triggerData,
           instructions: this.getShopCoordinationInstructions(vehicleType)
         })
