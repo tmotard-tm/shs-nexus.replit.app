@@ -600,6 +600,16 @@ export default function ToolsQueuePage() {
                             {item.isByov && (
                               <Badge className="bg-green-100 text-green-800">BYOV</Badge>
                             )}
+                            {(() => {
+                              const blockedActions = item.currentBlockingStatus?.blockedActions || item.blockedActions || [];
+                              const isBlocked = blockedActions.length > 0;
+                              return isBlocked && (
+                                <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300">
+                                  <AlertTriangle className="h-3 w-3 mr-1" />
+                                  Awaiting Fleet routing
+                                </Badge>
+                              );
+                            })()}
                           </div>
                         </div>
                         <div className="flex flex-col items-end gap-2">
@@ -607,17 +617,33 @@ export default function ToolsQueuePage() {
                             <Badge variant={getPriorityColor(item.priority)}>{item.priority}</Badge>
                             <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
                           </div>
-                          <Button
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPickUpItem(item);
-                            }}
-                            disabled={assignMutation.isPending}
-                            data-testid={`button-pick-up-${item.id}`}
-                          >
-                            Pick Up
-                          </Button>
+                          {(() => {
+                            const blockedActions = item.currentBlockingStatus?.blockedActions || item.blockedActions || [];
+                            const isBlocked = blockedActions.length > 0;
+                            return isBlocked ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled
+                                data-testid={`button-pick-up-${item.id}`}
+                              >
+                                <Ban className="h-4 w-4 mr-1" />
+                                Blocked
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPickUpItem(item);
+                                }}
+                                disabled={assignMutation.isPending}
+                                data-testid={`button-pick-up-${item.id}`}
+                              >
+                                Pick Up
+                              </Button>
+                            );
+                          })()}
                         </div>
                       </div>
                     </CardContent>
