@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { QueueItem, User } from "@shared/schema";
-import { Clock, User as UserIcon, Save, AlertTriangle, CheckCircle, Ban, Truck, RefreshCw, ExternalLink } from "lucide-react";
+import { Clock, User as UserIcon, Save, AlertTriangle, CheckCircle, Ban, Truck, RefreshCw, ExternalLink, Info } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
@@ -603,12 +603,45 @@ export default function ToolsQueuePage() {
                             {(() => {
                               const blockedActions = item.currentBlockingStatus?.blockedActions || item.blockedActions || [];
                               const isBlocked = blockedActions.length > 0;
-                              return isBlocked && (
-                                <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300">
-                                  <AlertTriangle className="h-3 w-3 mr-1" />
-                                  Awaiting Fleet routing
-                                </Badge>
-                              );
+                              const routingPath = item.currentBlockingStatus?.routingPath?.toUpperCase() || item.fleetRoutingDecision?.toUpperCase() || '';
+                              
+                              // Show blocking badge if blocked
+                              if (isBlocked) {
+                                return (
+                                  <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300">
+                                    <AlertTriangle className="h-3 w-3 mr-1" />
+                                    Awaiting Fleet routing
+                                  </Badge>
+                                );
+                              }
+                              
+                              // Show routing-specific badges for non-blocked items
+                              if (routingPath === 'PMF') {
+                                return (
+                                  <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300">
+                                    <Info className="h-3 w-3 mr-1" />
+                                    No Action Required
+                                  </Badge>
+                                );
+                              }
+                              if (routingPath === 'PEP_BOYS' || routingPath === 'PEPBOYS' || routingPath === 'PEP BOYS') {
+                                return (
+                                  <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300">
+                                    <AlertTriangle className="h-3 w-3 mr-1" />
+                                    CRITICAL: Issue QR Codes First
+                                  </Badge>
+                                );
+                              }
+                              if (routingPath === 'REASSIGNED') {
+                                return (
+                                  <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300">
+                                    <Info className="h-3 w-3 mr-1" />
+                                    Reassigned Vehicle
+                                  </Badge>
+                                );
+                              }
+                              
+                              return null;
                             })()}
                           </div>
                         </div>

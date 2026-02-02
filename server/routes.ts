@@ -1969,14 +1969,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
         return res.status(403).json({ message: "Access denied to Tools queue" });
       }
-      const { assigneeId } = req.body;
+      const { assigneeId, fleetRoutingDecision } = req.body;
       if (!assigneeId) {
         return res.status(400).json({ message: "Assignee ID is required" });
       }
-      const queueItem = await storage.assignToolsQueueItem(req.params.id, assigneeId);
+      
+      // First assign the task
+      let queueItem = await storage.assignToolsQueueItem(req.params.id, assigneeId);
       if (!queueItem) {
         return res.status(404).json({ message: "Tools queue item not found" });
       }
+      
+      // If fleetRoutingDecision is provided, also update that field and clear blockedActions
+      if (fleetRoutingDecision) {
+        queueItem = await storage.updateToolsQueueItem(req.params.id, { 
+          fleetRoutingDecision,
+          routingReceivedAt: new Date(),
+          blockedActions: [], // Clear blocking when routing is received
+        });
+      }
+      
       res.json(queueItem);
     } catch (error) {
       res.status(500).json({ message: "Failed to assign Tools queue item" });
@@ -2227,7 +2239,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const items = await storage.getUnifiedQueueItems(allowedModules as QueueModule[], status);
-      res.json(items);
+      
+      // Sprint 2: Compute currentBlockingStatus for Tools items
+      const enrichedItems = await Promise.all(items.map(async (item) => {
+        if (item.department !== 'Tools') {
+          return item;
+        }
+        
+        // Compute blocking status based on stored fields and Fleet task status
+        let currentBlockingStatus = {
+          status: item.isByov ? 'ROUTING_RECEIVED' : 'AWAITING_ROUTING',
+          routingPath: item.fleetRoutingDecision || null,
+          blockedActions: item.blockedActions || [],
+          isByov: item.isByov || false,
+        };
+        
+        // If non-BYOV and has routing decision, it's unblocked
+        if (!item.isByov && item.fleetRoutingDecision) {
+          currentBlockingStatus = {
+            status: 'ROUTING_RECEIVED',
+            routingPath: item.fleetRoutingDecision,
+            blockedActions: [],
+            isByov: false,
+          };
+        } else if (!item.isByov && item.workflowId) {
+          // Check if Fleet task is completed
+          const fleetTask = await storage.getFleetTaskByWorkflowId(item.workflowId);
+          if (fleetTask && fleetTask.status === 'completed') {
+            currentBlockingStatus = {
+              status: 'ROUTING_RECEIVED',
+              routingPath: fleetTask.fleetRoutingDecision || 'Fleet Routing',
+              blockedActions: [],
+              isByov: false,
+            };
+          }
+        }
+        
+        return {
+          ...item,
+          currentBlockingStatus,
+        };
+      }));
+      
+      res.json(enrichedItems);
     } catch (error) {
       console.error('Error fetching unified queue items:', error);
       res.status(500).json({ message: "Failed to fetch queue items" });
