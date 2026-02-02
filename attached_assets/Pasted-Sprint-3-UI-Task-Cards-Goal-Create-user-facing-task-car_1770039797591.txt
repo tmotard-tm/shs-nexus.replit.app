@@ -1,0 +1,112 @@
+Sprint 3: UI Task Cards
+Goal: Create user-facing task cards with proper instructions
+
+Context
+Tools task cards show different content based on:
+
+BYOV vs Company Vehicle
+Routing status (pending, PMF, Pep Boys, Reassign)
+Card Variants
+BYOV Technician
++-----------------------------------------------------+
+| TOOLS - Recover Equipment                    [Day 0] |
++-----------------------------------------------------+
+| Technician: John Smith                              |
+| Truck: 88-1234                                      |
+| Type: BYOV [YES]                                    |
+|                                                     |
+| Status: Ready to proceed                            |
+|                                                     |
+| Instructions:                                       |
+| 1. Check Segno for open orders                      |
+| 2. Call technician                                  |
+| 3. Issue QR codes to Lawrence, KS                   |
+|                                                     |
+| [Issue QR Codes]  [Mark Complete]                   |
++-----------------------------------------------------+
+Company Vehicle (Blocked)
++-----------------------------------------------------+
+| TOOLS - Recover Equipment                    [Day 0] |
++-----------------------------------------------------+
+| Technician: Jane Doe                                |
+| Truck: 12-5678                                      |
+| Type: Company Vehicle                               |
+|                                                     |
+| [BLOCKED] Awaiting Fleet routing decision           |
+|                                                     |
+| You can complete these now:                         |
+| [OK] Check Segno for open orders                    |
+| [OK] Attempt to contact technician                  |
+|                                                     |
+| Blocked until routing confirmed:                    |
+| [X] Issue QR codes                                  |
+| [X] Coordinate tool audit                           |
+|                                                     |
+| Workaround: Check FleetScope for routing            |
+|                                                     |
+| [Check FleetScope]  [Refresh Status]                |
++-----------------------------------------------------+
+PMF Routing
++-----------------------------------------------------+
+| TOOLS - Recover Equipment                    [Day 0] |
++-----------------------------------------------------+
+| Technician: Jane Doe                                |
+| Truck: 12-5678                                      |
+| Routing: PMF                                        |
+|                                                     |
+| Status: No action required                          |
+|                                                     |
+| Instructions:                                       |
+| 1. Tools will stay in the vehicle                   |
+| 2. PMF will perform tool audit                      |
+| 3. Audit cost: $135 per vehicle                     |
+|                                                     |
+| [Mark Complete]                                     |
++-----------------------------------------------------+
+Pep Boys Routing
++-----------------------------------------------------+
+| TOOLS - Recover Equipment                    [Day 0] |
++-----------------------------------------------------+
+| Technician: Jane Doe                                |
+| Truck: 12-5678                                      |
+| Routing: PEP BOYS                                   |
+|                                                     |
+| [CRITICAL] Issue QR codes BEFORE truck pickup       |
+|                                                     |
+| Instructions:                                       |
+| 1. Generate QR codes for tool return                |
+| 2. Email QR codes to technician's personal email    |
+| 3. Instruct tech to ship before truck pickup        |
+|                                                     |
+| [Issue QR Codes]  [Mark Complete]                   |
++-----------------------------------------------------+
+Reassigned
++-----------------------------------------------------+
+| TOOLS - Recover Equipment                    [Day 0] |
++-----------------------------------------------------+
+| Technician: Jane Doe                                |
+| Truck: 12-5678                                      |
+| Routing: REASSIGNED TO NEW HIRE                     |
+|                                                     |
+| Instructions:                                       |
+| 1. Track this truck for new hire tool audit         |
+| 2. Note new hire name when assigned                 |
+| 3. Verify tool audit during new hire onboarding     |
+|                                                     |
+| [Mark Complete]                                     |
++-----------------------------------------------------+
+Implementation
+Follow existing patterns (Assets, Inventory task cards)
+Use the blocking logic from Sprint 2
+Add Tools to sidebar queue list if not auto-populated
+Constraints
+ONLY build UI components
+Do NOT change Phase 2 trigger yet
+Acceptance Criteria
+ Task card renders for all 5 variants
+ BYOV badge displays correctly
+ Blocked state shows workaround
+ Routing-specific instructions display
+ Mark Complete button works
+When Done
+Report: files changed, what works, any issues, questions for PM.
