@@ -62,6 +62,7 @@ export interface RolePermissionSettings {
       assetsQueue: boolean;
       inventoryQueue: boolean;
       fleetQueue: boolean;
+      toolsQueue: boolean;
     };
     management: {
       enabled: boolean;

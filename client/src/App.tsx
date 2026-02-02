@@ -29,6 +29,7 @@ import Integrations from "@/pages/integrations";
 import HolmanIntegration from "@/pages/holman-integration";
 import QueueManagement from "@/pages/queue-management";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
+import ToolsQueuePage from "@/pages/tools-queue";
 import UserManagement from "@/pages/user-management";
 import TemplateManagement from "@/pages/template-management";
 import RolePermissions from "@/pages/role-permissions";
@@ -242,6 +243,12 @@ function Router() {
 
       <Route path="/fleet-queue">
         <Redirect to="/queue-management?dept=fleet" />
+      </Route>
+
+      <Route path="/tools-queue">
+        <ProtectedRoute>
+          <ToolsQueuePage />
+        </ProtectedRoute>
       </Route>
 
       <Route path="/decommissions-queue">
