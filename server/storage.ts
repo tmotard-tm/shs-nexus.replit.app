@@ -2087,21 +2087,25 @@ export class MemStorage implements IStorage {
   // Workflow automation function - triggers Phase 2 after ALL Day 0 tasks complete
   async triggerNextWorkflowStep(completedItem: QueueItem): Promise<void> {
     // Only proceed if this item is part of a workflow
-    if (!completedItem.workflowId || !completedItem.workflowStep) return;
+    if (!completedItem.workflowId) return;
 
     try {
       const itemData = completedItem.data ? JSON.parse(completedItem.data) : null;
-      if (!itemData) return;
 
       // Two-Phase Offboarding System:
-      // Phase 1 (Day 0): Tasks 1-4 run in parallel (NTAO, Equipment, Fleet, Inventory)
+      // Phase 1 (Day 0): Tasks 1-5 run in parallel (NTAO, Equipment, Fleet, Inventory, Tools)
       // Phase 2 (Day 1-5): Auto-generate Fleet follow-up tasks ONLY after ALL Day 0 tasks complete
       
-      // Check if this is a Day 0 task completion
-      if (itemData.isDay0Task && itemData.phase === "day0") {
+      // Check if this is a Day 0 task completion (Day 0 tasks don't require workflowStep)
+      if (itemData && itemData.isDay0Task && itemData.phase === "day0") {
+        console.log(`Day 0 task detected: ${completedItem.title} - triggering Phase 2 check`);
         await this.checkAllDay0TasksAndTriggerPhase2(completedItem);
         return;
       }
+
+      // For legacy workflow support, require workflowStep
+      if (!completedItem.workflowStep) return;
+      if (!itemData) return;
 
       // Legacy workflow support - keeping existing logic for non-Day0 workflows
       const triggerData = completedItem.triggerData ? JSON.parse(completedItem.triggerData) : itemData;
@@ -5553,21 +5557,25 @@ export class DatabaseStorage implements IStorage {
   // Workflow automation function - triggers Phase 2 after ALL Day 0 tasks complete
   async triggerNextWorkflowStep(completedItem: QueueItem): Promise<void> {
     // Only proceed if this item is part of a workflow
-    if (!completedItem.workflowId || !completedItem.workflowStep) return;
+    if (!completedItem.workflowId) return;
 
     try {
       const itemData = completedItem.data ? JSON.parse(completedItem.data) : null;
-      if (!itemData) return;
-
+      
       // Two-Phase Offboarding System:
       // Phase 1 (Day 0): Tasks 1-5 run in parallel (NTAO, Equipment, Fleet, Inventory, Tools)
       // Phase 2 (Day 1-5): Auto-generate Fleet follow-up tasks ONLY after ALL Day 0 tasks complete
       
-      // Check if this is a Day 0 task completion
-      if (itemData.isDay0Task && itemData.phase === "day0") {
+      // Check if this is a Day 0 task completion (Day 0 tasks don't require workflowStep)
+      if (itemData && itemData.isDay0Task && itemData.phase === "day0") {
+        console.log(`Day 0 task detected: ${completedItem.title} - triggering Phase 2 check`);
         await this.checkAllDay0TasksAndTriggerPhase2(completedItem);
         return;
       }
+
+      // For legacy workflow support, require workflowStep
+      if (!completedItem.workflowStep) return;
+      if (!itemData) return;
 
       // Legacy workflow support - keeping existing logic for non-Day0 workflows
       const triggerData = completedItem.triggerData ? JSON.parse(completedItem.triggerData) : itemData;
