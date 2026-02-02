@@ -1,6 +1,6 @@
 # Nexus System Architecture
 
-> **Last Updated**: 2026-01-30
+> **Last Updated**: 2026-02-02
 > **Purpose**: The "Truth" document for understanding how Nexus works. Read this first.
 
 ---
@@ -60,7 +60,7 @@ Nexus is an **enterprise task management operations platform** that:
 | `routes.ts` | All REST API endpoints |
 | `storage.ts` | Database abstraction (MemStorage for dev, DatabaseStorage for prod) |
 | `snowflake-sync-service.ts` | Automated sync from Snowflake data warehouse |
-| `byov-utils.ts` | **NEW** BYOV detection logic and Tools task status utilities |
+| `byov-utils.ts` | BYOV detection logic and Tools task status utilities |
 | `db.ts` | Database connection setup |
 | `auth.ts` | Authentication middleware |
 
@@ -69,33 +69,94 @@ Nexus is an **enterprise task management operations platform** that:
 | File | Purpose |
 |------|---------|
 | `schema.ts` | Drizzle ORM schema definitions (source of truth for DB structure) |
+| `page-registry.ts` | Page definitions for role permissions |
 
 ### Frontend (`client/src/`)
 
 | Directory/File | Purpose |
 |----------------|---------|
-| `pages/` | Page components (queue-management, fleet, offboard-technician, etc.) |
+| `pages/` | Page components (queue-management, fleet, offboard-technician, tools-queue, etc.) |
 | `components/` | Reusable UI components |
 | `hooks/` | Custom React hooks (useAuth, use-toast, etc.) |
-| `lib/` | Utilities (queryClient, utils) |
+| `lib/` | Utilities (queryClient, utils, role-permissions) |
 
 ---
 
 ## Queue System
 
 ### Queue Types
-- **Onboarding Queue** - New hire tasks
-- **Offboarding Queue** - Termination tasks
+- **NTAO Queue** - New Technician Account Operations
+- **Assets Queue** - Equipment/asset management
 - **Fleet Queue** - Vehicle routing decisions
-- **Tools Queue** - **NEW** Tool retrieval/QR code tasks
+- **Inventory Queue** - Parts/inventory management
+- **Tools Queue** - Tool retrieval/QR code tasks
 
 ### Queue Item Schema
 All queues share the `queueItems` table with these key fields:
-- `module` - Which queue (onboarding, offboarding, fleet, tools)
-- `status` - Task status
+- `module` - Which queue (ntao, assets, fleet, inventory, tools)
+- `status` - Task status (pending, in_progress, completed)
 - `workflowId` - Links related tasks across queues
-- `isByov` - **NEW** BYOV flag for tools tasks
-- `blockedActions` - **NEW** Actions blocked until conditions met
+- `workflowStep` - Order within workflow (legacy) or null for Day 0 tasks
+- `isByov` - BYOV flag for tools tasks
+- `blockedActions` - Actions blocked until conditions met
+- `fleetRoutingDecision` - PMF, Pep Boys, or Reassigned
+
+---
+
+## Two-Phase Offboarding Workflow
+
+### Phase 1: Day 0 (Parallel)
+All 5 tasks created simultaneously, can be completed in any order:
+
+```
+                    ┌─────────────┐
+                    │ Termination │
+                    │   Trigger   │
+                    └──────┬──────┘
+                           │
+           ┌───────┬───────┼───────┬───────┐
+           ▼       ▼       ▼       ▼       ▼
+       ┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐
+       │ NTAO ││Assets││ Fleet││ Inv  ││Tools │
+       │Task 1││Task 2││Task 3││Task 4││Task 5│
+       └──┬───┘└──┬───┘└──┬───┘└──┬───┘└──┬───┘
+          │       │       │       │       │
+          └───────┴───────┴───┬───┴───────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │ ALL 5 COMPLETED?  │
+                    └─────────┬─────────┘
+                              │ Yes
+                              ▼
+                    ┌─────────────────────┐
+                    │  PHASE 2 TRIGGERED  │
+                    └─────────────────────┘
+```
+
+### Phase 2: Day 1-5 (Auto-Generated)
+Created automatically when ALL Day 0 tasks complete:
+
+1. **Vehicle Retrieval** (Day 1-3) - Retrieve vehicle from technician
+2. **Shop Coordination** (Day 3-5) - Process vehicle at service center
+
+### Trigger Logic (`server/storage.ts`)
+
+```typescript
+triggerNextWorkflowStep(completedItem) {
+  // Day 0 tasks don't require workflowStep
+  if (itemData.isDay0Task && itemData.phase === "day0") {
+    checkAllDay0TasksAndTriggerPhase2(completedItem);
+    return;
+  }
+  // Legacy workflow handling for workflowStep-based flows
+}
+
+checkAllDay0TasksAndTriggerPhase2(completedItem) {
+  // Get all Day 0 tasks for this workflowId
+  // Check if ALL 5 are completed
+  // If yes, create Phase 2 Fleet tasks
+}
+```
 
 ---
 
@@ -112,12 +173,31 @@ All queues share the `queueItems` table with these key fields:
    - BYOV techs: `isByov=true`, `blockedActions=[]`, status=`ROUTING_RECEIVED`
    - Non-BYOV techs: `isByov=false`, `blockedActions=['issue_qr_codes','coordinate_audit']`, status=`AWAITING_ROUTING`
 
-3. **Dynamic Status Check** (GET `/api/tools-queue/:id`)
+3. **Dynamic Status Check** (GET `/api/tools-queue/:id` and `/api/queues`)
    - Non-BYOV tasks check if Fleet task is complete
-   - If complete: `blockedActions` cleared, status changes to `ROUTING_RECEIVED`
+   - If complete and routing received: `blockedActions` cleared
+
+### Routing Decisions
+- **PMF**: Tools stay in vehicle, no action needed
+- **Pep Boys**: CRITICAL - Issue QR codes BEFORE truck pickup
+- **Reassigned**: Track for new hire tool audit
 
 ### Owner Assignment
 Tools tasks auto-assigned to: `joefree.semilla@transformco.com` (Joefree Semilla)
+
+---
+
+## Tools Queue Page (`/tools-queue`)
+
+### 5 Task Card Variants
+
+| Variant | Border Color | Condition | Actions |
+|---------|--------------|-----------|---------|
+| BYOV | Green | `isByov=true` | Issue QR Codes available |
+| Blocked | Yellow | Non-BYOV, no routing | Actions disabled |
+| PMF | Blue | `fleetRoutingDecision='pmf'` | No action required |
+| Pep Boys | Red | `fleetRoutingDecision='pep_boys'` | CRITICAL: Issue QR first |
+| Reassigned | Purple | `fleetRoutingDecision='reassigned'` | Track for audit |
 
 ---
 
@@ -146,7 +226,7 @@ Tools tasks auto-assigned to: `joefree.semilla@transformco.com` (Joefree Semilla
 | Table | Purpose |
 |-------|---------|
 | `users` | User accounts and roles |
-| `queue_items` | All queue tasks (onboarding, offboarding, fleet, tools) |
+| `queue_items` | All queue tasks (ntao, assets, fleet, inventory, tools) |
 | `all_techs` | Synced employee roster from Snowflake |
 | `sync_logs` | Audit trail for sync operations |
 | `role_permissions` | JSONB permission settings per role |
@@ -154,17 +234,21 @@ Tools tasks auto-assigned to: `joefree.semilla@transformco.com` (Joefree Semilla
 
 ---
 
-## Current State (2026-01-30)
+## Current State (2026-02-02)
 
 ### What's Working
 - Sprint 1: Tools queue fully implemented
 - Sprint 2: BYOV detection and blocking logic complete
-- Dynamic status computation on GET endpoint
+- Sprint 3: Tools Queue page with 5 task card variants
+- Sprint 4: DatabaseStorage has full workflow automation methods
+- Sprint 5: All test scenarios passing, bugs fixed
 
-### What's Next (Sprint 3)
-- Add `currentBlockingStatus` to list endpoint
-- Build Tools task card UI
-- Implement action buttons with blocking enforcement
+### Test Results (All Passing)
+1. BYOV Technician - Green badge, not blocked
+2. Company Vehicle (No Routing) - Yellow blocked state
+3. Company Vehicle (PMF Routing) - Blue badge
+4. Company Vehicle (Pep Boys) - Red critical warning
+5. Phase 2 Trigger - All 5 Day 0 → Phase 2 tasks created
 
 ### Known Issues
 - None blocking
@@ -188,3 +272,8 @@ npm run db:push --force # Force sync (use carefully)
 - `DATABASE_URL` - PostgreSQL connection string
 - `SNOWFLAKE_*` - Snowflake credentials
 - `HOLMAN_*` - Holman API credentials
+
+### Test Credentials
+- Enterprise ID: `developer`
+- Password: `test123`
+- User ID: `test-developer-001`

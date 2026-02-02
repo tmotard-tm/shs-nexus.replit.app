@@ -1,5 +1,35 @@
 # Enhancements & Bug Fixes Log
 
+## 2026-02-02
+
+### Bugs Fixed
+
+| Issue | Description | Resolution |
+|-------|-------------|------------|
+| Phase 2 trigger blocked | `triggerNextWorkflowStep()` had early return on missing `workflowStep` | Moved Day 0 task check before workflowStep requirement |
+| Routing decision not persisting | `/api/tools-queue/:id/assign` not saving `fleetRoutingDecision` | Updated endpoint to save routing and clear blockedActions |
+| Phase 2 task titles show "undefined" | techName not extracted from trigger data | Added fallback chain for techName, vehicleNumber, employeeId |
+| currentBlockingStatus missing in /api/queues | Tools items didn't show blocking status | Added dynamic computation matching tools-queue endpoint |
+
+### Enhancements Made
+
+| Enhancement | Description |
+|-------------|-------------|
+| Tools Queue Page | New `/tools-queue` page with 5 specialized task card variants |
+| Routing-Specific Badges | PMF (blue), Pep Boys (red), Reassigned (purple), Blocked (yellow) |
+| Phase 2 Trigger Chain | All 5 Day 0 tasks (NTAO, Assets, Fleet, Inventory, Tools) check before Phase 2 |
+| DatabaseStorage Parity | Added all workflow automation methods to DatabaseStorage class |
+
+### Technical Debt Identified
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| No automated tests for Phase 2 trigger | Medium | Consider adding integration tests |
+| Legacy workflows using workflowStep | Low | Ensure regression testing for older workflows |
+| BYOV unit tests still needed | Low | Add automated tests for byov-utils.ts |
+
+---
+
 ## 2026-01-30
 
 ### Bugs Fixed
@@ -20,7 +50,7 @@
 
 | Item | Priority | Notes |
 |------|----------|-------|
-| List endpoint missing blocking status | Medium | Sprint 3 will add `currentBlockingStatus` to list endpoint |
+| List endpoint missing blocking status | ✅ Fixed | Sprint 3 added `currentBlockingStatus` to list endpoint |
 | No automated tests for BYOV logic | Low | Consider adding unit tests for byov-utils.ts |
 
 ---
