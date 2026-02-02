@@ -43,7 +43,8 @@ export function PickUpRequestDialog({
             ntao: "NTAO",
             assets: "ASSETS", 
             inventory: "INVENTORY",
-            fleet: "FLEET"
+            fleet: "FLEET",
+            tools: "TOOLS"
           };
           return user.departments.includes(queueModuleMap[queueModule]);
         }
