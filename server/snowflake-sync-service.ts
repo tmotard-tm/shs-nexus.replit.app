@@ -17,21 +17,16 @@ interface SnowflakeAllTechRow {
   EMPLOYMENT_STATUS?: string;
   EFFDT?: string; // Effective date - used to identify termed employees
   DATE_LAST_WORKED?: string; // Last day worked for termed employees
-  // Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW
-  PERSONAL_EMAIL?: string;
-  WORK_EMAIL?: string;
-  MOBILE_PHONE?: string;
-  HOME_PHONE?: string;
-  WORK_PHONE?: string;
-  ADDRESS_LINE1?: string;
-  ADDRESS_LINE2?: string;
-  CITY?: string;
-  STATE?: string;
-  POSTAL_CODE?: string;
-  COUNTRY?: string;
-  EMERGENCY_CONTACT_NAME?: string;
-  EMERGENCY_CONTACT_PHONE?: string;
-  // TPMS assignment from TPMS_EXTRACT_LAST_ASSIGNED
+  // Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW (join by EMPLID)
+  SNSTV_HOME_ADDR1?: string;
+  SNSTV_HOME_ADDR2?: string;
+  SNSTV_HOME_CITY?: string;
+  SNSTV_HOME_STATE?: string;
+  SNSTV_HOME_POSTAL?: string;
+  SNSTV_MAIN_PHONE?: string;
+  SNSTV_CELL_PHONE?: string;
+  SNSTV_HOME_PHONE?: string;
+  // TPMS assignment from TPMS_EXTRACT_LAST_ASSIGNED (join by ENTERPRISE_ID)
   TRUCK_LU?: string;
 }
 
@@ -532,21 +527,16 @@ export class SnowflakeSyncService {
           t.EMPLOYMENT_STATUS,
           t.EFFDT,
           t.DATE_LAST_WORKED,
-          -- Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW (all columns except DATA_USAGE_NOTE)
-          c.PERSONAL_EMAIL,
-          c.WORK_EMAIL,
-          c.MOBILE_PHONE,
-          c.HOME_PHONE,
-          c.WORK_PHONE,
-          c.ADDRESS_LINE1,
-          c.ADDRESS_LINE2,
-          c.CITY,
-          c.STATE,
-          c.POSTAL_CODE,
-          c.COUNTRY,
-          c.EMERGENCY_CONTACT_NAME,
-          c.EMERGENCY_CONTACT_PHONE,
-          -- TPMS truck assignment
+          -- Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW (join by EMPLID)
+          c.SNSTV_HOME_ADDR1,
+          c.SNSTV_HOME_ADDR2,
+          c.SNSTV_HOME_CITY,
+          c.SNSTV_HOME_STATE,
+          c.SNSTV_HOME_POSTAL,
+          c.SNSTV_MAIN_PHONE,
+          c.SNSTV_CELL_PHONE,
+          c.SNSTV_HOME_PHONE,
+          -- TPMS truck assignment (join by ENTERPRISE_ID)
           tpms.TRUCK_LU
         FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
         LEFT JOIN PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
@@ -588,21 +578,16 @@ export class SnowflakeSyncService {
             employmentStatus: row.EMPLOYMENT_STATUS || null,
             effectiveDate: this.formatDateForDB(row.EFFDT ?? null),
             lastDayWorked: this.formatDateForDB(row.DATE_LAST_WORKED ?? null),
-            // Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW
-            personalEmail: row.PERSONAL_EMAIL || null,
-            workEmail: row.WORK_EMAIL || null,
-            mobilePhone: row.MOBILE_PHONE || null,
-            homePhone: row.HOME_PHONE || null,
-            workPhone: row.WORK_PHONE || null,
-            addressLine1: row.ADDRESS_LINE1 || null,
-            addressLine2: row.ADDRESS_LINE2 || null,
-            city: row.CITY || null,
-            state: row.STATE || null,
-            postalCode: row.POSTAL_CODE || null,
-            country: row.COUNTRY || null,
-            emergencyContactName: row.EMERGENCY_CONTACT_NAME || null,
-            emergencyContactPhone: row.EMERGENCY_CONTACT_PHONE || null,
-            // TPMS truck assignment
+            // Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW (join by EMPLID)
+            homeAddr1: row.SNSTV_HOME_ADDR1 || null,
+            homeAddr2: row.SNSTV_HOME_ADDR2 || null,
+            homeCity: row.SNSTV_HOME_CITY || null,
+            homeState: row.SNSTV_HOME_STATE || null,
+            homePostal: row.SNSTV_HOME_POSTAL || null,
+            mainPhone: row.SNSTV_MAIN_PHONE || null,
+            cellPhone: row.SNSTV_CELL_PHONE || null,
+            homePhone: row.SNSTV_HOME_PHONE || null,
+            // TPMS truck assignment (join by ENTERPRISE_ID)
             truckLu: row.TRUCK_LU || null,
           }));
 
