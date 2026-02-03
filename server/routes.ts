@@ -6052,58 +6052,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // TEMPORARY: Diagnostic endpoint to check EMPLID format differences
-  app.get("/api/snowflake/diagnose-emplid", async (req: any, res) => {
-    try {
-      const snowflakeService = getSnowflakeService();
-      
-      // Check roster EMPL_ID format from DRIVELINE_ALL_TECHS (actual source)
-      const rosterRows = await snowflakeService.executeQuery(`
-        SELECT EMPL_ID, ENTERPRISE_ID, FULL_NAME 
-        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS 
-        WHERE EMPL_ID IS NOT NULL 
-        LIMIT 5
-      `);
-      
-      // Check contact EMPLID format
-      const contactRows = await snowflakeService.executeQuery(`
-        SELECT EMPLID, SNSTV_CELL_PHONE, SNSTV_HOME_CITY 
-        FROM PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW 
-        WHERE EMPLID IS NOT NULL 
-        LIMIT 5
-      `);
-      
-      // Count matches with direct join
-      const matchCount = await snowflakeService.executeQuery(`
-        SELECT COUNT(*) as MATCH_COUNT
-        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
-        INNER JOIN PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
-          ON t.EMPL_ID = c.EMPLID
-      `);
-      
-      // Try to find a specific match
-      const sampleMatch = await snowflakeService.executeQuery(`
-        SELECT t.EMPL_ID, c.EMPLID, t.FULL_NAME, c.SNSTV_CELL_PHONE
-        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
-        INNER JOIN PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
-          ON t.EMPL_ID = c.EMPLID
-        LIMIT 5
-      `);
-      
-      res.json({
-        roster_sample: rosterRows,
-        roster_sample_info: "EMPL_ID format from DRIVELINE_ALL_TECHS",
-        contact_sample: contactRows,
-        contact_sample_info: "EMPLID format from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW",
-        match_count: matchCount,
-        sample_matches: sampleMatch
-      });
-    } catch (error: any) {
-      console.error("Error diagnosing EMPLID:", error);
-      res.status(500).json({ message: error.message });
-    }
-  });
-
   app.get("/api/snowflake/debug", requireAuth, async (req: any, res) => {
     try {
       const account = process.env.SNOWFLAKE_ACCOUNT;

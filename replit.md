@@ -99,17 +99,21 @@ Preferred communication style: Simple, everyday language.
 ## 2026-02-03: Employee Roster Data Enrichment ✅
 
 ### Snowflake View Joins for Enhanced Employee Data
-- **Contact Info Integration**: Joined `PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW` using EMPLID
+- **Contact Info Integration**: Joined `PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW` using EMPLID
   - Added columns: homeAddr1, homeAddr2, homeCity, homeState, homePostal (address fields)
   - Added columns: mainPhone, cellPhone, homePhone (phone fields)
   - Snowflake column mapping: SNSTV_HOME_ADDR1, SNSTV_HOME_ADDR2, SNSTV_HOME_CITY, SNSTV_HOME_STATE, SNSTV_HOME_POSTAL, SNSTV_MAIN_PHONE, SNSTV_CELL_PHONE, SNSTV_HOME_PHONE
+  - **Note**: Schema is `BATCH_VIEWS` (not `BACH_VIEWS`)
 - **TPMS Truck Assignment**: Joined `PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED` using ENTERPRISE_ID
   - Added: truckLu (TRUCK_LU column from TPMS extract)
+- **Employee Roster UI**: Added new columns to Integrations page table (Truck LU, Cell Phone, Main Phone, Home Address)
+  - Enhanced search to include truck, phone, and city fields
 
 ### Key Files Changed
 - `shared/schema.ts` - Added 9 new columns to `allTechs` table (8 contact + 1 TPMS)
 - `server/snowflake-sync-service.ts` - Updated SQL query with LEFT JOINs and data mapping
 - `server/storage.ts` - Updated `bulkUpsertAllTechs()` to handle new columns
+- `client/src/pages/integrations.tsx` - Added new columns to Employee Roster table with enhanced search
 
 ---
 
