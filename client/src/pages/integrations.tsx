@@ -773,7 +773,7 @@ export default function Integrations() {
                       <div className="relative flex-1">
                         <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                         <Input
-                          placeholder="Search by name, ID, or Enterprise ID..."
+                          placeholder="Search by name, ID, truck, phone, city..."
                           value={rosterSearch}
                           onChange={(e) => setRosterSearch(e.target.value)}
                           className="pl-8 h-8 text-sm"
@@ -816,15 +816,24 @@ export default function Integrations() {
                               <TableHead className="font-semibold">Job Title</TableHead>
                               <TableHead className="font-semibold">District</TableHead>
                               <TableHead className="font-semibold">Status</TableHead>
+                              <TableHead className="font-semibold">Truck LU</TableHead>
+                              <TableHead className="font-semibold">Cell Phone</TableHead>
+                              <TableHead className="font-semibold">Main Phone</TableHead>
+                              <TableHead className="font-semibold">Home Address</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {allTechs
                               .filter(tech => {
+                                const searchLower = rosterSearch.toLowerCase();
                                 const matchesSearch = !rosterSearch || 
-                                  tech.techName?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
-                                  tech.employeeId?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
-                                  tech.techRacfid?.toLowerCase().includes(rosterSearch.toLowerCase());
+                                  tech.techName?.toLowerCase().includes(searchLower) ||
+                                  tech.employeeId?.toLowerCase().includes(searchLower) ||
+                                  tech.techRacfid?.toLowerCase().includes(searchLower) ||
+                                  tech.truckLu?.toLowerCase().includes(searchLower) ||
+                                  tech.cellPhone?.toLowerCase().includes(searchLower) ||
+                                  tech.mainPhone?.toLowerCase().includes(searchLower) ||
+                                  tech.homeCity?.toLowerCase().includes(searchLower);
                                 const matchesStatus = rosterStatusFilter === "all" || tech.employmentStatus === rosterStatusFilter;
                                 return matchesSearch && matchesStatus;
                               })
@@ -844,6 +853,12 @@ export default function Integrations() {
                                       {tech.employmentStatus === 'A' ? 'Active' : tech.employmentStatus || '?'}
                                     </Badge>
                                   </TableCell>
+                                  <TableCell className="font-mono text-xs">{tech.truckLu || '-'}</TableCell>
+                                  <TableCell className="text-xs">{tech.cellPhone || '-'}</TableCell>
+                                  <TableCell className="text-xs">{tech.mainPhone || '-'}</TableCell>
+                                  <TableCell className="text-xs max-w-[200px] truncate" title={tech.homeAddr1 ? `${tech.homeAddr1}${tech.homeAddr2 ? ', ' + tech.homeAddr2 : ''}, ${tech.homeCity || ''}, ${tech.homeState || ''} ${tech.homePostal || ''}` : ''}>
+                                    {tech.homeAddr1 ? `${tech.homeCity || ''}, ${tech.homeState || ''}` : '-'}
+                                  </TableCell>
                                 </TableRow>
                               ))}
                           </TableBody>
@@ -854,17 +869,27 @@ export default function Integrations() {
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
                         <span>
                           Showing {Math.min(50, allTechs.filter(tech => {
+                            const searchLower = rosterSearch.toLowerCase();
                             const matchesSearch = !rosterSearch || 
-                              tech.techName?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
-                              tech.employeeId?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
-                              tech.techRacfid?.toLowerCase().includes(rosterSearch.toLowerCase());
+                              tech.techName?.toLowerCase().includes(searchLower) ||
+                              tech.employeeId?.toLowerCase().includes(searchLower) ||
+                              tech.techRacfid?.toLowerCase().includes(searchLower) ||
+                              tech.truckLu?.toLowerCase().includes(searchLower) ||
+                              tech.cellPhone?.toLowerCase().includes(searchLower) ||
+                              tech.mainPhone?.toLowerCase().includes(searchLower) ||
+                              tech.homeCity?.toLowerCase().includes(searchLower);
                             const matchesStatus = rosterStatusFilter === "all" || tech.employmentStatus === rosterStatusFilter;
                             return matchesSearch && matchesStatus;
                           }).length)} of {allTechs.filter(tech => {
+                            const searchLower = rosterSearch.toLowerCase();
                             const matchesSearch = !rosterSearch || 
-                              tech.techName?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
-                              tech.employeeId?.toLowerCase().includes(rosterSearch.toLowerCase()) ||
-                              tech.techRacfid?.toLowerCase().includes(rosterSearch.toLowerCase());
+                              tech.techName?.toLowerCase().includes(searchLower) ||
+                              tech.employeeId?.toLowerCase().includes(searchLower) ||
+                              tech.techRacfid?.toLowerCase().includes(searchLower) ||
+                              tech.truckLu?.toLowerCase().includes(searchLower) ||
+                              tech.cellPhone?.toLowerCase().includes(searchLower) ||
+                              tech.mainPhone?.toLowerCase().includes(searchLower) ||
+                              tech.homeCity?.toLowerCase().includes(searchLower);
                             const matchesStatus = rosterStatusFilter === "all" || tech.employmentStatus === rosterStatusFilter;
                             return matchesSearch && matchesStatus;
                           }).length} employees
