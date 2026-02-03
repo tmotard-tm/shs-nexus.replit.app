@@ -60,11 +60,16 @@ export default function TechRoster() {
   const activeFiltersCount = [statusFilter, districtFilter].filter(f => f !== "all").length;
 
   const filteredTechs = techs.filter(tech => {
+    const searchLower = searchQuery.toLowerCase();
     const matchesSearch = !searchQuery || 
-      tech.techName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tech.employeeId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tech.techRacfid?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tech.jobTitle?.toLowerCase().includes(searchQuery.toLowerCase());
+      tech.techName?.toLowerCase().includes(searchLower) ||
+      tech.employeeId?.toLowerCase().includes(searchLower) ||
+      tech.techRacfid?.toLowerCase().includes(searchLower) ||
+      tech.jobTitle?.toLowerCase().includes(searchLower) ||
+      tech.truckLu?.toLowerCase().includes(searchLower) ||
+      tech.cellPhone?.toLowerCase().includes(searchLower) ||
+      tech.mainPhone?.toLowerCase().includes(searchLower) ||
+      tech.homeCity?.toLowerCase().includes(searchLower);
     
     const matchesStatus = statusFilter === "all" || tech.employmentStatus === statusFilter;
     const matchesDistrict = districtFilter === "all" || tech.districtNo === districtFilter;
@@ -135,7 +140,7 @@ export default function TechRoster() {
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search by name, employee ID, Enterprise ID, or job title..."
+                      placeholder="Search by name, employee ID, Enterprise ID, job title, truck, phone, or city..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-9"
@@ -231,6 +236,10 @@ export default function TechRoster() {
                           <th className="text-left p-3 font-medium">District</th>
                           <th className="text-left p-3 font-medium">Planning Area</th>
                           <th className="text-left p-3 font-medium">Status</th>
+                          <th className="text-left p-3 font-medium">Truck LU</th>
+                          <th className="text-left p-3 font-medium">Cell Phone</th>
+                          <th className="text-left p-3 font-medium">Main Phone</th>
+                          <th className="text-left p-3 font-medium">Home Address</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -260,6 +269,12 @@ export default function TechRoster() {
                               >
                                 {tech.employmentStatus === 'A' ? 'Active' : tech.employmentStatus || 'Unknown'}
                               </Badge>
+                            </td>
+                            <td className="p-3 font-mono text-sm">{tech.truckLu || '-'}</td>
+                            <td className="p-3 text-sm">{tech.cellPhone || '-'}</td>
+                            <td className="p-3 text-sm">{tech.mainPhone || '-'}</td>
+                            <td className="p-3 text-sm max-w-[200px] truncate" title={tech.homeAddr1 ? `${tech.homeAddr1}${tech.homeAddr2 ? ', ' + tech.homeAddr2 : ''}, ${tech.homeCity || ''}, ${tech.homeState || ''} ${tech.homePostal || ''}` : ''}>
+                              {tech.homeCity ? `${tech.homeCity}, ${tech.homeState || ''}` : '-'}
                             </td>
                           </tr>
                         ))}
