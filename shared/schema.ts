@@ -413,6 +413,22 @@ export const allTechs = pgTable("all_techs", {
   // Termination tracking fields (for identifying termed employees)
   effectiveDate: date("effective_date"), // EFFDT - used to filter termed employees
   lastDayWorked: date("last_day_worked"), // DATE_LAST_WORKED
+  // Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW (joined by EMPLID)
+  personalEmail: text("personal_email"), // Personal email
+  workEmail: text("work_email"), // Work email
+  mobilePhone: text("mobile_phone"), // Mobile phone number
+  homePhone: text("home_phone"), // Home phone number
+  workPhone: text("work_phone"), // Work phone number
+  addressLine1: text("address_line1"), // Primary address line 1
+  addressLine2: text("address_line2"), // Primary address line 2
+  city: text("city"), // City
+  state: text("state"), // State
+  postalCode: text("postal_code"), // Postal/ZIP code
+  country: text("country"), // Country
+  emergencyContactName: text("emergency_contact_name"), // Emergency contact name
+  emergencyContactPhone: text("emergency_contact_phone"), // Emergency contact phone
+  // TPMS truck assignment from TPMS_EXTRACT_LAST_ASSIGNED (joined by ENTERPRISE_ID)
+  truckLu: text("truck_lu"), // TRUCK_LU from TPMS last assigned extract
   // Offboarding tracking (previously only in termed_techs)
   offboardingTaskCreated: boolean("offboarding_task_created").notNull().default(false),
   offboardingTaskId: varchar("offboarding_task_id"), // Reference to queue_items.id

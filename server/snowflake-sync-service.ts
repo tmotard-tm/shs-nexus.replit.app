@@ -17,6 +17,22 @@ interface SnowflakeAllTechRow {
   EMPLOYMENT_STATUS?: string;
   EFFDT?: string; // Effective date - used to identify termed employees
   DATE_LAST_WORKED?: string; // Last day worked for termed employees
+  // Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW
+  PERSONAL_EMAIL?: string;
+  WORK_EMAIL?: string;
+  MOBILE_PHONE?: string;
+  HOME_PHONE?: string;
+  WORK_PHONE?: string;
+  ADDRESS_LINE1?: string;
+  ADDRESS_LINE2?: string;
+  CITY?: string;
+  STATE?: string;
+  POSTAL_CODE?: string;
+  COUNTRY?: string;
+  EMERGENCY_CONTACT_NAME?: string;
+  EMERGENCY_CONTACT_PHONE?: string;
+  // TPMS assignment from TPMS_EXTRACT_LAST_ASSIGNED
+  TRUCK_LU?: string;
 }
 
 interface SkippedEmployee {
@@ -502,21 +518,41 @@ export class SnowflakeSyncService {
       const snowflake = getSnowflakeService();
       await snowflake.connect();
 
-      console.log('[Sync] Fetching all techs from Snowflake...');
+      console.log('[Sync] Fetching all techs from Snowflake with contact info and TPMS assignments...');
       const query = `
         SELECT 
-          EMPL_ID,
-          ENTERPRISE_ID,
-          FULL_NAME,
-          FIRST_NAME,
-          LAST_NAME,
-          JOB_TITLE,
-          DISTRICT_NO,
-          PLANNING_AREA_NM,
-          EMPLOYMENT_STATUS,
-          EFFDT,
-          DATE_LAST_WORKED
-        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS
+          t.EMPL_ID,
+          t.ENTERPRISE_ID,
+          t.FULL_NAME,
+          t.FIRST_NAME,
+          t.LAST_NAME,
+          t.JOB_TITLE,
+          t.DISTRICT_NO,
+          t.PLANNING_AREA_NM,
+          t.EMPLOYMENT_STATUS,
+          t.EFFDT,
+          t.DATE_LAST_WORKED,
+          -- Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW (all columns except DATA_USAGE_NOTE)
+          c.PERSONAL_EMAIL,
+          c.WORK_EMAIL,
+          c.MOBILE_PHONE,
+          c.HOME_PHONE,
+          c.WORK_PHONE,
+          c.ADDRESS_LINE1,
+          c.ADDRESS_LINE2,
+          c.CITY,
+          c.STATE,
+          c.POSTAL_CODE,
+          c.COUNTRY,
+          c.EMERGENCY_CONTACT_NAME,
+          c.EMERGENCY_CONTACT_PHONE,
+          -- TPMS truck assignment
+          tpms.TRUCK_LU
+        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
+        LEFT JOIN PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+          ON t.EMPL_ID = c.EMPLID
+        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
+          ON t.ENTERPRISE_ID = tpms.ENTERPRISE_ID
       `;
 
       const rawRows = await snowflake.executeQuery(query) as SnowflakeAllTechRow[];
@@ -552,6 +588,22 @@ export class SnowflakeSyncService {
             employmentStatus: row.EMPLOYMENT_STATUS || null,
             effectiveDate: this.formatDateForDB(row.EFFDT ?? null),
             lastDayWorked: this.formatDateForDB(row.DATE_LAST_WORKED ?? null),
+            // Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW
+            personalEmail: row.PERSONAL_EMAIL || null,
+            workEmail: row.WORK_EMAIL || null,
+            mobilePhone: row.MOBILE_PHONE || null,
+            homePhone: row.HOME_PHONE || null,
+            workPhone: row.WORK_PHONE || null,
+            addressLine1: row.ADDRESS_LINE1 || null,
+            addressLine2: row.ADDRESS_LINE2 || null,
+            city: row.CITY || null,
+            state: row.STATE || null,
+            postalCode: row.POSTAL_CODE || null,
+            country: row.COUNTRY || null,
+            emergencyContactName: row.EMERGENCY_CONTACT_NAME || null,
+            emergencyContactPhone: row.EMERGENCY_CONTACT_PHONE || null,
+            // TPMS truck assignment
+            truckLu: row.TRUCK_LU || null,
           }));
 
           const upsertedCount = await storage.bulkUpsertAllTechs(techDataBatch);
