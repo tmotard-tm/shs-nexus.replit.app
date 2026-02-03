@@ -28,7 +28,8 @@ import {
   X,
   AlertTriangle,
   BookOpen,
-  ListTodo
+  ListTodo,
+  Truck
 } from "lucide-react";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
 
@@ -96,7 +97,7 @@ export function WorkModuleDialog({
   const techData = taskData.technician || taskData.employee || {};
   const employeeLookupId = techData.employeeId || techData.techRacfid || techData.enterpriseId || '';
 
-  // Fetch employee roster data from all_techs to get district and other HR info
+  // Fetch employee roster data from all_techs to get district, contact info, and fleet info
   const { data: rosterData } = useQuery<{ 
     found: boolean;
     employeeId?: string;
@@ -108,6 +109,15 @@ export function WorkModuleDialog({
     districtNo?: string;
     planningAreaName?: string;
     employmentStatus?: string;
+    cellPhone?: string;
+    mainPhone?: string;
+    homePhone?: string;
+    homeAddr1?: string;
+    homeAddr2?: string;
+    homeCity?: string;
+    homeState?: string;
+    homePostal?: string;
+    truckLu?: string;
   }>({
     queryKey: ['/api/all-techs/lookup', employeeLookupId],
     queryFn: async () => {
@@ -128,6 +138,31 @@ export function WorkModuleDialog({
     planningArea: rosterData?.found ? rosterData.planningAreaName : techData.planningArea,
     jobTitle: rosterData?.found ? rosterData.jobTitle : techData.jobTitle,
     employmentStatus: rosterData?.found ? rosterData.employmentStatus : techData.employmentStatus,
+    // Contact info from roster
+    cellPhone: rosterData?.found ? rosterData.cellPhone : techData.cellPhone,
+    mainPhone: rosterData?.found ? rosterData.mainPhone : techData.mainPhone,
+    homePhone: rosterData?.found ? rosterData.homePhone : techData.homePhone,
+    // Home address from roster
+    homeAddr1: rosterData?.found ? rosterData.homeAddr1 : techData.homeAddr1,
+    homeAddr2: rosterData?.found ? rosterData.homeAddr2 : techData.homeAddr2,
+    homeCity: rosterData?.found ? rosterData.homeCity : techData.homeCity,
+    homeState: rosterData?.found ? rosterData.homeState : techData.homeState,
+    homePostal: rosterData?.found ? rosterData.homePostal : techData.homePostal,
+    // Fleet info from roster
+    truckLu: rosterData?.found ? rosterData.truckLu : techData.truckLu,
+  };
+
+  // Format phone number helper
+  const formatPhone = (phone: string | null | undefined): string => {
+    if (!phone) return 'N/A';
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 10) {
+      return `(${digits.slice(0,3)})${digits.slice(3,6)}-${digits.slice(6)}`;
+    }
+    if (digits.length === 11 && digits[0] === '1') {
+      return `(${digits.slice(1,4)})${digits.slice(4,7)}-${digits.slice(7)}`;
+    }
+    return phone;
   };
 
   // Load work template for this task
@@ -538,7 +573,7 @@ export function WorkModuleDialog({
 
           {/* Template Checklist Section */}
           <Tabs defaultValue="checklist" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="checklist" className="flex items-center gap-2" data-testid="tab-task-checklist">
                 <ListTodo className="h-4 w-4" />
                 Task Checklist
@@ -546,6 +581,10 @@ export function WorkModuleDialog({
               <TabsTrigger value="instructions" className="flex items-center gap-2" data-testid="tab-employee-details">
                 <User className="h-4 w-4" />
                 Employee Details
+              </TabsTrigger>
+              <TabsTrigger value="fleet" className="flex items-center gap-2" data-testid="tab-fleet-details">
+                <Truck className="h-4 w-4" />
+                Fleet Details
               </TabsTrigger>
             </TabsList>
             
@@ -724,15 +763,17 @@ export function WorkModuleDialog({
                   <div>
                     <div>
                       <Label className="text-sm font-medium text-primary">Contact Information</Label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
                         <div>
-                          <Label className="text-sm font-medium text-muted-foreground">Phone Number</Label>
-                          <p className="text-sm" data-testid="text-phone">
-                            {enrichedEmployeeData.phone || enrichedEmployeeData.phoneNumber || enrichedEmployeeData.cellPhone || enrichedEmployeeData.mobilePhone ||
-                             taskData.phone || taskData.phoneNumber || taskData.cellPhone || taskData.mobilePhone ||
-                             taskData.employee?.phone || taskData.employee?.phoneNumber || taskData.employee?.cellPhone ||
-                             taskData.technician?.phone || taskData.technician?.phoneNumber || taskData.technician?.cellPhone ||
-                             "N/A"}
+                          <Label className="text-sm font-medium text-muted-foreground">Cell Phone</Label>
+                          <p className="text-sm font-mono" data-testid="text-cell-phone">
+                            {formatPhone(enrichedEmployeeData.cellPhone)}
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Main Phone</Label>
+                          <p className="text-sm font-mono" data-testid="text-main-phone">
+                            {formatPhone(enrichedEmployeeData.mainPhone)}
                           </p>
                         </div>
                         <div>
@@ -745,15 +786,22 @@ export function WorkModuleDialog({
                              "N/A"}
                           </p>
                         </div>
-                        <div className="md:col-span-2">
-                          <Label className="text-sm font-medium text-muted-foreground">Full Address</Label>
+                        <div className="md:col-span-3">
+                          <Label className="text-sm font-medium text-muted-foreground">Home Address</Label>
                           <div className="text-sm" data-testid="text-address">
-                            {(enrichedEmployeeData.address || taskData.address || taskData.employee?.address || taskData.technician?.address) ? (
+                            {enrichedEmployeeData.homeAddr1 ? (
+                              <div>
+                                <p>{enrichedEmployeeData.homeAddr1}{enrichedEmployeeData.homeAddr2 ? `, ${enrichedEmployeeData.homeAddr2}` : ''}</p>
+                                <p className="text-muted-foreground">
+                                  {[enrichedEmployeeData.homeCity, enrichedEmployeeData.homeState, enrichedEmployeeData.homePostal].filter(Boolean).join(', ')}
+                                </p>
+                              </div>
+                            ) : (enrichedEmployeeData.address || taskData.address || taskData.employee?.address || taskData.technician?.address) ? (
                               <p>{enrichedEmployeeData.address || taskData.address || taskData.employee?.address || taskData.technician?.address}</p>
                             ) : (enrichedEmployeeData.street || taskData.street || taskData.employee?.street || taskData.technician?.street) ? (
                               <div>
                                 <p>{enrichedEmployeeData.street || taskData.street || taskData.employee?.street || taskData.technician?.street}</p>
-                                <p>
+                                <p className="text-muted-foreground">
                                   {[
                                     enrichedEmployeeData.city || taskData.city || taskData.employee?.city || taskData.technician?.city,
                                     enrichedEmployeeData.state || taskData.state || taskData.employee?.state || taskData.technician?.state,
@@ -860,6 +908,92 @@ export function WorkModuleDialog({
                       </div>
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="fleet" className="space-y-4">
+              {/* Fleet Details Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Truck className="h-4 w-4" />
+                    Fleet Information
+                  </CardTitle>
+                  <CardDescription>
+                    Vehicle assignment and fleet details from TPMS
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Vehicle Assignment */}
+                  <div>
+                    <Label className="text-sm font-medium text-primary">Vehicle Assignment</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Truck Number (LU)</Label>
+                        <p className="text-lg font-mono font-bold" data-testid="text-truck-lu">
+                          {enrichedEmployeeData.truckLu || taskData.truckLu || taskData.truckNumber || taskData.vehicleNumber || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Assignment Status</Label>
+                        <div className="mt-1">
+                          {enrichedEmployeeData.truckLu ? (
+                            <Badge className="bg-green-100 text-green-800">Assigned</Badge>
+                          ) : (
+                            <Badge variant="secondary">No Vehicle Assigned</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Employee Info for Fleet Context */}
+                  <div>
+                    <Label className="text-sm font-medium text-primary">Employee Fleet Context</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Employee Name</Label>
+                        <p className="text-sm font-medium" data-testid="text-fleet-employee-name">
+                          {enrichedEmployeeData.techName || enrichedEmployeeData.name || 
+                           (enrichedEmployeeData.firstName && enrichedEmployeeData.lastName 
+                             ? `${enrichedEmployeeData.firstName} ${enrichedEmployeeData.lastName}` 
+                             : "N/A")}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Enterprise ID</Label>
+                        <p className="font-mono text-sm" data-testid="text-fleet-enterprise-id">
+                          {enrichedEmployeeData.techRacfid || enrichedEmployeeData.enterpriseId || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">District</Label>
+                        <p className="text-sm" data-testid="text-fleet-district">
+                          {enrichedEmployeeData.district || enrichedEmployeeData.districtNo || "N/A"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Contact for Fleet Coordination */}
+                  <div>
+                    <Label className="text-sm font-medium text-primary">Contact for Fleet Coordination</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 p-4 bg-muted/30 rounded-lg">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Cell Phone</Label>
+                        <p className="text-sm font-mono" data-testid="text-fleet-cell-phone">
+                          {formatPhone(enrichedEmployeeData.cellPhone)}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Main Phone</Label>
+                        <p className="text-sm font-mono" data-testid="text-fleet-main-phone">
+                          {formatPhone(enrichedEmployeeData.mainPhone)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
