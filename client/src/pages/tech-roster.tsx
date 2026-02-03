@@ -226,20 +226,20 @@ export default function TechRoster() {
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table className="w-full min-w-[1400px]">
                       <thead>
                         <tr className="border-b bg-muted/50">
-                          <th className="text-left p-3 font-medium">Name</th>
-                          <th className="text-left p-3 font-medium">Employee ID</th>
-                          <th className="text-left p-3 font-medium">Enterprise ID</th>
-                          <th className="text-left p-3 font-medium">Job Title</th>
-                          <th className="text-left p-3 font-medium">District</th>
-                          <th className="text-left p-3 font-medium">Planning Area</th>
-                          <th className="text-left p-3 font-medium">Status</th>
-                          <th className="text-left p-3 font-medium">Truck LU</th>
-                          <th className="text-left p-3 font-medium">Cell Phone</th>
-                          <th className="text-left p-3 font-medium">Main Phone</th>
-                          <th className="text-left p-3 font-medium">Home Address</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Name</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Employee ID</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Enterprise ID</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Job Title</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">District</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Planning Area</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Status</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Truck LU</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Cell Phone</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Main Phone</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap min-w-[250px]">Home Address</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -249,35 +249,30 @@ export default function TechRoster() {
                             className="border-b hover:bg-muted/30 transition-colors"
                             data-testid={`row-tech-${tech.employeeId}`}
                           >
-                            <td className="p-3">
-                              <div className="font-medium">{tech.techName}</div>
-                              {tech.firstName && tech.lastName && tech.techName !== `${tech.firstName} ${tech.lastName}` && (
-                                <div className="text-sm text-muted-foreground">
-                                  {tech.firstName} {tech.lastName}
-                                </div>
-                              )}
+                            <td className="p-2">
+                              <div className="font-medium text-sm">{tech.techName}</div>
                             </td>
-                            <td className="p-3 font-mono text-sm">{tech.employeeId}</td>
-                            <td className="p-3 font-mono text-sm">{tech.techRacfid}</td>
-                            <td className="p-3 text-sm">{tech.jobTitle || '-'}</td>
-                            <td className="p-3 text-sm">{tech.districtNo || '-'}</td>
-                            <td className="p-3 text-sm">{tech.planningAreaName || '-'}</td>
-                            <td className="p-3">
+                            <td className="p-2 font-mono text-xs">{tech.employeeId}</td>
+                            <td className="p-2 font-mono text-xs">{tech.techRacfid}</td>
+                            <td className="p-2 text-xs">{tech.jobTitle || '-'}</td>
+                            <td className="p-2 text-xs">{tech.districtNo || '-'}</td>
+                            <td className="p-2 text-xs">{tech.planningAreaName || '-'}</td>
+                            <td className="p-2">
                               <Badge 
                                 variant={tech.employmentStatus === 'A' ? 'default' : 'secondary'}
-                                className={tech.employmentStatus === 'A' ? 'bg-green-100 text-green-800' : ''}
+                                className={`text-xs ${tech.employmentStatus === 'A' ? 'bg-green-100 text-green-800' : ''}`}
                               >
-                                {tech.employmentStatus === 'A' ? 'Active' : tech.employmentStatus || 'Unknown'}
+                                {tech.employmentStatus === 'A' ? 'A' : tech.employmentStatus || '?'}
                               </Badge>
                             </td>
-                            <td className="p-3 font-mono text-sm">{tech.truckLu || '-'}</td>
-                            <td className="p-3 text-sm">{tech.cellPhone || '-'}</td>
-                            <td className="p-3 text-sm">{tech.mainPhone || '-'}</td>
-                            <td className="p-3 text-sm max-w-[300px]" title={[tech.homeAddr1, tech.homeAddr2, tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}>
+                            <td className="p-2 font-mono text-xs">{tech.truckLu || '-'}</td>
+                            <td className="p-2 text-xs whitespace-nowrap">{tech.cellPhone || '-'}</td>
+                            <td className="p-2 text-xs whitespace-nowrap">{tech.mainPhone || '-'}</td>
+                            <td className="p-2 text-xs" title={[tech.homeAddr1, tech.homeAddr2, tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}>
                               {tech.homeAddr1 ? (
                                 <div className="space-y-0.5">
-                                  <div className="truncate">{tech.homeAddr1}{tech.homeAddr2 ? `, ${tech.homeAddr2}` : ''}</div>
-                                  <div className="text-muted-foreground truncate">{[tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}</div>
+                                  <div>{tech.homeAddr1}{tech.homeAddr2 ? `, ${tech.homeAddr2}` : ''}</div>
+                                  <div className="text-muted-foreground">{[tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}</div>
                                 </div>
                               ) : '-'}
                             </td>
