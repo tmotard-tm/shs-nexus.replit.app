@@ -15,6 +15,18 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import type { AllTech } from "@shared/schema";
 
+function formatPhoneNumber(phone: string | null | undefined): string {
+  if (!phone) return '-';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `(${digits.slice(0,3)})${digits.slice(3,6)}-${digits.slice(6)}`;
+  }
+  if (digits.length === 11 && digits[0] === '1') {
+    return `(${digits.slice(1,4)})${digits.slice(4,7)}-${digits.slice(7)}`;
+  }
+  return phone;
+}
+
 export default function TechRoster() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -266,8 +278,8 @@ export default function TechRoster() {
                               </Badge>
                             </td>
                             <td className="p-2 font-mono text-xs">{tech.truckLu || '-'}</td>
-                            <td className="p-2 text-xs whitespace-nowrap">{tech.cellPhone || '-'}</td>
-                            <td className="p-2 text-xs whitespace-nowrap">{tech.mainPhone || '-'}</td>
+                            <td className="p-2 text-xs whitespace-nowrap">{formatPhoneNumber(tech.cellPhone)}</td>
+                            <td className="p-2 text-xs whitespace-nowrap">{formatPhoneNumber(tech.mainPhone)}</td>
                             <td className="p-2 text-xs" title={[tech.homeAddr1, tech.homeAddr2, tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}>
                               {tech.homeAddr1 ? (
                                 <div className="space-y-0.5">
