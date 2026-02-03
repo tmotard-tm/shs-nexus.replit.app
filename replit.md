@@ -96,6 +96,23 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
+## 2026-02-03: Employee Roster Data Enrichment ✅
+
+### Snowflake View Joins for Enhanced Employee Data
+- **Contact Info Integration**: Joined `PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW` using EMPLID
+  - Added: personalEmail, workEmail, mobilePhone, homePhone, workPhone
+  - Added: addressLine1, addressLine2, city, state, postalCode, country
+  - Added: emergencyContactName, emergencyContactPhone
+- **TPMS Truck Assignment**: Joined `PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED` using ENTERPRISE_ID
+  - Added: truckLu (TRUCK_LU column from TPMS extract)
+
+### Key Files Changed
+- `shared/schema.ts` - Added 14 new columns to `allTechs` table
+- `server/snowflake-sync-service.ts` - Updated SQL query with LEFT JOINs and data mapping
+- `server/storage.ts` - Updated `bulkUpsertAllTechs()` to handle new columns
+
+---
+
 ## 2026-02-02: Sprint 5 - Testing & Bug Fixes ✅
 
 ### Sprint 5: End-to-End Testing & Critical Bug Fixes ✅
