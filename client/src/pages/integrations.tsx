@@ -22,6 +22,18 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { Link } from "wouter";
+
+function formatPhoneNumber(phone: string | null | undefined): string {
+  if (!phone) return '-';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `(${digits.slice(0,3)})${digits.slice(3,6)}-${digits.slice(6)}`;
+  }
+  if (digits.length === 11 && digits[0] === '1') {
+    return `(${digits.slice(1,4)})${digits.slice(4,7)}-${digits.slice(7)}`;
+  }
+  return phone;
+}
 import {
   Table,
   TableBody,
@@ -854,8 +866,8 @@ export default function Integrations() {
                                     </Badge>
                                   </TableCell>
                                   <TableCell className="font-mono text-xs">{tech.truckLu || '-'}</TableCell>
-                                  <TableCell className="text-xs">{tech.cellPhone || '-'}</TableCell>
-                                  <TableCell className="text-xs">{tech.mainPhone || '-'}</TableCell>
+                                  <TableCell className="text-xs">{formatPhoneNumber(tech.cellPhone)}</TableCell>
+                                  <TableCell className="text-xs">{formatPhoneNumber(tech.mainPhone)}</TableCell>
                                   <TableCell className="text-xs max-w-[200px] truncate" title={tech.homeAddr1 ? `${tech.homeAddr1}${tech.homeAddr2 ? ', ' + tech.homeAddr2 : ''}, ${tech.homeCity || ''}, ${tech.homeState || ''} ${tech.homePostal || ''}` : ''}>
                                     {tech.homeAddr1 ? `${tech.homeCity || ''}, ${tech.homeState || ''}` : '-'}
                                   </TableCell>
