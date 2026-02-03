@@ -6547,6 +6547,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           districtNo: tech.districtNo,
           planningAreaName: tech.planningAreaName,
           employmentStatus: tech.employmentStatus,
+          // Contact info
+          cellPhone: tech.cellPhone,
+          mainPhone: tech.mainPhone,
+          homePhone: tech.homePhone,
+          // Address info
+          homeAddr1: tech.homeAddr1,
+          homeAddr2: tech.homeAddr2,
+          homeCity: tech.homeCity,
+          homeState: tech.homeState,
+          homePostal: tech.homePostal,
+          // Fleet info
+          truckLu: tech.truckLu,
         });
       } else {
         res.json({ found: false });
