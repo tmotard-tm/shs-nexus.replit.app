@@ -273,8 +273,13 @@ export default function TechRoster() {
                             <td className="p-3 font-mono text-sm">{tech.truckLu || '-'}</td>
                             <td className="p-3 text-sm">{tech.cellPhone || '-'}</td>
                             <td className="p-3 text-sm">{tech.mainPhone || '-'}</td>
-                            <td className="p-3 text-sm max-w-[200px] truncate" title={tech.homeAddr1 ? `${tech.homeAddr1}${tech.homeAddr2 ? ', ' + tech.homeAddr2 : ''}, ${tech.homeCity || ''}, ${tech.homeState || ''} ${tech.homePostal || ''}` : ''}>
-                              {tech.homeCity ? `${tech.homeCity}, ${tech.homeState || ''}` : '-'}
+                            <td className="p-3 text-sm max-w-[300px]" title={[tech.homeAddr1, tech.homeAddr2, tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}>
+                              {tech.homeAddr1 ? (
+                                <div className="space-y-0.5">
+                                  <div className="truncate">{tech.homeAddr1}{tech.homeAddr2 ? `, ${tech.homeAddr2}` : ''}</div>
+                                  <div className="text-muted-foreground truncate">{[tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}</div>
+                                </div>
+                              ) : '-'}
                             </td>
                           </tr>
                         ))}
