@@ -6475,43 +6475,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Weekly Offboarding - Get term roster from Snowflake view
+  // Weekly Offboarding - Get term roster from Snowflake view with contact info
   app.get("/api/weekly-offboarding", requireAuth, async (req: any, res) => {
     try {
       const snowflakeService = getSnowflakeService();
       
+      // Join term roster with contact info view, filter by LAST_DATE_WORKED >= 2026-01-01
       const query = `
         SELECT 
-          EMPL_NAME,
-          ENTERPRISE_ID,
-          EMPL_STATUS,
-          EFFDT,
-          LAST_DATE_WORKED,
-          PLANNING_AREA,
-          TECH_SPECIALTY
-        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW
-        ORDER BY EFFDT DESC
+          t.EMPL_NAME,
+          t.ENTERPRISE_ID,
+          t.EMPLID,
+          t.EMPL_STATUS,
+          t.EFFDT,
+          t.LAST_DATE_WORKED,
+          t.PLANNING_AREA,
+          t.TECH_SPECIALTY,
+          c.SNSTC_HOME_ADDR1,
+          c.SNSTC_HOME_ADDR2,
+          c.SNSTV_HOME_CITY,
+          c.SNSTV_HOME_STATE,
+          c.SNSTV_HOME_POSTAL,
+          c.SNSTV_MAIN_PHONE,
+          c.SNSTV_CELL_PHONE,
+          c.SNSTV_HOME_PHONE
+        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
+        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+          ON t.EMPLID = c.EMPLID
+        WHERE t.LAST_DATE_WORKED >= '2026-01-01'
+        ORDER BY t.LAST_DATE_WORKED DESC
       `;
       
       const rows = await snowflakeService.executeQuery(query) as Array<{
         EMPL_NAME: string;
         ENTERPRISE_ID: string;
+        EMPLID: string;
         EMPL_STATUS: string;
         EFFDT: string;
         LAST_DATE_WORKED: string;
         PLANNING_AREA: string;
         TECH_SPECIALTY: string;
+        SNSTC_HOME_ADDR1: string;
+        SNSTC_HOME_ADDR2: string;
+        SNSTV_HOME_CITY: string;
+        SNSTV_HOME_STATE: string;
+        SNSTV_HOME_POSTAL: string;
+        SNSTV_MAIN_PHONE: string;
+        SNSTV_CELL_PHONE: string;
+        SNSTV_HOME_PHONE: string;
       }>;
       
-      const formattedData = rows.map(row => ({
-        emplName: row.EMPL_NAME || '',
-        enterpriseId: row.ENTERPRISE_ID || '',
-        emplStatus: row.EMPL_STATUS || '',
-        effdt: row.EFFDT || '',
-        lastDateWorked: row.LAST_DATE_WORKED || '',
-        planningArea: row.PLANNING_AREA || '',
-        techSpecialty: row.TECH_SPECIALTY || '',
-      }));
+      const formattedData = rows.map(row => {
+        // Build address from components
+        const addressParts = [
+          row.SNSTC_HOME_ADDR1,
+          row.SNSTC_HOME_ADDR2,
+          row.SNSTV_HOME_CITY,
+          row.SNSTV_HOME_STATE,
+          row.SNSTV_HOME_POSTAL
+        ].filter(Boolean);
+        const address = addressParts.join(', ');
+        
+        // Combine phone numbers with "/" separator
+        const phoneParts = [
+          row.SNSTV_MAIN_PHONE,
+          row.SNSTV_CELL_PHONE,
+          row.SNSTV_HOME_PHONE
+        ].filter(Boolean);
+        const contactPhone = phoneParts.join(' / ');
+        
+        return {
+          emplName: row.EMPL_NAME || '',
+          enterpriseId: row.ENTERPRISE_ID || '',
+          emplId: row.EMPLID || '',
+          emplStatus: row.EMPL_STATUS || '',
+          effdt: row.EFFDT || '',
+          lastDateWorked: row.LAST_DATE_WORKED || '',
+          planningArea: row.PLANNING_AREA || '',
+          techSpecialty: row.TECH_SPECIALTY || '',
+          address: address,
+          contactPhone: contactPhone,
+        };
+      });
       
       res.json(formattedData);
     } catch (error: any) {

@@ -16,11 +16,14 @@ import { format, parseISO, getWeek, getYear } from "date-fns";
 interface TermRosterEntry {
   emplName: string;
   enterpriseId: string;
+  emplId: string;
   emplStatus: string;
   effdt: string;
   lastDateWorked: string;
   planningArea: string;
   techSpecialty: string;
+  address: string;
+  contactPhone: string;
 }
 
 export default function WeeklyOffboarding() {
@@ -94,7 +97,9 @@ export default function WeeklyOffboarding() {
     const matchesSearch = searchQuery === "" || 
       entry.emplName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.enterpriseId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      entry.planningArea?.toLowerCase().includes(searchQuery.toLowerCase());
+      entry.planningArea?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      entry.address?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      entry.contactPhone?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesWeek = weekFilter === "all" || getWeekKey(entry.effdt) === weekFilter;
     const matchesStatus = statusFilter === "all" || entry.emplStatus === statusFilter;
@@ -277,6 +282,8 @@ export default function WeeklyOffboarding() {
                         <TableHead className="w-[130px] bg-background sticky top-0">Last Date Worked</TableHead>
                         <TableHead className="bg-background sticky top-0">Planning Area</TableHead>
                         <TableHead className="bg-background sticky top-0">Tech Specialty</TableHead>
+                        <TableHead className="min-w-[200px] bg-background sticky top-0">Address</TableHead>
+                        <TableHead className="min-w-[180px] bg-background sticky top-0">Contact Phone</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -293,6 +300,8 @@ export default function WeeklyOffboarding() {
                           <TableCell className="whitespace-nowrap">{formatDate(entry.lastDateWorked)}</TableCell>
                           <TableCell className="text-sm">{entry.planningArea || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.techSpecialty || '-'}</TableCell>
+                          <TableCell className="text-sm">{entry.address || '-'}</TableCell>
+                          <TableCell className="text-sm">{entry.contactPhone || '-'}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
