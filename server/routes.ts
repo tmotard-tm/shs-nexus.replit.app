@@ -6481,6 +6481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const snowflakeService = getSnowflakeService();
       
       // Join term roster with contact info view, filter by LAST_DATE_WORKED >= 2026-01-01
+      // Contact view columns: HOME_ADDR1, HOME_ADDR2, HOME_CITY, HOME_STATE, HOME_POSTAL, MAIN_PHONE, CELL_PHONE, HOME_PHONE
       const query = `
         SELECT 
           t.EMPL_NAME,
@@ -6491,14 +6492,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           t.LAST_DATE_WORKED,
           t.PLANNING_AREA,
           t.TECH_SPECIALTY,
-          c.SNSTC_HOME_ADDR1,
-          c.SNSTC_HOME_ADDR2,
-          c.SNSTV_HOME_CITY,
-          c.SNSTV_HOME_STATE,
-          c.SNSTV_HOME_POSTAL,
-          c.SNSTV_MAIN_PHONE,
-          c.SNSTV_CELL_PHONE,
-          c.SNSTV_HOME_PHONE
+          c.HOME_ADDR1,
+          c.HOME_ADDR2,
+          c.HOME_CITY,
+          c.HOME_STATE,
+          c.HOME_POSTAL,
+          c.MAIN_PHONE,
+          c.CELL_PHONE,
+          c.HOME_PHONE
         FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
         LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
           ON t.EMPLID = c.EMPLID
@@ -6515,32 +6516,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         LAST_DATE_WORKED: string;
         PLANNING_AREA: string;
         TECH_SPECIALTY: string;
-        SNSTC_HOME_ADDR1: string;
-        SNSTC_HOME_ADDR2: string;
-        SNSTV_HOME_CITY: string;
-        SNSTV_HOME_STATE: string;
-        SNSTV_HOME_POSTAL: string;
-        SNSTV_MAIN_PHONE: string;
-        SNSTV_CELL_PHONE: string;
-        SNSTV_HOME_PHONE: string;
+        HOME_ADDR1: string;
+        HOME_ADDR2: string;
+        HOME_CITY: string;
+        HOME_STATE: string;
+        HOME_POSTAL: string;
+        MAIN_PHONE: string;
+        CELL_PHONE: string;
+        HOME_PHONE: string;
       }>;
       
       const formattedData = rows.map(row => {
         // Build address from components
         const addressParts = [
-          row.SNSTC_HOME_ADDR1,
-          row.SNSTC_HOME_ADDR2,
-          row.SNSTV_HOME_CITY,
-          row.SNSTV_HOME_STATE,
-          row.SNSTV_HOME_POSTAL
+          row.HOME_ADDR1,
+          row.HOME_ADDR2,
+          row.HOME_CITY,
+          row.HOME_STATE,
+          row.HOME_POSTAL
         ].filter(Boolean);
         const address = addressParts.join(', ');
         
         // Combine phone numbers with "/" separator
         const phoneParts = [
-          row.SNSTV_MAIN_PHONE,
-          row.SNSTV_CELL_PHONE,
-          row.SNSTV_HOME_PHONE
+          row.MAIN_PHONE,
+          row.CELL_PHONE,
+          row.HOME_PHONE
         ].filter(Boolean);
         const contactPhone = phoneParts.join(' / ');
         
