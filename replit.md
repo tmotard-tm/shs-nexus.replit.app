@@ -101,6 +101,8 @@ Preferred communication style: Simple, everyday language.
 - Optimistic UI updates with save status indicator (Saving.../Saved/Error)
 - Flush-on-unmount using navigator.sendBeacon to prevent lost updates
 - Task checkboxes, carrier dropdown, and routing radio buttons auto-save on change
+- Mark Complete button shows warning dialog if tasks are incomplete (allows confirmation)
+- Phase 2 trigger verified: completeToolsQueueItem → triggerNextWorkflowStep → checkAllDay0TasksAndTriggerPhase2
 
 ---
 
