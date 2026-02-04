@@ -8442,13 +8442,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Remove leading zeros from vehicle number for API call
           const cleanVehicleNumber = vehicleNumber.replace(/^0+/, '');
           
+          // Map internal values to Fleet Scope expected format
+          const keysMap: Record<string, string> = {
+            'present': 'Present',
+            'not_present': 'Not Present',
+            'unknown': 'Unknown/would not check',
+          };
+          
+          const repairedMap: Record<string, string> = {
+            'complete': 'Complete',
+            'in_process': 'In Process',
+            'unknown_if_needed': 'Unknown if needed',
+            'declined': 'Declined',
+          };
+          
+          const statusMap: Record<string, string> = {
+            'reserved_for_new_hire': 'Reserved for new hire',
+            'in_repair': 'In repair',
+            'declined_repair': 'Declined repair',
+            'available_for_rental_pmf': 'Available to assign or send to PMF',
+            'sent_to_pmf': 'Sent to PMF',
+            'assigned_to_tech_in_rental': 'Assigned to rental',
+            'not_found': 'Not found',
+          };
+          
           const fleetScopePayload = {
-            keys: keys || null,
-            repaired: repaired || null,
+            keys: keys ? keysMap[keys] || keys : null,
+            repaired: repaired ? repairedMap[repaired] || repaired : null,
             contact: nexusNewLocationContact || null,
             confirmedAddress: nexusNewLocation || null,
             generalComments: comments || null,
-            fleetTeamComments: postOffboardedStatus || null,
+            fleetTeamComments: postOffboardedStatus ? statusMap[postOffboardedStatus] || postOffboardedStatus : null,
           };
 
           const fleetScopeUrl = `https://fleet-scope.replit.app/api/public/spares/${cleanVehicleNumber}`;
