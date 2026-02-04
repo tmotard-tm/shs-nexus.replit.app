@@ -165,7 +165,7 @@ export default function WeeklyOffboarding() {
   const uniqueOwners = Array.from(new Set(termRoster.map(e => e.owner).filter(Boolean))).sort();
 
   const weekGroups = termRoster.reduce((acc, entry) => {
-    const weekKey = getWeekKey(entry.effdt);
+    const weekKey = getWeekKey(entry.lastDateWorked);
     if (!acc[weekKey]) {
       acc[weekKey] = { label: getWeekLabel(weekKey), count: 0 };
     }
@@ -179,12 +179,13 @@ export default function WeeklyOffboarding() {
     const matchesSearch = searchQuery === "" || 
       entry.emplName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.enterpriseId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      entry.truck?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.planningArea?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.address?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.contactPhone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.owner?.toLowerCase().includes(searchQuery.toLowerCase());
     
-    const matchesWeek = weekFilter === "all" || getWeekKey(entry.effdt) === weekFilter;
+    const matchesWeek = weekFilter === "all" || getWeekKey(entry.lastDateWorked) === weekFilter;
     const matchesStatus = statusFilter === "all" || entry.emplStatus === statusFilter;
     const matchesOwner = ownerFilter === "all" || entry.owner === ownerFilter;
     
