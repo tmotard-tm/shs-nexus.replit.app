@@ -585,6 +585,28 @@ export const tpmsCachedAssignments = pgTable("tpms_cached_assignments", {
   };
 });
 
+// Vehicle Nexus Data - stores Nexus-specific vehicle data (post-offboard status, new location, etc.)
+export const vehicleNexusData = pgTable("vehicle_nexus_data", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  vehicleNumber: varchar("vehicle_number", { length: 20 }).notNull().unique(),
+  postOffboardedStatus: text("post_offboarded_status"), // Reserved for new hire, In repair, Declined repair, Available to assign for rental / sent to PMF, Not found
+  nexusNewLocation: text("nexus_new_location"), // Full address: street, state, zipcode
+  nexusNewLocationContact: varchar("nexus_new_location_contact", { length: 30 }), // Phone number
+  comments: text("comments"), // Up to 400 characters
+  updatedBy: text("updated_by"), // User who last updated
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    vehicleNumberIdx: index("vnd_vehicle_number_idx").on(table.vehicleNumber),
+    postOffboardedStatusIdx: index("vnd_post_offboarded_status_idx").on(table.postOffboardedStatus),
+  };
+});
+
+export const insertVehicleNexusDataSchema = createInsertSchema(vehicleNexusData).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertVehicleNexusData = z.infer<typeof insertVehicleNexusDataSchema>;
+export type VehicleNexusData = typeof vehicleNexusData.$inferSelect;
+
 // Onboarding Hires from Snowflake HR data - tracks new tech hires for weekly truck assignment
 export const onboardingHires = pgTable("onboarding_hires", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

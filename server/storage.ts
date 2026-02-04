@@ -53,6 +53,8 @@ import {
   type RolePermissionSettings,
   type RentalSnapshot,
   type InsertRentalSnapshot,
+  type VehicleNexusData,
+  type InsertVehicleNexusData,
   users,
   requests,
   apiConfigurations,
@@ -78,6 +80,7 @@ import {
   fieldMappings,
   rolePermissions,
   rentalSnapshots,
+  vehicleNexusData,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -366,6 +369,10 @@ export interface IStorage {
   createRentalSnapshot(snapshot: InsertRentalSnapshot): Promise<RentalSnapshot>;
   upsertRentalSnapshot(snapshot: InsertRentalSnapshot): Promise<RentalSnapshot>;
   deleteRentalSnapshot(id: string): Promise<boolean>;
+
+  // Vehicle Nexus Data Module (Nexus-specific vehicle data)
+  getVehicleNexusData(vehicleNumber: string): Promise<VehicleNexusData | undefined>;
+  upsertVehicleNexusData(data: InsertVehicleNexusData): Promise<VehicleNexusData>;
 }
 
 export class MemStorage implements IStorage {
@@ -3345,6 +3352,14 @@ export class MemStorage implements IStorage {
   async deleteRentalSnapshot(_id: string): Promise<boolean> {
     throw new Error("MemStorage does not support rental snapshots. Use DatabaseStorage.");
   }
+
+  // Vehicle Nexus Data Module (MemStorage stubs)
+  async getVehicleNexusData(_vehicleNumber: string): Promise<VehicleNexusData | undefined> {
+    throw new Error("MemStorage does not support vehicle nexus data. Use DatabaseStorage.");
+  }
+  async upsertVehicleNexusData(_data: InsertVehicleNexusData): Promise<VehicleNexusData> {
+    throw new Error("MemStorage does not support vehicle nexus data. Use DatabaseStorage.");
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -5849,6 +5864,39 @@ export class DatabaseStorage implements IStorage {
       
       default:
         return baseInstructions;
+    }
+  }
+
+  // Vehicle Nexus Data Module
+  async getVehicleNexusData(vehicleNumber: string): Promise<VehicleNexusData | undefined> {
+    const result = await db.select().from(vehicleNexusData)
+      .where(eq(vehicleNexusData.vehicleNumber, vehicleNumber))
+      .limit(1);
+    return result[0];
+  }
+
+  async upsertVehicleNexusData(data: InsertVehicleNexusData): Promise<VehicleNexusData> {
+    const existing = await this.getVehicleNexusData(data.vehicleNumber);
+    
+    if (existing) {
+      const result = await db.update(vehicleNexusData)
+        .set({
+          postOffboardedStatus: data.postOffboardedStatus,
+          nexusNewLocation: data.nexusNewLocation,
+          nexusNewLocationContact: data.nexusNewLocationContact,
+          comments: data.comments,
+          updatedBy: data.updatedBy,
+          updatedAt: new Date(),
+        })
+        .where(eq(vehicleNexusData.vehicleNumber, data.vehicleNumber))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(vehicleNexusData).values({
+        ...data,
+        id: randomUUID(),
+      }).returning();
+      return result[0];
     }
   }
 }
