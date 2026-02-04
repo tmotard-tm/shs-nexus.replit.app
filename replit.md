@@ -86,3 +86,38 @@ Preferred communication style: Simple, everyday language.
 -   **Holman**: Vehicle fleet details and assignment updates.
 -   **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments.
 -   **PMF/PARQ AI**: Fleet vehicle availability API.
+
+# Recent Changes
+
+## 2026-02-04: Sprint 8 - Auto-Save for Task Progress ✅
+
+### Backend Changes
+- Added `PATCH /api/tools-queue/:id/save-progress` endpoint for partial updates
+- Accepts: task booleans, carrier, fleetRoutingDecision
+- Added `updateToolsQueueProgress()` method to storage interface
+
+### Frontend Changes
+- Created `client/src/hooks/use-debounced-save.ts` hook with 500ms debounce
+- Optimistic UI updates with save status indicator (Saving.../Saved/Error)
+- Flush-on-unmount using navigator.sendBeacon to prevent lost updates
+- Task checkboxes, carrier dropdown, and routing radio buttons auto-save on change
+
+---
+
+## 2026-02-04: Sprint 7 - Enhanced Tools Task Detail View ✅
+
+### New ToolsTaskDetailView Component
+- 3-column layout: Contact & Routing, Task Checklist, Actions
+- Contact info from all_techs table, vehicle location from Samsara GPS
+- 6 interactive checkboxes + carrier dropdown, routing radio buttons
+- External links: Tool Audit Form, View in Segno (placeholder)
+
+---
+
+## 2026-02-04: Sprint 6 - Schema Extension + Contact Info Mapping ✅
+
+### Task Checklist Schema Extension
+- Added 7 new columns to queue_items: task_tools_return, task_iphone_return, task_disconnected_line, task_disconnected_mpayment, task_close_segno_orders, task_create_shipping_label, carrier
+
+### Contact Info Endpoint
+- Added `GET /api/tools-queue/:id/contact` to fetch technician contact info from all_techs table
