@@ -1859,8 +1859,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied to Tools queue" });
       }
       const queueItems = await storage.getToolsQueueItems();
-      res.json(queueItems);
+      
+      // Enrich each queue item with technician data from all_techs
+      const enrichedItems = await Promise.all(queueItems.map(async (item) => {
+        let techData: any = null;
+        
+        try {
+          const parsedData = typeof item.data === 'string' 
+            ? JSON.parse(item.data) 
+            : item.data;
+          
+          // Try to find tech by employee ID or enterprise ID
+          const employeeId = parsedData?.employee?.employeeId || parsedData?.employeeId || parsedData?.emplid;
+          const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.techRacfId;
+          
+          let tech = null;
+          if (employeeId) {
+            tech = await storage.getAllTechByEmployeeId(employeeId);
+          }
+          if (!tech && enterpriseId) {
+            tech = await storage.getAllTechByTechRacfid(enterpriseId);
+          }
+          
+          if (tech) {
+            // Build full address
+            const addressParts = [
+              tech.homeAddr1,
+              tech.homeAddr2,
+              tech.homeCity,
+              tech.homeState,
+              tech.homePostal
+            ].filter(Boolean);
+            
+            techData = {
+              techName: tech.techName,
+              enterpriseId: tech.techRacfid,
+              district: tech.districtNo || null,
+              separationDate: tech.lastDayWorked || tech.effectiveDate || null,
+              workPhone: tech.mainPhone || null,
+              personalPhone: tech.cellPhone || tech.homePhone || null,
+              email: parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
+              address: addressParts.length > 0 ? addressParts.join(', ') : null,
+            };
+          } else {
+            // Fallback: extract from queue item data/title
+            techData = {
+              techName: parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Tools Queue - ', '') || 'Unknown',
+              enterpriseId: enterpriseId || employeeId || 'Unknown',
+              district: null,
+              separationDate: parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
+              workPhone: null,
+              personalPhone: parsedData?.employee?.phone || null,
+              email: parsedData?.employee?.email || null,
+              address: parsedData?.employee?.address || null,
+            };
+          }
+        } catch (e) {
+          // If parsing fails, use fallback data
+          techData = {
+            techName: item.title?.replace('Tools Queue - ', '') || 'Unknown',
+            enterpriseId: 'Unknown',
+            district: null,
+            separationDate: null,
+            workPhone: null,
+            personalPhone: null,
+            email: null,
+            address: null,
+          };
+        }
+        
+        return {
+          ...item,
+          techData,
+        };
+      }));
+      
+      res.json(enrichedItems);
     } catch (error) {
+      console.error('Error fetching enriched tools queue items:', error);
       res.status(500).json({ message: "Failed to fetch Tools queue items" });
     }
   });

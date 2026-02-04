@@ -89,6 +89,37 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
+## 2026-02-04: Sprint 9 - Tools Recovery Queue Redesign ✅
+
+### Complete UI/UX Overhaul
+- Replaced card-based tabs with table-based layout featuring sortable columns
+- Columns: Technician, District, Sep Date, Vehicle Type, Routing, Status, Tasks Progress
+- Expandable inline rows replace separate detail view navigation
+- 3-column expansion panel: Contact Details, Recovery Tasks, Quick Actions
+
+### Enhanced Filtering
+- Search by technician name or ID
+- Multi-select filters: Status, Vehicle Type, District
+- "Incomplete Only" toggle to focus on outstanding items
+- Pagination with 10 items per page
+
+### Urgency Matrix System
+- Vehicle Type + Days Until Separation determines urgency level
+- CRITICAL: Rental ≤7 days OR BYOV ≤2 days
+- HIGH: BYOV >2 days OR Company ≤2 days  
+- STANDARD: Company >2 days
+- Visual badges indicate urgency throughout
+
+### Data Enrichment
+- Backend enriches queue items with technician data from `all_techs` table
+- Includes: district, contact info (phones, email), separation date
+- Auto-save preserved with 500ms debounce via `useDebouncedSave` hook
+
+### Schema
+- Added `vehicleType` text column to `queue_items` ('company' | 'byov' | 'rental')
+
+---
+
 ## 2026-02-04: Sprint 8 - Auto-Save for Task Progress ✅
 
 ### Backend Changes

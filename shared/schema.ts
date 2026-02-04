@@ -237,7 +237,8 @@ export const queueItems = pgTable("queue_items", {
   autoTrigger: boolean("auto_trigger").notNull().default(false), // Whether this task should auto-trigger when dependencies complete
   triggerData: text("trigger_data"), // Data for auto-triggered tasks
   // Tools queue fields (Sprint 1: Schema + Task Creation)
-  isByov: boolean("is_byov").default(false), // Is this a Bring Your Own Vehicle tech?
+  isByov: boolean("is_byov").default(false), // Is this a Bring Your Own Vehicle tech? (legacy, use vehicleType)
+  vehicleType: text("vehicle_type").default("company"), // 'company' | 'byov' | 'rental'
   fleetRoutingDecision: text("fleet_routing_decision"), // Routing decision from Fleet
   routingReceivedAt: timestamp("routing_received_at"), // When routing decision was received
   blockedActions: text("blocked_actions").array(), // Array of blocked action identifiers
@@ -921,6 +922,20 @@ export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = z.infer<typeof insertVehicleSchema>;
 export type QueueItem = typeof queueItems.$inferSelect;
 export type InsertQueueItem = z.infer<typeof insertQueueItemSchema>;
+
+// Enriched Tools Queue Item with technician data joined from all_techs
+export interface EnrichedToolsQueueItem extends QueueItem {
+  techData?: {
+    techName: string;
+    enterpriseId: string;
+    district: string | null;
+    separationDate: string | null;
+    workPhone: string | null;
+    personalPhone: string | null;
+    email: string | null;
+    address: string | null;
+  };
+}
 export type StorageSpot = typeof storageSpots.$inferSelect;
 export type InsertStorageSpot = z.infer<typeof insertStorageSpotSchema>;
 export type Template = typeof templates.$inferSelect;
