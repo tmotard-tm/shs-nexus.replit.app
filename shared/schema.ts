@@ -594,6 +594,8 @@ export const vehicleNexusData = pgTable("vehicle_nexus_data", {
   postOffboardedStatus: text("post_offboarded_status"), // Reserved for new hire, In repair, Declined repair, Available to assign for rental / sent to PMF, Not found
   nexusNewLocation: text("nexus_new_location"), // Full address: street, state, zipcode
   nexusNewLocationContact: varchar("nexus_new_location_contact", { length: 30 }), // Phone number
+  keys: text("keys"), // Present, Not Present, Unknown/Would not Check
+  repaired: text("repaired"), // Complete, In Process, Unknown if needed, Declined
   comments: text("comments"), // Up to 400 characters
   updatedBy: text("updated_by"), // User who last updated
   createdAt: timestamp("created_at").defaultNow().notNull(),

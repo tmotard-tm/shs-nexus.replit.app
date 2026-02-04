@@ -45,6 +45,8 @@ export default function WeeklyOffboarding() {
   const [nexusStatus, setNexusStatus] = useState("");
   const [nexusLocation, setNexusLocation] = useState("");
   const [nexusContact, setNexusContact] = useState("");
+  const [nexusKeys, setNexusKeys] = useState("");
+  const [nexusRepaired, setNexusRepaired] = useState("");
   const [nexusComments, setNexusComments] = useState("");
 
   const { data: termRoster = [], isLoading, isRefetching } = useQuery<TermRosterEntry[]>({
@@ -91,11 +93,15 @@ export default function WeeklyOffboarding() {
       setNexusStatus(nexusData.postOffboardedStatus || "");
       setNexusLocation(nexusData.nexusNewLocation || "");
       setNexusContact(nexusData.nexusNewLocationContact || "");
+      setNexusKeys(nexusData.keys || "");
+      setNexusRepaired(nexusData.repaired || "");
       setNexusComments(nexusData.comments || "");
     } else {
       setNexusStatus("");
       setNexusLocation("");
       setNexusContact("");
+      setNexusKeys("");
+      setNexusRepaired("");
       setNexusComments("");
     }
   }, [nexusData, selectedEntry]);
@@ -107,6 +113,8 @@ export default function WeeklyOffboarding() {
       postOffboardedStatus: string | null;
       nexusNewLocation: string | null;
       nexusNewLocationContact: string | null;
+      keys: string | null;
+      repaired: string | null;
       comments: string | null;
     }) => {
       return await apiRequest('PUT', `/api/vehicle-nexus-data/${data.vehicleNumber}`, data);
@@ -522,6 +530,35 @@ export default function WeeklyOffboarding() {
                         </div>
 
                         <div>
+                          <Label className="text-xs text-muted-foreground">Keys</Label>
+                          <Select value={nexusKeys} onValueChange={setNexusKeys}>
+                            <SelectTrigger className="mt-1" data-testid="select-nexus-keys">
+                              <SelectValue placeholder="Select keys status..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="present">Present</SelectItem>
+                              <SelectItem value="not_present">Not Present</SelectItem>
+                              <SelectItem value="unknown">Unknown/Would not Check</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Repaired</Label>
+                          <Select value={nexusRepaired} onValueChange={setNexusRepaired}>
+                            <SelectTrigger className="mt-1" data-testid="select-nexus-repaired">
+                              <SelectValue placeholder="Select repair status..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="complete">Complete</SelectItem>
+                              <SelectItem value="in_process">In Process</SelectItem>
+                              <SelectItem value="unknown_if_needed">Unknown if needed</SelectItem>
+                              <SelectItem value="declined">Declined</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
                           <Label className="text-xs text-muted-foreground">Comments</Label>
                           <Textarea
                             value={nexusComments}
@@ -541,6 +578,8 @@ export default function WeeklyOffboarding() {
                             postOffboardedStatus: nexusStatus || null,
                             nexusNewLocation: nexusLocation || null,
                             nexusNewLocationContact: nexusContact || null,
+                            keys: nexusKeys || null,
+                            repaired: nexusRepaired || null,
                             comments: nexusComments || null,
                           })}
                           disabled={saveNexusDataMutation.isPending}
