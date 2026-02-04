@@ -97,6 +97,7 @@ function ToolsTaskCard({
   onPickUp,
   onComplete,
   onRefresh,
+  onClick,
   isCompletePending 
 }: { 
   item: ToolsQueueItem;
@@ -105,6 +106,7 @@ function ToolsTaskCard({
   onPickUp: (item: ToolsQueueItem) => void;
   onComplete: (itemId: string) => void;
   onRefresh: () => void;
+  onClick: () => void;
   isCompletePending: boolean;
 }) {
   const variant = getCardVariant(item);
@@ -187,12 +189,12 @@ function ToolsTaskCard({
         </ol>
       </div>
       <div className="flex gap-2 pt-4 border-t">
-        <Button size="sm" variant="outline" data-testid={`button-issue-qr-${item.id}`}>
+        <Button size="sm" variant="outline" onClick={(e) => e.stopPropagation()} data-testid={`button-issue-qr-${item.id}`}>
           Issue QR Codes
         </Button>
         <Button 
           size="sm" 
-          onClick={() => onComplete(item.id)}
+          onClick={(e) => { e.stopPropagation(); onComplete(item.id); }}
           disabled={isCompletePending}
           data-testid={`button-complete-${item.id}`}
         >
@@ -250,14 +252,14 @@ function ToolsTaskCard({
       </div>
       
       <div className="flex gap-2 pt-4 border-t">
-        <Button size="sm" variant="outline" data-testid={`button-check-fleetscope-${item.id}`}>
+        <Button size="sm" variant="outline" onClick={(e) => e.stopPropagation()} data-testid={`button-check-fleetscope-${item.id}`}>
           <ExternalLink className="h-4 w-4 mr-1" />
           Check FleetScope
         </Button>
         <Button 
           size="sm" 
           variant="outline"
-          onClick={onRefresh}
+          onClick={(e) => { e.stopPropagation(); onRefresh(); }}
           data-testid={`button-refresh-${item.id}`}
         >
           <RefreshCw className="h-4 w-4 mr-1" />
@@ -286,7 +288,7 @@ function ToolsTaskCard({
       <div className="flex gap-2 pt-4 border-t">
         <Button 
           size="sm" 
-          onClick={() => onComplete(item.id)}
+          onClick={(e) => { e.stopPropagation(); onComplete(item.id); }}
           disabled={isCompletePending}
           data-testid={`button-complete-${item.id}`}
         >
@@ -313,12 +315,12 @@ function ToolsTaskCard({
         </ol>
       </div>
       <div className="flex gap-2 pt-4 border-t">
-        <Button size="sm" variant="outline" data-testid={`button-issue-qr-${item.id}`}>
+        <Button size="sm" variant="outline" onClick={(e) => e.stopPropagation()} data-testid={`button-issue-qr-${item.id}`}>
           Issue QR Codes
         </Button>
         <Button 
           size="sm" 
-          onClick={() => onComplete(item.id)}
+          onClick={(e) => { e.stopPropagation(); onComplete(item.id); }}
           disabled={isCompletePending}
           data-testid={`button-complete-${item.id}`}
         >
@@ -346,7 +348,7 @@ function ToolsTaskCard({
       <div className="flex gap-2 pt-4 border-t">
         <Button 
           size="sm" 
-          onClick={() => onComplete(item.id)}
+          onClick={(e) => { e.stopPropagation(); onComplete(item.id); }}
           disabled={isCompletePending}
           data-testid={`button-complete-${item.id}`}
         >
@@ -374,7 +376,7 @@ function ToolsTaskCard({
   };
 
   return (
-    <Card className={`hover:shadow-md transition-shadow ${getVariantStyles()}`}>
+    <Card className={`hover:shadow-md transition-shadow cursor-pointer ${getVariantStyles()}`} onClick={onClick}>
       <CardContent className="p-4">
         {renderHeader()}
         {renderTechInfo()}
@@ -724,6 +726,7 @@ export default function ToolsQueuePage() {
                     onPickUp={setPickUpItem}
                     onComplete={(id) => completeMutation.mutate(id)}
                     onRefresh={() => refetch()}
+                    onClick={() => setViewQueueItem(item)}
                     isCompletePending={completeMutation.isPending}
                   />
                 ))}
