@@ -1264,11 +1264,11 @@ export default function FleetManagement() {
                             <SelectValue placeholder="Select status..." />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="unassigned_in_spare_pool">Unassigned in spare pool</SelectItem>
-                            <SelectItem value="assigned_to_new_tech">Assigned to new tech</SelectItem>
-                            <SelectItem value="at_auction">At auction</SelectItem>
-                            <SelectItem value="at_body_shop">At body shop</SelectItem>
-                            <SelectItem value="other">Other</SelectItem>
+                            <SelectItem value="reserved_for_new_hire">Reserved for new hire</SelectItem>
+                            <SelectItem value="in_repair">In repair</SelectItem>
+                            <SelectItem value="declined_repair">Declined repair</SelectItem>
+                            <SelectItem value="available_for_rental_pmf">Available to assign for rental / sent to PMF</SelectItem>
+                            <SelectItem value="not_found">Not found</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
