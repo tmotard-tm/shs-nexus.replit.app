@@ -8233,6 +8233,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Vehicle Nexus Data - Nexus-specific vehicle data for offboarding/relocation tracking
+  app.get("/api/vehicle-nexus-data/:vehicleNumber", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber } = req.params;
+      const data = await storage.getVehicleNexusData(vehicleNumber);
+      res.json(data || null);
+    } catch (error: any) {
+      console.error("Error fetching vehicle nexus data:", error);
+      res.status(500).json({ message: "Failed to fetch vehicle nexus data", error: error.message });
+    }
+  });
+
+  app.put("/api/vehicle-nexus-data/:vehicleNumber", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber } = req.params;
+      const { postOffboardedStatus, nexusNewLocation, nexusNewLocationContact, comments } = req.body;
+      
+      const data = await storage.upsertVehicleNexusData({
+        vehicleNumber,
+        postOffboardedStatus: postOffboardedStatus || null,
+        nexusNewLocation: nexusNewLocation || null,
+        nexusNewLocationContact: nexusNewLocationContact || null,
+        comments: comments || null,
+        updatedBy: req.user?.username || 'system',
+      });
+      
+      res.json(data);
+    } catch (error: any) {
+      console.error("Error updating vehicle nexus data:", error);
+      res.status(500).json({ message: "Failed to update vehicle nexus data", error: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack
