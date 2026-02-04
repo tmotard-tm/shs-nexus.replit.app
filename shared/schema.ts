@@ -241,6 +241,14 @@ export const queueItems = pgTable("queue_items", {
   fleetRoutingDecision: text("fleet_routing_decision"), // Routing decision from Fleet
   routingReceivedAt: timestamp("routing_received_at"), // When routing decision was received
   blockedActions: text("blocked_actions").array(), // Array of blocked action identifiers
+  // Sprint 6: Task Checklist (6 boolean fields for Claudia's workflow)
+  taskToolsReturn: boolean("task_tools_return").default(false),
+  taskIphoneReturn: boolean("task_iphone_return").default(false),
+  taskDisconnectedLine: boolean("task_disconnected_line").default(false),
+  taskDisconnectedMPayment: boolean("task_disconnected_mpayment").default(false),
+  taskCloseSegnoOrders: boolean("task_close_segno_orders").default(false),
+  taskCreateShippingLabel: boolean("task_create_shipping_label").default(false),
+  carrier: text("carrier"), // 'Verizon' | 'T-Mobile' | null
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {

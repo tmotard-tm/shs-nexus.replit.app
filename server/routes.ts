@@ -1903,6 +1903,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Sprint 6: Contact info endpoint - fetches tech contact info from all_techs table
+  app.get("/api/tools-queue/:id/contact", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
+        return res.status(403).json({ message: "Access denied to Tools queue" });
+      }
+      
+      const queueItem = await storage.getToolsQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Tools queue item not found" });
+      }
+      
+      // Extract employee ID from queue item data
+      let employeeId: string | null = null;
+      try {
+        const parsedData = typeof queueItem.data === 'string' 
+          ? JSON.parse(queueItem.data) 
+          : queueItem.data;
+        employeeId = parsedData?.employee?.employeeId || 
+                     parsedData?.employeeId || 
+                     parsedData?.emplid ||
+                     null;
+      } catch (e) {
+        console.warn('Could not parse employee ID from queue item data:', e);
+      }
+      
+      if (!employeeId) {
+        return res.status(404).json({ message: "No employee ID found in queue item" });
+      }
+      
+      // Lookup contact info from all_techs table
+      const tech = await storage.getAllTechByEmployeeId(employeeId);
+      if (!tech) {
+        return res.status(404).json({ message: "Technician not found in employee roster" });
+      }
+      
+      // Return mapped contact info
+      res.json({
+        personalPhone: tech.cellPhone || null,
+        workPhone: tech.mainPhone || null,
+        homePhone: tech.homePhone || null,
+        homeAddress: {
+          line1: tech.homeAddr1 || null,
+          line2: tech.homeAddr2 || null,
+          city: tech.homeCity || null,
+          state: tech.homeState || null,
+          postal: tech.homePostal || null,
+        },
+        employeeId: tech.employeeId,
+        techName: tech.techName,
+      });
+    } catch (error) {
+      console.error('Error fetching contact info:', error);
+      res.status(500).json({ message: "Failed to fetch contact info" });
+    }
+  });
+
   app.post("/api/tools-queue", checkAnonymousRateLimit, async (req, res) => {
     try {
       const sanitizedData = sanitizeInput(req.body);
