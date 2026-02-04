@@ -9,6 +9,16 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { QueueItem, User } from "@shared/schema";
 import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import {
@@ -138,6 +148,26 @@ export function ToolsTaskDetailView({
     onBack();
   };
 
+  const [showIncompleteWarning, setShowIncompleteWarning] = useState(false);
+
+  const allTasksComplete = Object.values(taskState).every(Boolean);
+  const completedCount = Object.values(taskState).filter(Boolean).length;
+  const totalTasks = Object.keys(taskState).length;
+
+  const handleCompleteClick = () => {
+    flushPending();
+    if (!allTasksComplete) {
+      setShowIncompleteWarning(true);
+    } else {
+      onComplete(item.id);
+    }
+  };
+
+  const handleConfirmComplete = () => {
+    setShowIncompleteWarning(false);
+    onComplete(item.id);
+  };
+
   const parsedData = (() => {
     try {
       return item.data ? (typeof item.data === 'string' ? JSON.parse(item.data) : item.data) : {};
@@ -156,9 +186,6 @@ export function ToolsTaskDetailView({
     queryKey: [`/api/samsara/vehicle/${truckNumber}`],
     enabled: !!truckNumber && truckNumber !== 'Unknown',
   });
-
-  const completedCount = Object.values(taskState).filter(Boolean).length;
-  const totalTasks = TASK_LIST.length;
 
   const handleTaskToggle = (key: TaskKey) => {
     const newValue = !taskState[key];
@@ -468,7 +495,7 @@ export function ToolsTaskDetailView({
             <Button
               className="w-full"
               style={{ backgroundColor: '#36D9A3' }}
-              onClick={() => onComplete(item.id)}
+              onClick={handleCompleteClick}
               disabled={isCompletePending}
             >
               {isCompletePending ? (
@@ -486,6 +513,32 @@ export function ToolsTaskDetailView({
           </CardContent>
         </Card>
       </div>
+
+      <AlertDialog open={showIncompleteWarning} onOpenChange={setShowIncompleteWarning}>
+        <AlertDialogContent aria-describedby="incomplete-tasks-description">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              Incomplete Tasks
+            </AlertDialogTitle>
+            <AlertDialogDescription id="incomplete-tasks-description">
+              Only {completedCount} of {totalTasks} tasks are marked complete. 
+              Some tasks may not apply to this case.
+              <br /><br />
+              Are you sure you want to mark this case complete?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Go Back</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmComplete}
+              style={{ backgroundColor: '#36D9A3' }}
+            >
+              Complete Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
