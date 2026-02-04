@@ -6526,6 +6526,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SNSTV_HOME_PHONE: string;
       }>;
       
+      // Format phone number to (xxx)xxx-xxxx format
+      const formatPhone = (phone: string | null | undefined): string | null => {
+        if (!phone) return null;
+        // Remove all non-digit characters
+        const digits = phone.replace(/\D/g, '');
+        // Handle 10-digit US phone numbers
+        if (digits.length === 10) {
+          return `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
+        }
+        // Handle 11-digit with leading 1
+        if (digits.length === 11 && digits[0] === '1') {
+          return `(${digits.slice(1, 4)})${digits.slice(4, 7)}-${digits.slice(7)}`;
+        }
+        // Return original if not standard format
+        return phone;
+      };
+      
       const formattedData = rows.map(row => {
         // Build address from components
         const addressParts = [
@@ -6537,11 +6554,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ].filter(Boolean);
         const address = addressParts.join(', ');
         
-        // Combine phone numbers with "/" separator
+        // Format and combine phone numbers with "/" separator
         const phoneParts = [
-          row.SNSTV_MAIN_PHONE,
-          row.SNSTV_CELL_PHONE,
-          row.SNSTV_HOME_PHONE
+          formatPhone(row.SNSTV_MAIN_PHONE),
+          formatPhone(row.SNSTV_CELL_PHONE),
+          formatPhone(row.SNSTV_HOME_PHONE)
         ].filter(Boolean);
         const contactPhone = phoneParts.join(' / ');
         
