@@ -5884,6 +5884,8 @@ export class DatabaseStorage implements IStorage {
           postOffboardedStatus: data.postOffboardedStatus,
           nexusNewLocation: data.nexusNewLocation,
           nexusNewLocationContact: data.nexusNewLocationContact,
+          keys: data.keys,
+          repaired: data.repaired,
           comments: data.comments,
           updatedBy: data.updatedBy,
           updatedAt: new Date(),

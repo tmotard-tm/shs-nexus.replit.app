@@ -8422,16 +8422,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/vehicle-nexus-data/:vehicleNumber", requireAuth, async (req: any, res) => {
     try {
       const { vehicleNumber } = req.params;
-      const { postOffboardedStatus, nexusNewLocation, nexusNewLocationContact, comments } = req.body;
+      const { postOffboardedStatus, nexusNewLocation, nexusNewLocationContact, keys, repaired, comments } = req.body;
       
       const data = await storage.upsertVehicleNexusData({
         vehicleNumber,
         postOffboardedStatus: postOffboardedStatus || null,
         nexusNewLocation: nexusNewLocation || null,
         nexusNewLocationContact: nexusNewLocationContact || null,
+        keys: keys || null,
+        repaired: repaired || null,
         comments: comments || null,
         updatedBy: req.user?.username || 'system',
       });
+
+      // Post to external Fleet Scope API
+      try {
+        const apiKey = process.env.X_API_Key;
+        if (apiKey) {
+          // Remove leading zeros from vehicle number for API call
+          const cleanVehicleNumber = vehicleNumber.replace(/^0+/, '');
+          
+          const fleetScopePayload = {
+            keys: keys || null,
+            repaired: repaired || null,
+            contact: nexusNewLocationContact || null,
+            confirmedAddress: nexusNewLocation || null,
+            generalComments: comments || null,
+            fleetTeamComments: postOffboardedStatus || null,
+          };
+
+          const fleetScopeResponse = await fetch(`https://fleet-scope.replit.app/api/public/spares/${cleanVehicleNumber}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': apiKey,
+            },
+            body: JSON.stringify(fleetScopePayload),
+          });
+
+          if (!fleetScopeResponse.ok) {
+            console.warn(`Fleet Scope API returned status ${fleetScopeResponse.status} for vehicle ${vehicleNumber}`);
+          } else {
+            console.log(`Successfully synced vehicle ${vehicleNumber} to Fleet Scope`);
+          }
+        } else {
+          console.warn('X_API_Key not configured, skipping Fleet Scope sync');
+        }
+      } catch (fleetScopeError: any) {
+        // Log but don't fail the request if external API fails
+        console.error('Fleet Scope API sync failed:', fleetScopeError.message);
+      }
       
       res.json(data);
     } catch (error: any) {
