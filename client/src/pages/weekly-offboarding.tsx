@@ -420,7 +420,21 @@ export default function WeeklyOffboarding() {
       </div>
 
       {/* Employee Detail Drawer */}
-      <Sheet open={!!selectedEntry} onOpenChange={(open) => !open && setSelectedEntry(null)}>
+      <Sheet open={!!selectedEntry} onOpenChange={(open) => {
+        if (!open && selectedEntry?.truck) {
+          // Auto-save when closing the drawer
+          saveNexusDataMutation.mutate({
+            vehicleNumber: selectedEntry.truck,
+            postOffboardedStatus: nexusStatus || null,
+            nexusNewLocation: nexusLocation || null,
+            nexusNewLocationContact: nexusContact || null,
+            keys: nexusKeys || null,
+            repaired: nexusRepaired || null,
+            comments: nexusComments || null,
+          });
+        }
+        if (!open) setSelectedEntry(null);
+      }}>
         <SheetContent className="w-[450px] sm:max-w-[450px] overflow-y-auto" data-testid="sheet-employee-detail">
           {selectedEntry && (
             <div className="space-y-6">
@@ -572,27 +586,9 @@ export default function WeeklyOffboarding() {
                           <p className="text-xs text-muted-foreground text-right mt-1">{nexusComments.length}/400</p>
                         </div>
 
-                        <Button
-                          onClick={() => saveNexusDataMutation.mutate({
-                            vehicleNumber: selectedEntry.truck,
-                            postOffboardedStatus: nexusStatus || null,
-                            nexusNewLocation: nexusLocation || null,
-                            nexusNewLocationContact: nexusContact || null,
-                            keys: nexusKeys || null,
-                            repaired: nexusRepaired || null,
-                            comments: nexusComments || null,
-                          })}
-                          disabled={saveNexusDataMutation.isPending}
-                          className="w-full"
-                          data-testid="button-save-nexus-data"
-                        >
-                          {saveNexusDataMutation.isPending ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          ) : (
-                            <CheckCircle className="h-4 w-4 mr-2" />
-                          )}
-                          Save Tracking Data
-                        </Button>
+                        <p className="text-xs text-muted-foreground text-center italic">
+                          Changes save automatically when you close this panel
+                        </p>
                       </div>
                     )}
                   </div>
