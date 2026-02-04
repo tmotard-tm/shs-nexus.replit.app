@@ -6480,8 +6480,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const snowflakeService = getSnowflakeService();
       
-      // Join term roster with contact info view, filter by LAST_DATE_WORKED >= 2026-01-01
-      // Contact view columns start with SNSTV_
+      // Join term roster with contact info view and TPMS for truck info
+      // Filter by LAST_DATE_WORKED >= 2026-01-01
       const query = `
         SELECT 
           t.EMPL_NAME,
@@ -6499,10 +6499,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           c.SNSTV_HOME_POSTAL,
           c.SNSTV_MAIN_PHONE,
           c.SNSTV_CELL_PHONE,
-          c.SNSTV_HOME_PHONE
+          c.SNSTV_HOME_PHONE,
+          tpms.TRUCK_LU
         FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
         LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
           ON t.EMPLID = c.EMPLID
+        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.TPMS_EXTRACT_LAST_ASSIGNED tpms
+          ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
         WHERE t.LAST_DATE_WORKED >= '2026-01-01'
         ORDER BY t.LAST_DATE_WORKED DESC
       `;
@@ -6524,6 +6527,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SNSTV_MAIN_PHONE: string;
         SNSTV_CELL_PHONE: string;
         SNSTV_HOME_PHONE: string;
+        TRUCK_LU: string;
       }>;
       
       // Format phone number to (xxx)xxx-xxxx format
@@ -6616,6 +6620,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           address: address,
           contactPhone: contactPhone,
           owner: getOwner(row.PLANNING_AREA),
+          truck: row.TRUCK_LU || '',
         };
       });
       

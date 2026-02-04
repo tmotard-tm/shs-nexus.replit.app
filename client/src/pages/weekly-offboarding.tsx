@@ -25,6 +25,7 @@ interface TermRosterEntry {
   address: string;
   contactPhone: string;
   owner: string;
+  truck: string;
 }
 
 export default function WeeklyOffboarding() {
@@ -290,6 +291,7 @@ export default function WeeklyOffboarding() {
                       <TableRow className="bg-background">
                         <TableHead className="bg-background sticky top-0">Employee Name</TableHead>
                         <TableHead className="w-[120px] bg-background sticky top-0">Enterprise ID</TableHead>
+                        <TableHead className="w-[100px] bg-background sticky top-0">Truck</TableHead>
                         <TableHead className="w-[120px] bg-background sticky top-0">Status</TableHead>
                         <TableHead className="w-[120px] bg-background sticky top-0">
                           <div className="flex items-center gap-1">
@@ -310,6 +312,7 @@ export default function WeeklyOffboarding() {
                         <TableRow key={`${entry.enterpriseId}-${index}`} data-testid={`row-term-${index}`}>
                           <TableCell className="font-medium">{entry.emplName || '-'}</TableCell>
                           <TableCell className="font-mono text-sm">{entry.enterpriseId?.toUpperCase() || '-'}</TableCell>
+                          <TableCell className="font-mono text-sm">{entry.truck || '-'}</TableCell>
                           <TableCell>
                             <Badge variant={getStatusBadgeVariant(entry.emplStatus)}>
                               {entry.emplStatus || 'Unknown'}
