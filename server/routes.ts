@@ -6543,6 +6543,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return phone;
       };
       
+      // Planning Area to Owner mapping (first 4 digits)
+      const planningAreaOwnerMap: Record<string, string> = {
+        '3132': 'Rob & Andrea',
+        '3580': 'Monica, Cheryl & Machell',
+        '4766': 'Rob & Andrea',
+        '6141': 'Monica, Cheryl & Machell',
+        '7084': 'Rob & Andrea',
+        '7088': 'Carol & Tasha',
+        '7108': 'Carol & Tasha',
+        '7323': 'Monica, Cheryl & Machell',
+        '7435': 'Rob & Andrea',
+        '7670': 'Rob & Andrea',
+        '7744': 'Rob & Andrea',
+        '7983': 'Rob & Andrea',
+        '7995': 'Carol & Tasha',
+        '8035': 'Rob & Andrea',
+        '8096': 'Monica, Cheryl & Machell',
+        '8107': 'Carol & Tasha',
+        '8147': 'Carol & Tasha',
+        '8158': 'Carol & Tasha',
+        '8162': 'Monica, Cheryl & Machell',
+        '8169': 'Carol & Tasha',
+        '8175': 'Rob & Andrea',
+        '8184': 'Carol & Tasha',
+        '8206': 'Monica, Cheryl & Machell',
+        '8220': 'Monica, Cheryl & Machell',
+        '8228': 'Carol & Tasha',
+        '8309': 'Monica, Cheryl & Machell',
+        '8366': 'Carol & Tasha',
+        '8380': 'Rob & Andrea',
+        '8420': 'Monica, Cheryl & Machell',
+        '8555': 'Monica, Cheryl & Machell',
+        '8935': 'Monica, Cheryl & Machell',
+      };
+      
+      // Get owner from planning area (first 4 digits)
+      const getOwner = (planningArea: string | null | undefined): string => {
+        if (!planningArea) return 'Unknown';
+        const code = planningArea.replace(/\D/g, '').slice(0, 4);
+        return planningAreaOwnerMap[code] || 'Unknown';
+      };
+      
       const formattedData = rows.map(row => {
         // Build address from components
         const addressParts = [
@@ -6573,6 +6615,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           techSpecialty: row.TECH_SPECIALTY || '',
           address: address,
           contactPhone: contactPhone,
+          owner: getOwner(row.PLANNING_AREA),
         };
       });
       

@@ -24,6 +24,7 @@ interface TermRosterEntry {
   techSpecialty: string;
   address: string;
   contactPhone: string;
+  owner: string;
 }
 
 export default function WeeklyOffboarding() {
@@ -31,6 +32,7 @@ export default function WeeklyOffboarding() {
   const [searchQuery, setSearchQuery] = useState("");
   const [weekFilter, setWeekFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [ownerFilter, setOwnerFilter] = useState<string>("all");
 
   const { data: termRoster = [], isLoading, isRefetching } = useQuery<TermRosterEntry[]>({
     queryKey: ['/api/weekly-offboarding'],
@@ -81,6 +83,7 @@ export default function WeeklyOffboarding() {
   };
 
   const uniqueStatuses = Array.from(new Set(termRoster.map(e => e.emplStatus).filter(Boolean))).sort();
+  const uniqueOwners = Array.from(new Set(termRoster.map(e => e.owner).filter(Boolean))).sort();
 
   const weekGroups = termRoster.reduce((acc, entry) => {
     const weekKey = getWeekKey(entry.effdt);
@@ -99,12 +102,14 @@ export default function WeeklyOffboarding() {
       entry.enterpriseId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.planningArea?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.address?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      entry.contactPhone?.toLowerCase().includes(searchQuery.toLowerCase());
+      entry.contactPhone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      entry.owner?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesWeek = weekFilter === "all" || getWeekKey(entry.effdt) === weekFilter;
     const matchesStatus = statusFilter === "all" || entry.emplStatus === statusFilter;
+    const matchesOwner = ownerFilter === "all" || entry.owner === ownerFilter;
     
-    return matchesSearch && matchesWeek && matchesStatus;
+    return matchesSearch && matchesWeek && matchesStatus && matchesOwner;
   });
 
   const formatDate = (dateStr: string): string => {
@@ -245,6 +250,19 @@ export default function WeeklyOffboarding() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+                    <SelectTrigger className="w-[220px]" data-testid="select-owner-filter">
+                      <SelectValue placeholder="Filter by owner" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Owners</SelectItem>
+                      {uniqueOwners.map((owner) => (
+                        <SelectItem key={owner} value={owner}>{owner}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 
@@ -281,6 +299,7 @@ export default function WeeklyOffboarding() {
                         </TableHead>
                         <TableHead className="w-[130px] bg-background sticky top-0">Last Date Worked</TableHead>
                         <TableHead className="bg-background sticky top-0">Planning Area</TableHead>
+                        <TableHead className="bg-background sticky top-0">Owner</TableHead>
                         <TableHead className="bg-background sticky top-0">Tech Specialty</TableHead>
                         <TableHead className="min-w-[200px] bg-background sticky top-0">Address</TableHead>
                         <TableHead className="min-w-[180px] bg-background sticky top-0">Contact Phone</TableHead>
@@ -299,6 +318,7 @@ export default function WeeklyOffboarding() {
                           <TableCell className="whitespace-nowrap">{formatDate(entry.effdt)}</TableCell>
                           <TableCell className="whitespace-nowrap">{formatDate(entry.lastDateWorked)}</TableCell>
                           <TableCell className="text-sm">{entry.planningArea || '-'}</TableCell>
+                          <TableCell className="text-sm">{entry.owner || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.techSpecialty || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.address || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.contactPhone || '-'}</TableCell>
