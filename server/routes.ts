@@ -6482,6 +6482,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Join term roster with contact info view and TPMS for truck info
       // Filter by LAST_DATE_WORKED >= 2026-01-01
+      // Exclude records where the truck is still actively assigned in TPMS_EXTRACT
       const query = `
         SELECT 
           t.EMPL_NAME,
@@ -6507,6 +6508,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
           ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
         WHERE t.LAST_DATE_WORKED >= '2026-01-01'
+          AND (
+            tpms.TRUCK_LU IS NULL 
+            OR NOT EXISTS (
+              SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT active
+              WHERE active.TRUCK_LU = tpms.TRUCK_LU
+            )
+          )
         ORDER BY t.LAST_DATE_WORKED DESC
       `;
       
