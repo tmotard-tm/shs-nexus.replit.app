@@ -8451,7 +8451,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             fleetTeamComments: postOffboardedStatus || null,
           };
 
-          const fleetScopeResponse = await fetch(`https://fleet-scope.replit.app/api/public/spares/${cleanVehicleNumber}`, {
+          const fleetScopeUrl = `https://fleet-scope.replit.app/api/public/spares/${cleanVehicleNumber}`;
+          
+          // Log the full request details
+          console.log('=== FLEET SCOPE API REQUEST ===');
+          console.log('URL:', fleetScopeUrl);
+          console.log('Method: POST');
+          console.log('Headers:', { 'Content-Type': 'application/json', 'X-API-Key': '***' });
+          console.log('Payload:', JSON.stringify(fleetScopePayload, null, 2));
+          console.log('===============================');
+
+          const fleetScopeResponse = await fetch(fleetScopeUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -8459,6 +8469,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             },
             body: JSON.stringify(fleetScopePayload),
           });
+
+          // Log the response details
+          const responseText = await fleetScopeResponse.text();
+          console.log('=== FLEET SCOPE API RESPONSE ===');
+          console.log('Status:', fleetScopeResponse.status);
+          console.log('Response Body:', responseText);
+          console.log('================================');
 
           if (!fleetScopeResponse.ok) {
             console.warn(`Fleet Scope API returned status ${fleetScopeResponse.status} for vehicle ${vehicleNumber}`);
