@@ -2028,7 +2028,7 @@ export class MemStorage implements IStorage {
     const updatedItem = { 
       ...item, 
       assignedTo: assigneeId,
-      status: "pending",
+      status: "in_progress",
       updatedAt: new Date() 
     };
     this.toolsQueueItems.set(id, updatedItem);
@@ -4491,7 +4491,7 @@ export class DatabaseStorage implements IStorage {
   async assignToolsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined> {
     return await this.updateToolsQueueItem(id, { 
       assignedTo: assigneeId, 
-      status: 'pending'
+      status: 'in_progress'
     });
   }
 

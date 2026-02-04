@@ -88,7 +88,9 @@ interface ToolsTaskDetailViewProps {
   currentUser?: User;
   onBack: () => void;
   onComplete: (itemId: string) => void;
+  onAssign?: (itemId: string, assigneeId: string) => void;
   isCompletePending: boolean;
+  isAssignPending?: boolean;
 }
 
 type TaskKey = 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel';
@@ -115,8 +117,12 @@ export function ToolsTaskDetailView({
   currentUser,
   onBack,
   onComplete,
-  isCompletePending
+  onAssign,
+  isCompletePending,
+  isAssignPending
 }: ToolsTaskDetailViewProps) {
+  const isPending = item.status === 'pending';
+  const isAssignedToMe = item.assignedTo === currentUser?.id;
   const [taskState, setTaskState] = useState<Record<TaskKey, boolean>>({
     taskToolsReturn: item.taskToolsReturn ?? false,
     taskIphoneReturn: item.taskIphoneReturn ?? false,
@@ -492,11 +498,32 @@ export function ToolsTaskDetailView({
 
             <Separator className="my-4" />
 
+            {isPending && !isAssignedToMe && onAssign && currentUser && (
+              <Button
+                className="w-full mb-3"
+                style={{ backgroundColor: '#1A4B8C' }}
+                onClick={() => onAssign(item.id, currentUser.id)}
+                disabled={isAssignPending}
+              >
+                {isAssignPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Assigning...
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-4 w-4 mr-2" />
+                    Assign to Me
+                  </>
+                )}
+              </Button>
+            )}
+
             <Button
               className="w-full"
               style={{ backgroundColor: '#36D9A3' }}
               onClick={handleCompleteClick}
-              disabled={isCompletePending}
+              disabled={isCompletePending || (isPending && !isAssignedToMe)}
             >
               {isCompletePending ? (
                 <>
@@ -510,6 +537,11 @@ export function ToolsTaskDetailView({
                 </>
               )}
             </Button>
+            {isPending && !isAssignedToMe && (
+              <p className="text-xs text-muted-foreground text-center mt-2">
+                Assign to yourself first to mark complete
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

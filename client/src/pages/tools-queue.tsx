@@ -514,7 +514,15 @@ export default function ToolsQueuePage() {
               completeMutation.mutate(itemId);
               setViewQueueItem(null);
             }}
+            onAssign={(itemId, assigneeId) => {
+              assignMutation.mutate({ queueItemId: itemId, assigneeId }, {
+                onSuccess: () => {
+                  setViewQueueItem(null);
+                }
+              });
+            }}
             isCompletePending={completeMutation.isPending}
+            isAssignPending={assignMutation.isPending}
           />
         </div>
       </MainContent>
@@ -603,7 +611,7 @@ export default function ToolsQueuePage() {
               <div className="grid gap-4">
                 {pendingItems.map((item) => (
                   <Card key={item.id} className={`hover:shadow-md transition-shadow cursor-pointer ${getCardBorderClass(item)}`}
-                        onClick={() => setPickUpItem(item)}>
+                        onClick={() => setViewQueueItem(item)}>
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
