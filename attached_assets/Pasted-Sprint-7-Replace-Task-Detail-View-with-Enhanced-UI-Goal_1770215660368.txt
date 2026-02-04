@@ -1,0 +1,93 @@
+Sprint 7: Replace Task Detail View with Enhanced UI
+Goal: Create the new 3-column task detail view that replaces the current view when queue='tools'
+
+What You're Building
+When a user clicks on a Tools queue task (like "Day 0: Recover Equipment & Tools - ABALOS, JUSTINE W"), they currently see a basic task detail. Replace this with the new enhanced UI.
+
+Integration Point
+Find where the task detail view is rendered. Look for:
+
+client/src/pages/ or client/src/components/
+Component that renders when clicking "View" on a queue item
+Condition: Only replace when queue === 'tools'
+Component Structure
+Create client/src/components/tools-queue/ToolsTaskDetailView.tsx:
+
++---------------------------------------------------------------+
+| Day 0: Recover Equipment & Tools - [TECH NAME]         [Back] |
++---------------------------------------------------------------+
+| Column 1: Contact    | Column 2: Tasks      | Column 3: Actions |
+|                      |                      |                   |
+| Work Phone: xxx      | [ ] Tools Return     | [View in Segno]   |
+| Personal: xxx        | [ ] iPhone Return    | [View Tool Audit] |
+| Email: xxx           | [ ] Disconnect Line  | [Send Reminder]   |
+| Address: xxx         |     [Carrier: ___]   | [Generate QR]     |
+|                      | [ ] Deactivate mPay  |                   |
+| --- Routing ---      | [ ] Close Segno      | [Mark Complete]   |
+| ( ) PMF              | [ ] Create Label     |                   |
+| ( ) Pep Boys         |                      |                   |
+| ( ) Transfer         | 4/6 Complete         |                   |
+| ( ) Pending          |                      |                   |
++---------------------------------------------------------------+
+Column 1: Contact & Routing
+Contact Details:
+
+Fetch from /api/tools-queue/:offboardingId/contact (Sprint 6)
+Show work phone, personal phone (highlight if available), email, address
+If personal phone missing, show "Request from HR" button
+Vehicle Routing:
+
+Radio buttons: PMF, Pep Boys, Transfer, Pending
+Pre-select based on fleetRoutingDecision field (Sprint 1-5)
+Show current location if available (GPS from FleetScope)
+Column 2: Task Checklist
+Six interactive checkboxes matching Claudia's Excel workflow:
+
+Task	Description	Icon
+Tools Return Asset	Verify all assigned tools returned	Briefcase
+iPhone Return Asset	Check condition and unlock status	Smartphone
+Disconnect Phone Line	Suspend service (show carrier badge)	Wifi/WifiOff
+Deactivate mPayment	Remove access in Temples system	CreditCard
+Close Segno Orders	Ensure no open work orders remain	FileText
+Create UPS Shipping Label	Generate QR code for tech	Package
+Carrier Selection:
+
+Dropdown under "Disconnect Phone Line" task
+Options: Verizon, T-Mobile
+Claudia determines this based on tech's phone
+Progress Counter:
+
+Show "X/6 Complete" at bottom
+Column 3: Actions
+Buttons (NOT equipment table - equipment tracked in Segno):
+
+Button	Action
+View in Segno	Opens Segno Asset Acknowledgment (external link)
+View Tool Audit Form	Opens Luca's Tool Audit form (external link)
+Send Reminder Email	Future: compose email to tech
+Generate QR Label	Future: UPS label generation
+Mark Case Complete	Calls existing complete endpoint
+Styling
+Follow the designer mockup colors:
+
+Navy: #1A4B8C (headers, primary buttons)
+Teal: #36D9A3 (success states, complete button)
+Use existing Shadcn components where possible
+Slate grays for backgrounds and borders
+Constraints
+ONLY build the UI component
+Wire checkboxes to local state (persistence in Sprint 8)
+Keep existing task list/queue view unchanged
+Maintain mobile responsiveness
+Acceptance Criteria
+ New component renders when queue='tools' task is clicked
+ Contact info displays from API (or shows loading state)
+ All 6 task checkboxes are interactive
+ Carrier dropdown works
+ Routing radio buttons work
+ External links to Segno/Tool Audit form work
+ Back button returns to queue list
+ No regressions in other queue types (NTAO, Assets, Fleet, Inventory)
+When Done
+Report: files changed, what works, screenshots if possible, any issues.
+

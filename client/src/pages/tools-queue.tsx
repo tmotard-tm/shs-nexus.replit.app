@@ -16,6 +16,7 @@ import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
+import { ToolsTaskDetailView } from "@/components/tools-queue/ToolsTaskDetailView";
 
 interface ToolsQueueItem extends Omit<QueueItem, 'isByov' | 'fleetRoutingDecision' | 'routingReceivedAt' | 'blockedActions'> {
   isByov?: boolean | null;
@@ -499,6 +500,25 @@ export default function ToolsQueuePage() {
     );
   }
 
+  if (viewQueueItem) {
+    return (
+      <MainContent>
+        <div className="container mx-auto p-6">
+          <ToolsTaskDetailView
+            item={viewQueueItem}
+            currentUser={user ?? undefined}
+            onBack={() => setViewQueueItem(null)}
+            onComplete={(itemId) => {
+              completeMutation.mutate(itemId);
+              setViewQueueItem(null);
+            }}
+            isCompletePending={completeMutation.isPending}
+          />
+        </div>
+      </MainContent>
+    );
+  }
+
   return (
     <MainContent>
       <div className="container mx-auto p-6 space-y-6">
@@ -766,114 +786,6 @@ export default function ToolsQueuePage() {
             )}
           </TabsContent>
         </Tabs>
-
-        <Dialog open={!!viewQueueItem} onOpenChange={() => setViewQueueItem(null)}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Tools Queue Item Details</DialogTitle>
-              <DialogDescription>
-                View complete form submission and manage queue item
-              </DialogDescription>
-            </DialogHeader>
-            {viewQueueItem && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="font-semibold">Status</Label>
-                    <div className="mt-1">
-                      <Badge className={getStatusColor(viewQueueItem.status)}>
-                        {viewQueueItem.status}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="font-semibold">Priority</Label>
-                    <div className="mt-1">
-                      <Badge variant={getPriorityColor(viewQueueItem.priority)}>
-                        {viewQueueItem.priority}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="font-semibold">Created</Label>
-                    <p className="text-sm">{new Date(viewQueueItem.createdAt).toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <Label className="font-semibold">Assigned To</Label>
-                    <p className="text-sm">
-                      {users.find(u => u.id === viewQueueItem.assignedTo)?.username || 'Unassigned'}
-                    </p>
-                  </div>
-                  <div>
-                    <Label className="font-semibold">BYOV Status</Label>
-                    <div className="mt-1">
-                      {viewQueueItem.isByov ? (
-                        <Badge className="bg-green-100 text-green-800">Yes - BYOV</Badge>
-                      ) : (
-                        <Badge variant="outline">No - Company Vehicle</Badge>
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="font-semibold">Routing Decision</Label>
-                    <p className="text-sm">
-                      {viewQueueItem.fleetRoutingDecision || 'Pending Fleet Decision'}
-                    </p>
-                  </div>
-                </div>
-
-                <div>
-                  <Label className="font-semibold">Description</Label>
-                  <p className="text-sm mt-1 p-3 bg-muted rounded">{viewQueueItem.description}</p>
-                </div>
-
-                {viewQueueItem.data && (
-                  <div>
-                    <Label className="font-medium">Additional Data</Label>
-                    <div className="mt-1">
-                      <QueueItemDataTemplate data={viewQueueItem.data} />
-                    </div>
-                  </div>
-                )}
-
-                <NotesSection item={viewQueueItem} />
-              </div>
-            )}
-            {viewQueueItem && (
-              <div className="flex gap-2 pt-4 border-t">
-                {viewQueueItem.status === "pending" && (
-                  <Button 
-                    onClick={() => setPickUpItem(viewQueueItem)}
-                    disabled={assignMutation.isPending}
-                    data-testid={`button-pick-up-dialog-${viewQueueItem.id}`}
-                  >
-                    Pick Up
-                  </Button>
-                )}
-                {viewQueueItem.status === "in_progress" && viewQueueItem.assignedTo === user?.id && (
-                  <>
-                    <Button 
-                      onClick={() => {
-                        setWorkModuleItem(viewQueueItem);
-                        setIsWorkModuleOpen(true);
-                      }}
-                      data-testid={`button-start-work-${viewQueueItem.id}`}
-                    >
-                      Start Work
-                    </Button>
-                    <Button 
-                      variant="outline"
-                      onClick={() => completeMutation.mutate(viewQueueItem.id)}
-                      disabled={completeMutation.isPending}
-                    >
-                      Mark Complete
-                    </Button>
-                  </>
-                )}
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
 
         <PickUpRequestDialog
           isOpen={!!pickUpItem}
