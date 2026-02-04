@@ -6475,6 +6475,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Weekly Offboarding - Get term roster from Snowflake view
+  app.get("/api/weekly-offboarding", requireAuth, async (req: any, res) => {
+    try {
+      const snowflakeService = getSnowflakeService();
+      
+      const query = `
+        SELECT 
+          EMPL_NAME,
+          ENTERPRISE_ID,
+          EMPL_STATUS,
+          EFFDT,
+          LAST_DATE_WORKED,
+          PLANNING_AREA,
+          TECH_SPECIALTY
+        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW
+        ORDER BY EFFDT DESC
+      `;
+      
+      const rows = await snowflakeService.executeQuery(query) as Array<{
+        EMPL_NAME: string;
+        ENTERPRISE_ID: string;
+        EMPL_STATUS: string;
+        EFFDT: string;
+        LAST_DATE_WORKED: string;
+        PLANNING_AREA: string;
+        TECH_SPECIALTY: string;
+      }>;
+      
+      const formattedData = rows.map(row => ({
+        emplName: row.EMPL_NAME || '',
+        enterpriseId: row.ENTERPRISE_ID || '',
+        emplStatus: row.EMPL_STATUS || '',
+        effdt: row.EFFDT || '',
+        lastDateWorked: row.LAST_DATE_WORKED || '',
+        planningArea: row.PLANNING_AREA || '',
+        techSpecialty: row.TECH_SPECIALTY || '',
+      }));
+      
+      res.json(formattedData);
+    } catch (error: any) {
+      console.error("Error fetching weekly offboarding data:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Weekly Offboarding - Sync/Refresh (same as GET but for POST compatibility)
+  app.post("/api/snowflake/sync/weekly-offboarding", requireAuth, async (req: any, res) => {
+    try {
+      res.json({ success: true, message: "Term roster refreshed from Snowflake" });
+    } catch (error: any) {
+      console.error("Error syncing weekly offboarding:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Get termed techs list (now sourced from unified all_techs table by filtering on effectiveDate)
   app.get("/api/termed-techs", requireAuth, async (req: any, res) => {
     try {

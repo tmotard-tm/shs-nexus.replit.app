@@ -44,6 +44,7 @@ import TechRoster from "@/pages/tech-roster";
 import VehicleAssignments from "@/pages/vehicle-assignments";
 import FleetManagement from "@/pages/fleet-management";
 import WeeklyOnboarding from "@/pages/weekly-onboarding";
+import WeeklyOffboarding from "@/pages/weekly-offboarding";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import TestRepairResults from "@/pages/test-repair-results";
@@ -179,6 +180,12 @@ function Router() {
       <Route path="/weekly-onboarding">
         <ProtectedRoute>
           <WeeklyOnboarding />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/weekly-offboarding">
+        <ProtectedRoute>
+          <WeeklyOffboarding />
         </ProtectedRoute>
       </Route>
       

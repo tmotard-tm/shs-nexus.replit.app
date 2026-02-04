@@ -44,6 +44,7 @@ export interface RolePermissionSettings {
     onboarding: boolean;
     assignVehicle: boolean;
     weeklyOnboarding: boolean;
+    weeklyOffboarding: boolean;
     createVehicle: boolean;
   };
   sidebar: {
@@ -73,6 +74,7 @@ export interface RolePermissionSettings {
       rolePermissions: boolean;
       fleetManagement: boolean;
       weeklyOnboarding: boolean;
+      weeklyOffboarding: boolean;
       vehicleAssignments: boolean;
       techRoster: boolean;
     };
