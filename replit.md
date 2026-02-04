@@ -96,6 +96,30 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
+## 2026-02-04: Sprint 6 - Schema Extension + Contact Info Mapping ✅
+
+### Task Checklist Schema Extension
+- Added 7 new columns to `queue_items` table for Claudia's workflow tracking:
+  - `task_tools_return` (boolean) - Track tools return completion
+  - `task_iphone_return` (boolean) - Track iPhone return completion
+  - `task_disconnected_line` (boolean) - Track line disconnection
+  - `task_disconnected_mpayment` (boolean) - Track M-Payment disconnection
+  - `task_close_segno_orders` (boolean) - Track Segno orders closure
+  - `task_create_shipping_label` (boolean) - Track shipping label creation
+  - `carrier` (text) - Carrier selection ('Verizon' | 'T-Mobile' | null)
+
+### Contact Info Endpoint
+- Added `GET /api/tools-queue/:id/contact` endpoint
+- Fetches technician contact info from `all_techs` table (synced from Snowflake)
+- Maps: cellPhone → personalPhone, homeAddr fields → homeAddress object
+- Returns: personalPhone, workPhone, homePhone, homeAddress, employeeId, techName
+
+### Key Files Changed
+- `shared/schema.ts` - Added 7 new columns to `queueItems` table
+- `server/routes.ts` - Added contact info endpoint
+
+---
+
 ## 2026-02-03: Employee Roster Data Enrichment ✅
 
 ### Snowflake View Joins for Enhanced Employee Data
