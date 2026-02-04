@@ -420,21 +420,7 @@ export default function WeeklyOffboarding() {
       </div>
 
       {/* Employee Detail Drawer */}
-      <Sheet open={!!selectedEntry} onOpenChange={(open) => {
-        if (!open && selectedEntry?.truck) {
-          // Auto-save when closing the drawer
-          saveNexusDataMutation.mutate({
-            vehicleNumber: selectedEntry.truck,
-            postOffboardedStatus: nexusStatus || null,
-            nexusNewLocation: nexusLocation || null,
-            nexusNewLocationContact: nexusContact || null,
-            keys: nexusKeys || null,
-            repaired: nexusRepaired || null,
-            comments: nexusComments || null,
-          });
-        }
-        if (!open) setSelectedEntry(null);
-      }}>
+      <Sheet open={!!selectedEntry} onOpenChange={(open) => !open && setSelectedEntry(null)}>
         <SheetContent className="w-[450px] sm:max-w-[450px] overflow-y-auto" data-testid="sheet-employee-detail">
           {selectedEntry && (
             <div className="space-y-6">
@@ -513,9 +499,9 @@ export default function WeeklyOffboarding() {
                               <SelectItem value="reserved_for_new_hire">Reserved for new hire</SelectItem>
                               <SelectItem value="in_repair">In repair</SelectItem>
                               <SelectItem value="declined_repair">Declined repair</SelectItem>
-                              <SelectItem value="available_for_rental_pmf">Available to assign for rental / send to PMF</SelectItem>
+                              <SelectItem value="available_for_rental_pmf">Available to assign or send to PMF</SelectItem>
                               <SelectItem value="sent_to_pmf">Sent to PMF</SelectItem>
-                              <SelectItem value="assigned_to_tech_in_rental">Assigned to tech in rental</SelectItem>
+                              <SelectItem value="assigned_to_tech_in_rental">Assigned to rental</SelectItem>
                               <SelectItem value="not_found">Not found</SelectItem>
                             </SelectContent>
                           </Select>
@@ -586,9 +572,27 @@ export default function WeeklyOffboarding() {
                           <p className="text-xs text-muted-foreground text-right mt-1">{nexusComments.length}/400</p>
                         </div>
 
-                        <p className="text-xs text-muted-foreground text-center italic">
-                          Changes save automatically when you close this panel
-                        </p>
+                        <Button
+                          onClick={() => saveNexusDataMutation.mutate({
+                            vehicleNumber: selectedEntry.truck,
+                            postOffboardedStatus: nexusStatus || null,
+                            nexusNewLocation: nexusLocation || null,
+                            nexusNewLocationContact: nexusContact || null,
+                            keys: nexusKeys || null,
+                            repaired: nexusRepaired || null,
+                            comments: nexusComments || null,
+                          })}
+                          disabled={saveNexusDataMutation.isPending}
+                          className="w-full"
+                          data-testid="button-save-nexus-data"
+                        >
+                          {saveNexusDataMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                          )}
+                          Save Tracking Data
+                        </Button>
                       </div>
                     )}
                   </div>
