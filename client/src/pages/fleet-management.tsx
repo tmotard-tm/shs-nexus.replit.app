@@ -1267,7 +1267,9 @@ export default function FleetManagement() {
                             <SelectItem value="reserved_for_new_hire">Reserved for new hire</SelectItem>
                             <SelectItem value="in_repair">In repair</SelectItem>
                             <SelectItem value="declined_repair">Declined repair</SelectItem>
-                            <SelectItem value="available_for_rental_pmf">Available to assign for rental / sent to PMF</SelectItem>
+                            <SelectItem value="available_for_rental_pmf">Available to assign for rental / send to PMF</SelectItem>
+                            <SelectItem value="sent_to_pmf">Sent to PMF</SelectItem>
+                            <SelectItem value="assigned_to_tech_in_rental">Assigned to tech in rental</SelectItem>
                             <SelectItem value="not_found">Not found</SelectItem>
                           </SelectContent>
                         </Select>
