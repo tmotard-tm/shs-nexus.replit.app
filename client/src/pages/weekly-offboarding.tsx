@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -6,7 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download } from "lucide-react";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
+import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -34,6 +39,13 @@ export default function WeeklyOffboarding() {
   const [weekFilter, setWeekFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
+  const [selectedEntry, setSelectedEntry] = useState<TermRosterEntry | null>(null);
+  
+  // Nexus tracking fields
+  const [nexusStatus, setNexusStatus] = useState("");
+  const [nexusLocation, setNexusLocation] = useState("");
+  const [nexusContact, setNexusContact] = useState("");
+  const [nexusComments, setNexusComments] = useState("");
 
   const { data: termRoster = [], isLoading, isRefetching } = useQuery<TermRosterEntry[]>({
     queryKey: ['/api/weekly-offboarding'],
@@ -54,6 +66,64 @@ export default function WeeklyOffboarding() {
       toast({
         title: "Sync Failed",
         description: error.message || "Failed to sync term roster data",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Fetch nexus data when an entry with a truck is selected
+  const { data: nexusData, isLoading: nexusDataLoading } = useQuery({
+    queryKey: ['/api/vehicle-nexus-data', selectedEntry?.truck],
+    queryFn: async () => {
+      if (!selectedEntry?.truck) return null;
+      const response = await fetch(`/api/vehicle-nexus-data/${selectedEntry.truck}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) return null;
+      return response.json();
+    },
+    enabled: !!selectedEntry?.truck,
+  });
+
+  // Reset nexus fields when selection changes
+  useEffect(() => {
+    if (nexusData) {
+      setNexusStatus(nexusData.postOffboardedStatus || "");
+      setNexusLocation(nexusData.nexusNewLocation || "");
+      setNexusContact(nexusData.nexusNewLocationContact || "");
+      setNexusComments(nexusData.comments || "");
+    } else {
+      setNexusStatus("");
+      setNexusLocation("");
+      setNexusContact("");
+      setNexusComments("");
+    }
+  }, [nexusData, selectedEntry]);
+
+  // Save nexus tracking data mutation
+  const saveNexusDataMutation = useMutation({
+    mutationFn: async (data: {
+      vehicleNumber: string;
+      postOffboardedStatus: string | null;
+      nexusNewLocation: string | null;
+      nexusNewLocationContact: string | null;
+      comments: string | null;
+    }) => {
+      return await apiRequest('PUT', `/api/vehicle-nexus-data/${data.vehicleNumber}`, data);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Saved",
+        description: "Nexus tracking data has been saved.",
+      });
+      if (selectedEntry?.truck) {
+        queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', selectedEntry.truck] });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Save Failed",
+        description: error.message || "Failed to save nexus tracking data",
         variant: "destructive",
       });
     },
@@ -309,7 +379,12 @@ export default function WeeklyOffboarding() {
                     </TableHeader>
                     <TableBody>
                       {filteredRoster.map((entry, index) => (
-                        <TableRow key={`${entry.enterpriseId}-${index}`} data-testid={`row-term-${index}`}>
+                        <TableRow 
+                          key={`${entry.enterpriseId}-${index}`} 
+                          data-testid={`row-term-${index}`}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => setSelectedEntry(entry)}
+                        >
                           <TableCell className="font-medium">{entry.emplName || '-'}</TableCell>
                           <TableCell className="font-mono text-sm">{entry.enterpriseId?.toUpperCase() || '-'}</TableCell>
                           <TableCell className="font-mono text-sm">{entry.truck || '-'}</TableCell>
@@ -335,6 +410,170 @@ export default function WeeklyOffboarding() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Employee Detail Drawer */}
+      <Sheet open={!!selectedEntry} onOpenChange={(open) => !open && setSelectedEntry(null)}>
+        <SheetContent className="w-[450px] sm:max-w-[450px] overflow-y-auto" data-testid="sheet-employee-detail">
+          {selectedEntry && (
+            <div className="space-y-6">
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2">
+                  <UserMinus className="h-5 w-5 text-red-600" />
+                  {selectedEntry.emplName}
+                </SheetTitle>
+                <SheetDescription>
+                  {selectedEntry.enterpriseId?.toUpperCase()} • {selectedEntry.truck || 'No Truck'}
+                </SheetDescription>
+              </SheetHeader>
+
+              <Separator />
+
+              {/* Employee Info */}
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm text-muted-foreground">Employee Details</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Status:</span>
+                    <Badge variant={getStatusBadgeVariant(selectedEntry.emplStatus)} className="ml-2">
+                      {selectedEntry.emplStatus}
+                    </Badge>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Last Worked:</span>
+                    <span className="ml-2">{formatDate(selectedEntry.lastDateWorked)}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Planning Area:</span>
+                    <span className="ml-2">{selectedEntry.planningArea || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Owner:</span>
+                    <span className="ml-2">{selectedEntry.owner || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Address:</span>
+                    <span className="ml-2">{selectedEntry.address || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Contact:</span>
+                    <span className="ml-2">{selectedEntry.contactPhone || '-'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {selectedEntry.truck && (
+                <>
+                  <Separator />
+
+                  {/* Nexus Tracking Data */}
+                  <div className="space-y-4">
+                    <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-2">
+                      <Truck className="h-4 w-4" />
+                      Nexus Tracking
+                    </h4>
+                    
+                    {nexusDataLoading ? (
+                      <div className="space-y-3">
+                        <Skeleton className="h-9 w-full" />
+                        <Skeleton className="h-9 w-full" />
+                        <Skeleton className="h-9 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Post-Offboarded Status</Label>
+                          <Select value={nexusStatus} onValueChange={setNexusStatus}>
+                            <SelectTrigger className="mt-1" data-testid="select-nexus-status">
+                              <SelectValue placeholder="Select status..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="reserved_for_new_hire">Reserved for new hire</SelectItem>
+                              <SelectItem value="in_repair">In repair</SelectItem>
+                              <SelectItem value="declined_repair">Declined repair</SelectItem>
+                              <SelectItem value="available_for_rental_pmf">Available to assign for rental / send to PMF</SelectItem>
+                              <SelectItem value="sent_to_pmf">Sent to PMF</SelectItem>
+                              <SelectItem value="assigned_to_tech_in_rental">Assigned to tech in rental</SelectItem>
+                              <SelectItem value="not_found">Not found</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">New Location</Label>
+                          <Input
+                            value={nexusLocation}
+                            onChange={(e) => setNexusLocation(e.target.value)}
+                            placeholder="Address or location description..."
+                            className="mt-1"
+                            data-testid="input-nexus-location"
+                          />
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">New Location Contact</Label>
+                          <Input
+                            value={nexusContact}
+                            onChange={(e) => setNexusContact(e.target.value)}
+                            placeholder="Phone number or contact info..."
+                            className="mt-1"
+                            data-testid="input-nexus-contact"
+                          />
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Comments</Label>
+                          <Textarea
+                            value={nexusComments}
+                            onChange={(e) => setNexusComments(e.target.value.slice(0, 400))}
+                            placeholder="Additional notes (max 400 characters)..."
+                            className="mt-1 resize-none"
+                            rows={3}
+                            maxLength={400}
+                            data-testid="textarea-nexus-comments"
+                          />
+                          <p className="text-xs text-muted-foreground text-right mt-1">{nexusComments.length}/400</p>
+                        </div>
+
+                        <Button
+                          onClick={() => saveNexusDataMutation.mutate({
+                            vehicleNumber: selectedEntry.truck,
+                            postOffboardedStatus: nexusStatus || null,
+                            nexusNewLocation: nexusLocation || null,
+                            nexusNewLocationContact: nexusContact || null,
+                            comments: nexusComments || null,
+                          })}
+                          disabled={saveNexusDataMutation.isPending}
+                          className="w-full"
+                          data-testid="button-save-nexus-data"
+                        >
+                          {saveNexusDataMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                          )}
+                          Save Tracking Data
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {!selectedEntry.truck && (
+                <>
+                  <Separator />
+                  <div className="text-center py-4 text-muted-foreground">
+                    <Truck className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No truck assigned to this employee.</p>
+                    <p className="text-sm">Nexus tracking is only available for employees with assigned trucks.</p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </MainContent>
   );
 }
