@@ -2073,6 +2073,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Save progress on Tools queue item (auto-save tasks, carrier, routing)
+  app.patch("/api/tools-queue/:id/save-progress", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
+        return res.status(403).json({ message: "Access denied to Tools queue" });
+      }
+      
+      const { 
+        taskToolsReturn, 
+        taskIphoneReturn, 
+        taskDisconnectedLine, 
+        taskDisconnectedMPayment, 
+        taskCloseSegnoOrders, 
+        taskCreateShippingLabel, 
+        carrier,
+        fleetRoutingDecision
+      } = req.body;
+      
+      const updates: Record<string, any> = {};
+      if (typeof taskToolsReturn === 'boolean') updates.taskToolsReturn = taskToolsReturn;
+      if (typeof taskIphoneReturn === 'boolean') updates.taskIphoneReturn = taskIphoneReturn;
+      if (typeof taskDisconnectedLine === 'boolean') updates.taskDisconnectedLine = taskDisconnectedLine;
+      if (typeof taskDisconnectedMPayment === 'boolean') updates.taskDisconnectedMPayment = taskDisconnectedMPayment;
+      if (typeof taskCloseSegnoOrders === 'boolean') updates.taskCloseSegnoOrders = taskCloseSegnoOrders;
+      if (typeof taskCreateShippingLabel === 'boolean') updates.taskCreateShippingLabel = taskCreateShippingLabel;
+      if (carrier !== undefined) updates.carrier = carrier;
+      if (fleetRoutingDecision !== undefined) updates.fleetRoutingDecision = fleetRoutingDecision;
+      
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No valid fields to update" });
+      }
+      
+      const queueItem = await storage.updateToolsQueueProgress(req.params.id, updates);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Tools queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      console.error('Error saving tools queue progress:', error);
+      res.status(500).json({ message: "Failed to save progress" });
+    }
+  });
 
   // Check for existing open offboarding tasks for an employee
   app.get("/api/offboarding/check-existing", async (req, res) => {

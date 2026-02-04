@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { QueueItem, User } from "@shared/schema";
+import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import {
   ArrowLeft,
   Phone,
@@ -26,7 +27,8 @@ import {
   CheckCircle,
   Loader2,
   Truck,
-  AlertCircle
+  AlertCircle,
+  Check
 } from "lucide-react";
 
 interface ToolsQueueItem extends Omit<QueueItem, 'isByov' | 'fleetRoutingDecision' | 'routingReceivedAt' | 'blockedActions' | 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier'> {
@@ -126,6 +128,16 @@ export function ToolsTaskDetailView({
   
   const [routing, setRouting] = useState<string>(normalizeRouting(item.fleetRoutingDecision));
 
+  const { save, saveStatus, flushPending } = useDebouncedSave({ 
+    itemId: item.id,
+    debounceMs: 500 
+  });
+
+  const handleBack = () => {
+    flushPending();
+    onBack();
+  };
+
   const parsedData = (() => {
     try {
       return item.data ? (typeof item.data === 'string' ? JSON.parse(item.data) : item.data) : {};
@@ -149,7 +161,19 @@ export function ToolsTaskDetailView({
   const totalTasks = TASK_LIST.length;
 
   const handleTaskToggle = (key: TaskKey) => {
-    setTaskState(prev => ({ ...prev, [key]: !prev[key] }));
+    const newValue = !taskState[key];
+    setTaskState(prev => ({ ...prev, [key]: newValue }));
+    save({ [key]: newValue });
+  };
+
+  const handleCarrierChange = (value: string) => {
+    setCarrier(value);
+    save({ carrier: value || null });
+  };
+
+  const handleRoutingChange = (value: string) => {
+    setRouting(value);
+    save({ fleetRoutingDecision: value === 'pending' ? null : value });
   };
 
   const formatAddress = (addr: ContactInfo['homeAddress'] | undefined) => {
@@ -174,7 +198,7 @@ export function ToolsTaskDetailView({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
@@ -188,6 +212,28 @@ export function ToolsTaskDetailView({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {saveStatus !== 'idle' && (
+            <div className="flex items-center gap-1 text-sm text-muted-foreground">
+              {saveStatus === 'saving' && (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span>Saving...</span>
+                </>
+              )}
+              {saveStatus === 'saved' && (
+                <>
+                  <Check className="h-3 w-3 text-green-600" />
+                  <span className="text-green-600">Saved</span>
+                </>
+              )}
+              {saveStatus === 'error' && (
+                <>
+                  <AlertCircle className="h-3 w-3 text-red-600" />
+                  <span className="text-red-600">Save failed</span>
+                </>
+              )}
+            </div>
+          )}
           {item.isByov && (
             <Badge className="bg-green-100 text-green-800 border-green-200">BYOV</Badge>
           )}
@@ -255,7 +301,7 @@ export function ToolsTaskDetailView({
 
             <div className="space-y-3">
               <h4 className="font-medium text-sm text-muted-foreground">Vehicle Routing</h4>
-              <RadioGroup value={routing} onValueChange={setRouting} className="space-y-2">
+              <RadioGroup value={routing} onValueChange={handleRoutingChange} className="space-y-2">
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="PMF" id="routing-pmf" />
                   <Label htmlFor="routing-pmf" className="text-sm cursor-pointer">PMF (Park My Fleet)</Label>
@@ -328,7 +374,7 @@ export function ToolsTaskDetailView({
 
                     {task.hasCarrier && (
                       <div className="ml-8">
-                        <Select value={carrier} onValueChange={setCarrier}>
+                        <Select value={carrier} onValueChange={handleCarrierChange}>
                           <SelectTrigger className="w-40 h-8 text-sm">
                             <SelectValue placeholder="Select carrier" />
                           </SelectTrigger>

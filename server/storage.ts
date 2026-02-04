@@ -166,6 +166,7 @@ export interface IStorage {
   assignToolsQueueItem(id: string, assigneeId: string): Promise<QueueItem | undefined>;
   startWorkToolsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
   completeToolsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
+  updateToolsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier' | 'fleetRoutingDecision'>>): Promise<QueueItem | undefined>;
   
   // BYOV Blocking Logic (Sprint 2)
   getFleetTaskByWorkflowId(workflowId: string): Promise<QueueItem | undefined>;
@@ -2070,6 +2071,19 @@ export class MemStorage implements IStorage {
     // Check if this completes a workflow step and trigger next step
     await this.triggerNextWorkflowStep(updatedItem);
     
+    return updatedItem;
+  }
+
+  async updateToolsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier' | 'fleetRoutingDecision'>>): Promise<QueueItem | undefined> {
+    const item = this.toolsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = {
+      ...item,
+      ...updates,
+      updatedAt: new Date()
+    };
+    this.toolsQueueItems.set(id, updatedItem);
     return updatedItem;
   }
 
@@ -4526,6 +4540,17 @@ export class DatabaseStorage implements IStorage {
     }
     
     return completedItem;
+  }
+
+  async updateToolsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier' | 'fleetRoutingDecision'>>): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({
+        ...updates,
+        updatedAt: new Date()
+      })
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Tools')))
+      .returning();
+    return result[0];
   }
 
   async getFleetTaskByWorkflowId(workflowId: string): Promise<QueueItem | undefined> {
