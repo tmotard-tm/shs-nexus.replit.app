@@ -2031,6 +2031,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               separationCategory: hrRecord?.separationCategory || null,
               hrTruckNumber: hrRecord?.truckNumber || null,
               notes: hrRecord?.notes || null,
+              // Sprint 11: Track if enriched from Snowflake HR data
+              fromSnowflake: !!hrRecord,
             };
           } else {
             // Fallback: extract from queue item data/title, with HR separation data overlay
@@ -2047,6 +2049,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               separationCategory: hrRecord?.separationCategory || null,
               hrTruckNumber: hrRecord?.truckNumber || null,
               notes: hrRecord?.notes || null,
+              // Sprint 11: Track if enriched from Snowflake HR data
+              fromSnowflake: !!hrRecord,
             };
           }
         } catch (e) {
@@ -2064,6 +2068,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             separationCategory: null,
             hrTruckNumber: null,
             notes: null,
+            fromSnowflake: false,
           };
         }
         
@@ -2165,9 +2170,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ldapId = enterpriseId || tech.techRacfid;
       if (ldapId) {
         try {
-          const mobileData = await snowflakeSyncService.getMobilePhoneByLdap(ldapId);
-          if (mobileData.success && mobileData.phoneNumber) {
-            mobilePhone = mobileData.phoneNumber;
+          const syncService = getSnowflakeSyncService();
+          if (syncService) {
+            const mobileData = await syncService.getMobilePhoneByLdap(ldapId);
+            if (mobileData.success && mobileData.phoneNumber) {
+              mobilePhone = mobileData.phoneNumber;
+            }
           }
         } catch (e) {
           // Silently continue if mobile phone lookup fails

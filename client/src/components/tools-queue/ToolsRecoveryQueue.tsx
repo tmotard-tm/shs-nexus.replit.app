@@ -60,6 +60,7 @@ interface TechData {
   hrTruckNumber: string | null;
   separationCategory: string | null;
   notes: string | null;
+  fromSnowflake?: boolean;
 }
 
 interface ToolsQueueItemEnriched extends QueueItem {
@@ -841,7 +842,12 @@ export function ToolsRecoveryQueue() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-900">{row.techData?.techName || "Unknown"}</div>
-                        <div className="text-xs text-slate-400 font-mono">{row.techData?.enterpriseId || "N/A"}</div>
+                        <div className="text-xs text-slate-400 font-mono flex items-center gap-2">
+                          {row.techData?.enterpriseId || "N/A"}
+                          {row.techData?.fromSnowflake && (
+                            <span className="text-[10px] text-slate-400 italic">Source: Snowflake</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-slate-600">{row.techData?.district || "N/A"}</td>
                       <td className="px-4 py-3 text-slate-600">
