@@ -46,6 +46,7 @@ import FleetManagement from "@/pages/fleet-management";
 import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
+import CommunicationHub from "@/pages/communication-hub";
 import TestRepairResults from "@/pages/test-repair-results";
 import About from "@/pages/about";
 import { BackButton } from "@/components/ui/back-button";
@@ -313,6 +314,14 @@ function Router() {
             <TemplateManagement />
           </MainContent>
         </PermissionProtectedRoute>
+      </Route>
+
+      <Route path="/communication-hub">
+        <ProtectedRoute>
+          <MainContent>
+            <CommunicationHub />
+          </MainContent>
+        </ProtectedRoute>
       </Route>
 
       <Route path="/role-permissions">

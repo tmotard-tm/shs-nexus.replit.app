@@ -16,6 +16,7 @@ import {
   UserPlus,
   Info,
   Wrench,
+  Mail,
   type LucideIcon
 } from "lucide-react";
 
@@ -251,6 +252,21 @@ export const PAGES: PageDefinition[] = [
       { key: "editTemplate", label: "Edit Template", description: "Show/hide Edit Template button" },
       { key: "deleteTemplate", label: "Delete Template", description: "Show/hide Delete Template button" },
       { key: "toggleStatus", label: "Toggle Status", description: "Show/hide template status toggle" },
+    ],
+  },
+  {
+    key: "communicationHub",
+    label: "Communication Hub",
+    description: "Manage email and SMS templates, whitelists, and message logs",
+    path: "/communication-hub",
+    icon: Mail,
+    category: "management",
+    permissionKey: "communicationHub",
+    features: [
+      { key: "editTemplates", label: "Edit Templates", description: "Show/hide template editing" },
+      { key: "changeMode", label: "Change Mode", description: "Allow changing simulated/whitelisted/live mode" },
+      { key: "manageWhitelist", label: "Manage Whitelist", description: "Show/hide whitelist management" },
+      { key: "viewLogs", label: "View Logs", description: "Show/hide message history" },
     ],
   },
   {
