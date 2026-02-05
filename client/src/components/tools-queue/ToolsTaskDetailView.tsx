@@ -63,7 +63,7 @@ interface ToolsQueueItem extends Omit<QueueItem, 'isByov' | 'fleetRoutingDecisio
 
 interface ContactInfo {
   personalPhone: string | null;
-  workPhone: string | null;
+  mobilePhone: string | null;
   homePhone: string | null;
   homeAddress: {
     line1: string | null;
@@ -293,12 +293,12 @@ export function ToolsTaskDetailView({
               ) : contactInfo ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm">
-                    <Phone className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">Work:</span>
-                    <span>{contactInfo.workPhone || 'Not available'}</span>
+                    <Smartphone className="h-4 w-4 text-muted-foreground" />
+                    <span className="font-medium">Mobile:</span>
+                    <span>{contactInfo.mobilePhone || 'Not available'}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
-                    <Smartphone className="h-4 w-4 text-muted-foreground" />
+                    <Phone className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium">Personal:</span>
                     {contactInfo.personalPhone ? (
                       <span className="text-green-600 font-medium">{contactInfo.personalPhone}</span>

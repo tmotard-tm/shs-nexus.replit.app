@@ -2131,8 +2131,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Tools queue item not found" });
       }
       
-      // Extract employee ID from queue item data
+      // Extract employee ID and enterprise ID from queue item data
       let employeeId: string | null = null;
+      let enterpriseId: string | null = null;
       try {
         const parsedData = typeof queueItem.data === 'string' 
           ? JSON.parse(queueItem.data) 
@@ -2141,6 +2142,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                      parsedData?.employeeId || 
                      parsedData?.emplid ||
                      null;
+        enterpriseId = parsedData?.employee?.enterpriseId || 
+                       parsedData?.employee?.racfId || 
+                       parsedData?.techRacfId ||
+                       null;
       } catch (e) {
         console.warn('Could not parse employee ID from queue item data:', e);
       }
@@ -2155,10 +2160,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Technician not found in employee roster" });
       }
       
+      // Sprint 11: Fetch mobile phone from TPMS tech table
+      let mobilePhone: string | null = null;
+      const ldapId = enterpriseId || tech.techRacfid;
+      if (ldapId) {
+        try {
+          const mobileData = await snowflakeSyncService.getMobilePhoneByLdap(ldapId);
+          if (mobileData.success && mobileData.phoneNumber) {
+            mobilePhone = mobileData.phoneNumber;
+          }
+        } catch (e) {
+          // Silently continue if mobile phone lookup fails
+        }
+      }
+      
       // Return mapped contact info
       res.json({
         personalPhone: tech.cellPhone || null,
-        workPhone: tech.mainPhone || null,
+        mobilePhone: mobilePhone,
         homePhone: tech.homePhone || null,
         homeAddress: {
           line1: tech.homeAddr1 || null,
