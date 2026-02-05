@@ -538,7 +538,7 @@ export default function WeeklyOffboarding() {
                                       <span className="text-xs text-muted-foreground">
                                         {(() => {
                                           try {
-                                            return format(parseISO(samsaraInfo.lastUpdated), 'MMM d, yyyy h:mm a');
+                                            return format(parseISO(samsaraInfo.lastUpdated), 'yyyy-MM-dd');
                                           } catch {
                                             return samsaraInfo.lastUpdated;
                                           }
