@@ -555,6 +555,7 @@ export default function WeeklyOffboarding() {
                               <SelectValue placeholder="Select status..." />
                             </SelectTrigger>
                             <SelectContent>
+                              <SelectItem value="__none__">-- None --</SelectItem>
                               <SelectItem value="reserved_for_new_hire">Reserved for new hire</SelectItem>
                               <SelectItem value="in_repair">In repair</SelectItem>
                               <SelectItem value="declined_repair">Declined repair</SelectItem>
@@ -595,6 +596,7 @@ export default function WeeklyOffboarding() {
                               <SelectValue placeholder="Select keys status..." />
                             </SelectTrigger>
                             <SelectContent>
+                              <SelectItem value="__none__">-- None --</SelectItem>
                               <SelectItem value="present">Present</SelectItem>
                               <SelectItem value="not_present">Not Present</SelectItem>
                               <SelectItem value="unknown">Unknown/Would not Check</SelectItem>
@@ -609,6 +611,7 @@ export default function WeeklyOffboarding() {
                               <SelectValue placeholder="Select repair status..." />
                             </SelectTrigger>
                             <SelectContent>
+                              <SelectItem value="__none__">-- None --</SelectItem>
                               <SelectItem value="complete">Complete</SelectItem>
                               <SelectItem value="in_process">In Process</SelectItem>
                               <SelectItem value="unknown_if_needed">Unknown if needed</SelectItem>
@@ -634,11 +637,11 @@ export default function WeeklyOffboarding() {
                         <Button
                           onClick={() => saveNexusDataMutation.mutate({
                             vehicleNumber: selectedEntry.truck,
-                            postOffboardedStatus: nexusStatus || null,
+                            postOffboardedStatus: nexusStatus === '__none__' ? null : (nexusStatus || null),
                             nexusNewLocation: nexusLocation || null,
                             nexusNewLocationContact: nexusContact || null,
-                            keys: nexusKeys || null,
-                            repaired: nexusRepaired || null,
+                            keys: nexusKeys === '__none__' ? null : (nexusKeys || null),
+                            repaired: nexusRepaired === '__none__' ? null : (nexusRepaired || null),
                             comments: nexusComments || null,
                           })}
                           disabled={saveNexusDataMutation.isPending}
