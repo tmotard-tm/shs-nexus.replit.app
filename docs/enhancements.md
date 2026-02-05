@@ -1,5 +1,33 @@
 # Enhancements & Bug Fixes Log
 
+## 2026-02-05
+
+### Bugs Fixed
+
+| Issue | Description | Resolution |
+|-------|-------------|------------|
+| Circular import | email-service.ts and communication-service.ts had circular dependency | Created notification-service.ts to hold sendToolAuditNotification |
+
+### Enhancements Made
+
+| Enhancement | Description |
+|-------------|-------------|
+| Communication Hub | Centralized template management with mode control (simulated/whitelisted/live) |
+| Developer-only access | All /api/communication/* routes enforce developer role at backend level |
+| Template preview | Live preview with variable substitution in Communication Hub |
+| Whitelist manager | Add/remove test emails and phones for safe testing |
+| Send history | Filterable log of all sent/simulated messages |
+
+### Technical Debt Identified
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| No Zod validation on communication routes | Medium | Add input validation for security |
+| SMS not implemented | Medium | Shows as simulated - needs Twilio integration |
+| No E2E tests for Communication Hub | Low | Consider Playwright tests |
+
+---
+
 ## 2026-02-04
 
 ### Bugs Fixed

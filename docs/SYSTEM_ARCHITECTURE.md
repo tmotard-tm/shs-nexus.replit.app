@@ -1,6 +1,6 @@
 # Nexus System Architecture
 
-> **Last Updated**: 2026-02-04
+> **Last Updated**: 2026-02-05
 > **Purpose**: The "Truth" document for understanding how Nexus works. Read this first.
 
 ---
@@ -63,6 +63,9 @@ Nexus is an **enterprise task management operations platform** that:
 | `byov-utils.ts` | BYOV detection logic and Tools task status utilities |
 | `db.ts` | Database connection setup |
 | `auth.ts` | Authentication middleware |
+| `communication-service.ts` | **New (2026-02-05)**: Mode-aware email/SMS sending with template support |
+| `notification-service.ts` | **New (2026-02-05)**: Tool audit notifications (extracted to avoid circular imports) |
+| `email-service.ts` | SendGrid email sending utilities |
 
 ### Shared (`shared/`)
 
@@ -75,7 +78,7 @@ Nexus is an **enterprise task management operations platform** that:
 
 | Directory/File | Purpose |
 |----------------|---------|
-| `pages/` | Page components (queue-management, fleet, offboard-technician, tools-queue, etc.) |
+| `pages/` | Page components (queue-management, fleet, offboard-technician, tools-queue, communication-hub, etc.) |
 | `components/` | Reusable UI components |
 | `components/tools-queue/ToolsRecoveryQueue.tsx` | **New (2026-02-04)**: Table-based Tools queue with expandable rows, filters, urgency badges |
 | `hooks/` | Custom React hooks (useAuth, use-toast, etc.) |
@@ -303,14 +306,18 @@ GET /api/tools-queue
 - Sprint 1-5: Tools queue, BYOV detection, blocking logic, Phase 2 triggers
 - Sprint 6-9: Enhanced task detail views, auto-save, table-based queue redesign
 - Sprint 10: HR separation data integration from Snowflake
+- Sprint 11: Mobile phone from TPMS, Snowflake source indicator
+- **Communication Hub MVP**: Template management with mode control (simulated/whitelisted/live)
 
-### Sprint 10 Highlights
-- Tools Queue now fetches separation details from HR Snowflake table
-- Priority: HR data > all_techs data > queue item data
-- Available fields: separationDate, contactNumber, personalEmail, fleetPickupAddress, separationCategory
+### Communication Hub Highlights
+- Developer-only access (UI and API level enforcement)
+- Three tabs: Templates, Whitelist, History
+- Mode-aware sending: simulated (logs only), whitelisted (test recipients), live (real)
+- Tool Audit emails now routed through Communication Hub templates
 
 ### Known Issues
-- None blocking
+- SMS not yet implemented (shows as simulated)
+- No Zod validation on communication routes
 
 ---
 

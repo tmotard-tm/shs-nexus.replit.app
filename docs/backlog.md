@@ -27,6 +27,8 @@
 | Sprint 8 | Auto-Save for Task Progress | ✅ Complete | 2026-02-04 |
 | Sprint 9 | Tools Recovery Queue Redesign (Table + Expandable Rows) | ✅ Complete | 2026-02-04 |
 | Sprint 10 | HR Separation Data Integration | ✅ Complete | 2026-02-05 |
+| Sprint 11 | Mobile Phone from TPMS | ✅ Complete | 2026-02-05 |
+| Communication Hub | Template Management MVP | ✅ Complete | 2026-02-05 |
 
 ### In Progress 🚧
 
@@ -38,9 +40,9 @@
 
 | Sprint | Feature | Description |
 |--------|---------|-------------|
-| Sprint 11 | FleetScope Deep Link | Add link to FleetScope for easier routing lookup |
-| Sprint 11 | Legacy Workflow Regression Tests | Ensure workflowStep-based workflows still work |
-| Sprint 11 | Phase 2 Email Notifications | Notify Fleet team when Phase 2 tasks created |
+| Sprint 12 | FleetScope Deep Link | Add link to FleetScope for easier routing lookup |
+| Sprint 12 | Phase 2 Email Notifications | Notify Fleet team when Phase 2 tasks created |
+| Sprint 12 | SMS via Twilio | Implement SMS sending in Communication Hub |
 
 ---
 
