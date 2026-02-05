@@ -39,6 +39,7 @@ export default function WeeklyOffboarding() {
   const [weekFilter, setWeekFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
+  const [manualStatusFilter, setManualStatusFilter] = useState<string>("all");
   const [selectedEntry, setSelectedEntry] = useState<TermRosterEntry | null>(null);
   
   // Nexus tracking fields
@@ -95,6 +96,22 @@ export default function WeeklyOffboarding() {
   const nexusDataMap = new Map(
     allNexusData.map(item => [item.vehicleNumber, item])
   );
+
+  // Manual status labels for display
+  const manualStatusLabels: Record<string, string> = {
+    'reserved_for_new_hire': 'Reserved for new hire',
+    'in_repair': 'In repair',
+    'declined_repair': 'Declined repair',
+    'available_for_rental_pmf': 'Available to assign or send to PMF',
+    'sent_to_pmf': 'Sent to PMF',
+    'assigned_to_tech_in_rental': 'Assigned to rental',
+    'not_found': 'Not found',
+  };
+
+  // Get unique manual statuses from nexus data
+  const uniqueManualStatuses = Array.from(
+    new Set(allNexusData.map(d => d.postOffboardedStatus).filter(Boolean) as string[])
+  ).sort();
 
   // Batch fetch Samsara location data for all trucks in the list
   const { data: samsaraData = {} } = useQuery<Record<string, { vehicleName: string; address: string; lastUpdated: string }>>({
@@ -265,7 +282,12 @@ export default function WeeklyOffboarding() {
     const matchesStatus = statusFilter === "all" || entry.emplStatus === statusFilter;
     const matchesOwner = ownerFilter === "all" || entry.owner === ownerFilter;
     
-    return matchesSearch && matchesWeek && matchesStatus && matchesOwner;
+    // Manual status filter - check nexus data for the truck
+    const nexusInfo = entry.truck ? nexusDataMap.get(entry.truck) : null;
+    const matchesManualStatus = manualStatusFilter === "all" || 
+      (manualStatusFilter === "__none__" ? !nexusInfo?.postOffboardedStatus : nexusInfo?.postOffboardedStatus === manualStatusFilter);
+    
+    return matchesSearch && matchesWeek && matchesStatus && matchesOwner && matchesManualStatus;
   });
 
   const formatDate = (dateStr: string): string => {
@@ -419,6 +441,22 @@ export default function WeeklyOffboarding() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Select value={manualStatusFilter} onValueChange={setManualStatusFilter}>
+                    <SelectTrigger className="w-[220px]" data-testid="select-manual-status-filter">
+                      <SelectValue placeholder="Filter by manual status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Manual Statuses</SelectItem>
+                      <SelectItem value="__none__">-- No Status Set --</SelectItem>
+                      {uniqueManualStatuses.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {manualStatusLabels[status] || status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 
@@ -502,19 +540,10 @@ export default function WeeklyOffboarding() {
                             {(() => {
                               const nexusInfo = entry.truck ? nexusDataMap.get(entry.truck) : null;
                               if (nexusInfo?.postOffboardedStatus) {
-                                const statusLabels: Record<string, string> = {
-                                  'reserved_for_new_hire': 'Reserved for new hire',
-                                  'in_repair': 'In repair',
-                                  'declined_repair': 'Declined repair',
-                                  'available_for_rental_pmf': 'Available to assign or send to PMF',
-                                  'sent_to_pmf': 'Sent to PMF',
-                                  'assigned_to_tech_in_rental': 'Assigned to rental',
-                                  'not_found': 'Not found',
-                                };
                                 return (
                                   <div className="flex flex-col">
                                     <Badge variant="outline" className="text-xs mb-1 whitespace-nowrap">
-                                      {statusLabels[nexusInfo.postOffboardedStatus] || nexusInfo.postOffboardedStatus}
+                                      {manualStatusLabels[nexusInfo.postOffboardedStatus] || nexusInfo.postOffboardedStatus}
                                     </Badge>
                                     {nexusInfo.updatedBy && (
                                       <span className="text-xs text-muted-foreground">by {nexusInfo.updatedBy}</span>
