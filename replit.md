@@ -89,6 +89,38 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
+## 2026-02-05: Communication Hub MVP ✅
+
+### New Feature
+- Centralized management for all email and SMS templates
+- Three operational modes per template: Simulated, Whitelisted, Live
+- Developer-only access (both UI and API level enforcement)
+
+### Database Schema
+- `communication_templates`: Stores templates with mode, content, variables
+- `communication_whitelist`: Email/phone whitelist for testing
+- `communication_logs`: Audit trail of all sent/simulated messages
+
+### Backend Changes
+- Created `server/communication-service.ts` with mode-aware send logic
+- Created `server/notification-service.ts` to avoid circular imports
+- Moved `sendToolAuditNotification` from email-service.ts to notification-service.ts
+- All `/api/communication/*` routes require developer role
+
+### Frontend Changes
+- New page at `/communication-hub` with three tabs:
+  - Templates: Edit content, preview, toggle modes
+  - Whitelist: Add/remove test emails and phone numbers
+  - History: View send logs with filtering
+- Added to page-registry.ts with `communicationHub` permission key
+
+### Integration
+- Tool Audit emails now use Communication Hub templates
+- Templates support `{{var}}`, `${var}`, and `[var]` placeholder formats
+- SMS not yet implemented (shows as simulated)
+
+---
+
 ## 2026-02-05: Sprint 11 - Mobile Phone from TPMS ✅
 
 ### New Snowflake Data Source
@@ -205,32 +237,33 @@ Preferred communication style: Simple, everyday language.
 # Session Handoff (2026-02-05)
 
 ## Last Session Summary
-- **Completed**: Sprint 1 - Tool Audit Email Notification
-- **Next**: FleetScope deep link, Phase 2 email notifications
+- **Completed**: Communication Hub MVP with template management, mode control, and developer-only access
+- **Next**: FleetScope deep link, Phase 2 email notifications, SMS implementation
 - **Blockers**: None
 
 ## Current State
 - **App Status**: Running without errors
 - **Working Features**:
-  - Tools Queue auto-populates from HR separation table (filter: `LAST_DAY IS NOT NULL`)
-  - 5-minute polling for new separation records creates offboarding tasks automatically
-  - **NEW**: Tool Audit email sent automatically when Tools task is created from separation sync
-  - **NEW**: Test mode enabled by default - emails redirect to test address
-  - Mobile phone fetched from `PRD_TPMS.HSTECH.COMTTU_TECH_UN` (active techs only)
-  - Discrete "Source: Snowflake" badge shows next to enterprise ID for HR-sourced items
-  - HR separation data (Last Day, Fleet Pickup Address, HR Truck Number, Notes) displayed in expanded rows
-- **Key Endpoints**:
-  - `GET /api/tools-queue` - enriches with HR separation + mobile phone from Snowflake
-  - `GET /api/tools-queue/:id/contact` - fetches contact info with mobile phone
-  - `POST /api/snowflake/sync/separations` - manual trigger for separation poll
-  - `GET /api/test-separation/:identifier` - diagnostic endpoint for HR data
-- **Environment Variables**:
-  - `TOOL_AUDIT_EMAIL_TEST_MODE=true` - test mode enabled (set to 'false' for production)
-  - `TOOL_AUDIT_TEST_EMAIL=stephen.wong@transformco.com` - test recipient
-- **Known Issues**: None
+  - **NEW**: Communication Hub at `/communication-hub` (Developer-only)
+    - Templates tab: Edit content, preview with variables, toggle simulated/whitelisted/live modes
+    - Whitelist tab: Add/remove test emails and phone numbers for whitelisted mode
+    - History tab: View all send logs with filtering by status
+  - Tool Audit emails now use Communication Hub templates
+  - All existing offboarding features continue working
+- **Key Communication Hub Endpoints** (all require developer role):
+  - `GET /api/communication/templates` - list all templates
+  - `PATCH /api/communication/templates/:id` - update template content/mode
+  - `GET /api/communication/whitelist` - list whitelisted recipients
+  - `POST /api/communication/whitelist` - add to whitelist
+  - `GET /api/communication/logs` - view send history
+- **Template Modes**:
+  - `simulated`: Logs message without sending (default for safety)
+  - `whitelisted`: Only sends if recipient is in whitelist
+  - `live`: Sends to actual recipient
+- **Known Issues**: SMS not yet implemented (shows as simulated)
 
 ## Recommended Next Steps
-1. Add FleetScope deep link for easier routing lookup
-2. Implement Phase 2 email notifications when Fleet tasks are created
-3. Add Playwright E2E tests for expandable row interactions
-4. Test Tool Audit email with real HR separation record
+1. Implement SMS sending via Twilio integration
+2. Add FleetScope deep link for easier routing lookup
+3. Implement Phase 2 email notifications when Fleet tasks are created
+4. Add input validation (Zod schemas) to communication routes

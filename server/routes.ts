@@ -8711,10 +8711,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ========================================
-  // Communication Hub API Routes
+  // Communication Hub API Routes (Developer-only)
   // ========================================
   
-  app.get("/api/communication/templates", async (_req, res) => {
+  // Helper to check developer role for communication routes
+  const requireDeveloperRole = async (req: any, res: any): Promise<boolean> => {
+    const sessionToken = req.cookies?.session;
+    if (!sessionToken) {
+      res.status(401).json({ message: "Authentication required" });
+      return false;
+    }
+    const currentUser = await storage.getUserBySession(sessionToken);
+    if (!currentUser || currentUser.role !== 'developer') {
+      res.status(403).json({ message: "Developer role required" });
+      return false;
+    }
+    return true;
+  };
+  
+  app.get("/api/communication/templates", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const templates = await storage.getCommunicationTemplates();
       res.json(templates);
@@ -8724,6 +8740,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/communication/templates/:id", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const template = await storage.getCommunicationTemplate(req.params.id);
       if (!template) {
@@ -8736,6 +8753,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/communication/templates", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const template = await storage.createCommunicationTemplate(req.body);
       res.status(201).json(template);
@@ -8745,6 +8763,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/communication/templates/:id", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const template = await storage.updateCommunicationTemplate(req.params.id, req.body);
       if (!template) {
@@ -8757,6 +8776,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.delete("/api/communication/templates/:id", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const deleted = await storage.deleteCommunicationTemplate(req.params.id);
       if (!deleted) {
@@ -8768,7 +8788,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/communication/whitelist", async (_req, res) => {
+  app.get("/api/communication/whitelist", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const entries = await storage.getWhitelistEntries();
       res.json(entries);
@@ -8778,6 +8799,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/communication/whitelist", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const entry = await storage.addToWhitelist(req.body);
       res.status(201).json(entry);
@@ -8787,6 +8809,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.delete("/api/communication/whitelist/:id", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const deleted = await storage.removeFromWhitelist(req.params.id);
       if (!deleted) {
@@ -8799,6 +8822,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/communication/logs", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
       const logs = await storage.getCommunicationLogs(limit);
@@ -8809,6 +8833,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/communication/logs/template/:templateId", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const logs = await storage.getCommunicationLogsByTemplate(req.params.templateId);
       res.json(logs);
@@ -8818,6 +8843,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/communication/logs/recipient/:recipient", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const logs = await storage.getCommunicationLogsByRecipient(req.params.recipient);
       res.json(logs);
@@ -8826,7 +8852,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/communication/templates/seed", async (_req, res) => {
+  app.post("/api/communication/templates/seed", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const { seedDefaultTemplates } = await import("./communication-service");
       const count = await seedDefaultTemplates();
@@ -8837,6 +8864,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/communication/preview", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const { templateName, variables } = req.body;
       const { getTemplatePreview } = await import("./communication-service");
@@ -8851,6 +8879,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/communication/send", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
     try {
       const { templateName, recipient, variables, metadata } = req.body;
       const { sendCommunication } = await import("./communication-service");

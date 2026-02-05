@@ -1,6 +1,5 @@
 // Email service using SendGrid
 import sgMail from '@sendgrid/mail';
-import { sendCommunication } from "./communication-service";
 
 // Initialize SendGrid with API key
 const apiKey = process.env.SENDGRID_API_KEY;
@@ -149,46 +148,5 @@ Sears IT Administration
   };
 }
 
-// Sprint 1: Tool Audit Notification - Now using Communication Hub
-
-interface ToolAuditNotificationParams {
-  email: string;
-  firstName: string;
-  technicianName: string;
-  lastDay: string;
-  ldapId: string;
-}
-
-export async function sendToolAuditNotification(params: ToolAuditNotificationParams): Promise<{
-  success: boolean;
-  testMode: boolean;
-  intendedRecipient: string;
-  actualRecipient: string;
-  error?: string;
-}> {
-  console.log(`[TOOL AUDIT EMAIL] Using Communication Hub for template-based sending`);
-  
-  const result = await sendCommunication({
-    templateName: 'tool-audit-notification',
-    recipient: params.email,
-    variables: {
-      firstName: params.firstName,
-      technicianName: params.technicianName,
-      lastDay: params.lastDay,
-      ldapId: params.ldapId,
-    },
-    metadata: {
-      source: 'tool-audit-notification',
-      ldapId: params.ldapId,
-    },
-    sentBy: 'system',
-  });
-
-  return {
-    success: result.success,
-    testMode: result.status === 'simulated',
-    intendedRecipient: result.intendedRecipient,
-    actualRecipient: result.actualRecipient || 'none',
-    error: result.error,
-  };
-}
+// Note: sendToolAuditNotification has been moved to notification-service.ts
+// to avoid circular imports. Import it from there instead.

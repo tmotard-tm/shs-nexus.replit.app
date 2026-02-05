@@ -4,7 +4,7 @@ import { storage } from './storage';
 import { randomUUID } from 'crypto';
 import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCachedAssignment } from '@shared/schema';
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
-import { sendToolAuditNotification } from './email-service';
+import { sendToolAuditNotification } from './notification-service';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
