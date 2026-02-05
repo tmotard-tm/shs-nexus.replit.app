@@ -56,6 +56,10 @@ interface TechData {
   personalPhone: string | null;
   email: string | null;
   address: string | null;
+  fleetPickupAddress: string | null;
+  hrTruckNumber: string | null;
+  separationCategory: string | null;
+  notes: string | null;
 }
 
 interface ToolsQueueItemEnriched extends QueueItem {
@@ -710,7 +714,7 @@ export function ToolsRecoveryQueue() {
   const columns = [
     { key: "techName", label: "Technician", width: "w-48" },
     { key: "district", label: "District", width: "w-20" },
-    { key: "separationDate", label: "Sep Date", width: "w-28" },
+    { key: "separationDate", label: "Last Day", width: "w-28" },
     { key: "vehicleType", label: "Vehicle", width: "w-24" },
     { key: "routing", label: "Routing", width: "w-24" },
     { key: "status", label: "Status", width: "w-28" },
