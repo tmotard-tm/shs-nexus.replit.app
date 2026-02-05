@@ -204,24 +204,25 @@ Preferred communication style: Simple, everyday language.
 
 # Session Handoff (2026-02-05)
 
-## Summary of Today's Work
-- **Sprint 11 completed**: Mobile Phone from TPMS integration
-- **Major deliverables**:
-  - New `getMobilePhoneByLdap()` method queries `PRD_TPMS.HSTECH.COMTTU_TECH_UN` for active techs with mobile phones
-  - Tools Queue now displays "Mobile Phone" instead of "Work Phone"
-  - Both `/api/tools-queue` and `/api/tools-queue/:id/contact` endpoints fetch mobile phone from TPMS table
-  - Frontend updated with Smartphone icon and mobilePhone field
+## Last Session Summary
+- **Completed**: Sprint 11 - Mobile Phone from TPMS + "Source: Snowflake" badge indicator
+- **Next**: Add FleetScope deep link for routing lookup, Phase 2 email notifications
+- **Blockers**: None
 
 ## Current State
-- App is running without errors
-- Tools Queue shows mobile phone numbers from TPMS when available
-- HR separation data integration from Sprint 10 also working
-
-## Blockers / Pending Decisions
-- None blocking
+- **App Status**: Running without errors
+- **Working Features**:
+  - Tools Queue auto-populates from HR separation table (filter: `LAST_DAY IS NOT NULL`)
+  - Mobile phone fetched from `PRD_TPMS.HSTECH.COMTTU_TECH_UN` (active techs only)
+  - Discrete "Source: Snowflake" badge shows next to enterprise ID for HR-sourced items
+  - HR separation data (Last Day, Fleet Pickup Address, HR Truck Number, Notes) displayed in expanded rows
+- **Key Endpoints**:
+  - `GET /api/tools-queue` - enriches with HR separation + mobile phone from Snowflake
+  - `GET /api/tools-queue/:id/contact` - fetches contact info with mobile phone
+  - `GET /api/test-separation/:identifier` - diagnostic endpoint for HR data
+- **Known Issues**: None
 
 ## Recommended Next Steps
 1. Add FleetScope deep link for easier routing lookup
 2. Implement Phase 2 email notifications when Fleet tasks are created
-3. **Medium Priority**: Add Playwright E2E tests for the new expandable row interactions
-4. **Low Priority**: Clean up legacy card-based components if no longer needed
+3. Add Playwright E2E tests for expandable row interactions
