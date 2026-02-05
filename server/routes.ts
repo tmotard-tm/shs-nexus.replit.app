@@ -2014,10 +2014,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
               // Sprint 11: Include personal email from HR if available
               email: hrRecord?.personalEmail || parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
               address: addressParts.length > 0 ? addressParts.join(', ') : null,
+              // Sprint 11: Fleet pickup address from HR table
+              fleetPickupAddress: hrRecord?.fleetPickupAddress || null,
               // Sprint 11: Additional HR separation data
               separationCategory: hrRecord?.separationCategory || null,
               hrTruckNumber: hrRecord?.truckNumber || null,
-              hrNotes: hrRecord?.notes || null,
+              notes: hrRecord?.notes || null,
             };
           } else {
             // Fallback: extract from queue item data/title, with HR separation data overlay
@@ -2029,10 +2031,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               workPhone: null,
               personalPhone: hrRecord?.contactNumber || parsedData?.employee?.phone || null,
               email: hrRecord?.personalEmail || parsedData?.employee?.email || null,
-              address: hrRecord?.fleetPickupAddress || parsedData?.employee?.address || null,
+              address: parsedData?.employee?.address || null,
+              fleetPickupAddress: hrRecord?.fleetPickupAddress || null,
               separationCategory: hrRecord?.separationCategory || null,
               hrTruckNumber: hrRecord?.truckNumber || null,
-              hrNotes: hrRecord?.notes || null,
+              notes: hrRecord?.notes || null,
             };
           }
         } catch (e) {
@@ -2046,9 +2049,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             personalPhone: null,
             email: null,
             address: null,
+            fleetPickupAddress: null,
             separationCategory: null,
             hrTruckNumber: null,
-            hrNotes: null,
+            notes: null,
           };
         }
         

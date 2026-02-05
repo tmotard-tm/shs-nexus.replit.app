@@ -359,6 +359,27 @@ function ExpandedRowDetails({
                   {techData?.address || "N/A"}
                 </span>
               </div>
+              <Separator className="my-2" />
+              <div className="flex items-start justify-between">
+                <span className="text-sm text-slate-500">Fleet Pickup Address:</span>
+                <span className="text-sm font-medium text-slate-900 text-right max-w-[200px] flex items-start justify-end gap-1">
+                  <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0 text-amber-500" />
+                  {techData?.fleetPickupAddress || "N/A"}
+                </span>
+              </div>
+              <div className="flex items-start justify-between">
+                <span className="text-sm text-slate-500">HR Truck Number:</span>
+                <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
+                  <Truck className="h-3 w-3 text-amber-500" />
+                  {techData?.hrTruckNumber || "N/A"}
+                </span>
+              </div>
+              {techData?.notes && (
+                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-md">
+                  <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">HR Notes:</span>
+                  <p className="text-sm text-slate-700 mt-1">{techData.notes}</p>
+                </div>
+              )}
             </div>
           </div>
 
