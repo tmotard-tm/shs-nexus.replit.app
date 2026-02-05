@@ -372,6 +372,7 @@ export interface IStorage {
 
   // Vehicle Nexus Data Module (Nexus-specific vehicle data)
   getVehicleNexusData(vehicleNumber: string): Promise<VehicleNexusData | undefined>;
+  getVehicleNexusDataBatch(vehicleNumbers: string[]): Promise<VehicleNexusData[]>;
   upsertVehicleNexusData(data: InsertVehicleNexusData): Promise<VehicleNexusData>;
 }
 
@@ -3357,6 +3358,9 @@ export class MemStorage implements IStorage {
   async getVehicleNexusData(_vehicleNumber: string): Promise<VehicleNexusData | undefined> {
     throw new Error("MemStorage does not support vehicle nexus data. Use DatabaseStorage.");
   }
+  async getVehicleNexusDataBatch(_vehicleNumbers: string[]): Promise<VehicleNexusData[]> {
+    throw new Error("MemStorage does not support vehicle nexus data. Use DatabaseStorage.");
+  }
   async upsertVehicleNexusData(_data: InsertVehicleNexusData): Promise<VehicleNexusData> {
     throw new Error("MemStorage does not support vehicle nexus data. Use DatabaseStorage.");
   }
@@ -5873,6 +5877,13 @@ export class DatabaseStorage implements IStorage {
       .where(eq(vehicleNexusData.vehicleNumber, vehicleNumber))
       .limit(1);
     return result[0];
+  }
+
+  async getVehicleNexusDataBatch(vehicleNumbers: string[]): Promise<VehicleNexusData[]> {
+    if (vehicleNumbers.length === 0) return [];
+    const result = await db.select().from(vehicleNexusData)
+      .where(inArray(vehicleNexusData.vehicleNumber, vehicleNumbers));
+    return result;
   }
 
   async upsertVehicleNexusData(data: InsertVehicleNexusData): Promise<VehicleNexusData> {

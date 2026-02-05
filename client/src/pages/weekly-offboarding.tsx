@@ -53,6 +53,31 @@ export default function WeeklyOffboarding() {
     queryKey: ['/api/weekly-offboarding'],
   });
 
+  // Collect all truck numbers from termRoster for batch fetch
+  const truckNumbers = termRoster
+    .map(entry => entry.truck)
+    .filter((truck): truck is string => !!truck);
+
+  // Batch fetch nexus data for all trucks in the list
+  const { data: allNexusData = [] } = useQuery<{
+    vehicleNumber: string;
+    postOffboardedStatus: string | null;
+    updatedBy: string | null;
+  }[]>({
+    queryKey: ['/api/vehicle-nexus-data/batch', truckNumbers],
+    queryFn: async () => {
+      if (truckNumbers.length === 0) return [];
+      const response = await apiRequest('POST', '/api/vehicle-nexus-data/batch', { vehicleNumbers: truckNumbers });
+      return response.json();
+    },
+    enabled: truckNumbers.length > 0,
+  });
+
+  // Create a lookup map for quick access
+  const nexusDataMap = new Map(
+    allNexusData.map(item => [item.vehicleNumber, item])
+  );
+
   const syncMutation = useMutation({
     mutationFn: async () => {
       return await apiRequest('POST', '/api/snowflake/sync/weekly-offboarding');
@@ -126,6 +151,7 @@ export default function WeeklyOffboarding() {
       });
       if (selectedEntry?.truck) {
         queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', selectedEntry.truck] });
+        queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data/batch'] });
       }
     },
     onError: (error: any) => {
@@ -382,6 +408,7 @@ export default function WeeklyOffboarding() {
                         <TableHead className="bg-background sticky top-0">Planning Area</TableHead>
                         <TableHead className="bg-background sticky top-0">Owner</TableHead>
                         <TableHead className="bg-background sticky top-0">Tech Specialty</TableHead>
+                        <TableHead className="min-w-[150px] bg-background sticky top-0">Manual Status</TableHead>
                         <TableHead className="min-w-[200px] bg-background sticky top-0">Address</TableHead>
                         <TableHead className="min-w-[180px] bg-background sticky top-0">Contact Phone</TableHead>
                       </TableRow>
@@ -407,6 +434,33 @@ export default function WeeklyOffboarding() {
                           <TableCell className="text-sm">{entry.planningArea || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.owner || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.techSpecialty || '-'}</TableCell>
+                          <TableCell className="text-sm">
+                            {(() => {
+                              const nexusInfo = entry.truck ? nexusDataMap.get(entry.truck) : null;
+                              if (nexusInfo?.postOffboardedStatus) {
+                                const statusLabels: Record<string, string> = {
+                                  'reserved_for_new_hire': 'Reserved for new hire',
+                                  'in_repair': 'In repair',
+                                  'declined_repair': 'Declined repair',
+                                  'available_for_rental_pmf': 'Available to assign or send to PMF',
+                                  'sent_to_pmf': 'Sent to PMF',
+                                  'assigned_to_tech_in_rental': 'Assigned to rental',
+                                  'not_found': 'Not found',
+                                };
+                                return (
+                                  <div className="flex flex-col">
+                                    <Badge variant="outline" className="text-xs mb-1 whitespace-nowrap">
+                                      {statusLabels[nexusInfo.postOffboardedStatus] || nexusInfo.postOffboardedStatus}
+                                    </Badge>
+                                    {nexusInfo.updatedBy && (
+                                      <span className="text-xs text-muted-foreground">by {nexusInfo.updatedBy}</span>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              return '-';
+                            })()}
+                          </TableCell>
                           <TableCell className="text-sm">{entry.address || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.contactPhone || '-'}</TableCell>
                         </TableRow>

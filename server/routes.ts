@@ -8408,6 +8408,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Vehicle Nexus Data - Nexus-specific vehicle data for offboarding/relocation tracking
+  app.post("/api/vehicle-nexus-data/batch", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumbers } = req.body;
+      if (!Array.isArray(vehicleNumbers)) {
+        return res.status(400).json({ message: "vehicleNumbers must be an array" });
+      }
+      const data = await storage.getVehicleNexusDataBatch(vehicleNumbers);
+      res.json(data);
+    } catch (error: any) {
+      console.error("Error fetching vehicle nexus data batch:", error);
+      res.status(500).json({ message: "Failed to fetch vehicle nexus data batch", error: error.message });
+    }
+  });
+
   app.get("/api/vehicle-nexus-data/:vehicleNumber", requireAuth, async (req: any, res) => {
     try {
       const { vehicleNumber } = req.params;
