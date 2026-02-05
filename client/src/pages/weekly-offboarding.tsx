@@ -536,13 +536,7 @@ export default function WeeklyOffboarding() {
                                     <span className="text-sm">{samsaraInfo.address}</span>
                                     {samsaraInfo.lastUpdated && (
                                       <span className="text-xs text-muted-foreground">
-                                        {(() => {
-                                          try {
-                                            return format(parseISO(samsaraInfo.lastUpdated), 'yyyy-MM-dd');
-                                          } catch {
-                                            return samsaraInfo.lastUpdated;
-                                          }
-                                        })()}
+                                        {samsaraInfo.lastUpdated.split(' ')[0] || samsaraInfo.lastUpdated}
                                       </span>
                                     )}
                                   </div>
