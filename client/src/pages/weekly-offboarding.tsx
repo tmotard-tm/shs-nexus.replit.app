@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -49,6 +49,24 @@ export default function WeeklyOffboarding() {
   const [nexusRepaired, setNexusRepaired] = useState("");
   const [nexusComments, setNexusComments] = useState("");
 
+  // Refs for synchronized scrollbars
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const [tableWidth, setTableWidth] = useState(0);
+
+  // Sync scroll positions between top scrollbar and table
+  const handleTopScroll = useCallback(() => {
+    if (topScrollRef.current && tableScrollRef.current) {
+      tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    }
+  }, []);
+
+  const handleTableScroll = useCallback(() => {
+    if (topScrollRef.current && tableScrollRef.current) {
+      topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+    }
+  }, []);
+
   const { data: termRoster = [], isLoading, isRefetching } = useQuery<TermRosterEntry[]>({
     queryKey: ['/api/weekly-offboarding'],
   });
@@ -89,6 +107,22 @@ export default function WeeklyOffboarding() {
     enabled: truckNumbers.length > 0,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes since Samsara data doesn't change frequently
   });
+
+  // Update table width for top scrollbar
+  useEffect(() => {
+    const updateWidth = () => {
+      if (tableScrollRef.current) {
+        setTableWidth(tableScrollRef.current.scrollWidth);
+      }
+    };
+    // Small delay to ensure table is rendered
+    const timer = setTimeout(updateWidth, 100);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [termRoster]);
 
   const syncMutation = useMutation({
     mutationFn: async () => {
@@ -406,7 +440,20 @@ export default function WeeklyOffboarding() {
               </div>
             ) : (
               <div className="rounded-md border">
-                <div className="overflow-x-auto overflow-y-auto max-h-[600px]">
+                {/* Top scrollbar */}
+                <div 
+                  ref={topScrollRef}
+                  onScroll={handleTopScroll}
+                  className="overflow-x-auto overflow-y-hidden"
+                  style={{ height: '12px' }}
+                >
+                  <div style={{ width: tableWidth, height: '1px' }} />
+                </div>
+                <div 
+                  ref={tableScrollRef}
+                  onScroll={handleTableScroll}
+                  className="overflow-x-auto overflow-y-auto max-h-[600px]"
+                >
                   <Table>
                     <TableHeader className="sticky top-0 z-10">
                       <TableRow className="bg-background">
