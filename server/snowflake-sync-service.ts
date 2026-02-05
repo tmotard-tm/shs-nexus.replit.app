@@ -4,6 +4,7 @@ import { storage } from './storage';
 import { randomUUID } from 'crypto';
 import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCachedAssignment } from '@shared/schema';
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
+import { sendToolAuditNotification } from './email-service';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -1163,11 +1164,14 @@ export class SnowflakeSyncService {
   }
 
   // Sprint 0: Sync new separation records and create offboarding tasks
+  // Sprint 1: Send Tool Audit notification email when Tools task is created
   async syncNewSeparations(triggeredBy: string = 'scheduler'): Promise<{
     success: boolean;
     newRecordsFound: number;
     tasksCreated: number;
     tasksSkipped: number;
+    emailsSent: number;
+    emailsSkipped: number;
     errors: string[];
     lastSyncTimestamp: string;
   }> {
@@ -1176,6 +1180,8 @@ export class SnowflakeSyncService {
       newRecordsFound: 0,
       tasksCreated: 0,
       tasksSkipped: 0,
+      emailsSent: 0,
+      emailsSkipped: 0,
       errors: [] as string[],
       lastSyncTimestamp: new Date().toISOString(),
     };
@@ -1346,8 +1352,45 @@ export class SnowflakeSyncService {
 
             // Route to correct queue
             const deptUpper = task.department.toUpperCase();
+            let createdItem: any = null;
+            
             if (deptUpper === 'TOOLS') {
-              await storage.createToolsQueueItem(queueItem);
+              createdItem = await storage.createToolsQueueItem(queueItem);
+              
+              // Sprint 1: Send Tool Audit notification email after creating Tools task
+              if (separation.personalEmail) {
+                try {
+                  // Extract first name from technician name (e.g., "LASTNAME,FIRSTNAME" or "First Last")
+                  const nameParts = (separation.technicianName || '').split(/[,\s]+/);
+                  const firstName = nameParts.length > 1 
+                    ? (nameParts[0].includes(',') ? nameParts[1] : nameParts[0]) 
+                    : nameParts[0] || 'Team Member';
+                  
+                  const emailResult = await sendToolAuditNotification({
+                    email: separation.personalEmail,
+                    firstName: firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
+                    technicianName: separation.technicianName || separation.ldapId,
+                    lastDay: separation.lastDay || 'your scheduled last day',
+                    ldapId: separation.ldapId,
+                  });
+                  
+                  if (emailResult.success && createdItem?.id) {
+                    // Update the Tools queue item with notification status
+                    await storage.updateToolsQueueNotificationStatus(createdItem.id, true);
+                    result.emailsSent++;
+                    console.log(`[Separation Sync] Tool Audit email sent for ${techName} (test mode: ${emailResult.testMode})`);
+                  } else if (!emailResult.success) {
+                    console.log(`[Separation Sync] Tool Audit email failed for ${techName}: ${emailResult.error || 'unknown'}`);
+                    result.emailsSkipped++;
+                  }
+                } catch (emailError: any) {
+                  console.error(`[Separation Sync] Email error for ${techName}:`, emailError.message);
+                  result.emailsSkipped++;
+                }
+              } else {
+                console.log(`[Separation Sync] No personal email for ${techName}, skipping Tool Audit notification`);
+                result.emailsSkipped++;
+              }
             } else if (deptUpper === 'FLEET') {
               await storage.createFleetQueueItem(queueItem);
             } else if (deptUpper === 'INVENTORY CONTROL' || deptUpper === 'INVENTORY') {
@@ -1377,7 +1420,7 @@ export class SnowflakeSyncService {
       });
 
       result.success = true;
-      console.log(`[Separation Sync] Completed: ${result.newRecordsFound} records, ${result.tasksCreated} tasks created, ${result.tasksSkipped} skipped`);
+      console.log(`[Separation Sync] Completed: ${result.newRecordsFound} records, ${result.tasksCreated} tasks created, ${result.tasksSkipped} skipped, ${result.emailsSent} emails sent, ${result.emailsSkipped} emails skipped`);
       
       return result;
     } catch (error: any) {

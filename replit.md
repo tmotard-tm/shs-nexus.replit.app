@@ -205,16 +205,17 @@ Preferred communication style: Simple, everyday language.
 # Session Handoff (2026-02-05)
 
 ## Last Session Summary
-- **Completed**: Sprint 0 - Snowflake Separation Sync for Offboarding Automation
-- **Next**: Tool Audit email notifications, FleetScope deep link
+- **Completed**: Sprint 1 - Tool Audit Email Notification
+- **Next**: FleetScope deep link, Phase 2 email notifications
 - **Blockers**: None
 
 ## Current State
 - **App Status**: Running without errors
 - **Working Features**:
   - Tools Queue auto-populates from HR separation table (filter: `LAST_DAY IS NOT NULL`)
-  - **NEW**: 5-minute polling for new separation records creates offboarding tasks automatically
-  - **NEW**: `syncNewSeparations()` creates Day 0 tasks for Tools, Fleet, Inventory queues
+  - 5-minute polling for new separation records creates offboarding tasks automatically
+  - **NEW**: Tool Audit email sent automatically when Tools task is created from separation sync
+  - **NEW**: Test mode enabled by default - emails redirect to test address
   - Mobile phone fetched from `PRD_TPMS.HSTECH.COMTTU_TECH_UN` (active techs only)
   - Discrete "Source: Snowflake" badge shows next to enterprise ID for HR-sourced items
   - HR separation data (Last Day, Fleet Pickup Address, HR Truck Number, Notes) displayed in expanded rows
@@ -223,10 +224,13 @@ Preferred communication style: Simple, everyday language.
   - `GET /api/tools-queue/:id/contact` - fetches contact info with mobile phone
   - `POST /api/snowflake/sync/separations` - manual trigger for separation poll
   - `GET /api/test-separation/:identifier` - diagnostic endpoint for HR data
+- **Environment Variables**:
+  - `TOOL_AUDIT_EMAIL_TEST_MODE=true` - test mode enabled (set to 'false' for production)
+  - `TOOL_AUDIT_TEST_EMAIL=stephen.wong@transformco.com` - test recipient
 - **Known Issues**: None
 
 ## Recommended Next Steps
-1. Tool Audit email notification when separation syncs
-2. Add FleetScope deep link for easier routing lookup
-3. Implement Phase 2 email notifications when Fleet tasks are created
-4. Add Playwright E2E tests for expandable row interactions
+1. Add FleetScope deep link for easier routing lookup
+2. Implement Phase 2 email notifications when Fleet tasks are created
+3. Add Playwright E2E tests for expandable row interactions
+4. Test Tool Audit email with real HR separation record

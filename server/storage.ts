@@ -167,6 +167,7 @@ export interface IStorage {
   startWorkToolsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
   completeToolsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
   updateToolsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier' | 'fleetRoutingDecision'>>): Promise<QueueItem | undefined>;
+  updateToolsQueueNotificationStatus(id: string, sent: boolean): Promise<QueueItem | undefined>;
   
   // BYOV Blocking Logic (Sprint 2)
   getFleetTaskByWorkflowId(workflowId: string): Promise<QueueItem | undefined>;
@@ -715,9 +716,19 @@ export class MemStorage implements IStorage {
         autoTrigger: false,
         triggerData: null,
         isByov: false,
+        vehicleType: 'company',
         fleetRoutingDecision: null,
         routingReceivedAt: null,
         blockedActions: null,
+        taskToolsReturn: false,
+        taskIphoneReturn: false,
+        taskDisconnectedLine: false,
+        taskDisconnectedMPayment: false,
+        taskCloseSegnoOrders: false,
+        taskCreateShippingLabel: false,
+        carrier: null,
+        toolAuditNotificationSent: false,
+        toolAuditNotificationSentAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -770,9 +781,19 @@ export class MemStorage implements IStorage {
         autoTrigger: false,
         triggerData: null,
         isByov: false,
+        vehicleType: 'company',
         fleetRoutingDecision: null,
         routingReceivedAt: null,
         blockedActions: null,
+        taskToolsReturn: false,
+        taskIphoneReturn: false,
+        taskDisconnectedLine: false,
+        taskDisconnectedMPayment: false,
+        taskCloseSegnoOrders: false,
+        taskCreateShippingLabel: false,
+        carrier: null,
+        toolAuditNotificationSent: false,
+        toolAuditNotificationSentAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -822,9 +843,19 @@ export class MemStorage implements IStorage {
         autoTrigger: false,
         triggerData: null,
         isByov: false,
+        vehicleType: 'company',
         fleetRoutingDecision: null,
         routingReceivedAt: null,
         blockedActions: null,
+        taskToolsReturn: false,
+        taskIphoneReturn: false,
+        taskDisconnectedLine: false,
+        taskDisconnectedMPayment: false,
+        taskCloseSegnoOrders: false,
+        taskCreateShippingLabel: false,
+        carrier: null,
+        toolAuditNotificationSent: false,
+        toolAuditNotificationSentAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       }
@@ -2081,6 +2112,20 @@ export class MemStorage implements IStorage {
     const updatedItem = {
       ...item,
       ...updates,
+      updatedAt: new Date()
+    };
+    this.toolsQueueItems.set(id, updatedItem);
+    return updatedItem;
+  }
+
+  async updateToolsQueueNotificationStatus(id: string, sent: boolean): Promise<QueueItem | undefined> {
+    const item = this.toolsQueueItems.get(id);
+    if (!item) return undefined;
+    
+    const updatedItem = {
+      ...item,
+      toolAuditNotificationSent: sent,
+      toolAuditNotificationSentAt: sent ? new Date() : null,
       updatedAt: new Date()
     };
     this.toolsQueueItems.set(id, updatedItem);
@@ -4546,6 +4591,18 @@ export class DatabaseStorage implements IStorage {
     const result = await db.update(queueItems)
       .set({
         ...updates,
+        updatedAt: new Date()
+      })
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Tools')))
+      .returning();
+    return result[0];
+  }
+
+  async updateToolsQueueNotificationStatus(id: string, sent: boolean): Promise<QueueItem | undefined> {
+    const result = await db.update(queueItems)
+      .set({
+        toolAuditNotificationSent: sent,
+        toolAuditNotificationSentAt: sent ? new Date() : null,
         updatedAt: new Date()
       })
       .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Tools')))

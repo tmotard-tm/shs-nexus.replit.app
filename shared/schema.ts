@@ -250,6 +250,9 @@ export const queueItems = pgTable("queue_items", {
   taskCloseSegnoOrders: boolean("task_close_segno_orders").default(false),
   taskCreateShippingLabel: boolean("task_create_shipping_label").default(false),
   carrier: text("carrier"), // 'Verizon' | 'T-Mobile' | null
+  // Sprint 1: Tool Audit Notification tracking
+  toolAuditNotificationSent: boolean("tool_audit_notification_sent").default(false),
+  toolAuditNotificationSentAt: timestamp("tool_audit_notification_sent_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {
