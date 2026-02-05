@@ -810,6 +810,86 @@ export class SnowflakeSyncService {
     }
   }
 
+  // Sprint 11: Get mobile phone number from TPMS tech table by LDAP ID
+  async getMobilePhoneByLdap(ldapId: string): Promise<{
+    success: boolean;
+    phoneNumber?: string | null;
+    techName?: string;
+    techUnNo?: string;
+    districtId?: string;
+    message?: string;
+  }> {
+    if (!isSnowflakeConfigured()) {
+      return { success: false, message: 'Snowflake not configured' };
+    }
+
+    try {
+      const snowflake = getSnowflakeService();
+      await snowflake.connect();
+
+      const query = `
+        WITH filtered_techs AS (
+          SELECT 
+            TECH_UN_NO, 
+            TECH_AIM_ID, 
+            LDAP_ID, 
+            FIRST_NM, 
+            LAST_NM, 
+            MBL_PH_NO,
+            DIST_UN_NO, 
+            TECH_STS_CD, 
+            ACTIVE_IND, 
+            MGR_NM
+          FROM PRD_TPMS.HSTECH.COMTTU_TECH_UN
+          WHERE MBL_PH_NO IS NOT NULL
+            AND MBL_PH_NO <> ' '
+            AND TECH_STS_CD = 'A'
+            AND ACTIVE_IND = 'Y'
+        ),
+        primary_tech_assignment AS (
+          SELECT 
+            t.*,
+            ROW_NUMBER() OVER (PARTITION BY LDAP_ID ORDER BY TECH_UN_NO) AS primary_rank
+          FROM filtered_techs t
+        )
+        SELECT 
+          LDAP_ID AS TECH_ID,
+          FIRST_NM || ' ' || LAST_NM AS TECH_NAME,
+          MBL_PH_NO AS PHONE_NUMBER,
+          MGR_NM,
+          TECH_UN_NO,
+          DIST_UN_NO AS DISTRICT_ID
+        FROM primary_tech_assignment
+        WHERE primary_rank = 1 AND UPPER(LDAP_ID) = UPPER(?)
+      `;
+
+      const rows = await snowflake.executeQuery(query, [ldapId]) as Array<{
+        TECH_ID: string;
+        TECH_NAME: string;
+        PHONE_NUMBER: string;
+        MGR_NM: string | null;
+        TECH_UN_NO: string;
+        DISTRICT_ID: string;
+      }>;
+
+      if (rows.length > 0) {
+        const row = rows[0];
+        return {
+          success: true,
+          phoneNumber: row.PHONE_NUMBER,
+          techName: row.TECH_NAME,
+          techUnNo: row.TECH_UN_NO,
+          districtId: row.DISTRICT_ID,
+        };
+      }
+
+      return { success: false, message: 'NO_RECORD' };
+    } catch (error: any) {
+      console.error(`[MobilePhone] Error looking up mobile phone for ${ldapId}:`, error.message);
+      return { success: false, message: error.message };
+    }
+  }
+
   async getSeparationDetails(enterpriseId: string): Promise<{
     success: boolean;
     ldapId?: string;

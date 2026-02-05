@@ -1990,6 +1990,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Sprint 11: Look up HR separation data from our pre-fetched map
           const hrRecord = hrLookup.get(enterpriseId?.toUpperCase() || '') || hrLookup.get(employeeId || '');
           
+          // Sprint 11: Fetch mobile phone from TPMS tech table
+          let mobilePhoneData: { phoneNumber?: string | null } = {};
+          if (enterpriseId) {
+            try {
+              mobilePhoneData = await snowflakeSyncService.getMobilePhoneByLdap(enterpriseId);
+            } catch (e) {
+              // Silently continue if mobile phone lookup fails
+            }
+          }
+          
           if (tech) {
             // Build full address - prefer HR separation address if available
             const addressParts = hrRecord?.fleetPickupAddress
@@ -2008,7 +2018,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               district: tech.districtNo || null,
               // Sprint 11: Prioritize separation date from HR table, fallback to all_techs
               separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || tech.lastDayWorked || tech.effectiveDate || null,
-              workPhone: tech.mainPhone || null,
+              // Sprint 11: Mobile phone from TPMS tech table (COMTTU_TECH_UN)
+              mobilePhone: mobilePhoneData?.phoneNumber || null,
               // Sprint 11: Include HR contact number if available
               personalPhone: hrRecord?.contactNumber || tech.cellPhone || tech.homePhone || null,
               // Sprint 11: Include personal email from HR if available
@@ -2028,7 +2039,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               enterpriseId: enterpriseId || employeeId || 'Unknown',
               district: null,
               separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
-              workPhone: null,
+              mobilePhone: mobilePhoneData?.phoneNumber || null,
               personalPhone: hrRecord?.contactNumber || parsedData?.employee?.phone || null,
               email: hrRecord?.personalEmail || parsedData?.employee?.email || null,
               address: parsedData?.employee?.address || null,
@@ -2045,7 +2056,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             enterpriseId: 'Unknown',
             district: null,
             separationDate: null,
-            workPhone: null,
+            mobilePhone: null,
             personalPhone: null,
             email: null,
             address: null,

@@ -52,7 +52,7 @@ interface TechData {
   enterpriseId: string;
   district: string | null;
   separationDate: string | null;
-  workPhone: string | null;
+  mobilePhone: string | null;
   personalPhone: string | null;
   email: string | null;
   address: string | null;
@@ -321,10 +321,10 @@ function ExpandedRowDetails({
             </h4>
             <div className="bg-white p-4 rounded-md border border-slate-200 shadow-sm space-y-3">
               <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500">Work Phone:</span>
+                <span className="text-sm text-slate-500">Mobile Phone:</span>
                 <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
-                  <Briefcase className="h-3 w-3 text-slate-400" />
-                  {techData?.workPhone || "N/A"}
+                  <Smartphone className="h-3 w-3 text-slate-400" />
+                  {techData?.mobilePhone || "N/A"}
                 </span>
               </div>
               <div className="flex items-start justify-between">
