@@ -543,12 +543,10 @@ export default function WeeklyOffboarding() {
                                 const lastWorked = parseISO(entry.lastDateWorked);
                                 const daysSince = differenceInDays(new Date(), lastWorked);
                                 const isPastDue = daysSince >= 2 && !hasManualStatus;
-                                return (
-                                  <div className={isPastDue ? "text-red-600 font-semibold" : ""}>
-                                    {daysSince}
-                                    {isPastDue && <div className="text-xs">past 2 days</div>}
-                                  </div>
-                                );
+                                if (isPastDue) {
+                                  return <span className="text-red-600 font-semibold whitespace-nowrap">2 days past</span>;
+                                }
+                                return daysSince;
                               } catch {
                                 return '-';
                               }
