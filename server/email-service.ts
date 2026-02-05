@@ -1,5 +1,6 @@
 // Email service using SendGrid
 import sgMail from '@sendgrid/mail';
+import { sendCommunication } from "./communication-service";
 
 // Initialize SendGrid with API key
 const apiKey = process.env.SENDGRID_API_KEY;
@@ -148,23 +149,14 @@ Sears IT Administration
   };
 }
 
-// Sprint 1: Tool Audit Notification
+// Sprint 1: Tool Audit Notification - Now using Communication Hub
+
 interface ToolAuditNotificationParams {
   email: string;
   firstName: string;
   technicianName: string;
   lastDay: string;
   ldapId: string;
-}
-
-const TOOL_AUDIT_FORM_URL = 'https://tech-tool-audit-checklist-lucabuccilli1.replit.app';
-
-function isToolAuditTestMode(): boolean {
-  return process.env.TOOL_AUDIT_EMAIL_TEST_MODE !== 'false'; // Default to true
-}
-
-function getToolAuditTestEmail(): string | null {
-  return process.env.TOOL_AUDIT_TEST_EMAIL || null;
 }
 
 export async function sendToolAuditNotification(params: ToolAuditNotificationParams): Promise<{
@@ -174,124 +166,29 @@ export async function sendToolAuditNotification(params: ToolAuditNotificationPar
   actualRecipient: string;
   error?: string;
 }> {
-  const testMode = isToolAuditTestMode();
-  const testEmail = getToolAuditTestEmail();
+  console.log(`[TOOL AUDIT EMAIL] Using Communication Hub for template-based sending`);
   
-  // Determine actual recipient
-  const intendedRecipient = params.email;
-  let actualRecipient = intendedRecipient;
-  
-  if (testMode) {
-    if (!testEmail) {
-      console.log(`[TOOL AUDIT EMAIL - TEST MODE] No test email configured, skipping send`);
-      console.log(`[TOOL AUDIT EMAIL - TEST MODE] Would have sent to: ${intendedRecipient}`);
-      console.log(`[TOOL AUDIT EMAIL - TEST MODE] Subject: Action Required: Complete Your Tool Audit Before ${params.lastDay}`);
-      return {
-        success: false,
-        testMode: true,
-        intendedRecipient,
-        actualRecipient: 'none',
-        error: 'TOOL_AUDIT_TEST_EMAIL not configured',
-      };
-    }
-    actualRecipient = testEmail;
-    console.log(`[TOOL AUDIT EMAIL - TEST MODE] Would send to: ${intendedRecipient}`);
-    console.log(`[TOOL AUDIT EMAIL - TEST MODE] Actually sending to: ${actualRecipient}`);
-  }
+  const result = await sendCommunication({
+    templateName: 'tool-audit-notification',
+    recipient: params.email,
+    variables: {
+      firstName: params.firstName,
+      technicianName: params.technicianName,
+      lastDay: params.lastDay,
+      ldapId: params.ldapId,
+    },
+    metadata: {
+      source: 'tool-audit-notification',
+      ldapId: params.ldapId,
+    },
+    sentBy: 'system',
+  });
 
-  const formUrl = `${TOOL_AUDIT_FORM_URL}?ldap=${encodeURIComponent(params.ldapId)}`;
-  
-  const subject = `Action Required: Complete Your Tool Audit Before ${params.lastDay}`;
-  
-  const text = `Hi ${params.firstName},
-
-As you prepare for your last day on ${params.lastDay}, please complete the Tool Audit form below.
-
-Complete Tool Audit: ${formUrl}
-
-As part of your onboarding, you signed a Tool Accountability Policy acknowledging your responsibility for company-provided tools. Completing this form helps us verify your inventory and avoid any payroll adjustments on your final check.
-
-This takes about 5 minutes.
-
-Thank you,
-Transform Co Tools Team`;
-
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background: #1a365d; color: white; padding: 20px; text-align: center; }
-    .content { padding: 30px 20px; background: #f9f9f9; }
-    .button { display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
-    .footer { font-size: 12px; color: #666; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; }
-    .important { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1 style="margin: 0;">Tool Audit Required</h1>
-    </div>
-    <div class="content">
-      <p>Hi ${params.firstName},</p>
-      
-      <p>As you prepare for your last day on <strong>${params.lastDay}</strong>, please complete the Tool Audit form below.</p>
-      
-      <p style="text-align: center;">
-        <a href="${formUrl}" class="button">Complete Tool Audit</a>
-      </p>
-      
-      <div class="important">
-        <p style="margin: 0;">As part of your onboarding, you signed a Tool Accountability Policy acknowledging your responsibility for company-provided tools. Completing this form helps us verify your inventory and avoid any payroll adjustments on your final check.</p>
-      </div>
-      
-      <p><strong>This takes about 5 minutes.</strong></p>
-      
-      <p>Thank you,<br>
-      Transform Co Tools Team</p>
-      
-      <div class="footer">
-        ${testMode ? `<p style="color: #d32f2f;"><strong>[TEST MODE]</strong> This email was intended for: ${intendedRecipient}</p>` : ''}
-        <p>This is an automated message from the Nexus Employee Offboarding System.</p>
-        <p>If you did not expect this email or have questions, please contact your supervisor or the Tools Team.</p>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
-`;
-
-  try {
-    const result = await sendEmail({
-      to: actualRecipient,
-      from: DEFAULT_FROM_EMAIL,
-      subject,
-      text,
-      html,
-    });
-
-    if (result) {
-      console.log(`[TOOL AUDIT EMAIL] Sent successfully to ${actualRecipient}${testMode ? ` (test mode, intended: ${intendedRecipient})` : ''}`);
-    }
-
-    return {
-      success: result,
-      testMode,
-      intendedRecipient,
-      actualRecipient,
-    };
-  } catch (error: any) {
-    console.error(`[TOOL AUDIT EMAIL] Failed to send:`, error.message);
-    return {
-      success: false,
-      testMode,
-      intendedRecipient,
-      actualRecipient,
-      error: error.message,
-    };
-  }
+  return {
+    success: result.success,
+    testMode: result.status === 'simulated',
+    intendedRecipient: result.intendedRecipient,
+    actualRecipient: result.actualRecipient || 'none',
+    error: result.error,
+  };
 }
