@@ -1,0 +1,111 @@
+Sprint 1: Auto-Send Tool Audit Notification
+I'm the PM for the Technician Offboarding Process Redesign. This is Sprint 1 of the Tool Audit Notification feature.
+
+Context
+Sprint 0 is complete. Nexus now syncs separation records from Crystal's Snowflake table. Now we need to automatically send technicians an email with a link to complete the Tool Audit form.
+
+Key Constraint
+DO NOT modify Luca's Tool Audit form. Just send the email with a link to the existing form.
+
+What You're Building
+When Nexus syncs a new separation record from Snowflake, automatically send the technician an email with a link to complete the Tool Audit form.
+
+Test Mode First
+Important: Build this with a TEST MODE that we can validate before sending real emails.
+
+Add environment variable: TOOL_AUDIT_EMAIL_TEST_MODE=true (default to true)
+When TEST_MODE is true:
+DO NOT send to the technician's actual email
+Instead, send to a test email address (add TOOL_AUDIT_TEST_EMAIL env var)
+Log what WOULD have been sent (recipient, subject, body preview)
+Still record the notification as "sent" in the database for testing the flow
+When TEST_MODE is false:
+Send to the actual technician email from Snowflake record
+This lets us validate the full flow without accidentally emailing real technicians.
+
+Email Provider: SendGrid
+Use SendGrid for sending emails.
+
+Setup:
+
+Add SENDGRID_API_KEY to Replit Secrets
+Use the SendGrid Node.js library (@sendgrid/mail)
+Set a verified sender email (e.g., tools-team@transformco.com or whatever is configured)
+Email Content
+Subject: Action Required: Complete Your Tool Audit Before [LAST_DAY]
+
+Body:
+
+Hi [First Name from TECHNICIAN_NAME],
+As you prepare for your last day on [LAST_DAY], please complete the Tool Audit form below.
+Complete Tool Audit: https://tech-tool-audit-checklist-lucabuccilli1.replit.app?ldap=[LDAP_ID]
+As part of your onboarding, you signed a Tool Accountability Policy acknowledging your responsibility for company-provided tools. Completing this form helps us verify your inventory and avoid any payroll adjustments on your final check.
+This takes about 5 minutes.
+Thank you,
+Transform Co Tools Team
+Implementation Steps
+Email Service Setup
+
+Create server/email-service.ts (or use existing)
+Install SendGrid: npm install @sendgrid/mail
+Add SENDGRID_API_KEY to Replit Secrets
+Add TOOL_AUDIT_EMAIL_TEST_MODE=true to env vars
+Add TOOL_AUDIT_TEST_EMAIL=your-test-email@example.com to env vars
+Notification Trigger
+
+In server/snowflake-sync-service.ts, after creating offboarding tasks:
+// After task creation
+if (separation.personalEmail) {
+  await sendToolAuditNotification({
+    email: separation.personalEmail,
+    name: separation.technicianName,
+    lastDay: separation.lastDay,
+    ldapId: separation.ldapId
+  });
+}
+Test Mode Logic
+
+const isTestMode = process.env.TOOL_AUDIT_EMAIL_TEST_MODE === 'true';
+const recipient = isTestMode 
+  ? process.env.TOOL_AUDIT_TEST_EMAIL 
+  : technicianEmail;
+if (isTestMode) {
+  console.log(`[TEST MODE] Would send to: ${technicianEmail}`);
+  console.log(`[TEST MODE] Actually sending to: ${recipient}`);
+}
+Skip Conditions
+
+No PERSONAL_EMAIL in record: skip (log warning)
+Already sent notification for this LDAP_ID: skip (prevent duplicates)
+Schema Addition
+Add tracking columns to queue_items table (NOT a new table):
+
+// Add to queue_items table in shared/schema.ts
+toolAuditNotificationSent: boolean('tool_audit_notification_sent').default(false),
+toolAuditNotificationSentAt: timestamp('tool_audit_notification_sent_at'),
+Decision: Use queue_items columns (not a separate table) to track notification status. This keeps the Tools task and notification status together.
+
+Business Rules
+Rule	Logic
+When to send	Immediately when separation record syncs from Snowflake
+Skip conditions	No PERSONAL_EMAIL in Snowflake record
+Duplicate prevention	Check if notification already sent for this LDAP_ID
+Test mode	When enabled, redirect all emails to test address
+Acceptance Criteria
+ SendGrid configured and working
+ Test mode sends to test email address (not real technician)
+ Test mode logs what would have been sent
+ Email contains personalized content (name, last day, LDAP in link)
+ No duplicate emails sent for same tech
+ Graceful handling when email is missing
+ Sent timestamp recorded in database
+When You're Done
+Please report back with:
+
+Files changed - List all files you created or modified
+Test mode working - Confirm test email was received at test address
+Sample email - Screenshot or preview of the email content
+What works - Confirm which acceptance criteria are passing
+What doesn't work - Any issues or partial implementations
+Env vars needed - List all environment variables to configure
+Questions for PM - Anything unclear or decisions you need from me
