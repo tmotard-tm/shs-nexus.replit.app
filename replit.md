@@ -89,6 +89,31 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
+## 2026-02-05: Sprint 11 - Mobile Phone from TPMS ✅
+
+### New Snowflake Data Source
+- Connected to TPMS tech table: `PRD_TPMS.HSTECH.COMTTU_TECH_UN`
+- Queries active technicians with mobile phone numbers
+- Uses ROW_NUMBER to select primary assignment when tech has multiple records
+
+### Backend Integration
+- Added `getMobilePhoneByLdap()` method to `SnowflakeSyncService`
+- Queries by LDAP_ID (enterprise ID) with case-insensitive matching
+- Returns: phoneNumber, techName, techUnNo, districtId
+
+### Tools Queue Enrichment Updated
+- `/api/tools-queue` endpoint now fetches mobile phone from TPMS table
+- `/api/tools-queue/:id/contact` endpoint updated to include mobilePhone
+- Replaced `workPhone` field with `mobilePhone` across all techData objects
+
+### Frontend Changes
+- Changed label from "Work Phone" to "Mobile Phone" in ToolsRecoveryQueue
+- Updated icon from Briefcase to Smartphone
+- Updated ToolsTaskDetailView ContactInfo interface and display
+- TechData interface updated to use mobilePhone instead of workPhone
+
+---
+
 ## 2026-02-05: Sprint 10 - HR Separation Data Integration ✅
 
 ### New Snowflake Data Source
@@ -180,22 +205,23 @@ Preferred communication style: Simple, everyday language.
 # Session Handoff (2026-02-05)
 
 ## Summary of Today's Work
-- **Sprint 10 completed**: Connected HR separation data from Snowflake to Tools Queue
+- **Sprint 11 completed**: Mobile Phone from TPMS integration
 - **Major deliverables**:
-  - New `getSeparationDetails()` method queries `PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS`
-  - Tools Queue enrichment now fetches separation dates, pickup addresses, and contact info from HR
-  - Priority hierarchy: HR data > all_techs data > queue item data
+  - New `getMobilePhoneByLdap()` method queries `PRD_TPMS.HSTECH.COMTTU_TECH_UN` for active techs with mobile phones
+  - Tools Queue now displays "Mobile Phone" instead of "Work Phone"
+  - Both `/api/tools-queue` and `/api/tools-queue/:id/contact` endpoints fetch mobile phone from TPMS table
+  - Frontend updated with Smartphone icon and mobilePhone field
 
 ## Current State
 - App is running without errors
-- Tools Queue now shows real separation dates from HR when available
-- Snowflake integration verified working with 66 HR separation records
+- Tools Queue shows mobile phone numbers from TPMS when available
+- HR separation data integration from Sprint 10 also working
 
 ## Blockers / Pending Decisions
 - None blocking
 
 ## Recommended Next Steps
-1. **Sprint 11**: Add FleetScope deep link for easier routing lookup
-2. **Sprint 11**: Implement Phase 2 email notifications when Fleet tasks are created
+1. Add FleetScope deep link for easier routing lookup
+2. Implement Phase 2 email notifications when Fleet tasks are created
 3. **Medium Priority**: Add Playwright E2E tests for the new expandable row interactions
 4. **Low Priority**: Clean up legacy card-based components if no longer needed
