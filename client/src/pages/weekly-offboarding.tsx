@@ -151,7 +151,11 @@ export default function WeeklyOffboarding() {
       });
       if (selectedEntry?.truck) {
         queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', selectedEntry.truck] });
-        queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data/batch'] });
+        queryClient.invalidateQueries({ 
+          predicate: (query) => 
+            Array.isArray(query.queryKey) && 
+            query.queryKey[0] === '/api/vehicle-nexus-data/batch'
+        });
       }
     },
     onError: (error: any) => {
