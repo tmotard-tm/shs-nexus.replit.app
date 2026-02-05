@@ -1061,6 +1061,332 @@ export class SnowflakeSyncService {
     }
   }
 
+  // Sprint 0: Get new separation records created since a timestamp
+  async getSeparationsSinceTimestamp(sinceTimestamp: Date): Promise<{
+    success: boolean;
+    records: Array<{
+      id: number;
+      ldapId: string;
+      technicianName: string | null;
+      emplId: string;
+      planningArea: string | null;
+      planningAreaName: string | null;
+      lastDay: string | null;
+      effectiveSeparationDate: string | null;
+      truckNumber: string | null;
+      contactNumber: string | null;
+      personalEmail: string | null;
+      fleetPickupAddress: string | null;
+      separationCategory: string | null;
+      notes: string | null;
+      createdAt: string;
+    }>;
+    message?: string;
+  }> {
+    if (!isSnowflakeConfigured()) {
+      console.log('[Separation Sync] Snowflake not configured');
+      return { success: false, records: [], message: 'Snowflake not configured' };
+    }
+
+    try {
+      const snowflake = getSnowflakeService();
+      await snowflake.connect();
+
+      const isoTimestamp = sinceTimestamp.toISOString();
+      console.log(`[Separation Sync] Fetching new separations created since: ${isoTimestamp}`);
+      
+      const query = `
+        SELECT 
+          ID,
+          LDAP_ID,
+          TECHNICIAN_NAME,
+          EMPLID,
+          PLANNING_AREA,
+          PLANNING_AREA_NAME,
+          LAST_DAY,
+          EFFECTIVE_SEPARATION_DATE,
+          TRUCK_NUMBER,
+          CONTACT_NUMBER,
+          PERSONAL_EMAIL,
+          FLEET_PICKUP_ADDRESS,
+          SEPARATION_CATEGORY,
+          NOTES,
+          CREATED_AT
+        FROM PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS
+        WHERE CREATED_AT > ?
+        ORDER BY CREATED_AT ASC
+      `;
+
+      const rows = await snowflake.executeQuery(query, [isoTimestamp]) as Array<{
+        ID: number;
+        LDAP_ID: string;
+        TECHNICIAN_NAME: string | null;
+        EMPLID: string;
+        PLANNING_AREA: string | null;
+        PLANNING_AREA_NAME: string | null;
+        LAST_DAY: string | null;
+        EFFECTIVE_SEPARATION_DATE: string | null;
+        TRUCK_NUMBER: string | null;
+        CONTACT_NUMBER: string | null;
+        PERSONAL_EMAIL: string | null;
+        FLEET_PICKUP_ADDRESS: string | null;
+        SEPARATION_CATEGORY: string | null;
+        NOTES: string | null;
+        CREATED_AT: string;
+      }>;
+
+      console.log(`[Separation Sync] Found ${rows.length} new separations since ${isoTimestamp}`);
+      
+      const records = rows.map(row => ({
+        id: row.ID,
+        ldapId: row.LDAP_ID,
+        technicianName: row.TECHNICIAN_NAME,
+        emplId: row.EMPLID,
+        planningArea: row.PLANNING_AREA,
+        planningAreaName: row.PLANNING_AREA_NAME,
+        lastDay: row.LAST_DAY,
+        effectiveSeparationDate: row.EFFECTIVE_SEPARATION_DATE,
+        truckNumber: row.TRUCK_NUMBER,
+        contactNumber: row.CONTACT_NUMBER,
+        personalEmail: row.PERSONAL_EMAIL,
+        fleetPickupAddress: row.FLEET_PICKUP_ADDRESS,
+        separationCategory: row.SEPARATION_CATEGORY,
+        notes: row.NOTES,
+        createdAt: row.CREATED_AT,
+      }));
+
+      return { success: true, records };
+    } catch (error: any) {
+      console.error(`[Separation Sync] QUERY_ERROR fetching new separations:`, error.message);
+      return { success: false, records: [], message: `QUERY_ERROR: ${error.message}` };
+    }
+  }
+
+  // Sprint 0: Sync new separation records and create offboarding tasks
+  async syncNewSeparations(triggeredBy: string = 'scheduler'): Promise<{
+    success: boolean;
+    newRecordsFound: number;
+    tasksCreated: number;
+    tasksSkipped: number;
+    errors: string[];
+    lastSyncTimestamp: string;
+  }> {
+    const result = {
+      success: false,
+      newRecordsFound: 0,
+      tasksCreated: 0,
+      tasksSkipped: 0,
+      errors: [] as string[],
+      lastSyncTimestamp: new Date().toISOString(),
+    };
+
+    if (!isSnowflakeConfigured()) {
+      result.errors.push('Snowflake not configured');
+      return result;
+    }
+
+    try {
+      // Get the last sync timestamp from sync_logs or default to 24 hours ago
+      const lastSync = await storage.getLatestSyncLog('separation_poll');
+      const sinceTimestamp = lastSync?.completedAt 
+        ? new Date(lastSync.completedAt)
+        : new Date(Date.now() - 24 * 60 * 60 * 1000); // Default: 24 hours ago
+
+      console.log(`[Separation Sync] Polling for new separations since: ${sinceTimestamp.toISOString()}`);
+
+      // Fetch new separation records
+      const separationsResult = await this.getSeparationsSinceTimestamp(sinceTimestamp);
+      
+      if (!separationsResult.success) {
+        result.errors.push(separationsResult.message || 'Failed to fetch separations');
+        return result;
+      }
+
+      result.newRecordsFound = separationsResult.records.length;
+
+      if (separationsResult.records.length === 0) {
+        console.log('[Separation Sync] No new separation records found');
+        result.success = true;
+        
+        // Log the successful poll even if no records found
+        await storage.createSyncLog({
+          syncType: 'separation_poll',
+          status: 'completed',
+          triggeredBy,
+          recordsProcessed: 0,
+          recordsCreated: 0,
+          recordsUpdated: 0,
+          errorMessage: null,
+          completedAt: new Date(),
+        });
+        
+        return result;
+      }
+
+      console.log(`[Separation Sync] Processing ${separationsResult.records.length} new separation records...`);
+
+      const tpmsService = getTPMSService();
+      const tpmsConfigured = tpmsService.isConfigured();
+
+      for (const separation of separationsResult.records) {
+        try {
+          // Check for existing offboarding tasks for this employee
+          const existingTasksResult = await storage.findExistingOffboardingTasks(
+            separation.emplId,
+            separation.ldapId,
+            45 // 45 day window
+          );
+
+          if (existingTasksResult.hasExisting) {
+            console.log(`[Separation Sync] Skipping ${separation.technicianName || separation.ldapId} - existing tasks found`);
+            result.tasksSkipped++;
+            continue;
+          }
+
+          // Look up truck info from TPMS
+          let truckInfo: { truckNo?: string; districtNo?: string; lookupSuccess: boolean } = { lookupSuccess: false };
+          
+          if (tpmsConfigured && separation.ldapId) {
+            try {
+              const tpmsResult = await tpmsService.lookupTruckByEnterpriseId(separation.ldapId);
+              if (tpmsResult.success && tpmsResult.techInfo) {
+                truckInfo = {
+                  truckNo: tpmsResult.techInfo.truckNo?.trim() || separation.truckNumber || undefined,
+                  districtNo: tpmsResult.techInfo.districtNo?.trim() || separation.planningArea || undefined,
+                  lookupSuccess: true,
+                };
+              }
+            } catch (e) {
+              // Use HR data as fallback
+              truckInfo.truckNo = separation.truckNumber || undefined;
+            }
+          } else {
+            truckInfo.truckNo = separation.truckNumber || undefined;
+          }
+
+          // Generate workflow ID
+          const workflowId = `sep_sync_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+          const vehicleNumber = truckInfo.truckNo || separation.truckNumber || '';
+          const techName = separation.technicianName || separation.ldapId;
+
+          // Create offboarding tasks for Fleet, Tools, and Inventory
+          const day0Tasks = [
+            {
+              title: `Day 0: Recover Equipment & Tools - ${techName}`,
+              description: `IMMEDIATE: Begin equipment/tools recovery for ${techName} (${separation.ldapId}). Truck: ${vehicleNumber || 'TBD'}. Last Day: ${separation.lastDay || 'TBD'}. Source: HR Separation Sync.`,
+              department: 'Tools',
+              step: 'tools_recover_equipment_day0',
+              subtask: 'Tools',
+              workflowStep: 1,
+            },
+            {
+              title: `Day 0: Fleet Coordination - ${vehicleNumber || techName}`,
+              description: `IMMEDIATE: Begin fleet coordination for ${techName} (${separation.ldapId}). Vehicle: ${vehicleNumber || 'TBD'}. Pickup Address: ${separation.fleetPickupAddress || 'TBD'}. Source: HR Separation Sync.`,
+              department: 'FLEET',
+              step: 'fleet_coordination_day0',
+              subtask: 'Fleet',
+              workflowStep: 2,
+            },
+            {
+              title: `Day 0: Remove from TPMS - ${vehicleNumber || techName}`,
+              description: `IMMEDIATE: Remove ${techName} (${separation.ldapId}) from TPMS. Vehicle: ${vehicleNumber || 'TBD'}. Source: HR Separation Sync.`,
+              department: 'Inventory Control',
+              step: 'inventory_remove_tpms_day0',
+              subtask: 'Inventory',
+              workflowStep: 3,
+            },
+          ];
+
+          for (const task of day0Tasks) {
+            const queueItem: InsertQueueItem = {
+              workflowType: 'offboarding',
+              title: task.title,
+              description: task.description,
+              status: 'pending',
+              priority: 'high',
+              requesterId: 'system',
+              department: task.department,
+              workflowId: workflowId,
+              workflowStep: task.workflowStep,
+              data: JSON.stringify({
+                workflowType: 'offboarding_sequence',
+                step: task.step,
+                subtask: task.subtask,
+                phase: 'day0',
+                isDay0Task: true,
+                source: 'hr_separation_sync',
+                hrSeparationId: separation.id,
+                syncedAt: new Date().toISOString(),
+                technician: {
+                  techName: separation.technicianName,
+                  techRacfid: separation.ldapId,
+                  enterpriseId: separation.ldapId,
+                  employeeId: separation.emplId,
+                  lastDayWorked: separation.lastDay,
+                  effectiveDate: separation.effectiveSeparationDate,
+                  district: separation.planningArea,
+                  planningArea: separation.planningAreaName,
+                  contactNumber: separation.contactNumber,
+                  personalEmail: separation.personalEmail,
+                  separationCategory: separation.separationCategory,
+                },
+                vehicle: {
+                  vehicleNumber: vehicleNumber,
+                  truckNo: vehicleNumber,
+                  fleetPickupAddress: separation.fleetPickupAddress,
+                },
+                hrNotes: separation.notes,
+              }),
+              metadata: JSON.stringify({
+                createdVia: 'hr_separation_sync',
+                hrSeparationId: separation.id,
+                tpmsTruckNo: truckInfo.truckNo || null,
+              }),
+            };
+
+            // Route to correct queue
+            const deptUpper = task.department.toUpperCase();
+            if (deptUpper === 'TOOLS') {
+              await storage.createToolsQueueItem(queueItem);
+            } else if (deptUpper === 'FLEET') {
+              await storage.createFleetQueueItem(queueItem);
+            } else if (deptUpper === 'INVENTORY CONTROL' || deptUpper === 'INVENTORY') {
+              await storage.createInventoryQueueItem(queueItem);
+            }
+            
+            result.tasksCreated++;
+          }
+
+          console.log(`[Separation Sync] Created ${day0Tasks.length} tasks for ${techName}`);
+        } catch (taskError: any) {
+          console.error(`[Separation Sync] Error creating tasks for ${separation.ldapId}:`, taskError.message);
+          result.errors.push(`Failed to create tasks for ${separation.ldapId}: ${taskError.message}`);
+        }
+      }
+
+      // Log the successful sync
+      await storage.createSyncLog({
+        syncType: 'separation_poll',
+        status: 'completed',
+        triggeredBy,
+        recordsProcessed: result.newRecordsFound,
+        recordsCreated: result.tasksCreated,
+        recordsUpdated: 0,
+        errorMessage: result.errors.length > 0 ? result.errors.join('; ') : null,
+        completedAt: new Date(),
+      });
+
+      result.success = true;
+      console.log(`[Separation Sync] Completed: ${result.newRecordsFound} records, ${result.tasksCreated} tasks created, ${result.tasksSkipped} skipped`);
+      
+      return result;
+    } catch (error: any) {
+      result.errors.push(error.message);
+      console.error('[Separation Sync] Error:', error.message);
+      return result;
+    }
+  }
+
   async syncTruckInventory(triggeredBy: string = 'manual'): Promise<SyncResult> {
     const startTime = Date.now();
     const result: SyncResult = {

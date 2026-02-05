@@ -6606,6 +6606,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Sprint 0: Manual trigger for separation poll
+  app.post("/api/snowflake/sync/separations", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer users can trigger manual syncs" });
+      }
+      
+      const { triggerSeparationPoll } = await import("./sync-scheduler");
+      const result = await triggerSeparationPoll();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error polling separations:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   app.post("/api/snowflake/sync/all-techs", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);

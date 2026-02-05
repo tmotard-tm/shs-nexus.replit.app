@@ -4,9 +4,11 @@ import { isSnowflakeConfigured } from './snowflake-service';
 const SYNC_HOUR_EST = 5; // 5am EST
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
 const ENRICH_INTERVAL_HOURS = 12; // Enrich every 12 hours
+const SEPARATION_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes for separation sync
 
 let lastSyncDate: string | null = null;
 let lastEnrichTime: number | null = null; // Timestamp of last enrichment
+let lastSeparationPollTime: number | null = null; // Sprint 0: Track separation polls
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -55,6 +57,9 @@ async function checkAndRunSync(): Promise<void> {
 
     // Check if we need to run onboarding enrichment (every 12 hours)
     await checkAndRunEnrichment();
+    
+    // Sprint 0: Check if we need to poll for new separation records (every 5 minutes)
+    await checkAndRunSeparationPoll();
   } catch (error) {
     console.error('[Scheduler] Error during scheduled sync:', error);
   }
@@ -81,6 +86,35 @@ async function checkAndRunEnrichment(): Promise<void> {
     }
   } catch (error) {
     console.error('[Scheduler] Error during onboarding enrichment:', error);
+  }
+}
+
+// Sprint 0: Poll for new separation records every 5 minutes
+async function checkAndRunSeparationPoll(): Promise<void> {
+  try {
+    if (!isSnowflakeConfigured()) {
+      return;
+    }
+
+    const now = Date.now();
+
+    // Run separation poll if we haven't run it yet or if 5 minutes have passed
+    if (lastSeparationPollTime === null || (now - lastSeparationPollTime) >= SEPARATION_POLL_INTERVAL_MS) {
+      console.log('[Scheduler] Polling for new separation records (every 5 minutes)');
+      
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.syncNewSeparations('scheduler');
+      
+      lastSeparationPollTime = now;
+      
+      if (result.newRecordsFound > 0) {
+        console.log(`[Scheduler] Separation poll complete: ${result.newRecordsFound} new records, ${result.tasksCreated} tasks created`);
+      } else {
+        console.log('[Scheduler] Separation poll complete: no new records');
+      }
+    }
+  } catch (error) {
+    console.error('[Scheduler] Error during separation poll:', error);
   }
 }
 
@@ -122,7 +156,13 @@ export function stopSyncScheduler(): void {
   console.log('[Scheduler] Sync scheduler stopped');
 }
 
-export function getSchedulerStatus(): { running: boolean; lastSyncDate: string | null; nextSyncTime: string } {
+export function getSchedulerStatus(): { 
+  running: boolean; 
+  lastSyncDate: string | null; 
+  nextSyncTime: string;
+  lastSeparationPoll: string | null;
+  separationPollIntervalMs: number;
+} {
   const estNow = getESTDate();
   const nextSync = new Date(estNow);
   
@@ -136,5 +176,26 @@ export function getSchedulerStatus(): { running: boolean; lastSyncDate: string |
     running: schedulerRunning,
     lastSyncDate,
     nextSyncTime: nextSync.toISOString(),
+    lastSeparationPoll: lastSeparationPollTime ? new Date(lastSeparationPollTime).toISOString() : null,
+    separationPollIntervalMs: SEPARATION_POLL_INTERVAL_MS,
   };
+}
+
+// Sprint 0: Manual trigger for separation poll (for testing)
+export async function triggerSeparationPoll(): Promise<{
+  success: boolean;
+  newRecordsFound: number;
+  tasksCreated: number;
+  tasksSkipped: number;
+  errors: string[];
+}> {
+  if (!isSnowflakeConfigured()) {
+    return { success: false, newRecordsFound: 0, tasksCreated: 0, tasksSkipped: 0, errors: ['Snowflake not configured'] };
+  }
+  
+  console.log('[Scheduler] Manual separation poll triggered');
+  const syncService = getSnowflakeSyncService();
+  const result = await syncService.syncNewSeparations('manual');
+  lastSeparationPollTime = Date.now();
+  return result;
 }
