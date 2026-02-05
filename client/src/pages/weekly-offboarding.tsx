@@ -16,7 +16,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { format, parseISO, getWeek, getYear } from "date-fns";
+import { format, parseISO, getWeek, getYear, differenceInDays } from "date-fns";
 
 interface TermRosterEntry {
   emplName: string;
@@ -506,6 +506,7 @@ export default function WeeklyOffboarding() {
                           </div>
                         </TableHead>
                         <TableHead className="w-[130px] bg-background sticky top-0">Last Date Worked</TableHead>
+                        <TableHead className="w-[100px] bg-background sticky top-0">Days Since</TableHead>
                         <TableHead className="bg-background sticky top-0">Planning Area</TableHead>
                         <TableHead className="bg-background sticky top-0">Owner</TableHead>
                         <TableHead className="bg-background sticky top-0">Tech Specialty</TableHead>
@@ -533,6 +534,26 @@ export default function WeeklyOffboarding() {
                           </TableCell>
                           <TableCell className="whitespace-nowrap">{formatDate(entry.effdt)}</TableCell>
                           <TableCell className="whitespace-nowrap">{formatDate(entry.lastDateWorked)}</TableCell>
+                          <TableCell className="text-sm">
+                            {(() => {
+                              if (!entry.lastDateWorked) return '-';
+                              const nexusInfo = entry.truck ? nexusDataMap.get(entry.truck) : null;
+                              const hasManualStatus = !!nexusInfo?.postOffboardedStatus;
+                              try {
+                                const lastWorked = parseISO(entry.lastDateWorked);
+                                const daysSince = differenceInDays(new Date(), lastWorked);
+                                const isPastDue = daysSince >= 2 && !hasManualStatus;
+                                return (
+                                  <div className={isPastDue ? "text-red-600 font-semibold" : ""}>
+                                    {daysSince}
+                                    {isPastDue && <div className="text-xs">past 2 days</div>}
+                                  </div>
+                                );
+                              } catch {
+                                return '-';
+                              }
+                            })()}
+                          </TableCell>
                           <TableCell className="text-sm">{entry.planningArea || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.owner || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.techSpecialty || '-'}</TableCell>
