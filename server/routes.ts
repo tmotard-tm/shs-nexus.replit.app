@@ -1858,14 +1858,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
         return res.status(403).json({ message: "Access denied to Tools queue" });
       }
-      const queueItems = await storage.getToolsQueueItems();
       
       // Import Snowflake sync service for separation data
       const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
       const snowflakeSyncService = getSnowflakeSyncService();
       
+      // Sprint 11: Fetch ALL confirmed separations from HR table
+      let hrSeparations: Array<{
+        ldapId: string;
+        technicianName: string | null;
+        emplId: string;
+        lastDay: string | null;
+        effectiveSeparationDate: string | null;
+        truckNumber: string | null;
+        contactNumber: string | null;
+        personalEmail: string | null;
+        fleetPickupAddress: string | null;
+        separationCategory: string | null;
+        notes: string | null;
+      }> = [];
+      
+      if (snowflakeSyncService) {
+        try {
+          const hrResult = await snowflakeSyncService.getAllConfirmedSeparations();
+          if (hrResult.success) {
+            hrSeparations = hrResult.records;
+            console.log(`[Tools Queue] Fetched ${hrSeparations.length} confirmed separations from HR`);
+          }
+        } catch (hrError) {
+          console.log('[Tools Queue] Could not fetch HR separations:', hrError);
+        }
+      }
+      
+      // Get existing queue items
+      const existingQueueItems = await storage.getToolsQueueItems();
+      
+      // Build a set of existing enterprise IDs and employee IDs to check for duplicates
+      const existingIds = new Set<string>();
+      for (const item of existingQueueItems) {
+        try {
+          const parsedData = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
+          const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.techRacfId;
+          const employeeId = parsedData?.employee?.employeeId || parsedData?.employeeId || parsedData?.emplid;
+          if (enterpriseId) existingIds.add(enterpriseId.toUpperCase());
+          if (employeeId) existingIds.add(employeeId);
+        } catch (e) {
+          // Skip items with invalid data
+        }
+      }
+      
+      // Sprint 11: Auto-create queue items for HR techs that don't have one yet
+      const newlyCreatedItems: typeof existingQueueItems = [];
+      for (const hrRecord of hrSeparations) {
+        const ldapUpper = hrRecord.ldapId?.toUpperCase();
+        const emplId = hrRecord.emplId;
+        
+        // Skip if already has a queue item
+        if ((ldapUpper && existingIds.has(ldapUpper)) || (emplId && existingIds.has(emplId))) {
+          continue;
+        }
+        
+        // Look up tech data from all_techs for additional info
+        let techFromDb = null;
+        if (ldapUpper) {
+          techFromDb = await storage.getAllTechByTechRacfid(ldapUpper);
+        }
+        if (!techFromDb && emplId) {
+          techFromDb = await storage.getAllTechByEmployeeId(emplId);
+        }
+        
+        // Create new queue item for this HR separation
+        try {
+          const newItem = await storage.createToolsQueueItem({
+            workflowType: 'offboarding',
+            title: `Tools Queue - ${hrRecord.technicianName || ldapUpper || 'Unknown'}`,
+            description: `HR separation record for ${hrRecord.technicianName || ldapUpper}`,
+            status: 'pending',
+            priority: 'medium',
+            requesterId: 'system',
+            department: 'Tools',
+            data: JSON.stringify({
+              source: 'hr_separation',
+              employee: {
+                enterpriseId: ldapUpper,
+                employeeId: emplId,
+                fullName: hrRecord.technicianName,
+              },
+              hrSeparation: hrRecord,
+            }),
+          });
+          newlyCreatedItems.push(newItem);
+          existingIds.add(ldapUpper || '');
+          existingIds.add(emplId || '');
+          console.log(`[Tools Queue] Auto-created queue item for HR separation: ${hrRecord.technicianName} (${ldapUpper})`);
+        } catch (createError) {
+          console.error(`[Tools Queue] Failed to auto-create queue item for ${ldapUpper}:`, createError);
+        }
+      }
+      
+      // Combine existing and newly created items
+      const allQueueItems = [...existingQueueItems, ...newlyCreatedItems];
+      
+      // Build HR lookup map for quick access
+      const hrLookup = new Map<string, typeof hrSeparations[0]>();
+      for (const hr of hrSeparations) {
+        if (hr.ldapId) hrLookup.set(hr.ldapId.toUpperCase(), hr);
+        if (hr.emplId) hrLookup.set(hr.emplId, hr);
+      }
+      
       // Enrich each queue item with technician data from all_techs and separation data from HR
-      const enrichedItems = await Promise.all(queueItems.map(async (item) => {
+      const enrichedItems = await Promise.all(allQueueItems.map(async (item) => {
         let techData: any = null;
         
         try {
@@ -1885,21 +1987,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             tech = await storage.getAllTechByTechRacfid(enterpriseId);
           }
           
-          // Sprint 10: Fetch separation details from HR Snowflake table
-          let separationDetails: any = null;
-          const lookupId = enterpriseId || employeeId;
-          if (lookupId && snowflakeSyncService) {
-            try {
-              separationDetails = await snowflakeSyncService.getSeparationDetails(lookupId);
-            } catch (sepError) {
-              console.log(`[Tools Queue] Could not fetch separation details for ${lookupId}:`, sepError);
-            }
-          }
+          // Sprint 11: Look up HR separation data from our pre-fetched map
+          const hrRecord = hrLookup.get(enterpriseId?.toUpperCase() || '') || hrLookup.get(employeeId || '');
           
           if (tech) {
             // Build full address - prefer HR separation address if available
-            const addressParts = separationDetails?.success && separationDetails.fleetPickupAddress
-              ? [separationDetails.fleetPickupAddress]
+            const addressParts = hrRecord?.fleetPickupAddress
+              ? [hrRecord.fleetPickupAddress]
               : [
                   tech.homeAddr1,
                   tech.homeAddr2,
@@ -1912,51 +2006,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
               techName: tech.techName,
               enterpriseId: tech.techRacfid,
               district: tech.districtNo || null,
-              // Sprint 10: Prioritize separation date from HR table, fallback to all_techs
-              separationDate: (separationDetails?.success && separationDetails.lastDay) 
-                ? separationDetails.lastDay 
-                : (separationDetails?.success && separationDetails.effectiveSeparationDate)
-                  ? separationDetails.effectiveSeparationDate
-                  : tech.lastDayWorked || tech.effectiveDate || null,
+              // Sprint 11: Prioritize separation date from HR table, fallback to all_techs
+              separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || tech.lastDayWorked || tech.effectiveDate || null,
               workPhone: tech.mainPhone || null,
-              // Sprint 10: Include HR contact number if available
-              personalPhone: (separationDetails?.success && separationDetails.contactNumber) 
-                ? separationDetails.contactNumber 
-                : tech.cellPhone || tech.homePhone || null,
-              // Sprint 10: Include personal email from HR if available
-              email: (separationDetails?.success && separationDetails.personalEmail)
-                ? separationDetails.personalEmail
-                : parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
+              // Sprint 11: Include HR contact number if available
+              personalPhone: hrRecord?.contactNumber || tech.cellPhone || tech.homePhone || null,
+              // Sprint 11: Include personal email from HR if available
+              email: hrRecord?.personalEmail || parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
               address: addressParts.length > 0 ? addressParts.join(', ') : null,
-              // Sprint 10: Additional HR separation data
-              separationCategory: separationDetails?.success ? separationDetails.separationCategory : null,
-              hrTruckNumber: separationDetails?.success ? separationDetails.truckNumber : null,
+              // Sprint 11: Additional HR separation data
+              separationCategory: hrRecord?.separationCategory || null,
+              hrTruckNumber: hrRecord?.truckNumber || null,
+              hrNotes: hrRecord?.notes || null,
             };
           } else {
             // Fallback: extract from queue item data/title, with HR separation data overlay
             techData = {
-              techName: (separationDetails?.success && separationDetails.technicianName) 
-                ? separationDetails.technicianName 
-                : parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Tools Queue - ', '') || 'Unknown',
+              techName: hrRecord?.technicianName || parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Tools Queue - ', '') || 'Unknown',
               enterpriseId: enterpriseId || employeeId || 'Unknown',
               district: null,
-              separationDate: (separationDetails?.success && separationDetails.lastDay) 
-                ? separationDetails.lastDay 
-                : (separationDetails?.success && separationDetails.effectiveSeparationDate)
-                  ? separationDetails.effectiveSeparationDate
-                  : parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
+              separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
               workPhone: null,
-              personalPhone: (separationDetails?.success && separationDetails.contactNumber) 
-                ? separationDetails.contactNumber 
-                : parsedData?.employee?.phone || null,
-              email: (separationDetails?.success && separationDetails.personalEmail)
-                ? separationDetails.personalEmail
-                : parsedData?.employee?.email || null,
-              address: (separationDetails?.success && separationDetails.fleetPickupAddress)
-                ? separationDetails.fleetPickupAddress
-                : parsedData?.employee?.address || null,
-              separationCategory: separationDetails?.success ? separationDetails.separationCategory : null,
-              hrTruckNumber: separationDetails?.success ? separationDetails.truckNumber : null,
+              personalPhone: hrRecord?.contactNumber || parsedData?.employee?.phone || null,
+              email: hrRecord?.personalEmail || parsedData?.employee?.email || null,
+              address: hrRecord?.fleetPickupAddress || parsedData?.employee?.address || null,
+              separationCategory: hrRecord?.separationCategory || null,
+              hrTruckNumber: hrRecord?.truckNumber || null,
+              hrNotes: hrRecord?.notes || null,
             };
           }
         } catch (e) {
@@ -1972,6 +2048,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             address: null,
             separationCategory: null,
             hrTruckNumber: null,
+            hrNotes: null,
           };
         }
         
@@ -6349,6 +6426,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Sprint 11: Diagnostic endpoint for testing separation data lookup
+  app.get("/api/test-separation/:identifier", requireAuth, async (req: any, res) => {
+    try {
+      const { identifier } = req.params;
+      if (!identifier) {
+        return res.status(400).json({ message: "Identifier (enterprise ID or employee ID) is required" });
+      }
+      
+      const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+      const snowflakeSyncService = getSnowflakeSyncService();
+      
+      if (!snowflakeSyncService) {
+        return res.status(500).json({ message: "Snowflake service not initialized" });
+      }
+      
+      // Test single lookup
+      const separationDetails = await snowflakeSyncService.getSeparationDetails(identifier);
+      
+      // Also look up from all_techs for comparison
+      let allTechsRecord = await storage.getAllTechByTechRacfid(identifier.toUpperCase());
+      if (!allTechsRecord) {
+        allTechsRecord = await storage.getAllTechByEmployeeId(identifier);
+      }
+      
+      res.json({
+        identifier,
+        hrSeparation: separationDetails,
+        allTechsRecord: allTechsRecord ? {
+          techName: allTechsRecord.techName,
+          techRacfid: allTechsRecord.techRacfid,
+          employeeId: allTechsRecord.employeeId,
+          districtNo: allTechsRecord.districtNo,
+          lastDayWorked: allTechsRecord.lastDayWorked,
+          effectiveDate: allTechsRecord.effectiveDate,
+          cellPhone: allTechsRecord.cellPhone,
+          homePhone: allTechsRecord.homePhone,
+          mainPhone: allTechsRecord.mainPhone,
+          homeAddr1: allTechsRecord.homeAddr1,
+          homeCity: allTechsRecord.homeCity,
+          homeState: allTechsRecord.homeState,
+        } : null,
+        recommendation: separationDetails.success 
+          ? "HR separation data found - this tech will appear in Tools Queue"
+          : allTechsRecord 
+            ? "No HR separation data, but found in all_techs"
+            : "Not found in HR separation table or all_techs",
+      });
+    } catch (error: any) {
+      console.error("Error testing separation lookup:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Sprint 11: Diagnostic endpoint for viewing all HR separations
+  app.get("/api/test-separations", requireAuth, async (req: any, res) => {
+    try {
+      const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+      const snowflakeSyncService = getSnowflakeSyncService();
+      
+      if (!snowflakeSyncService) {
+        return res.status(500).json({ message: "Snowflake service not initialized" });
+      }
+      
+      const result = await snowflakeSyncService.getAllConfirmedSeparations();
+      
+      res.json({
+        success: result.success,
+        count: result.records.length,
+        records: result.records,
+        message: result.message,
+      });
+    } catch (error: any) {
+      console.error("Error fetching all separations:", error);
+      res.status(500).json({ success: false, message: error.message });
     }
   });
 

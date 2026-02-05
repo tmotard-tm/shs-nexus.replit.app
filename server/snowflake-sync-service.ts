@@ -897,6 +897,90 @@ export class SnowflakeSyncService {
     }
   }
 
+  async getAllConfirmedSeparations(): Promise<{
+    success: boolean;
+    records: Array<{
+      ldapId: string;
+      technicianName: string | null;
+      emplId: string;
+      lastDay: string | null;
+      effectiveSeparationDate: string | null;
+      truckNumber: string | null;
+      contactNumber: string | null;
+      personalEmail: string | null;
+      fleetPickupAddress: string | null;
+      separationCategory: string | null;
+      notes: string | null;
+    }>;
+    message?: string;
+  }> {
+    if (!isSnowflakeConfigured()) {
+      console.log('[Separation] Snowflake not configured');
+      return { success: false, records: [], message: 'Snowflake not configured' };
+    }
+
+    try {
+      const snowflake = getSnowflakeService();
+      await snowflake.connect();
+
+      console.log('[Separation] Fetching all confirmed separations from HR table...');
+      
+      const query = `
+        SELECT 
+          LDAP_ID,
+          TECHNICIAN_NAME,
+          EMPLID,
+          LAST_DAY,
+          EFFECTIVE_SEPARATION_DATE,
+          TRUCK_NUMBER,
+          CONTACT_NUMBER,
+          PERSONAL_EMAIL,
+          FLEET_PICKUP_ADDRESS,
+          SEPARATION_CATEGORY,
+          NOTES
+        FROM PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS
+        WHERE LAST_DAY IS NOT NULL 
+           OR EFFECTIVE_SEPARATION_DATE IS NOT NULL
+        ORDER BY COALESCE(LAST_DAY, EFFECTIVE_SEPARATION_DATE) DESC NULLS LAST
+      `;
+
+      const rows = await snowflake.executeQuery(query) as Array<{
+        LDAP_ID: string;
+        TECHNICIAN_NAME: string | null;
+        EMPLID: string;
+        LAST_DAY: string | null;
+        EFFECTIVE_SEPARATION_DATE: string | null;
+        TRUCK_NUMBER: string | null;
+        CONTACT_NUMBER: string | null;
+        PERSONAL_EMAIL: string | null;
+        FLEET_PICKUP_ADDRESS: string | null;
+        SEPARATION_CATEGORY: string | null;
+        NOTES: string | null;
+      }>;
+
+      console.log(`[Separation] Found ${rows.length} confirmed separations`);
+      
+      const records = rows.map(row => ({
+        ldapId: row.LDAP_ID,
+        technicianName: row.TECHNICIAN_NAME,
+        emplId: row.EMPLID,
+        lastDay: row.LAST_DAY,
+        effectiveSeparationDate: row.EFFECTIVE_SEPARATION_DATE,
+        truckNumber: row.TRUCK_NUMBER,
+        contactNumber: row.CONTACT_NUMBER,
+        personalEmail: row.PERSONAL_EMAIL,
+        fleetPickupAddress: row.FLEET_PICKUP_ADDRESS,
+        separationCategory: row.SEPARATION_CATEGORY,
+        notes: row.NOTES,
+      }));
+
+      return { success: true, records };
+    } catch (error: any) {
+      console.error(`[Separation] QUERY_ERROR fetching all separations:`, error.message);
+      return { success: false, records: [], message: `QUERY_ERROR: ${error.message}` };
+    }
+  }
+
   async syncTruckInventory(triggeredBy: string = 'manual'): Promise<SyncResult> {
     const startTime = Date.now();
     const result: SyncResult = {
