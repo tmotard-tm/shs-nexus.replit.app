@@ -268,10 +268,19 @@ GET /api/tools-queue
 
 | System | Purpose | Sync Direction |
 |--------|---------|----------------|
-| Snowflake | Employee roster, TPMS data | Snowflake → Nexus |
+| Snowflake | Employee roster, TPMS data, HR separation data | Snowflake → Nexus |
 | Holman | Vehicle fleet details | Bi-directional |
 | TPMS | Tech-to-truck assignments | Snowflake → Nexus |
 | PMF/PARQ AI | Available vehicles API | PARQ → Nexus |
+
+### Snowflake Data Sources
+
+| Table | Purpose | Key Fields |
+|-------|---------|------------|
+| `PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS` | Employee roster | EMPL_ID, ENTERPRISE_ID, FULL_NAME |
+| `PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS` | HR separation data | LDAP_ID, LAST_DAY, TRUCK_NUMBER, FLEET_PICKUP_ADDRESS |
+| `PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW` | Contact info | Address, phone numbers |
+| `PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED` | Truck assignments | ENTERPRISE_ID, TRUCK_LU |
 
 ---
 
@@ -288,21 +297,17 @@ GET /api/tools-queue
 
 ---
 
-## Current State (2026-02-02)
+## Current State (2026-02-05)
 
 ### What's Working
-- Sprint 1: Tools queue fully implemented
-- Sprint 2: BYOV detection and blocking logic complete
-- Sprint 3: Tools Queue page with 5 task card variants
-- Sprint 4: DatabaseStorage has full workflow automation methods
-- Sprint 5: All test scenarios passing, bugs fixed
+- Sprint 1-5: Tools queue, BYOV detection, blocking logic, Phase 2 triggers
+- Sprint 6-9: Enhanced task detail views, auto-save, table-based queue redesign
+- Sprint 10: HR separation data integration from Snowflake
 
-### Test Results (All Passing)
-1. BYOV Technician - Green badge, not blocked
-2. Company Vehicle (No Routing) - Yellow blocked state
-3. Company Vehicle (PMF Routing) - Blue badge
-4. Company Vehicle (Pep Boys) - Red critical warning
-5. Phase 2 Trigger - All 5 Day 0 → Phase 2 tasks created
+### Sprint 10 Highlights
+- Tools Queue now fetches separation details from HR Snowflake table
+- Priority: HR data > all_techs data > queue item data
+- Available fields: separationDate, contactNumber, personalEmail, fleetPickupAddress, separationCategory
 
 ### Known Issues
 - None blocking

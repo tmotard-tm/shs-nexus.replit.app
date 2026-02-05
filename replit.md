@@ -89,6 +89,26 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
+## 2026-02-05: Sprint 10 - HR Separation Data Integration ✅
+
+### New Snowflake Data Source
+- Connected to new HR table: `PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS`
+- Contains separation dates, truck numbers, pickup addresses, and notes from HR team
+- 66 records with 8 having confirmed separation dates
+
+### Backend Integration
+- Added `getSeparationDetails()` method to `SnowflakeSyncService`
+- Queries by enterprise ID (LDAP_ID) or employee ID (EMPLID)
+- Returns: lastDay, effectiveSeparationDate, truckNumber, contactNumber, personalEmail, fleetPickupAddress, separationCategory
+
+### Tools Queue Enrichment Enhanced
+- Updated `/api/tools-queue` endpoint to fetch separation data from HR Snowflake table
+- Priority: HR separation data > all_techs data > queue item data
+- New fields available in techData: `separationCategory`, `hrTruckNumber`
+- HR data now populates: separationDate, contactNumber, personalEmail, fleetPickupAddress
+
+---
+
 ## 2026-02-04: Sprint 9 - Tools Recovery Queue Redesign ✅
 
 ### Complete UI/UX Overhaul
@@ -157,26 +177,25 @@ Preferred communication style: Simple, everyday language.
 
 ---
 
-# Session Handoff (2026-02-04)
+# Session Handoff (2026-02-05)
 
 ## Summary of Today's Work
-- **Sprint 6-9 completed**: Enhanced Tools Queue from basic cards to a full-featured table with expandable rows
+- **Sprint 10 completed**: Connected HR separation data from Snowflake to Tools Queue
 - **Major deliverables**:
-  - New `ToolsRecoveryQueue.tsx` component with table layout, filters, urgency badges
-  - Backend enrichment of queue items with technician data from `all_techs`
-  - Auto-save for task checkboxes and routing selections
-  - Urgency matrix (CRITICAL/HIGH/STANDARD) based on vehicle type + separation date
+  - New `getSeparationDetails()` method queries `PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS`
+  - Tools Queue enrichment now fetches separation dates, pickup addresses, and contact info from HR
+  - Priority hierarchy: HR data > all_techs data > queue item data
 
 ## Current State
 - App is running without errors
-- Tools Queue page (`/tools-queue`) displays new table-based UI
-- Known dev warning: React Fragment metadata warning from Replit dev tools (does not affect functionality)
+- Tools Queue now shows real separation dates from HR when available
+- Snowflake integration verified working with 66 HR separation records
 
 ## Blockers / Pending Decisions
 - None blocking
 
 ## Recommended Next Steps
-1. **Sprint 10**: Add FleetScope deep link for easier routing lookup
-2. **Sprint 10**: Implement Phase 2 email notifications when Fleet tasks are created
+1. **Sprint 11**: Add FleetScope deep link for easier routing lookup
+2. **Sprint 11**: Implement Phase 2 email notifications when Fleet tasks are created
 3. **Medium Priority**: Add Playwright E2E tests for the new expandable row interactions
 4. **Low Priority**: Clean up legacy card-based components if no longer needed

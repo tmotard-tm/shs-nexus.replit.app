@@ -1860,7 +1860,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const queueItems = await storage.getToolsQueueItems();
       
-      // Enrich each queue item with technician data from all_techs
+      // Import Snowflake sync service for separation data
+      const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+      const snowflakeSyncService = getSnowflakeSyncService();
+      
+      // Enrich each queue item with technician data from all_techs and separation data from HR
       const enrichedItems = await Promise.all(queueItems.map(async (item) => {
         let techData: any = null;
         
@@ -1881,37 +1885,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
             tech = await storage.getAllTechByTechRacfid(enterpriseId);
           }
           
+          // Sprint 10: Fetch separation details from HR Snowflake table
+          let separationDetails: any = null;
+          const lookupId = enterpriseId || employeeId;
+          if (lookupId && snowflakeSyncService) {
+            try {
+              separationDetails = await snowflakeSyncService.getSeparationDetails(lookupId);
+            } catch (sepError) {
+              console.log(`[Tools Queue] Could not fetch separation details for ${lookupId}:`, sepError);
+            }
+          }
+          
           if (tech) {
-            // Build full address
-            const addressParts = [
-              tech.homeAddr1,
-              tech.homeAddr2,
-              tech.homeCity,
-              tech.homeState,
-              tech.homePostal
-            ].filter(Boolean);
+            // Build full address - prefer HR separation address if available
+            const addressParts = separationDetails?.success && separationDetails.fleetPickupAddress
+              ? [separationDetails.fleetPickupAddress]
+              : [
+                  tech.homeAddr1,
+                  tech.homeAddr2,
+                  tech.homeCity,
+                  tech.homeState,
+                  tech.homePostal
+                ].filter(Boolean);
             
             techData = {
               techName: tech.techName,
               enterpriseId: tech.techRacfid,
               district: tech.districtNo || null,
-              separationDate: tech.lastDayWorked || tech.effectiveDate || null,
+              // Sprint 10: Prioritize separation date from HR table, fallback to all_techs
+              separationDate: (separationDetails?.success && separationDetails.lastDay) 
+                ? separationDetails.lastDay 
+                : (separationDetails?.success && separationDetails.effectiveSeparationDate)
+                  ? separationDetails.effectiveSeparationDate
+                  : tech.lastDayWorked || tech.effectiveDate || null,
               workPhone: tech.mainPhone || null,
-              personalPhone: tech.cellPhone || tech.homePhone || null,
-              email: parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
+              // Sprint 10: Include HR contact number if available
+              personalPhone: (separationDetails?.success && separationDetails.contactNumber) 
+                ? separationDetails.contactNumber 
+                : tech.cellPhone || tech.homePhone || null,
+              // Sprint 10: Include personal email from HR if available
+              email: (separationDetails?.success && separationDetails.personalEmail)
+                ? separationDetails.personalEmail
+                : parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
               address: addressParts.length > 0 ? addressParts.join(', ') : null,
+              // Sprint 10: Additional HR separation data
+              separationCategory: separationDetails?.success ? separationDetails.separationCategory : null,
+              hrTruckNumber: separationDetails?.success ? separationDetails.truckNumber : null,
             };
           } else {
-            // Fallback: extract from queue item data/title
+            // Fallback: extract from queue item data/title, with HR separation data overlay
             techData = {
-              techName: parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Tools Queue - ', '') || 'Unknown',
+              techName: (separationDetails?.success && separationDetails.technicianName) 
+                ? separationDetails.technicianName 
+                : parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Tools Queue - ', '') || 'Unknown',
               enterpriseId: enterpriseId || employeeId || 'Unknown',
               district: null,
-              separationDate: parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
+              separationDate: (separationDetails?.success && separationDetails.lastDay) 
+                ? separationDetails.lastDay 
+                : (separationDetails?.success && separationDetails.effectiveSeparationDate)
+                  ? separationDetails.effectiveSeparationDate
+                  : parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
               workPhone: null,
-              personalPhone: parsedData?.employee?.phone || null,
-              email: parsedData?.employee?.email || null,
-              address: parsedData?.employee?.address || null,
+              personalPhone: (separationDetails?.success && separationDetails.contactNumber) 
+                ? separationDetails.contactNumber 
+                : parsedData?.employee?.phone || null,
+              email: (separationDetails?.success && separationDetails.personalEmail)
+                ? separationDetails.personalEmail
+                : parsedData?.employee?.email || null,
+              address: (separationDetails?.success && separationDetails.fleetPickupAddress)
+                ? separationDetails.fleetPickupAddress
+                : parsedData?.employee?.address || null,
+              separationCategory: separationDetails?.success ? separationDetails.separationCategory : null,
+              hrTruckNumber: separationDetails?.success ? separationDetails.truckNumber : null,
             };
           }
         } catch (e) {
@@ -1925,6 +1970,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             personalPhone: null,
             email: null,
             address: null,
+            separationCategory: null,
+            hrTruckNumber: null,
           };
         }
         

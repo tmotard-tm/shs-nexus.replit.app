@@ -810,6 +810,93 @@ export class SnowflakeSyncService {
     }
   }
 
+  async getSeparationDetails(enterpriseId: string): Promise<{
+    success: boolean;
+    ldapId?: string;
+    technicianName?: string;
+    emplId?: string;
+    lastDay?: string | null;
+    effectiveSeparationDate?: string | null;
+    truckNumber?: string | null;
+    contactNumber?: string | null;
+    personalEmail?: string | null;
+    fleetPickupAddress?: string | null;
+    separationCategory?: string | null;
+    notes?: string | null;
+    message?: string;
+  }> {
+    if (!isSnowflakeConfigured()) {
+      console.log('[Separation] Snowflake not configured');
+      return { success: false, message: 'Snowflake not configured' };
+    }
+
+    try {
+      const snowflake = getSnowflakeService();
+      await snowflake.connect();
+
+      console.log(`[Separation] Looking up separation details for: ${enterpriseId}`);
+      
+      const query = `
+        SELECT 
+          LDAP_ID,
+          TECHNICIAN_NAME,
+          EMPLID,
+          LAST_DAY,
+          EFFECTIVE_SEPARATION_DATE,
+          TRUCK_NUMBER,
+          CONTACT_NUMBER,
+          PERSONAL_EMAIL,
+          FLEET_PICKUP_ADDRESS,
+          SEPARATION_CATEGORY,
+          NOTES
+        FROM PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS
+        WHERE UPPER(LDAP_ID) = UPPER(?)
+           OR EMPLID = ?
+        ORDER BY COALESCE(LAST_DAY, EFFECTIVE_SEPARATION_DATE) DESC NULLS LAST
+        LIMIT 1
+      `;
+
+      const rows = await snowflake.executeQuery(query, [enterpriseId, enterpriseId]) as Array<{
+        LDAP_ID: string;
+        TECHNICIAN_NAME: string | null;
+        EMPLID: string;
+        LAST_DAY: string | null;
+        EFFECTIVE_SEPARATION_DATE: string | null;
+        TRUCK_NUMBER: string | null;
+        CONTACT_NUMBER: string | null;
+        PERSONAL_EMAIL: string | null;
+        FLEET_PICKUP_ADDRESS: string | null;
+        SEPARATION_CATEGORY: string | null;
+        NOTES: string | null;
+      }>;
+
+      if (rows.length > 0) {
+        const row = rows[0];
+        console.log(`[Separation] Found separation details for ${enterpriseId}: last_day=${row.LAST_DAY}, truck=${row.TRUCK_NUMBER}`);
+        return {
+          success: true,
+          ldapId: row.LDAP_ID,
+          technicianName: row.TECHNICIAN_NAME || undefined,
+          emplId: row.EMPLID,
+          lastDay: row.LAST_DAY,
+          effectiveSeparationDate: row.EFFECTIVE_SEPARATION_DATE,
+          truckNumber: row.TRUCK_NUMBER,
+          contactNumber: row.CONTACT_NUMBER,
+          personalEmail: row.PERSONAL_EMAIL,
+          fleetPickupAddress: row.FLEET_PICKUP_ADDRESS,
+          separationCategory: row.SEPARATION_CATEGORY,
+          notes: row.NOTES,
+        };
+      }
+
+      console.log(`[Separation] No separation record found for: ${enterpriseId}`);
+      return { success: false, message: 'NO_RECORD' };
+    } catch (error: any) {
+      console.error(`[Separation] QUERY_ERROR for ${enterpriseId}:`, error.message);
+      return { success: false, message: `QUERY_ERROR: ${error.message}` };
+    }
+  }
+
   async syncTruckInventory(triggeredBy: string = 'manual'): Promise<SyncResult> {
     const startTime = Date.now();
     const result: SyncResult = {
