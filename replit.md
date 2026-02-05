@@ -205,24 +205,28 @@ Preferred communication style: Simple, everyday language.
 # Session Handoff (2026-02-05)
 
 ## Last Session Summary
-- **Completed**: Sprint 11 - Mobile Phone from TPMS + "Source: Snowflake" badge indicator
-- **Next**: Add FleetScope deep link for routing lookup, Phase 2 email notifications
+- **Completed**: Sprint 0 - Snowflake Separation Sync for Offboarding Automation
+- **Next**: Tool Audit email notifications, FleetScope deep link
 - **Blockers**: None
 
 ## Current State
 - **App Status**: Running without errors
 - **Working Features**:
   - Tools Queue auto-populates from HR separation table (filter: `LAST_DAY IS NOT NULL`)
+  - **NEW**: 5-minute polling for new separation records creates offboarding tasks automatically
+  - **NEW**: `syncNewSeparations()` creates Day 0 tasks for Tools, Fleet, Inventory queues
   - Mobile phone fetched from `PRD_TPMS.HSTECH.COMTTU_TECH_UN` (active techs only)
   - Discrete "Source: Snowflake" badge shows next to enterprise ID for HR-sourced items
   - HR separation data (Last Day, Fleet Pickup Address, HR Truck Number, Notes) displayed in expanded rows
 - **Key Endpoints**:
   - `GET /api/tools-queue` - enriches with HR separation + mobile phone from Snowflake
   - `GET /api/tools-queue/:id/contact` - fetches contact info with mobile phone
+  - `POST /api/snowflake/sync/separations` - manual trigger for separation poll
   - `GET /api/test-separation/:identifier` - diagnostic endpoint for HR data
 - **Known Issues**: None
 
 ## Recommended Next Steps
-1. Add FleetScope deep link for easier routing lookup
-2. Implement Phase 2 email notifications when Fleet tasks are created
-3. Add Playwright E2E tests for expandable row interactions
+1. Tool Audit email notification when separation syncs
+2. Add FleetScope deep link for easier routing lookup
+3. Implement Phase 2 email notifications when Fleet tasks are created
+4. Add Playwright E2E tests for expandable row interactions
