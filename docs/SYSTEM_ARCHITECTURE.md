@@ -1,6 +1,6 @@
 # Nexus System Architecture
 
-> **Last Updated**: 2026-02-02
+> **Last Updated**: 2026-02-04
 > **Purpose**: The "Truth" document for understanding how Nexus works. Read this first.
 
 ---
@@ -77,7 +77,9 @@ Nexus is an **enterprise task management operations platform** that:
 |----------------|---------|
 | `pages/` | Page components (queue-management, fleet, offboard-technician, tools-queue, etc.) |
 | `components/` | Reusable UI components |
+| `components/tools-queue/ToolsRecoveryQueue.tsx` | **New (2026-02-04)**: Table-based Tools queue with expandable rows, filters, urgency badges |
 | `hooks/` | Custom React hooks (useAuth, use-toast, etc.) |
+| `hooks/use-debounced-save.ts` | Auto-save hook with 500ms debounce for task progress |
 | `lib/` | Utilities (queryClient, utils, role-permissions) |
 
 ---
@@ -98,6 +100,9 @@ All queues share the `queueItems` table with these key fields:
 - `workflowId` - Links related tasks across queues
 - `workflowStep` - Order within workflow (legacy) or null for Day 0 tasks
 - `isByov` - BYOV flag for tools tasks
+- `vehicleType` - **New (2026-02-04)**: 'company' | 'byov' | 'rental' for urgency calculation
+- `task_*` columns - Task checklist booleans (tools_return, iphone_return, etc.)
+- `carrier` - Shipping carrier selection
 - `blockedActions` - Actions blocked until conditions met
 - `fleetRoutingDecision` - PMF, Pep Boys, or Reassigned
 
@@ -187,9 +192,58 @@ Tools tasks auto-assigned to: `joefree.semilla@transformco.com` (Joefree Semilla
 
 ---
 
-## Tools Queue Page (`/tools-queue`)
+## Tools Recovery Queue Page (`/tools-queue`)
 
-### 5 Task Card Variants
+> **Updated 2026-02-04**: Complete redesign from card-based tabs to table with expandable rows
+
+### Component: `ToolsRecoveryQueue.tsx`
+
+**Layout**:
+- Header stats: Total Cases | Urgent | Active | Done
+- Filter bar: Search, Status dropdown, Vehicle Type dropdown, District dropdown, Incomplete Only toggle
+- Sortable table with expandable rows
+- Pagination (10 items/page)
+
+**Table Columns**:
+| Column | Source |
+|--------|--------|
+| Technician | `techData.techName` (enriched from all_techs) |
+| District | `techData.district` (enriched from all_techs) |
+| Sep Date | `techData.separationDate` |
+| Vehicle | `vehicleType` (company/byov/rental) |
+| Routing | `fleetRoutingDecision` |
+| Status | `status` |
+| Tasks | Progress bar (completed/total) |
+
+**Expanded Row (3 columns)**:
+1. Contact Details: phones, email from all_techs
+2. Recovery Tasks: 6 checkboxes + carrier dropdown + routing radio buttons (auto-save)
+3. Quick Actions: Assign, Mark Complete, external links
+
+### Urgency Matrix
+
+| Vehicle Type | Days Until Sep | Urgency |
+|--------------|----------------|---------|
+| Rental | ≤7 days | CRITICAL |
+| Rental | >7 days | HIGH |
+| BYOV | ≤2 days | CRITICAL |
+| BYOV | >2 days | HIGH |
+| Company | ≤2 days | HIGH |
+| Company | >2 days | STANDARD |
+
+### Data Enrichment Flow
+
+```
+GET /api/tools-queue
+    │
+    ├─→ Fetch queue_items where module='tools'
+    │
+    ├─→ For each item: lookup technician in all_techs by enterpriseId
+    │
+    └─→ Return items with techData: { techName, district, separationDate, phones, email }
+```
+
+### Legacy: 5 Task Card Variants (Deprecated)
 
 | Variant | Border Color | Condition | Actions |
 |---------|--------------|-----------|---------|

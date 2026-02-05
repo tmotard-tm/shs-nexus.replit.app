@@ -1,5 +1,34 @@
 # Enhancements & Bug Fixes Log
 
+## 2026-02-04
+
+### Bugs Fixed
+
+| Issue | Description | Resolution |
+|-------|-------------|------------|
+| Fragment metadata warning | React warning about invalid prop on Fragment | Known Replit dev tools injection issue - does not affect functionality |
+
+### Enhancements Made
+
+| Enhancement | Description |
+|-------------|-------------|
+| Tools Recovery Queue Redesign | Complete UI overhaul from card tabs to table with expandable rows |
+| Urgency Matrix | Vehicle Type + Days Until Separation determines CRITICAL/HIGH/STANDARD urgency |
+| Data Enrichment | Backend enriches queue items with technician district/contact from all_techs |
+| Enhanced Filtering | Search, multi-select filters (status, vehicle, district), Incomplete Only toggle |
+| Auto-Save System | 500ms debounced saves for task checkboxes and routing selections |
+| Incomplete Task Warning | Dialog warns when completing workflow with incomplete tasks |
+| Self-Assign Feature | Users can assign tasks to themselves with one click |
+
+### Technical Debt Identified
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| No automated E2E tests for new queue | Medium | Consider Playwright tests for expandable row interactions |
+| Fragment warning in dev | Low | Caused by Replit dev tools, not a real issue |
+
+---
+
 ## 2026-02-02
 
 ### Bugs Fixed

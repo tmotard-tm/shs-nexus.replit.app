@@ -22,6 +22,10 @@
 | Sprint 5 | Phase 2 Trigger Bug Fix (workflowStep check) | ✅ Complete | 2026-02-02 |
 | Sprint 5 | Routing Decision Persistence Fix | ✅ Complete | 2026-02-02 |
 | Sprint 5 | Phase 2 Task Titles Fix (techName extraction) | ✅ Complete | 2026-02-02 |
+| Sprint 6 | Schema Extension + Contact Info Mapping | ✅ Complete | 2026-02-04 |
+| Sprint 7 | Enhanced Tools Task Detail View | ✅ Complete | 2026-02-04 |
+| Sprint 8 | Auto-Save for Task Progress | ✅ Complete | 2026-02-04 |
+| Sprint 9 | Tools Recovery Queue Redesign (Table + Expandable Rows) | ✅ Complete | 2026-02-04 |
 
 ### In Progress 🚧
 
@@ -33,9 +37,9 @@
 
 | Sprint | Feature | Description |
 |--------|---------|-------------|
-| Sprint 6 | FleetScope Deep Link | Add link to FleetScope for easier routing lookup |
-| Sprint 6 | Legacy Workflow Regression Tests | Ensure workflowStep-based workflows still work |
-| Sprint 6 | Phase 2 Email Notifications | Notify Fleet team when Phase 2 tasks created |
+| Sprint 10 | FleetScope Deep Link | Add link to FleetScope for easier routing lookup |
+| Sprint 10 | Legacy Workflow Regression Tests | Ensure workflowStep-based workflows still work |
+| Sprint 10 | Phase 2 Email Notifications | Notify Fleet team when Phase 2 tasks created |
 
 ---
 
