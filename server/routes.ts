@@ -8710,6 +8710,157 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ========================================
+  // Communication Hub API Routes
+  // ========================================
+  
+  app.get("/api/communication/templates", async (_req, res) => {
+    try {
+      const templates = await storage.getCommunicationTemplates();
+      res.json(templates);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch templates", error: error.message });
+    }
+  });
+
+  app.get("/api/communication/templates/:id", async (req, res) => {
+    try {
+      const template = await storage.getCommunicationTemplate(req.params.id);
+      if (!template) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+      res.json(template);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch template", error: error.message });
+    }
+  });
+
+  app.post("/api/communication/templates", async (req, res) => {
+    try {
+      const template = await storage.createCommunicationTemplate(req.body);
+      res.status(201).json(template);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to create template", error: error.message });
+    }
+  });
+
+  app.patch("/api/communication/templates/:id", async (req, res) => {
+    try {
+      const template = await storage.updateCommunicationTemplate(req.params.id, req.body);
+      if (!template) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+      res.json(template);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to update template", error: error.message });
+    }
+  });
+
+  app.delete("/api/communication/templates/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteCommunicationTemplate(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to delete template", error: error.message });
+    }
+  });
+
+  app.get("/api/communication/whitelist", async (_req, res) => {
+    try {
+      const entries = await storage.getWhitelistEntries();
+      res.json(entries);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch whitelist", error: error.message });
+    }
+  });
+
+  app.post("/api/communication/whitelist", async (req, res) => {
+    try {
+      const entry = await storage.addToWhitelist(req.body);
+      res.status(201).json(entry);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to add to whitelist", error: error.message });
+    }
+  });
+
+  app.delete("/api/communication/whitelist/:id", async (req, res) => {
+    try {
+      const deleted = await storage.removeFromWhitelist(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Entry not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to remove from whitelist", error: error.message });
+    }
+  });
+
+  app.get("/api/communication/logs", async (req, res) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+      const logs = await storage.getCommunicationLogs(limit);
+      res.json(logs);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch logs", error: error.message });
+    }
+  });
+
+  app.get("/api/communication/logs/template/:templateId", async (req, res) => {
+    try {
+      const logs = await storage.getCommunicationLogsByTemplate(req.params.templateId);
+      res.json(logs);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch logs", error: error.message });
+    }
+  });
+
+  app.get("/api/communication/logs/recipient/:recipient", async (req, res) => {
+    try {
+      const logs = await storage.getCommunicationLogsByRecipient(req.params.recipient);
+      res.json(logs);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch logs", error: error.message });
+    }
+  });
+
+  app.post("/api/communication/templates/seed", async (_req, res) => {
+    try {
+      const { seedDefaultTemplates } = await import("./communication-service");
+      const count = await seedDefaultTemplates();
+      res.json({ success: true, seeded: count });
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to seed templates", error: error.message });
+    }
+  });
+
+  app.post("/api/communication/preview", async (req, res) => {
+    try {
+      const { templateName, variables } = req.body;
+      const { getTemplatePreview } = await import("./communication-service");
+      const preview = await getTemplatePreview(templateName, variables || {});
+      if (!preview) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+      res.json(preview);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to generate preview", error: error.message });
+    }
+  });
+
+  app.post("/api/communication/send", async (req, res) => {
+    try {
+      const { templateName, recipient, variables, metadata } = req.body;
+      const { sendCommunication } = await import("./communication-service");
+      const result = await sendCommunication({ templateName, recipient, variables: variables || {}, metadata });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to send communication", error: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack

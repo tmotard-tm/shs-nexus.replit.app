@@ -53,6 +53,12 @@ import {
   type RolePermissionSettings,
   type RentalSnapshot,
   type InsertRentalSnapshot,
+  type CommunicationTemplate,
+  type InsertCommunicationTemplate,
+  type CommunicationWhitelistEntry,
+  type InsertCommunicationWhitelist,
+  type CommunicationLog,
+  type InsertCommunicationLog,
   users,
   requests,
   apiConfigurations,
@@ -78,6 +84,9 @@ import {
   fieldMappings,
   rolePermissions,
   rentalSnapshots,
+  communicationTemplates,
+  communicationWhitelist,
+  communicationLogs,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -368,6 +377,25 @@ export interface IStorage {
   createRentalSnapshot(snapshot: InsertRentalSnapshot): Promise<RentalSnapshot>;
   upsertRentalSnapshot(snapshot: InsertRentalSnapshot): Promise<RentalSnapshot>;
   deleteRentalSnapshot(id: string): Promise<boolean>;
+
+  // Communication Hub Module
+  getCommunicationTemplate(id: string): Promise<CommunicationTemplate | undefined>;
+  getCommunicationTemplateByName(name: string): Promise<CommunicationTemplate | undefined>;
+  getCommunicationTemplates(): Promise<CommunicationTemplate[]>;
+  createCommunicationTemplate(template: InsertCommunicationTemplate): Promise<CommunicationTemplate>;
+  updateCommunicationTemplate(id: string, updates: Partial<CommunicationTemplate>): Promise<CommunicationTemplate | undefined>;
+  deleteCommunicationTemplate(id: string): Promise<boolean>;
+
+  getWhitelistEntries(): Promise<CommunicationWhitelistEntry[]>;
+  getWhitelistEntriesByType(type: 'email' | 'phone'): Promise<CommunicationWhitelistEntry[]>;
+  isInWhitelist(type: 'email' | 'phone', value: string): Promise<boolean>;
+  addToWhitelist(entry: InsertCommunicationWhitelist): Promise<CommunicationWhitelistEntry>;
+  removeFromWhitelist(id: string): Promise<boolean>;
+
+  getCommunicationLogs(limit?: number): Promise<CommunicationLog[]>;
+  getCommunicationLogsByTemplate(templateId: string): Promise<CommunicationLog[]>;
+  getCommunicationLogsByRecipient(recipient: string): Promise<CommunicationLog[]>;
+  createCommunicationLog(log: InsertCommunicationLog): Promise<CommunicationLog>;
 }
 
 export class MemStorage implements IStorage {
@@ -3404,6 +3432,53 @@ export class MemStorage implements IStorage {
   async deleteRentalSnapshot(_id: string): Promise<boolean> {
     throw new Error("MemStorage does not support rental snapshots. Use DatabaseStorage.");
   }
+
+  // Communication Hub Module (MemStorage stubs)
+  async getCommunicationTemplate(_id: string): Promise<CommunicationTemplate | undefined> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async getCommunicationTemplateByName(_name: string): Promise<CommunicationTemplate | undefined> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async getCommunicationTemplates(): Promise<CommunicationTemplate[]> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async createCommunicationTemplate(_template: InsertCommunicationTemplate): Promise<CommunicationTemplate> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async updateCommunicationTemplate(_id: string, _updates: Partial<CommunicationTemplate>): Promise<CommunicationTemplate | undefined> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async deleteCommunicationTemplate(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async getWhitelistEntries(): Promise<CommunicationWhitelistEntry[]> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async getWhitelistEntriesByType(_type: 'email' | 'phone'): Promise<CommunicationWhitelistEntry[]> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async isInWhitelist(_type: 'email' | 'phone', _value: string): Promise<boolean> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async addToWhitelist(_entry: InsertCommunicationWhitelist): Promise<CommunicationWhitelistEntry> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async removeFromWhitelist(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async getCommunicationLogs(_limit?: number): Promise<CommunicationLog[]> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async getCommunicationLogsByTemplate(_templateId: string): Promise<CommunicationLog[]> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async getCommunicationLogsByRecipient(_recipient: string): Promise<CommunicationLog[]> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
+  async createCommunicationLog(_log: InsertCommunicationLog): Promise<CommunicationLog> {
+    throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -5932,6 +6007,91 @@ export class DatabaseStorage implements IStorage {
       default:
         return baseInstructions;
     }
+  }
+
+  // ========================================
+  // Communication Hub Module
+  // ========================================
+
+  async getCommunicationTemplate(id: string): Promise<CommunicationTemplate | undefined> {
+    const result = await db.select().from(communicationTemplates).where(eq(communicationTemplates.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getCommunicationTemplateByName(name: string): Promise<CommunicationTemplate | undefined> {
+    const result = await db.select().from(communicationTemplates).where(eq(communicationTemplates.name, name)).limit(1);
+    return result[0];
+  }
+
+  async getCommunicationTemplates(): Promise<CommunicationTemplate[]> {
+    return await db.select().from(communicationTemplates).orderBy(desc(communicationTemplates.createdAt));
+  }
+
+  async createCommunicationTemplate(template: InsertCommunicationTemplate): Promise<CommunicationTemplate> {
+    const result = await db.insert(communicationTemplates).values(template).returning();
+    return result[0];
+  }
+
+  async updateCommunicationTemplate(id: string, updates: Partial<CommunicationTemplate>): Promise<CommunicationTemplate | undefined> {
+    const result = await db.update(communicationTemplates)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(communicationTemplates.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteCommunicationTemplate(id: string): Promise<boolean> {
+    const result = await db.delete(communicationTemplates).where(eq(communicationTemplates.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async getWhitelistEntries(): Promise<CommunicationWhitelistEntry[]> {
+    return await db.select().from(communicationWhitelist).orderBy(desc(communicationWhitelist.createdAt));
+  }
+
+  async getWhitelistEntriesByType(type: 'email' | 'phone'): Promise<CommunicationWhitelistEntry[]> {
+    return await db.select().from(communicationWhitelist).where(eq(communicationWhitelist.type, type)).orderBy(desc(communicationWhitelist.createdAt));
+  }
+
+  async isInWhitelist(type: 'email' | 'phone', value: string): Promise<boolean> {
+    const normalizedValue = value.toLowerCase().trim();
+    const result = await db.select().from(communicationWhitelist).where(
+      and(
+        eq(communicationWhitelist.type, type),
+        sql`LOWER(${communicationWhitelist.value}) = ${normalizedValue}`
+      )
+    ).limit(1);
+    return result.length > 0;
+  }
+
+  async addToWhitelist(entry: InsertCommunicationWhitelist): Promise<CommunicationWhitelistEntry> {
+    const result = await db.insert(communicationWhitelist).values(entry).returning();
+    return result[0];
+  }
+
+  async removeFromWhitelist(id: string): Promise<boolean> {
+    const result = await db.delete(communicationWhitelist).where(eq(communicationWhitelist.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async getCommunicationLogs(limit: number = 100): Promise<CommunicationLog[]> {
+    return await db.select().from(communicationLogs).orderBy(desc(communicationLogs.sentAt)).limit(limit);
+  }
+
+  async getCommunicationLogsByTemplate(templateId: string): Promise<CommunicationLog[]> {
+    return await db.select().from(communicationLogs).where(eq(communicationLogs.templateId, templateId)).orderBy(desc(communicationLogs.sentAt));
+  }
+
+  async getCommunicationLogsByRecipient(recipient: string): Promise<CommunicationLog[]> {
+    const normalizedRecipient = recipient.toLowerCase().trim();
+    return await db.select().from(communicationLogs).where(
+      sql`LOWER(${communicationLogs.intendedRecipient}) = ${normalizedRecipient} OR LOWER(${communicationLogs.actualRecipient}) = ${normalizedRecipient}`
+    ).orderBy(desc(communicationLogs.sentAt));
+  }
+
+  async createCommunicationLog(log: InsertCommunicationLog): Promise<CommunicationLog> {
+    const result = await db.insert(communicationLogs).values(log).returning();
+    return result[0];
   }
 }
 

@@ -1644,3 +1644,84 @@ export interface RentalReductionDashboardData {
   lastUpdated: string;
   isLiveData?: boolean; // True when data comes from Snowflake, false for sample data
 }
+
+// ===============================
+// Communication Hub
+// ===============================
+
+// Communication template modes
+export type CommunicationMode = 'simulated' | 'whitelisted' | 'live';
+export type CommunicationType = 'email' | 'sms';
+
+// Communication templates table
+export const communicationTemplates = pgTable("communication_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  type: text("type").notNull(), // 'email' | 'sms'
+  mode: text("mode").notNull().default("simulated"), // 'simulated' | 'whitelisted' | 'live'
+  subject: text("subject"), // For email only
+  htmlContent: text("html_content"), // For email only
+  textContent: text("text_content").notNull(), // Plain text version (required for SMS, optional for email)
+  variables: text("variables").array(), // List of variable placeholders like ['firstName', 'lastDay', 'ldapId']
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdBy: varchar("created_by").references(() => users.id),
+  updatedBy: varchar("updated_by").references(() => users.id),
+});
+
+export const insertCommunicationTemplateSchema = createInsertSchema(communicationTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertCommunicationTemplate = z.infer<typeof insertCommunicationTemplateSchema>;
+export type CommunicationTemplate = typeof communicationTemplates.$inferSelect;
+
+// Communication whitelist table
+export const communicationWhitelist = pgTable("communication_whitelist", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  type: text("type").notNull(), // 'email' | 'phone'
+  value: text("value").notNull(), // email address or phone number
+  description: text("description"), // Optional note about why this is whitelisted
+  addedBy: varchar("added_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    typeValueIdx: index("whitelist_type_value_idx").on(table.type, table.value),
+  };
+});
+
+export const insertCommunicationWhitelistSchema = createInsertSchema(communicationWhitelist).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCommunicationWhitelist = z.infer<typeof insertCommunicationWhitelistSchema>;
+export type CommunicationWhitelistEntry = typeof communicationWhitelist.$inferSelect;
+
+// Communication logs table - stores all sent/simulated/blocked messages
+export const communicationLogs = pgTable("communication_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateId: varchar("template_id").references(() => communicationTemplates.id),
+  templateName: text("template_name").notNull(), // Denormalized for easier querying
+  type: text("type").notNull(), // 'email' | 'sms'
+  mode: text("mode").notNull(), // 'simulated' | 'whitelisted' | 'live'
+  status: text("status").notNull(), // 'sent' | 'simulated' | 'blocked' | 'failed'
+  intendedRecipient: text("intended_recipient").notNull(), // Original recipient
+  actualRecipient: text("actual_recipient"), // Actual recipient (may differ in test mode)
+  subject: text("subject"), // For emails
+  contentPreview: text("content_preview"), // First 500 chars of rendered content
+  variables: jsonb("variables"), // The variables used to render the template
+  errorMessage: text("error_message"), // If failed, why
+  metadata: jsonb("metadata"), // Additional context (queue item ID, etc.)
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  sentBy: varchar("sent_by").references(() => users.id), // System or user who triggered
+});
+
+export const insertCommunicationLogSchema = createInsertSchema(communicationLogs).omit({
+  id: true,
+  sentAt: true,
+});
+export type InsertCommunicationLog = z.infer<typeof insertCommunicationLogSchema>;
+export type CommunicationLog = typeof communicationLogs.$inferSelect;
