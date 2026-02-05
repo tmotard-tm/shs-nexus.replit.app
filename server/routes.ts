@@ -6457,6 +6457,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Batch lookup Samsara vehicle locations
+  app.post("/api/samsara/vehicles/batch", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNames } = req.body;
+      if (!Array.isArray(vehicleNames)) {
+        return res.status(400).json({ error: "vehicleNames must be an array" });
+      }
+      const syncService = getSnowflakeSyncService();
+      const resultsMap = await syncService.getSamsaraVehicleLocationsBatch(vehicleNames);
+      const results: Record<string, { vehicleName: string; address: string; lastUpdated: string }> = {};
+      resultsMap.forEach((value, key) => {
+        results[key] = value;
+      });
+      res.json(results);
+    } catch (error: any) {
+      console.error("Error batch looking up Samsara vehicle locations:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Get tech addresses from Snowflake TPMS data
   app.get("/api/snowflake/tech-addresses/:enterpriseId", requireAuth, async (req: any, res) => {
     const startTime = Date.now();

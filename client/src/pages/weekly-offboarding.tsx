@@ -78,6 +78,18 @@ export default function WeeklyOffboarding() {
     allNexusData.map(item => [item.vehicleNumber, item])
   );
 
+  // Batch fetch Samsara location data for all trucks in the list
+  const { data: samsaraData = {} } = useQuery<Record<string, { vehicleName: string; address: string; lastUpdated: string }>>({
+    queryKey: ['/api/samsara/vehicles/batch', truckNumbers],
+    queryFn: async () => {
+      if (truckNumbers.length === 0) return {};
+      const response = await apiRequest('POST', '/api/samsara/vehicles/batch', { vehicleNames: truckNumbers });
+      return response.json();
+    },
+    enabled: truckNumbers.length > 0,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes since Samsara data doesn't change frequently
+  });
+
   const syncMutation = useMutation({
     mutationFn: async () => {
       return await apiRequest('POST', '/api/snowflake/sync/weekly-offboarding');
@@ -415,6 +427,7 @@ export default function WeeklyOffboarding() {
                         <TableHead className="min-w-[150px] bg-background sticky top-0">Manual Status</TableHead>
                         <TableHead className="min-w-[200px] bg-background sticky top-0">Address</TableHead>
                         <TableHead className="min-w-[180px] bg-background sticky top-0">Contact Phone</TableHead>
+                        <TableHead className="min-w-[200px] bg-background sticky top-0">Samsara Location</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -467,6 +480,30 @@ export default function WeeklyOffboarding() {
                           </TableCell>
                           <TableCell className="text-sm">{entry.address || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.contactPhone || '-'}</TableCell>
+                          <TableCell className="text-sm">
+                            {(() => {
+                              const samsaraInfo = entry.truck ? samsaraData[entry.truck] || samsaraData[entry.truck?.replace(/^0+/, '')] : null;
+                              if (samsaraInfo?.address) {
+                                return (
+                                  <div className="flex flex-col">
+                                    <span className="text-sm">{samsaraInfo.address}</span>
+                                    {samsaraInfo.lastUpdated && (
+                                      <span className="text-xs text-muted-foreground">
+                                        {(() => {
+                                          try {
+                                            return format(parseISO(samsaraInfo.lastUpdated), 'MMM d, yyyy h:mm a');
+                                          } catch {
+                                            return samsaraInfo.lastUpdated;
+                                          }
+                                        })()}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              return '-';
+                            })()}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
