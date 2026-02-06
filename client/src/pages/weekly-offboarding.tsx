@@ -105,6 +105,7 @@ export default function WeeklyOffboarding() {
     'available_for_rental_pmf': 'Available to assign or send to PMF',
     'sent_to_pmf': 'Sent to PMF',
     'assigned_to_tech_in_rental': 'Assigned to rental',
+    'assigned_to_tech': 'Assigned to tech',
     'not_found': 'Not found',
   };
 
@@ -688,6 +689,7 @@ export default function WeeklyOffboarding() {
                               <SelectItem value="available_for_rental_pmf">Available to assign or send to PMF</SelectItem>
                               <SelectItem value="sent_to_pmf">Sent to PMF</SelectItem>
                               <SelectItem value="assigned_to_tech_in_rental">Assigned to rental</SelectItem>
+                              <SelectItem value="assigned_to_tech">Assigned to tech</SelectItem>
                               <SelectItem value="not_found">Not found</SelectItem>
                             </SelectContent>
                           </Select>
