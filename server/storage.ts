@@ -59,6 +59,8 @@ import {
   type InsertCommunicationWhitelist,
   type CommunicationLog,
   type InsertCommunicationLog,
+  type VehicleNexusData,
+  type InsertVehicleNexusData,
   users,
   requests,
   apiConfigurations,
@@ -87,6 +89,7 @@ import {
   communicationTemplates,
   communicationWhitelist,
   communicationLogs,
+  vehicleNexusData,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -396,6 +399,11 @@ export interface IStorage {
   getCommunicationLogsByTemplate(templateId: string): Promise<CommunicationLog[]>;
   getCommunicationLogsByRecipient(recipient: string): Promise<CommunicationLog[]>;
   createCommunicationLog(log: InsertCommunicationLog): Promise<CommunicationLog>;
+
+  // Vehicle Nexus Data Module (Nexus-specific vehicle data)
+  getVehicleNexusData(vehicleNumber: string): Promise<VehicleNexusData | undefined>;
+  getVehicleNexusDataBatch(vehicleNumbers: string[]): Promise<VehicleNexusData[]>;
+  upsertVehicleNexusData(data: InsertVehicleNexusData): Promise<VehicleNexusData>;
 }
 
 export class MemStorage implements IStorage {
@@ -3513,6 +3521,17 @@ export class MemStorage implements IStorage {
   async createCommunicationLog(_log: InsertCommunicationLog): Promise<CommunicationLog> {
     throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
   }
+
+  // Vehicle Nexus Data Module (MemStorage stubs)
+  async getVehicleNexusData(_vehicleNumber: string): Promise<VehicleNexusData | undefined> {
+    throw new Error("MemStorage does not support vehicle nexus data. Use DatabaseStorage.");
+  }
+  async getVehicleNexusDataBatch(_vehicleNumbers: string[]): Promise<VehicleNexusData[]> {
+    throw new Error("MemStorage does not support vehicle nexus data. Use DatabaseStorage.");
+  }
+  async upsertVehicleNexusData(_data: InsertVehicleNexusData): Promise<VehicleNexusData> {
+    throw new Error("MemStorage does not support vehicle nexus data. Use DatabaseStorage.");
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -6160,6 +6179,48 @@ export class DatabaseStorage implements IStorage {
   async createCommunicationLog(log: InsertCommunicationLog): Promise<CommunicationLog> {
     const result = await db.insert(communicationLogs).values(log).returning();
     return result[0];
+  }
+
+  // Vehicle Nexus Data Module
+  async getVehicleNexusData(vehicleNumber: string): Promise<VehicleNexusData | undefined> {
+    const result = await db.select().from(vehicleNexusData)
+      .where(eq(vehicleNexusData.vehicleNumber, vehicleNumber))
+      .limit(1);
+    return result[0];
+  }
+
+  async getVehicleNexusDataBatch(vehicleNumbers: string[]): Promise<VehicleNexusData[]> {
+    if (vehicleNumbers.length === 0) return [];
+    const result = await db.select().from(vehicleNexusData)
+      .where(inArray(vehicleNexusData.vehicleNumber, vehicleNumbers));
+    return result;
+  }
+
+  async upsertVehicleNexusData(data: InsertVehicleNexusData): Promise<VehicleNexusData> {
+    const existing = await this.getVehicleNexusData(data.vehicleNumber);
+    
+    if (existing) {
+      const result = await db.update(vehicleNexusData)
+        .set({
+          postOffboardedStatus: data.postOffboardedStatus,
+          nexusNewLocation: data.nexusNewLocation,
+          nexusNewLocationContact: data.nexusNewLocationContact,
+          keys: data.keys,
+          repaired: data.repaired,
+          comments: data.comments,
+          updatedBy: data.updatedBy,
+          updatedAt: new Date(),
+        })
+        .where(eq(vehicleNexusData.vehicleNumber, data.vehicleNumber))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(vehicleNexusData).values({
+        ...data,
+        id: randomUUID(),
+      }).returning();
+      return result[0];
+    }
   }
 }
 

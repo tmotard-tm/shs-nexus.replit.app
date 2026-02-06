@@ -44,6 +44,7 @@ export interface RolePermissionSettings {
     onboarding: boolean;
     assignVehicle: boolean;
     weeklyOnboarding: boolean;
+    weeklyOffboarding: boolean;
     createVehicle: boolean;
   };
   sidebar: {
@@ -73,6 +74,7 @@ export interface RolePermissionSettings {
       rolePermissions: boolean;
       fleetManagement: boolean;
       weeklyOnboarding: boolean;
+      weeklyOffboarding: boolean;
       vehicleAssignments: boolean;
       techRoster: boolean;
     };
@@ -596,6 +598,30 @@ export const tpmsCachedAssignments = pgTable("tpms_cached_assignments", {
     lastSuccessAtIdx: index("tpms_cache_last_success_idx").on(table.lastSuccessAt),
   };
 });
+
+// Vehicle Nexus Data - stores Nexus-specific vehicle data (post-offboard status, new location, etc.)
+export const vehicleNexusData = pgTable("vehicle_nexus_data", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  vehicleNumber: varchar("vehicle_number", { length: 20 }).notNull().unique(),
+  postOffboardedStatus: text("post_offboarded_status"),
+  nexusNewLocation: text("nexus_new_location"),
+  nexusNewLocationContact: varchar("nexus_new_location_contact", { length: 30 }),
+  keys: text("keys"),
+  repaired: text("repaired"),
+  comments: text("comments"),
+  updatedBy: text("updated_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    vehicleNumberIdx: index("vnd_vehicle_number_idx").on(table.vehicleNumber),
+    postOffboardedStatusIdx: index("vnd_post_offboarded_status_idx").on(table.postOffboardedStatus),
+  };
+});
+
+export const insertVehicleNexusDataSchema = createInsertSchema(vehicleNexusData).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertVehicleNexusData = z.infer<typeof insertVehicleNexusDataSchema>;
+export type VehicleNexusData = typeof vehicleNexusData.$inferSelect;
 
 // Onboarding Hires from Snowflake HR data - tracks new tech hires for weekly truck assignment
 export const onboardingHires = pgTable("onboarding_hires", {
