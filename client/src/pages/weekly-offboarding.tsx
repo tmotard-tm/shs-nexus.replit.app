@@ -49,6 +49,7 @@ export default function WeeklyOffboarding() {
   const [nexusKeys, setNexusKeys] = useState("");
   const [nexusRepaired, setNexusRepaired] = useState("");
   const [nexusComments, setNexusComments] = useState("");
+  const [nexusPhoneRecovery, setNexusPhoneRecovery] = useState("");
   const [manualTruck, setManualTruck] = useState("");
   const [manualTruckOverrides, setManualTruckOverrides] = useState<Record<string, string>>(() => {
     try {
@@ -195,6 +196,7 @@ export default function WeeklyOffboarding() {
       setNexusKeys(nexusData.keys || "");
       setNexusRepaired(nexusData.repaired || "");
       setNexusComments(nexusData.comments || "");
+      setNexusPhoneRecovery(nexusData.phoneRecoveryInitiated || "");
     } else {
       setNexusStatus("");
       setNexusLocation("");
@@ -202,6 +204,7 @@ export default function WeeklyOffboarding() {
       setNexusKeys("");
       setNexusRepaired("");
       setNexusComments("");
+      setNexusPhoneRecovery("");
     }
   }, [nexusData, selectedEntry]);
 
@@ -821,6 +824,20 @@ export default function WeeklyOffboarding() {
                           <p className="text-xs text-muted-foreground text-right mt-1">{nexusComments.length}/400</p>
                         </div>
 
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Phone Recovery Initiated</Label>
+                          <Select value={nexusPhoneRecovery} onValueChange={setNexusPhoneRecovery}>
+                            <SelectTrigger className="mt-1" data-testid="select-phone-recovery">
+                              <SelectValue placeholder="Select..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">-- None --</SelectItem>
+                              <SelectItem value="yes">Yes</SelectItem>
+                              <SelectItem value="no">No</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
                         <Button
                           onClick={() => saveNexusDataMutation.mutate({
                             vehicleNumber: effectiveTruck!,
@@ -830,6 +847,7 @@ export default function WeeklyOffboarding() {
                             keys: nexusKeys === '__none__' ? null : (nexusKeys || null),
                             repaired: nexusRepaired === '__none__' ? null : (nexusRepaired || null),
                             comments: nexusComments || null,
+                            phoneRecoveryInitiated: nexusPhoneRecovery === '__none__' ? null : (nexusPhoneRecovery || null),
                           })}
                           disabled={saveNexusDataMutation.isPending}
                           className="w-full"

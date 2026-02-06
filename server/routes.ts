@@ -9111,7 +9111,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/vehicle-nexus-data/:vehicleNumber", requireAuth, async (req: any, res) => {
     try {
       const { vehicleNumber } = req.params;
-      const { postOffboardedStatus, nexusNewLocation, nexusNewLocationContact, keys, repaired, comments } = req.body;
+      const { postOffboardedStatus, nexusNewLocation, nexusNewLocationContact, keys, repaired, comments, phoneRecoveryInitiated } = req.body;
       
       const data = await storage.upsertVehicleNexusData({
         vehicleNumber,
@@ -9121,6 +9121,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         keys: keys || null,
         repaired: repaired || null,
         comments: comments || null,
+        phoneRecoveryInitiated: phoneRecoveryInitiated || null,
         updatedBy: req.user?.username || 'system',
       });
 

@@ -6233,6 +6233,7 @@ export class DatabaseStorage implements IStorage {
           keys: data.keys,
           repaired: data.repaired,
           comments: data.comments,
+          phoneRecoveryInitiated: data.phoneRecoveryInitiated,
           updatedBy: data.updatedBy,
           updatedAt: new Date(),
         })
