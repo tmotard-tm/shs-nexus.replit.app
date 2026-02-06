@@ -1,11 +1,13 @@
 # Overview
 
-Nexus is an enterprise task management platform designed to automate repetitive tasks, centralize scattered information, and synchronize updates across multiple systems in real-time. It aims to eliminate manual data entry, reduce errors, and provide a single source of truth for service organizations managing large technician workforces and vehicle fleets.
+Nexus is an enterprise task management operations platform designed to automate repetitive tasks, centralize scattered information, and synchronize updates across multiple systems in real-time. It aims to eliminate manual data entry, reduce errors, and provide a single source of truth for service organizations managing large technician workforces and vehicle fleets.
 
 Its core value propositions include:
-- **Automation:** Automating task creation, workflow guidance, data synchronization, and routine communications.
-- **Centralization:** Providing a single interface to consolidate data from multiple external systems (Snowflake, Holman, TPMS, PMF), unified search, and role-based views.
-- **Synchronization:** Ensuring bi-directional data alignment, reliable updates through queue-based systems, change detection, and audit logging.
+- **Automation**: Workflow templates, scheduled syncs, and email automation.
+- **Centralization**: A single interface consolidating data from multiple external systems (Snowflake, Holman, TPMS, PMF), unified search, and role-based views.
+- **Synchronization**: Bi-directional sync, queue-based updates, change detection, and audit logging.
+
+The platform is built with React, TypeScript, and Express.js, providing role-based interfaces for Developers, Admins, and Agents. It features a modern UI with shadcn/ui and Tailwind CSS, comprehensive request tracking, and activity logging.
 
 # User Preferences
 
@@ -32,7 +34,7 @@ Preferred communication style: Simple, everyday language.
 
 ## Data Storage
 -   **Database**: PostgreSQL with Neon serverless driver
--   **Schema**: Includes tables for users, requests, API configurations, activity logs, role permissions, `all_techs`, and `sync_logs`.
+-   **Schema**: Users, requests, API configurations, activity logs, role permissions, `all_techs`, `sync_logs`, `vehicle_nexus_data`, `communication_templates`, `communication_whitelist`, `communication_logs`.
 -   **Migrations**: Drizzle Kit
 
 ## Authentication & Authorization
@@ -46,12 +48,14 @@ Preferred communication style: Simple, everyday language.
 -   **API Configuration**: Tools for managing external API connections.
 -   **Template Management**: CRUD operations for workflow templates.
 -   **Activity Logging**: Comprehensive audit trail of system actions.
--   **Task Queue**: A unified interface for all department-specific queues.
--   **Snowflake Sync System**: Automated daily synchronization for `all_techs` (employee roster), `termed_techs` (for offboarding), and TPMS data.
--   **TPMS Integration**: Syncs technician-vehicle assignments from Snowflake daily snapshots.
--   **Vehicle Assignment System**: Aggregates data from Snowflake (employees), TPMS (tech-truck assignments), and Holman (fleet details).
--   **Fleet Management Page**: Consolidated interface for managing vehicles, including stats, search, filters, and actions.
+-   **Task Queue**: A unified interface for all department-specific queues, including specialized task cards for tools management based on routing status (BYOV, Blocked, PMF, Pep Boys, Reassigned). Features a table-based layout with sortable columns, expandable inline rows, and enhanced filtering.
+-   **Snowflake Sync System**: Automated daily synchronization for `all_techs` (employee roster), `termed_techs` (for offboarding), and TPMS data, including enriched employee contact and truck assignment information. Integrates HR separation data from Snowflake.
+-   **TPMS Integration**: Syncs technician-vehicle assignments from Snowflake daily snapshots and retrieves mobile phone numbers.
+-   **Vehicle Assignment System**: Aggregates data from Snowflake, TPMS, and Holman.
+-   **Fleet Management Page**: Consolidated interface for managing vehicles, including stats, search, filters, actions, and a "Nexus Tracking" section for post-offboarding vehicle information.
 -   **Holman Assignment Sync**: Updates Holman records based on TPMS technician data to resolve assignment discrepancies.
+-   **Offboarding Workflow Enhancements**: Includes a "Tools" queue as a Day 0 task with BYOV detection and blocking logic, and a Phase 2 trigger mechanism for creating subsequent fleet tasks based on Day 0 task completion. Features auto-save for task progress.
+-   **Communication Hub**: Centralized management for email and SMS templates with `Simulated`, `Whitelisted`, and `Live` modes, developer-only access, and audit logging.
 
 # External Dependencies
 
@@ -82,197 +86,7 @@ Preferred communication style: Simple, everyday language.
 -   **cmdk**: Command palette component.
 
 ## Integrations
--   **Snowflake**: Data warehouse for technician rosters and TPMS data.
+-   **Snowflake**: Data warehouse for technician rosters, TPMS data, and HR separation data.
 -   **Holman**: Vehicle fleet details and assignment updates.
--   **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments.
+-   **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments and mobile phone numbers.
 -   **PMF/PARQ AI**: Fleet vehicle availability API.
-
-# Recent Changes
-
-## 2026-02-06: Bug Fixes + Phase 2 Email Notifications ✅
-
-### Bug Fixes
-- Fixed `seedDefaultTemplates()` to check for missing templates individually instead of skipping when any templates exist
-- Fixed foreign key constraint error in `communication_logs` by passing `undefined` instead of `'system'` for `sentBy` in system-triggered notifications
-- Added communication template seeding at startup in `server/index.ts`
-
-### Phase 2 Email Notifications
-- New `phase2-tasks-created` communication template (professional HTML email)
-- New `sendPhase2TasksCreatedNotification()` function in notification-service.ts
-- Integrated into `createPhase2FleetTasks()` in storage.ts (both MemStorage and DatabaseStorage)
-- Recipients sourced from `PHASE2_NOTIFICATION_RECIPIENTS` env var or users with Fleet department
-- Template starts in `simulated` mode (safe by default, switchable via Communication Hub)
-- Non-blocking: notification failures don't prevent Phase 2 task creation
-
----
-
-## 2026-02-05: Communication Hub MVP ✅
-
-### New Feature
-- Centralized management for all email and SMS templates
-- Three operational modes per template: Simulated, Whitelisted, Live
-- Developer-only access (both UI and API level enforcement)
-
-### Database Schema
-- `communication_templates`: Stores templates with mode, content, variables
-- `communication_whitelist`: Email/phone whitelist for testing
-- `communication_logs`: Audit trail of all sent/simulated messages
-
-### Backend Changes
-- Created `server/communication-service.ts` with mode-aware send logic
-- Created `server/notification-service.ts` to avoid circular imports
-- Moved `sendToolAuditNotification` from email-service.ts to notification-service.ts
-- All `/api/communication/*` routes require developer role
-
-### Frontend Changes
-- New page at `/communication-hub` with three tabs:
-  - Templates: Edit content, preview, toggle modes
-  - Whitelist: Add/remove test emails and phone numbers
-  - History: View send logs with filtering
-- Added to page-registry.ts with `communicationHub` permission key
-
-### Integration
-- Tool Audit emails now use Communication Hub templates
-- Templates support `{{var}}`, `${var}`, and `[var]` placeholder formats
-- SMS not yet implemented (shows as simulated)
-
----
-
-## 2026-02-05: Sprint 11 - Mobile Phone from TPMS ✅
-
-### New Snowflake Data Source
-- Connected to TPMS tech table: `PRD_TPMS.HSTECH.COMTTU_TECH_UN`
-- Queries active technicians with mobile phone numbers
-- Uses ROW_NUMBER to select primary assignment when tech has multiple records
-
-### Backend Integration
-- Added `getMobilePhoneByLdap()` method to `SnowflakeSyncService`
-- Queries by LDAP_ID (enterprise ID) with case-insensitive matching
-- Returns: phoneNumber, techName, techUnNo, districtId
-
-### Tools Queue Enrichment Updated
-- `/api/tools-queue` endpoint now fetches mobile phone from TPMS table
-- `/api/tools-queue/:id/contact` endpoint updated to include mobilePhone
-- Replaced `workPhone` field with `mobilePhone` across all techData objects
-
-### Frontend Changes
-- Changed label from "Work Phone" to "Mobile Phone" in ToolsRecoveryQueue
-- Updated icon from Briefcase to Smartphone
-- Updated ToolsTaskDetailView ContactInfo interface and display
-- TechData interface updated to use mobilePhone instead of workPhone
-
----
-
-## 2026-02-05: Sprint 10 - HR Separation Data Integration ✅
-
-### New Snowflake Data Source
-- Connected to new HR table: `PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS`
-- Contains separation dates, truck numbers, pickup addresses, and notes from HR team
-- 66 records with 8 having confirmed separation dates
-
-### Backend Integration
-- Added `getSeparationDetails()` method to `SnowflakeSyncService`
-- Queries by enterprise ID (LDAP_ID) or employee ID (EMPLID)
-- Returns: lastDay, effectiveSeparationDate, truckNumber, contactNumber, personalEmail, fleetPickupAddress, separationCategory
-
-### Tools Queue Enrichment Enhanced
-- Updated `/api/tools-queue` endpoint to fetch separation data from HR Snowflake table
-- Priority: HR separation data > all_techs data > queue item data
-- New fields available in techData: `separationCategory`, `hrTruckNumber`
-- HR data now populates: separationDate, contactNumber, personalEmail, fleetPickupAddress
-
----
-
-## 2026-02-04: Sprint 9 - Tools Recovery Queue Redesign ✅
-
-### Complete UI/UX Overhaul
-- Replaced card-based tabs with table-based layout featuring sortable columns
-- Columns: Technician, District, Sep Date, Vehicle Type, Routing, Status, Tasks Progress
-- Expandable inline rows replace separate detail view navigation
-- 3-column expansion panel: Contact Details, Recovery Tasks, Quick Actions
-
-### Enhanced Filtering
-- Search by technician name or ID
-- Multi-select filters: Status, Vehicle Type, District
-- "Incomplete Only" toggle to focus on outstanding items
-- Pagination with 10 items per page
-
-### Urgency Matrix System
-- Vehicle Type + Days Until Separation determines urgency level
-- CRITICAL: Rental ≤7 days OR BYOV ≤2 days
-- HIGH: BYOV >2 days OR Company ≤2 days  
-- STANDARD: Company >2 days
-- Visual badges indicate urgency throughout
-
-### Data Enrichment
-- Backend enriches queue items with technician data from `all_techs` table
-- Includes: district, contact info (phones, email), separation date
-- Auto-save preserved with 500ms debounce via `useDebouncedSave` hook
-
-### Schema
-- Added `vehicleType` text column to `queue_items` ('company' | 'byov' | 'rental')
-
----
-
-## 2026-02-04: Sprint 8 - Auto-Save for Task Progress ✅
-
-### Backend Changes
-- Added `PATCH /api/tools-queue/:id/save-progress` endpoint for partial updates
-- Accepts: task booleans, carrier, fleetRoutingDecision
-- Added `updateToolsQueueProgress()` method to storage interface
-
-### Frontend Changes
-- Created `client/src/hooks/use-debounced-save.ts` hook with 500ms debounce
-- Optimistic UI updates with save status indicator (Saving.../Saved/Error)
-- Flush-on-unmount using navigator.sendBeacon to prevent lost updates
-- Task checkboxes, carrier dropdown, and routing radio buttons auto-save on change
-- Mark Complete button shows warning dialog if tasks are incomplete (allows confirmation)
-- Phase 2 trigger verified: completeToolsQueueItem → triggerNextWorkflowStep → checkAllDay0TasksAndTriggerPhase2
-
----
-
-## 2026-02-04: Sprint 7 - Enhanced Tools Task Detail View ✅
-
-### New ToolsTaskDetailView Component
-- 3-column layout: Contact & Routing, Task Checklist, Actions
-- Contact info from all_techs table, vehicle location from Samsara GPS
-- 6 interactive checkboxes + carrier dropdown, routing radio buttons
-- External links: Tool Audit Form, View in Segno (placeholder)
-
----
-
-## 2026-02-04: Sprint 6 - Schema Extension + Contact Info Mapping ✅
-
-### Task Checklist Schema Extension
-- Added 7 new columns to queue_items: task_tools_return, task_iphone_return, task_disconnected_line, task_disconnected_mpayment, task_close_segno_orders, task_create_shipping_label, carrier
-
-### Contact Info Endpoint
-- Added `GET /api/tools-queue/:id/contact` to fetch technician contact info from all_techs table
-
----
-
-# Session Handoff (2026-02-06)
-
-## Last Session Summary
-- **Completed**: Bug fixes (template seeding, FK constraint), Phase 2 Email Notifications
-- **Next**: FleetScope deep link, SMS implementation
-- **Blockers**: None
-
-## Current State
-- **App Status**: Running without errors
-- **Working Features**:
-  - Communication Hub at `/communication-hub` (Developer-only)
-  - Tool Audit emails use Communication Hub templates
-  - **NEW**: Phase 2 email notifications when all Day 0 tasks complete
-  - All offboarding features working
-- **Phase 2 Notification Setup**:
-  - Template `phase2-tasks-created` in Communication Hub (starts simulated)
-  - Set `PHASE2_NOTIFICATION_RECIPIENTS` env var for email recipients (comma-separated)
-  - Or assign users to Fleet department for automatic recipient lookup
-  - Toggle template to `whitelisted` or `live` mode via Communication Hub
-- **Known Issues**: SMS not yet implemented (shows as simulated)
-
-## Recommended Next Steps
-1. Implement SMS sending via Twilio integration
-2. Add FleetScope deep link for easier routing lookup
-3. Add input validation (Zod schemas) to communication routes

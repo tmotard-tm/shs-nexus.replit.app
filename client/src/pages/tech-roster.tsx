@@ -15,6 +15,18 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import type { AllTech } from "@shared/schema";
 
+function formatPhoneNumber(phone: string | null | undefined): string {
+  if (!phone) return '-';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `(${digits.slice(0,3)})${digits.slice(3,6)}-${digits.slice(6)}`;
+  }
+  if (digits.length === 11 && digits[0] === '1') {
+    return `(${digits.slice(1,4)})${digits.slice(4,7)}-${digits.slice(7)}`;
+  }
+  return phone;
+}
+
 export default function TechRoster() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -60,11 +72,16 @@ export default function TechRoster() {
   const activeFiltersCount = [statusFilter, districtFilter].filter(f => f !== "all").length;
 
   const filteredTechs = techs.filter(tech => {
+    const searchLower = searchQuery.toLowerCase();
     const matchesSearch = !searchQuery || 
-      tech.techName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tech.employeeId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tech.techRacfid?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tech.jobTitle?.toLowerCase().includes(searchQuery.toLowerCase());
+      tech.techName?.toLowerCase().includes(searchLower) ||
+      tech.employeeId?.toLowerCase().includes(searchLower) ||
+      tech.techRacfid?.toLowerCase().includes(searchLower) ||
+      tech.jobTitle?.toLowerCase().includes(searchLower) ||
+      tech.truckLu?.toLowerCase().includes(searchLower) ||
+      tech.cellPhone?.toLowerCase().includes(searchLower) ||
+      tech.mainPhone?.toLowerCase().includes(searchLower) ||
+      tech.homeCity?.toLowerCase().includes(searchLower);
     
     const matchesStatus = statusFilter === "all" || tech.employmentStatus === statusFilter;
     const matchesDistrict = districtFilter === "all" || tech.districtNo === districtFilter;
@@ -135,7 +152,7 @@ export default function TechRoster() {
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search by name, employee ID, Enterprise ID, or job title..."
+                      placeholder="Search by name, employee ID, Enterprise ID, job title, truck, phone, or city..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-9"
@@ -221,16 +238,20 @@ export default function TechRoster() {
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table className="w-full min-w-[1400px]">
                       <thead>
                         <tr className="border-b bg-muted/50">
-                          <th className="text-left p-3 font-medium">Name</th>
-                          <th className="text-left p-3 font-medium">Employee ID</th>
-                          <th className="text-left p-3 font-medium">Enterprise ID</th>
-                          <th className="text-left p-3 font-medium">Job Title</th>
-                          <th className="text-left p-3 font-medium">District</th>
-                          <th className="text-left p-3 font-medium">Planning Area</th>
-                          <th className="text-left p-3 font-medium">Status</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Name</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Employee ID</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Enterprise ID</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Job Title</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">District</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Planning Area</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Status</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Truck LU</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Cell Phone</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap">Main Phone</th>
+                          <th className="text-left p-2 font-medium whitespace-nowrap min-w-[250px]">Home Address</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -240,26 +261,32 @@ export default function TechRoster() {
                             className="border-b hover:bg-muted/30 transition-colors"
                             data-testid={`row-tech-${tech.employeeId}`}
                           >
-                            <td className="p-3">
-                              <div className="font-medium">{tech.techName}</div>
-                              {tech.firstName && tech.lastName && tech.techName !== `${tech.firstName} ${tech.lastName}` && (
-                                <div className="text-sm text-muted-foreground">
-                                  {tech.firstName} {tech.lastName}
-                                </div>
-                              )}
+                            <td className="p-2">
+                              <div className="font-medium text-sm">{tech.techName}</div>
                             </td>
-                            <td className="p-3 font-mono text-sm">{tech.employeeId}</td>
-                            <td className="p-3 font-mono text-sm">{tech.techRacfid}</td>
-                            <td className="p-3 text-sm">{tech.jobTitle || '-'}</td>
-                            <td className="p-3 text-sm">{tech.districtNo || '-'}</td>
-                            <td className="p-3 text-sm">{tech.planningAreaName || '-'}</td>
-                            <td className="p-3">
+                            <td className="p-2 font-mono text-xs">{tech.employeeId}</td>
+                            <td className="p-2 font-mono text-xs">{tech.techRacfid}</td>
+                            <td className="p-2 text-xs">{tech.jobTitle || '-'}</td>
+                            <td className="p-2 text-xs">{tech.districtNo || '-'}</td>
+                            <td className="p-2 text-xs">{tech.planningAreaName || '-'}</td>
+                            <td className="p-2">
                               <Badge 
                                 variant={tech.employmentStatus === 'A' ? 'default' : 'secondary'}
-                                className={tech.employmentStatus === 'A' ? 'bg-green-100 text-green-800' : ''}
+                                className={`text-xs ${tech.employmentStatus === 'A' ? 'bg-green-100 text-green-800' : ''}`}
                               >
-                                {tech.employmentStatus === 'A' ? 'Active' : tech.employmentStatus || 'Unknown'}
+                                {tech.employmentStatus === 'A' ? 'A' : tech.employmentStatus || '?'}
                               </Badge>
+                            </td>
+                            <td className="p-2 font-mono text-xs">{tech.truckLu || '-'}</td>
+                            <td className="p-2 text-xs whitespace-nowrap">{formatPhoneNumber(tech.cellPhone)}</td>
+                            <td className="p-2 text-xs whitespace-nowrap">{formatPhoneNumber(tech.mainPhone)}</td>
+                            <td className="p-2 text-xs" title={[tech.homeAddr1, tech.homeAddr2, tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}>
+                              {tech.homeAddr1 ? (
+                                <div className="space-y-0.5">
+                                  <div>{tech.homeAddr1}{tech.homeAddr2 ? `, ${tech.homeAddr2}` : ''}</div>
+                                  <div className="text-muted-foreground">{[tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}</div>
+                                </div>
+                              ) : '-'}
                             </td>
                           </tr>
                         ))}

@@ -253,6 +253,30 @@ async function initializeSnowflake() {
     console.error("⚠️ Truck inventory auto-sync check failed:", error);
   }
 
+  // Auto-sync all-techs on startup to ensure contact info and TPMS data is current
+  try {
+    const { isSnowflakeConfigured } = await import("./snowflake-service");
+    
+    if (isSnowflakeConfigured()) {
+      log("👥 Running all-techs sync with contact info and TPMS joins...");
+      const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+      const syncService = getSnowflakeSyncService();
+      
+      // Run sync in background (don't block server startup)
+      syncService.syncAllTechs('startup').then(result => {
+        if (result.success) {
+          log(`✅ All-techs startup sync complete: ${result.recordsProcessed} records processed`);
+        } else {
+          log(`⚠️ All-techs startup sync had errors: ${result.errors?.join(', ')}`);
+        }
+      }).catch(err => {
+        console.error("❌ All-techs startup sync error:", err.message);
+      });
+    }
+  } catch (error) {
+    console.error("⚠️ All-techs startup sync check failed:", error);
+  }
+
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

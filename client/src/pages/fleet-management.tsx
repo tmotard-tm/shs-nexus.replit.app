@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
@@ -116,6 +117,12 @@ export default function FleetManagement() {
   // Selected vehicle for detail view
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
+  
+  // Nexus tracking data form state
+  const [nexusStatus, setNexusStatus] = useState<string>("");
+  const [nexusLocation, setNexusLocation] = useState("");
+  const [nexusContact, setNexusContact] = useState("");
+  const [nexusComments, setNexusComments] = useState("");
 
   // Fetch vehicles from Holman API with TPMS enrichment
   const { data: apiResponse, isLoading, error, refetch, isFetching } = useQuery<FleetVehiclesResponse>({
@@ -169,6 +176,62 @@ export default function FleetManagement() {
       toast({
         title: "Holman Update Failed",
         description: error.message || "Failed to update vehicle assignment",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Fetch Nexus tracking data when vehicle is selected
+  const { data: nexusData, isLoading: nexusDataLoading } = useQuery<{
+    postOffboardedStatus: string | null;
+    nexusNewLocation: string | null;
+    nexusNewLocationContact: string | null;
+    comments: string | null;
+  } | null>({
+    queryKey: ['/api/vehicle-nexus-data', selectedVehicle?.vehicleNumber],
+    enabled: !!selectedVehicle?.vehicleNumber,
+  });
+
+  // Update form state when nexus data is loaded
+  useEffect(() => {
+    if (nexusData) {
+      setNexusStatus(nexusData.postOffboardedStatus || "");
+      setNexusLocation(nexusData.nexusNewLocation || "");
+      setNexusContact(nexusData.nexusNewLocationContact || "");
+      setNexusComments(nexusData.comments || "");
+    } else if (selectedVehicle) {
+      setNexusStatus("");
+      setNexusLocation("");
+      setNexusContact("");
+      setNexusComments("");
+    }
+  }, [nexusData, selectedVehicle]);
+
+  // Save Nexus tracking data mutation
+  const saveNexusDataMutation = useMutation({
+    mutationFn: async (data: { 
+      vehicleNumber: string;
+      postOffboardedStatus: string | null;
+      nexusNewLocation: string | null;
+      nexusNewLocationContact: string | null;
+      comments: string | null;
+    }) => {
+      const response = await apiRequest('PUT', `/api/vehicle-nexus-data/${data.vehicleNumber}`, data);
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Tracking Data Saved",
+        description: "Vehicle tracking information has been updated",
+      });
+      if (selectedVehicle) {
+        queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', selectedVehicle.vehicleNumber] });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Save Failed",
+        description: error.message || "Failed to save tracking data",
         variant: "destructive",
       });
     },
@@ -1176,6 +1239,98 @@ export default function FleetManagement() {
                         TPMS and Holman records don't match. Use "Sync to Holman" to update.
                       </AlertDescription>
                     </Alert>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Nexus Tracking Data */}
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm text-muted-foreground">Nexus Tracking</h4>
+                  
+                  {nexusDataLoading ? (
+                    <div className="space-y-3">
+                      <Skeleton className="h-9 w-full" />
+                      <Skeleton className="h-9 w-full" />
+                      <Skeleton className="h-9 w-full" />
+                      <Skeleton className="h-20 w-full" />
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Post-Offboarded Status</Label>
+                        <Select value={nexusStatus} onValueChange={setNexusStatus}>
+                          <SelectTrigger className="mt-1" data-testid="select-nexus-status">
+                            <SelectValue placeholder="Select status..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="reserved_for_new_hire">Reserved for new hire</SelectItem>
+                            <SelectItem value="in_repair">In repair</SelectItem>
+                            <SelectItem value="declined_repair">Declined repair</SelectItem>
+                            <SelectItem value="available_for_rental_pmf">Available to assign for rental / send to PMF</SelectItem>
+                            <SelectItem value="sent_to_pmf">Sent to PMF</SelectItem>
+                            <SelectItem value="assigned_to_tech_in_rental">Assigned to tech in rental</SelectItem>
+                            <SelectItem value="not_found">Not found</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-muted-foreground">New Location</Label>
+                        <Input
+                          value={nexusLocation}
+                          onChange={(e) => setNexusLocation(e.target.value)}
+                          placeholder="Address or location description..."
+                          className="mt-1"
+                          data-testid="input-nexus-location"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-muted-foreground">New Location Contact</Label>
+                        <Input
+                          value={nexusContact}
+                          onChange={(e) => setNexusContact(e.target.value)}
+                          placeholder="Phone number or contact info..."
+                          className="mt-1"
+                          data-testid="input-nexus-contact"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Comments</Label>
+                        <Textarea
+                          value={nexusComments}
+                          onChange={(e) => setNexusComments(e.target.value.slice(0, 400))}
+                          placeholder="Additional notes (max 400 characters)..."
+                          className="mt-1 resize-none"
+                          rows={3}
+                          maxLength={400}
+                          data-testid="textarea-nexus-comments"
+                        />
+                        <p className="text-xs text-muted-foreground text-right mt-1">{nexusComments.length}/400</p>
+                      </div>
+
+                      <Button
+                        onClick={() => saveNexusDataMutation.mutate({
+                          vehicleNumber: selectedVehicle.vehicleNumber,
+                          postOffboardedStatus: nexusStatus || null,
+                          nexusNewLocation: nexusLocation || null,
+                          nexusNewLocationContact: nexusContact || null,
+                          comments: nexusComments || null,
+                        })}
+                        disabled={saveNexusDataMutation.isPending}
+                        className="w-full"
+                        data-testid="button-save-nexus-data"
+                      >
+                        {saveNexusDataMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                        )}
+                        Save Tracking Data
+                      </Button>
+                    </div>
                   )}
                 </div>
 

@@ -603,13 +603,13 @@ export const tpmsCachedAssignments = pgTable("tpms_cached_assignments", {
 export const vehicleNexusData = pgTable("vehicle_nexus_data", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vehicleNumber: varchar("vehicle_number", { length: 20 }).notNull().unique(),
-  postOffboardedStatus: text("post_offboarded_status"),
-  nexusNewLocation: text("nexus_new_location"),
-  nexusNewLocationContact: varchar("nexus_new_location_contact", { length: 30 }),
-  keys: text("keys"),
-  repaired: text("repaired"),
-  comments: text("comments"),
-  updatedBy: text("updated_by"),
+  postOffboardedStatus: text("post_offboarded_status"), // Reserved for new hire, In repair, Declined repair, Available to assign for rental / sent to PMF, Not found
+  nexusNewLocation: text("nexus_new_location"), // Full address: street, state, zipcode
+  nexusNewLocationContact: varchar("nexus_new_location_contact", { length: 30 }), // Phone number
+  keys: text("keys"), // Present, Not Present, Unknown/Would not Check
+  repaired: text("repaired"), // Complete, In Process, Unknown if needed, Declined
+  comments: text("comments"), // Up to 400 characters
+  updatedBy: text("updated_by"), // User who last updated
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {

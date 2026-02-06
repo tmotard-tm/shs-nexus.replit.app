@@ -540,7 +540,7 @@ export class SnowflakeSyncService {
           -- TPMS truck assignment (join by ENTERPRISE_ID)
           tpms.TRUCK_LU
         FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
-        LEFT JOIN PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
           ON t.EMPL_ID = c.EMPLID
         LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
           ON t.ENTERPRISE_ID = tpms.ENTERPRISE_ID
@@ -725,6 +725,76 @@ export class SnowflakeSyncService {
     } catch (error: any) {
       console.error('[Samsara] Error looking up vehicle location:', error);
       return { found: false };
+    }
+  }
+
+  async getSamsaraVehicleLocationsBatch(vehicleNames: string[]): Promise<Map<string, {
+    vehicleName: string;
+    address: string;
+    lastUpdated: string;
+  }>> {
+    const results = new Map<string, { vehicleName: string; address: string; lastUpdated: string }>();
+    
+    if (!isSnowflakeConfigured() || vehicleNames.length === 0) {
+      return results;
+    }
+
+    try {
+      const snowflake = getSnowflakeService();
+      await snowflake.connect();
+
+      // Normalize vehicle names (strip leading zeros)
+      const normalizedNames = vehicleNames.map(v => v.replace(/^0+/, ''));
+      const placeholders = normalizedNames.map(() => '?').join(',');
+      
+      console.log(`[Samsara-Batch] Looking up GPS locations for ${vehicleNames.length} vehicles`);
+      
+      const query = `
+        SELECT
+          SS.VEHICLE_NAME,
+          SS.REVERSE_GEO_FULL AS ADDRESS,
+          SS.TIME AS DATE_AND_TIME
+        FROM
+          (SELECT
+            *
+          FROM
+            BI_ANALYTICS.APP_SAMSARA.SAMSARA_STREAM
+          WHERE
+            VEHICLE_NAME IN (${placeholders})
+          QUALIFY
+            ROW_NUMBER() OVER (PARTITION BY VEHICLE_NAME ORDER BY "TIME" DESC, 
+            RECEIVED_AT DESC)=1) SS
+      `;
+
+      const rows = await snowflake.executeQuery(query, normalizedNames) as Array<{
+        VEHICLE_NAME: string;
+        ADDRESS: string;
+        DATE_AND_TIME: string;
+      }>;
+
+      console.log(`[Samsara-Batch] Found ${rows.length} results`);
+
+      for (const row of rows) {
+        // Store with both normalized and original (padded) versions as keys
+        const normalized = row.VEHICLE_NAME;
+        results.set(normalized, {
+          vehicleName: normalized,
+          address: row.ADDRESS || '',
+          lastUpdated: row.DATE_AND_TIME || '',
+        });
+        // Also store with leading zeros (5-digit format)
+        const padded = normalized.padStart(5, '0');
+        results.set(padded, {
+          vehicleName: normalized,
+          address: row.ADDRESS || '',
+          lastUpdated: row.DATE_AND_TIME || '',
+        });
+      }
+
+      return results;
+    } catch (error: any) {
+      console.error('[Samsara-Batch] Error looking up vehicle locations:', error);
+      return results;
     }
   }
 

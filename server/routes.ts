@@ -6395,58 +6395,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // TEMPORARY: Diagnostic endpoint to check EMPLID format differences
-  app.get("/api/snowflake/diagnose-emplid", async (req: any, res) => {
-    try {
-      const snowflakeService = getSnowflakeService();
-      
-      // Check roster EMPL_ID format from DRIVELINE_ALL_TECHS (actual source)
-      const rosterRows = await snowflakeService.executeQuery(`
-        SELECT EMPL_ID, ENTERPRISE_ID, FULL_NAME 
-        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS 
-        WHERE EMPL_ID IS NOT NULL 
-        LIMIT 5
-      `);
-      
-      // Check contact EMPLID format
-      const contactRows = await snowflakeService.executeQuery(`
-        SELECT EMPLID, SNSTV_CELL_PHONE, SNSTV_HOME_CITY 
-        FROM PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW 
-        WHERE EMPLID IS NOT NULL 
-        LIMIT 5
-      `);
-      
-      // Count matches with direct join
-      const matchCount = await snowflakeService.executeQuery(`
-        SELECT COUNT(*) as MATCH_COUNT
-        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
-        INNER JOIN PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
-          ON t.EMPL_ID = c.EMPLID
-      `);
-      
-      // Try to find a specific match
-      const sampleMatch = await snowflakeService.executeQuery(`
-        SELECT t.EMPL_ID, c.EMPLID, t.FULL_NAME, c.SNSTV_CELL_PHONE
-        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
-        INNER JOIN PRD_TECH_RECRUITMENT.BACH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
-          ON t.EMPL_ID = c.EMPLID
-        LIMIT 5
-      `);
-      
-      res.json({
-        roster_sample: rosterRows,
-        roster_sample_info: "EMPL_ID format from DRIVELINE_ALL_TECHS",
-        contact_sample: contactRows,
-        contact_sample_info: "EMPLID format from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW",
-        match_count: matchCount,
-        sample_matches: sampleMatch
-      });
-    } catch (error: any) {
-      console.error("Error diagnosing EMPLID:", error);
-      res.status(500).json({ message: error.message });
-    }
-  });
-
   app.get("/api/snowflake/debug", requireAuth, async (req: any, res) => {
     try {
       const account = process.env.SNOWFLAKE_ACCOUNT;
@@ -6946,6 +6894,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Batch lookup Samsara vehicle locations
+  app.post("/api/samsara/vehicles/batch", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNames } = req.body;
+      if (!Array.isArray(vehicleNames)) {
+        return res.status(400).json({ error: "vehicleNames must be an array" });
+      }
+      const syncService = getSnowflakeSyncService();
+      const resultsMap = await syncService.getSamsaraVehicleLocationsBatch(vehicleNames);
+      const results: Record<string, { vehicleName: string; address: string; lastUpdated: string }> = {};
+      resultsMap.forEach((value, key) => {
+        results[key] = value;
+      });
+      res.json(results);
+    } catch (error: any) {
+      console.error("Error batch looking up Samsara vehicle locations:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Get tech addresses from Snowflake TPMS data
   app.get("/api/snowflake/tech-addresses/:enterpriseId", requireAuth, async (req: any, res) => {
     const startTime = Date.now();
@@ -6960,6 +6928,180 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       const duration = Date.now() - startTime;
       console.error(`[TPMS-Addresses] Error after ${duration}ms:`, error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Weekly Offboarding - Get term roster from Snowflake view with contact info
+  app.get("/api/weekly-offboarding", requireAuth, async (req: any, res) => {
+    try {
+      const snowflakeService = getSnowflakeService();
+      
+      // Join term roster with contact info view and TPMS for truck info
+      // Filter by LAST_DATE_WORKED >= 2026-01-01
+      // Exclude records where the truck is still actively assigned in TPMS_EXTRACT
+      const query = `
+        SELECT 
+          t.EMPL_NAME,
+          t.ENTERPRISE_ID,
+          t.EMPLID,
+          t.EMPL_STATUS,
+          t.EFFDT,
+          t.LAST_DATE_WORKED,
+          t.PLANNING_AREA,
+          t.TECH_SPECIALTY,
+          c.SNSTV_HOME_ADDR1,
+          c.SNSTV_HOME_ADDR2,
+          c.SNSTV_HOME_CITY,
+          c.SNSTV_HOME_STATE,
+          c.SNSTV_HOME_POSTAL,
+          c.SNSTV_MAIN_PHONE,
+          c.SNSTV_CELL_PHONE,
+          c.SNSTV_HOME_PHONE,
+          tpms.TRUCK_LU
+        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
+        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+          ON t.EMPLID = c.EMPLID
+        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
+          ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
+        WHERE t.LAST_DATE_WORKED >= '2026-01-01'
+          AND (
+            tpms.TRUCK_LU IS NULL 
+            OR NOT EXISTS (
+              SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT active
+              WHERE active.TRUCK_LU = tpms.TRUCK_LU
+            )
+          )
+        ORDER BY t.LAST_DATE_WORKED DESC
+      `;
+      
+      const rows = await snowflakeService.executeQuery(query) as Array<{
+        EMPL_NAME: string;
+        ENTERPRISE_ID: string;
+        EMPLID: string;
+        EMPL_STATUS: string;
+        EFFDT: string;
+        LAST_DATE_WORKED: string;
+        PLANNING_AREA: string;
+        TECH_SPECIALTY: string;
+        SNSTV_HOME_ADDR1: string;
+        SNSTV_HOME_ADDR2: string;
+        SNSTV_HOME_CITY: string;
+        SNSTV_HOME_STATE: string;
+        SNSTV_HOME_POSTAL: string;
+        SNSTV_MAIN_PHONE: string;
+        SNSTV_CELL_PHONE: string;
+        SNSTV_HOME_PHONE: string;
+        TRUCK_LU: string;
+      }>;
+      
+      // Format phone number to (xxx)xxx-xxxx format
+      const formatPhone = (phone: string | null | undefined): string | null => {
+        if (!phone) return null;
+        // Remove all non-digit characters
+        const digits = phone.replace(/\D/g, '');
+        // Handle 10-digit US phone numbers
+        if (digits.length === 10) {
+          return `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
+        }
+        // Handle 11-digit with leading 1
+        if (digits.length === 11 && digits[0] === '1') {
+          return `(${digits.slice(1, 4)})${digits.slice(4, 7)}-${digits.slice(7)}`;
+        }
+        // Return original if not standard format
+        return phone;
+      };
+      
+      // Planning Area to Owner mapping (first 4 digits)
+      const planningAreaOwnerMap: Record<string, string> = {
+        '3132': 'Rob & Andrea',
+        '3580': 'Monica, Cheryl & Machell',
+        '4766': 'Rob & Andrea',
+        '6141': 'Monica, Cheryl & Machell',
+        '7084': 'Rob & Andrea',
+        '7088': 'Carol & Tasha',
+        '7108': 'Carol & Tasha',
+        '7323': 'Monica, Cheryl & Machell',
+        '7435': 'Rob & Andrea',
+        '7670': 'Rob & Andrea',
+        '7744': 'Rob & Andrea',
+        '7983': 'Rob & Andrea',
+        '7995': 'Carol & Tasha',
+        '8035': 'Rob & Andrea',
+        '8096': 'Monica, Cheryl & Machell',
+        '8107': 'Carol & Tasha',
+        '8147': 'Carol & Tasha',
+        '8158': 'Carol & Tasha',
+        '8162': 'Monica, Cheryl & Machell',
+        '8169': 'Carol & Tasha',
+        '8175': 'Rob & Andrea',
+        '8184': 'Carol & Tasha',
+        '8206': 'Monica, Cheryl & Machell',
+        '8220': 'Monica, Cheryl & Machell',
+        '8228': 'Carol & Tasha',
+        '8309': 'Monica, Cheryl & Machell',
+        '8366': 'Carol & Tasha',
+        '8380': 'Rob & Andrea',
+        '8420': 'Monica, Cheryl & Machell',
+        '8555': 'Monica, Cheryl & Machell',
+        '8935': 'Monica, Cheryl & Machell',
+      };
+      
+      // Get owner from planning area (first 4 digits)
+      const getOwner = (planningArea: string | null | undefined): string => {
+        if (!planningArea) return 'Unknown';
+        const code = planningArea.replace(/\D/g, '').slice(0, 4);
+        return planningAreaOwnerMap[code] || 'Unknown';
+      };
+      
+      const formattedData = rows.map(row => {
+        // Build address from components
+        const addressParts = [
+          row.SNSTV_HOME_ADDR1,
+          row.SNSTV_HOME_ADDR2,
+          row.SNSTV_HOME_CITY,
+          row.SNSTV_HOME_STATE,
+          row.SNSTV_HOME_POSTAL
+        ].filter(Boolean);
+        const address = addressParts.join(', ');
+        
+        // Format and combine phone numbers with "/" separator
+        const phoneParts = [
+          formatPhone(row.SNSTV_MAIN_PHONE),
+          formatPhone(row.SNSTV_CELL_PHONE),
+          formatPhone(row.SNSTV_HOME_PHONE)
+        ].filter(Boolean);
+        const contactPhone = phoneParts.join(' / ');
+        
+        return {
+          emplName: row.EMPL_NAME || '',
+          enterpriseId: row.ENTERPRISE_ID || '',
+          emplId: row.EMPLID || '',
+          emplStatus: row.EMPL_STATUS || '',
+          effdt: row.EFFDT || '',
+          lastDateWorked: row.LAST_DATE_WORKED || '',
+          planningArea: row.PLANNING_AREA || '',
+          techSpecialty: row.TECH_SPECIALTY || '',
+          address: address,
+          contactPhone: contactPhone,
+          owner: getOwner(row.PLANNING_AREA),
+          truck: row.TRUCK_LU || '',
+        };
+      });
+      
+      res.json(formattedData);
+    } catch (error: any) {
+      console.error("Error fetching weekly offboarding data:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Weekly Offboarding - Sync/Refresh (same as GET but for POST compatibility)
+  app.post("/api/snowflake/sync/weekly-offboarding", requireAuth, async (req: any, res) => {
+    try {
+      res.json({ success: true, message: "Term roster refreshed from Snowflake" });
+    } catch (error: any) {
+      console.error("Error syncing weekly offboarding:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   });
@@ -7036,6 +7178,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           districtNo: tech.districtNo,
           planningAreaName: tech.planningAreaName,
           employmentStatus: tech.employmentStatus,
+          // Contact info
+          cellPhone: tech.cellPhone,
+          mainPhone: tech.mainPhone,
+          homePhone: tech.homePhone,
+          // Address info
+          homeAddr1: tech.homeAddr1,
+          homeAddr2: tech.homeAddr2,
+          homeCity: tech.homeCity,
+          homeState: tech.homeState,
+          homePostal: tech.homePostal,
+          // Fleet info
+          truckLu: tech.truckLu,
         });
       } else {
         res.json({ found: false });
@@ -8960,7 +9114,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const apiKey = process.env.X_API_Key;
         if (apiKey) {
           const cleanVehicleNumber = vehicleNumber.replace(/^0+/, '');
-          
           const keysMap: Record<string, string> = {
             'present': 'Present',
             'not_present': 'Not Present',
