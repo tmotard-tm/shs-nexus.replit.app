@@ -90,3 +90,47 @@ Preferred communication style: Simple, everyday language.
 -   **Holman**: Vehicle fleet details and assignment updates.
 -   **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments and mobile phone numbers.
 -   **PMF/PARQ AI**: Fleet vehicle availability API.
+-   **Fleet Scope**: External API for posting vehicle spare status updates (POST to `/api/public/spares/{vehicleNumber}`).
+-   **SendGrid**: Email delivery for Communication Hub templates.
+
+# Last Session Summary (2026-02-06)
+
+## Completed
+- Resolved all Git merge conflicts between main branch (Communication Hub features) and SearsDriveLine branch (Vehicle Nexus Data + Weekly Offboarding features)
+- Fixed conflict markers in 3 core files: `shared/schema.ts`, `server/storage.ts`, `server/routes.ts`
+- Successfully merged main into SearsDriveLine branch via Replit Git UI
+- Both feature sets (Communication Hub + Vehicle Nexus Data) now coexist and run without errors
+
+## Next Steps
+- Implement SMS sending via Twilio integration for Communication Hub
+- Add FleetScope deep link for routing lookup
+- Add input validation (Zod schemas) to communication routes
+- Review and address pre-existing LSP warnings in `server/storage.ts` (vehicleType MemStorage stubs)
+
+## Blockers
+- None. App is running cleanly with all routes registered.
+
+# Current State
+
+## Working Routes (all registered and functional)
+- **Auth**: `/api/auth/*` (login, register, password management)
+- **Core CRUD**: `/api/users`, `/api/requests`, `/api/configurations`, `/api/activity-logs`
+- **Task Queues**: `/api/ntao-queue`, `/api/assets-queue`, `/api/inventory-queue`, `/api/fleet-queue`, `/api/tools-queue`, `/api/queues/*`
+- **Snowflake**: `/api/snowflake/*` (status, sync, query, debug)
+- **Holman**: `/api/holman/*` (vehicles, contacts, maintenance, fleet sync, assignment updates)
+- **TPMS**: `/api/tpms/*` (tech info, truck lookups, cache sync)
+- **Vehicle Assignments**: `/api/vehicle-assignments/*`
+- **Communication Hub**: `/api/communication/*` (templates CRUD, whitelist, logs, preview, send)
+- **Vehicle Nexus Data**: `/api/vehicle-nexus-data/*` (batch upsert, get/update by vehicle number, Fleet Scope API sync)
+- **Weekly Offboarding**: `/api/weekly-offboarding` (term roster from Snowflake)
+- **Fleet Overview**: `/api/fleet-overview/statistics`
+- **Templates & Work Progress**: `/api/work-templates/*`, `/api/work-progress/*`
+- **Role Permissions**: `/api/role-permissions/*`
+
+## Known Issues (Pre-existing, Non-blocking)
+- LSP warnings in `server/storage.ts` for `vehicleType` field in MemStorage stubs (5 diagnostics) — only affects in-memory fallback, not production DatabaseStorage
+- LSP warnings in `server/routes.ts` (3 diagnostics) — non-critical
+- TPMS API calls failing for some truck numbers in Holman enrichment (expected behavior when TPMS has no data for a vehicle)
+
+## Git Branch State
+- Main branch and SearsDriveLine branch are now synchronized with all features merged
