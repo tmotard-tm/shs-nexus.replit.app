@@ -8714,19 +8714,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Communication Hub API Routes (Developer-only)
   // ========================================
   
-  // Helper to check developer role for communication routes
   const requireDeveloperRole = async (req: any, res: any): Promise<boolean> => {
-    const sessionToken = req.cookies?.session;
-    if (!sessionToken) {
+    const cookieHeader = req.headers.cookie;
+    const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
+    
+    if (!sessionId) {
       res.status(401).json({ message: "Authentication required" });
       return false;
     }
-    const currentUser = await storage.getUserBySession(sessionToken);
-    if (!currentUser || currentUser.role !== 'developer') {
-      res.status(403).json({ message: "Developer role required" });
+    
+    try {
+      const session = await storage.getSession(sessionId);
+      if (!session || session.expiresAt < new Date()) {
+        if (session) {
+          await storage.deleteSession(sessionId);
+        }
+        res.status(401).json({ message: "Session expired" });
+        return false;
+      }
+      
+      const user = await storage.getUser(session.userId);
+      if (!user) {
+        res.status(401).json({ message: "User not found" });
+        return false;
+      }
+      
+      if (user.role !== 'developer') {
+        res.status(403).json({ message: "Developer role required" });
+        return false;
+      }
+      
+      req.user = user;
+      return true;
+    } catch (error) {
+      res.status(401).json({ message: "Authentication failed" });
       return false;
     }
-    return true;
   };
   
   app.get("/api/communication/templates", async (req, res) => {
