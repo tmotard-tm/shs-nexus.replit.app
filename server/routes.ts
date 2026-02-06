@@ -8913,6 +8913,292 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Vehicle Nexus Data - Nexus-specific vehicle data for offboarding/relocation tracking
+  app.post("/api/vehicle-nexus-data/batch", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumbers } = req.body;
+      if (!Array.isArray(vehicleNumbers)) {
+        return res.status(400).json({ message: "vehicleNumbers must be an array" });
+      }
+      const data = await storage.getVehicleNexusDataBatch(vehicleNumbers);
+      res.json(data);
+    } catch (error: any) {
+      console.error("Error fetching vehicle nexus data batch:", error);
+      res.status(500).json({ message: "Failed to fetch vehicle nexus data batch", error: error.message });
+    }
+  });
+
+  app.get("/api/vehicle-nexus-data/:vehicleNumber", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber } = req.params;
+      const data = await storage.getVehicleNexusData(vehicleNumber);
+      res.json(data || null);
+    } catch (error: any) {
+      console.error("Error fetching vehicle nexus data:", error);
+      res.status(500).json({ message: "Failed to fetch vehicle nexus data", error: error.message });
+    }
+  });
+
+  app.put("/api/vehicle-nexus-data/:vehicleNumber", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber } = req.params;
+      const { postOffboardedStatus, nexusNewLocation, nexusNewLocationContact, keys, repaired, comments } = req.body;
+      
+      const data = await storage.upsertVehicleNexusData({
+        vehicleNumber,
+        postOffboardedStatus: postOffboardedStatus || null,
+        nexusNewLocation: nexusNewLocation || null,
+        nexusNewLocationContact: nexusNewLocationContact || null,
+        keys: keys || null,
+        repaired: repaired || null,
+        comments: comments || null,
+        updatedBy: req.user?.username || 'system',
+      });
+
+      // Post to external Fleet Scope API
+      try {
+        const apiKey = process.env.X_API_Key;
+        if (apiKey) {
+          const cleanVehicleNumber = vehicleNumber.replace(/^0+/, '');
+          
+          const keysMap: Record<string, string> = {
+            'present': 'Present',
+            'not_present': 'Not Present',
+            'unknown': 'Unknown/would not check',
+          };
+          
+          const repairedMap: Record<string, string> = {
+            'complete': 'Complete',
+            'in_process': 'In Process',
+            'unknown_if_needed': 'Unknown if needed',
+            'declined': 'Declined',
+          };
+          
+          const statusMap: Record<string, string> = {
+            'reserved_for_new_hire': 'Reserved for new hire',
+            'in_repair': 'In repair',
+            'declined_repair': 'Declined repair',
+            'available_for_rental_pmf': 'Available to assign or send to PMF',
+            'sent_to_pmf': 'Sent to PMF',
+            'assigned_to_tech_in_rental': 'Assigned to rental',
+            'not_found': 'Not found',
+          };
+          
+          const fleetScopePayload = {
+            keys: keys ? keysMap[keys] || keys : null,
+            repaired: repaired ? repairedMap[repaired] || repaired : null,
+            contact: nexusNewLocationContact || null,
+            confirmedAddress: nexusNewLocation || null,
+            generalComments: comments || null,
+            fleetTeamComments: postOffboardedStatus ? statusMap[postOffboardedStatus] || postOffboardedStatus : null,
+          };
+
+          const fleetScopeUrl = `https://fleet-scope.replit.app/api/public/spares/${cleanVehicleNumber}`;
+          
+          console.log('=== FLEET SCOPE API REQUEST ===');
+          console.log('URL:', fleetScopeUrl);
+          console.log('Method: POST');
+          console.log('Headers:', { 'Content-Type': 'application/json', 'X-API-Key': '***' });
+          console.log('Payload:', JSON.stringify(fleetScopePayload, null, 2));
+          console.log('===============================');
+
+          const fleetScopeResponse = await fetch(fleetScopeUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': apiKey,
+            },
+            body: JSON.stringify(fleetScopePayload),
+          });
+
+          const responseText = await fleetScopeResponse.text();
+          console.log('=== FLEET SCOPE API RESPONSE ===');
+          console.log('Status:', fleetScopeResponse.status);
+          console.log('Response Body:', responseText);
+          console.log('================================');
+
+          if (!fleetScopeResponse.ok) {
+            console.warn(`Fleet Scope API returned status ${fleetScopeResponse.status} for vehicle ${vehicleNumber}`);
+          } else {
+            console.log(`Successfully synced vehicle ${vehicleNumber} to Fleet Scope`);
+          }
+        } else {
+          console.warn('X_API_Key not configured, skipping Fleet Scope sync');
+        }
+      } catch (fleetScopeError: any) {
+        console.error('Fleet Scope API sync failed:', fleetScopeError.message);
+      }
+      
+      res.json(data);
+    } catch (error: any) {
+      console.error("Error updating vehicle nexus data:", error);
+      res.status(500).json({ message: "Failed to update vehicle nexus data", error: error.message });
+    }
+  });
+
+  // Weekly Offboarding - Get term roster from Snowflake view with contact info
+  app.get("/api/weekly-offboarding", requireAuth, async (req: any, res) => {
+    try {
+      const { getSnowflakeService } = await import("./snowflake-service");
+      const snowflakeService = getSnowflakeService();
+      
+      const query = `
+        SELECT 
+          t.EMPL_NAME,
+          t.ENTERPRISE_ID,
+          t.EMPLID,
+          t.EMPL_STATUS,
+          t.EFFDT,
+          t.LAST_DATE_WORKED,
+          t.PLANNING_AREA,
+          t.TECH_SPECIALTY,
+          c.SNSTV_HOME_ADDR1,
+          c.SNSTV_HOME_ADDR2,
+          c.SNSTV_HOME_CITY,
+          c.SNSTV_HOME_STATE,
+          c.SNSTV_HOME_POSTAL,
+          c.SNSTV_MAIN_PHONE,
+          c.SNSTV_CELL_PHONE,
+          c.SNSTV_HOME_PHONE,
+          tpms.TRUCK_LU
+        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
+        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+          ON t.EMPLID = c.EMPLID
+        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
+          ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
+        WHERE t.LAST_DATE_WORKED >= '2026-01-01'
+          AND (
+            tpms.TRUCK_LU IS NULL 
+            OR NOT EXISTS (
+              SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT active
+              WHERE active.TRUCK_LU = tpms.TRUCK_LU
+            )
+          )
+        ORDER BY t.LAST_DATE_WORKED DESC
+      `;
+      
+      const rows = await snowflakeService.executeQuery(query) as Array<{
+        EMPL_NAME: string;
+        ENTERPRISE_ID: string;
+        EMPLID: string;
+        EMPL_STATUS: string;
+        EFFDT: string;
+        LAST_DATE_WORKED: string;
+        PLANNING_AREA: string;
+        TECH_SPECIALTY: string;
+        SNSTV_HOME_ADDR1: string;
+        SNSTV_HOME_ADDR2: string;
+        SNSTV_HOME_CITY: string;
+        SNSTV_HOME_STATE: string;
+        SNSTV_HOME_POSTAL: string;
+        SNSTV_MAIN_PHONE: string;
+        SNSTV_CELL_PHONE: string;
+        SNSTV_HOME_PHONE: string;
+        TRUCK_LU: string;
+      }>;
+      
+      const formatPhone = (phone: string | null | undefined): string | null => {
+        if (!phone) return null;
+        const digits = phone.replace(/\D/g, '');
+        if (digits.length === 10) {
+          return `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
+        }
+        if (digits.length === 11 && digits[0] === '1') {
+          return `(${digits.slice(1, 4)})${digits.slice(4, 7)}-${digits.slice(7)}`;
+        }
+        return phone;
+      };
+      
+      const planningAreaOwnerMap: Record<string, string> = {
+        '3132': 'Rob & Andrea',
+        '3580': 'Monica, Cheryl & Machell',
+        '4766': 'Rob & Andrea',
+        '6141': 'Monica, Cheryl & Machell',
+        '7084': 'Rob & Andrea',
+        '7088': 'Carol & Tasha',
+        '7108': 'Carol & Tasha',
+        '7323': 'Monica, Cheryl & Machell',
+        '7435': 'Rob & Andrea',
+        '7670': 'Rob & Andrea',
+        '7744': 'Rob & Andrea',
+        '7983': 'Rob & Andrea',
+        '7995': 'Carol & Tasha',
+        '8035': 'Rob & Andrea',
+        '8096': 'Monica, Cheryl & Machell',
+        '8107': 'Carol & Tasha',
+        '8147': 'Carol & Tasha',
+        '8158': 'Carol & Tasha',
+        '8162': 'Monica, Cheryl & Machell',
+        '8169': 'Carol & Tasha',
+        '8175': 'Rob & Andrea',
+        '8184': 'Carol & Tasha',
+        '8206': 'Monica, Cheryl & Machell',
+        '8220': 'Monica, Cheryl & Machell',
+        '8228': 'Carol & Tasha',
+        '8309': 'Monica, Cheryl & Machell',
+        '8366': 'Carol & Tasha',
+        '8380': 'Rob & Andrea',
+        '8420': 'Monica, Cheryl & Machell',
+        '8555': 'Monica, Cheryl & Machell',
+        '8935': 'Monica, Cheryl & Machell',
+      };
+      
+      const getOwner = (planningArea: string | null | undefined): string => {
+        if (!planningArea) return 'Unknown';
+        const code = planningArea.replace(/\D/g, '').slice(0, 4);
+        return planningAreaOwnerMap[code] || 'Unknown';
+      };
+      
+      const formattedData = rows.map(row => {
+        const addressParts = [
+          row.SNSTV_HOME_ADDR1,
+          row.SNSTV_HOME_ADDR2,
+          row.SNSTV_HOME_CITY,
+          row.SNSTV_HOME_STATE,
+          row.SNSTV_HOME_POSTAL
+        ].filter(Boolean);
+        const address = addressParts.join(', ');
+        
+        const phoneParts = [
+          formatPhone(row.SNSTV_MAIN_PHONE),
+          formatPhone(row.SNSTV_CELL_PHONE),
+          formatPhone(row.SNSTV_HOME_PHONE)
+        ].filter(Boolean);
+        const contactPhone = phoneParts.join(' / ');
+        
+        return {
+          emplName: row.EMPL_NAME || '',
+          enterpriseId: row.ENTERPRISE_ID || '',
+          emplId: row.EMPLID || '',
+          emplStatus: row.EMPL_STATUS || '',
+          effdt: row.EFFDT || '',
+          lastDateWorked: row.LAST_DATE_WORKED || '',
+          planningArea: row.PLANNING_AREA || '',
+          techSpecialty: row.TECH_SPECIALTY || '',
+          address: address,
+          contactPhone: contactPhone,
+          owner: getOwner(row.PLANNING_AREA),
+          truck: row.TRUCK_LU || '',
+        };
+      });
+      
+      res.json(formattedData);
+    } catch (error: any) {
+      console.error("Error fetching weekly offboarding data:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Weekly Offboarding - Sync/Refresh
+  app.post("/api/snowflake/sync/weekly-offboarding", requireAuth, async (req: any, res) => {
+    try {
+      res.json({ success: true, message: "Term roster refreshed from Snowflake" });
+    } catch (error: any) {
+      console.error("Error syncing weekly offboarding:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack
