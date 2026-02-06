@@ -49,6 +49,7 @@ export default function WeeklyOffboarding() {
   const [nexusKeys, setNexusKeys] = useState("");
   const [nexusRepaired, setNexusRepaired] = useState("");
   const [nexusComments, setNexusComments] = useState("");
+  const [manualTruck, setManualTruck] = useState("");
 
   // Refs for synchronized scrollbars
   const topScrollRef = useRef<HTMLDivElement>(null);
@@ -162,18 +163,21 @@ export default function WeeklyOffboarding() {
     },
   });
 
+  // Effective truck: use entry's truck or manually entered one
+  const effectiveTruck = selectedEntry?.truck || (manualTruck.length === 5 ? manualTruck : null);
+
   // Fetch nexus data when an entry with a truck is selected
   const { data: nexusData, isLoading: nexusDataLoading } = useQuery({
-    queryKey: ['/api/vehicle-nexus-data', selectedEntry?.truck],
+    queryKey: ['/api/vehicle-nexus-data', effectiveTruck],
     queryFn: async () => {
-      if (!selectedEntry?.truck) return null;
-      const response = await fetch(`/api/vehicle-nexus-data/${selectedEntry.truck}`, {
+      if (!effectiveTruck) return null;
+      const response = await fetch(`/api/vehicle-nexus-data/${effectiveTruck}`, {
         credentials: 'include',
       });
       if (!response.ok) return null;
       return response.json();
     },
-    enabled: !!selectedEntry?.truck,
+    enabled: !!effectiveTruck,
   });
 
   // Reset nexus fields when selection changes
@@ -195,6 +199,11 @@ export default function WeeklyOffboarding() {
     }
   }, [nexusData, selectedEntry]);
 
+  // Reset manual truck when selecting a new entry
+  useEffect(() => {
+    setManualTruck("");
+  }, [selectedEntry]);
+
   // Save nexus tracking data mutation
   const saveNexusDataMutation = useMutation({
     mutationFn: async (data: {
@@ -213,8 +222,9 @@ export default function WeeklyOffboarding() {
         title: "Saved",
         description: "Nexus tracking data has been saved.",
       });
-      if (selectedEntry?.truck) {
-        queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', selectedEntry.truck] });
+      const truckToInvalidate = selectedEntry?.truck || manualTruck;
+      if (truckToInvalidate) {
+        queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', truckToInvalidate] });
         queryClient.invalidateQueries({ 
           predicate: (query) => 
             Array.isArray(query.queryKey) && 
@@ -655,15 +665,37 @@ export default function WeeklyOffboarding() {
                 </div>
               </div>
 
-              {selectedEntry.truck && (
+              {(selectedEntry.truck || true) && (
                 <>
                   <Separator />
 
+                  {/* Manual truck entry for null trucks */}
+                  {!selectedEntry.truck && (
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Assign Truck Number</Label>
+                      <Input
+                        value={manualTruck}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 5);
+                          setManualTruck(val);
+                        }}
+                        placeholder="Enter 5-digit truck #"
+                        className="font-mono"
+                        maxLength={5}
+                        data-testid="input-manual-truck"
+                      />
+                      {manualTruck.length > 0 && manualTruck.length < 5 && (
+                        <p className="text-xs text-amber-600">Enter all 5 digits to enable tracking fields</p>
+                      )}
+                    </div>
+                  )}
+
                   {/* Nexus Tracking Data */}
+                  {effectiveTruck && (
                   <div className="space-y-4">
                     <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-2">
                       <Truck className="h-4 w-4" />
-                      Nexus Tracking
+                      Nexus Tracking {!selectedEntry.truck && effectiveTruck && <span className="text-xs">— Truck {effectiveTruck}</span>}
                     </h4>
                     
                     {nexusDataLoading ? (
@@ -764,7 +796,7 @@ export default function WeeklyOffboarding() {
 
                         <Button
                           onClick={() => saveNexusDataMutation.mutate({
-                            vehicleNumber: selectedEntry.truck,
+                            vehicleNumber: effectiveTruck!,
                             postOffboardedStatus: nexusStatus === '__none__' ? null : (nexusStatus || null),
                             nexusNewLocation: nexusLocation || null,
                             nexusNewLocationContact: nexusContact || null,
@@ -786,17 +818,7 @@ export default function WeeklyOffboarding() {
                       </div>
                     )}
                   </div>
-                </>
-              )}
-
-              {!selectedEntry.truck && (
-                <>
-                  <Separator />
-                  <div className="text-center py-4 text-muted-foreground">
-                    <Truck className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>No truck assigned to this employee.</p>
-                    <p className="text-sm">Nexus tracking is only available for employees with assigned trucks.</p>
-                  </div>
+                  )}
                 </>
               )}
             </div>
