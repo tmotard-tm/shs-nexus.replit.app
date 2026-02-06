@@ -1,5 +1,33 @@
 # Enhancements & Bug Fixes Log
 
+## 2026-02-06
+
+### Bugs Fixed
+
+| Issue | Description | Resolution |
+|-------|-------------|------------|
+| Duplicate Tools tasks | Two systems (sync service + GET handler) created tasks for same employees | Consolidated creation into sync service only; GET handler now read-only |
+| Cross-format dedup failure | Duplicate detection only checked one data structure format | Updated to check both `employee.*` and `technician.*` paths |
+| Sparse Day 0 format for Tools | Sync service created sparse "Day 0" tasks missing HR data | Changed to "Tools Queue -" format with full separation data |
+
+### Enhancements Made
+
+| Enhancement | Description |
+|-------------|-------------|
+| Single source of truth | Tools task creation now only happens in Snowflake sync service (scheduled, predictable) |
+| Rich HR data in tasks | Tools tasks include employee name, ID, separation date, truck number, pickup address |
+| Dev DB refresh script | Ran `scripts/refreshDevFromProd.js` to sync 32 tables from prod to dev |
+
+### Technical Debt Identified
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| No Zod validation on communication routes | Medium | Add input validation for security |
+| SMS not implemented | Medium | Shows as simulated - needs Twilio integration |
+| Legacy Day 0 Tools tasks in DB | Low | One legacy "Day 0: Recover Equipment & Tools - ABALOS" task remains (no equivalent Tools Queue task exists) |
+
+---
+
 ## 2026-02-05
 
 ### Bugs Fixed

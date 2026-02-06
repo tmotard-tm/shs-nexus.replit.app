@@ -1,6 +1,6 @@
 # Nexus System Architecture
 
-> **Last Updated**: 2026-02-05
+> **Last Updated**: 2026-02-06
 > **Purpose**: The "Truth" document for understanding how Nexus works. Read this first.
 
 ---
@@ -234,7 +234,24 @@ Tools tasks auto-assigned to: `joefree.semilla@transformco.com` (Joefree Semilla
 | Company | ≤2 days | HIGH |
 | Company | >2 days | STANDARD |
 
-### Data Enrichment Flow
+### Task Creation Flow (Updated 2026-02-06)
+
+Tools tasks are created **only** by the Snowflake sync service (`snowflake-sync-service.ts`) during scheduled daily sync. The GET handler is read-only.
+
+```
+Snowflake Sync (daily at 5am EST)
+    │
+    ├─→ Fetch HR separation data from Snowflake
+    │
+    ├─→ For each termed tech: check for existing Tools task (both data formats)
+    │
+    ├─→ If no duplicate: create "Tools Queue - LASTNAME,FIRSTNAME" task
+    │     with rich HR data (employee + hrSeparation structure)
+    │
+    └─→ Send Tool Audit email notification
+```
+
+### Data Enrichment Flow (Read-Only)
 
 ```
 GET /api/tools-queue
@@ -242,6 +259,7 @@ GET /api/tools-queue
     ├─→ Fetch queue_items where module='tools'
     │
     ├─→ For each item: lookup technician in all_techs by enterpriseId
+    │     (checks both employee.* and technician.* data paths)
     │
     └─→ Return items with techData: { techName, district, separationDate, phones, email }
 ```
@@ -308,7 +326,9 @@ GET /api/tools-queue
 - Sprint 10: HR separation data integration from Snowflake
 - Sprint 11: Mobile phone from TPMS, Snowflake source indicator
 - Communication Hub MVP: Template management with mode control (simulated/whitelisted/live)
-- **Phase 2 Email Notifications**: Fleet team notified when all Day 0 tasks complete
+- Phase 2 Email Notifications: Fleet team notified when all Day 0 tasks complete
+- **Tools Queue duplicate fix**: Single source of truth for task creation (sync service only)
+- **Cross-format duplicate detection**: Checks both `employee.*` and `technician.*` data paths
 
 ### Communication Hub Highlights
 - Developer-only access (UI and API level enforcement)
@@ -317,9 +337,15 @@ GET /api/tools-queue
 - Tool Audit emails now routed through Communication Hub templates
 - Phase 2 completion emails via `phase2-tasks-created` template
 
+### Key Architecture Decisions
+- GET handlers are read-only; task creation happens only in scheduled sync services
+- Tools Queue uses "Tools Queue - NAME" format with rich HR data; Fleet/Inventory use Day 0 format
+- Duplicate detection checks both legacy (`technician.*`) and current (`employee.*`) data structures
+
 ### Known Issues
 - SMS not yet implemented (shows as simulated)
 - No Zod validation on communication routes
+- One legacy "Day 0: Recover Equipment & Tools - ABALOS" task remains (no equivalent exists)
 
 ---
 

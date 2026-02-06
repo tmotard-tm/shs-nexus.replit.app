@@ -31,6 +31,8 @@
 | Communication Hub | Template Management MVP | ✅ Complete | 2026-02-05 |
 | Bug Fixes | Template seeding + FK constraint | ✅ Complete | 2026-02-06 |
 | Sprint 12 | Phase 2 Email Notifications | ✅ Complete | 2026-02-06 |
+| Bug Fixes | Tools Queue duplicate task fix | ✅ Complete | 2026-02-06 |
+| Bug Fixes | Cross-format duplicate detection | ✅ Complete | 2026-02-06 |
 
 ### In Progress 🚧
 

@@ -96,11 +96,14 @@ Preferred communication style: Simple, everyday language.
 # Last Session Summary (2026-02-06)
 
 ## Completed
-- Fixed Tools Queue duplicate task issue: two systems were creating tasks for the same employees
-- Moved Tools task auto-creation from GET handler (page load side effect) into Snowflake sync service (scheduled, predictable)
-- Changed sync service to create "Tools Queue -" format tasks with rich HR data instead of sparse "Day 0" format
-- Improved duplicate detection to check both `employee.*` and `technician.*` data structures across all dedup functions
-- Cleaned up 4 duplicate Day 0 tasks from database; retained richer "Tools Queue -" versions
+- Fixed critical Tools Queue duplicate task bug: two systems (sync service + GET handler) creating tasks for same employees
+- Consolidated Tools task creation into Snowflake sync service only; GET handler now read-only
+- Changed sync service to create "Tools Queue -" format tasks with rich HR separation data
+- Improved duplicate detection to check both `employee.*` and `technician.*` data structures
+- Cleaned up 4 duplicate Day 0 tasks from database; retained richer versions
+- Refreshed dev database from prod (32 tables via `scripts/refreshDevFromProd.js`)
+- Fixed template seeding, FK constraint errors, and Phase 2 email notifications (earlier in day)
+- Resolved Git merge conflicts between main and SearsDriveLine branches
 
 ## Next Steps
 - Implement SMS sending via Twilio integration for Communication Hub
@@ -110,6 +113,11 @@ Preferred communication style: Simple, everyday language.
 
 ## Blockers
 - None. App is running cleanly with all routes registered.
+
+## Key Design Decisions
+- GET handlers should only read data, never create it (side effects removed)
+- Single source of truth for Tools task creation in sync service prevents race conditions
+- Tools Queue uses rich HR data format; Fleet and Inventory queues still use Day 0 format
 
 # Current State
 
