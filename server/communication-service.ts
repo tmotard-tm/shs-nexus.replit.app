@@ -192,10 +192,7 @@ export async function getTemplatePreview(
 
 export async function seedDefaultTemplates(): Promise<number> {
   const existingTemplates = await storage.getCommunicationTemplates();
-  if (existingTemplates.length > 0) {
-    console.log(`[COMMUNICATION] Found ${existingTemplates.length} existing templates, skipping seed`);
-    return 0;
-  }
+  const existingNames = new Set(existingTemplates.map(t => t.name));
 
   const defaultTemplates = [
     {
@@ -359,14 +356,94 @@ This is an automated message from the Nexus Portal.`,
       variables: ['resetLink'],
       isActive: true,
     },
+    {
+      name: 'phase2-tasks-created',
+      description: 'Notifies Fleet team when all Day 0 offboarding tasks are completed and Phase 2 tasks have been auto-generated',
+      type: 'email',
+      mode: 'simulated',
+      subject: 'Phase 2 Tasks Created: Vehicle Retrieval for {{techName}}',
+      htmlContent: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; margin: 0; font-size: 24px;">Phase 2 Tasks Created</h1>
+    <p style="color: #d1fae5; margin: 8px 0 0 0; font-size: 14px;">All Day 0 offboarding tasks completed</p>
+  </div>
+  
+  <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
+    <p>All <strong>5 Day 0 offboarding tasks</strong> have been completed for <strong>{{techName}}</strong>. Phase 2 Fleet tasks have been automatically created and are ready for action.</p>
+    
+    <table style="border-collapse: collapse; margin: 20px 0; width: 100%;">
+      <tr>
+        <td style="padding: 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0; width: 40%;">Technician:</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">{{techName}}</td>
+      </tr>
+      <tr>
+        <td style="padding: 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Employee ID:</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">{{employeeId}}</td>
+      </tr>
+      <tr>
+        <td style="padding: 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Vehicle:</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">{{vehicleNumber}}</td>
+      </tr>
+      <tr>
+        <td style="padding: 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Vehicle Type:</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">{{vehicleType}}</td>
+      </tr>
+    </table>
+
+    <h3 style="color: #059669; margin-top: 25px;">New Phase 2 Tasks:</h3>
+    <ol style="padding-left: 20px;">
+      <li style="margin-bottom: 8px;"><strong>Vehicle Retrieval</strong> (Day 1-3) — Retrieve vehicle from technician and transport to appropriate location</li>
+      <li style="margin-bottom: 8px;"><strong>Shop Coordination</strong> (Day 3-5) — Process vehicle at service center for maintenance and reassignment prep</li>
+    </ol>
+
+    <p style="margin-top: 25px;">Please log in to <strong>Nexus</strong> to view and manage these tasks in the Fleet queue.</p>
+    
+    <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+      This is an automated message from the Nexus Offboarding System. Phase 2 tasks were triggered automatically upon completion of all Day 0 tasks.
+    </p>
+  </div>
+</body>
+</html>`,
+      textContent: `Phase 2 Tasks Created - All Day 0 Offboarding Complete
+
+All 5 Day 0 offboarding tasks have been completed for {{techName}}. Phase 2 Fleet tasks have been automatically created.
+
+Technician: {{techName}}
+Employee ID: {{employeeId}}
+Vehicle: {{vehicleNumber}}
+Vehicle Type: {{vehicleType}}
+
+New Phase 2 Tasks:
+1. Vehicle Retrieval (Day 1-3) - Retrieve vehicle from technician
+2. Shop Coordination (Day 3-5) - Process vehicle at service center
+
+Please log in to Nexus to manage these tasks in the Fleet queue.
+
+This is an automated message from the Nexus Offboarding System.`,
+      variables: ['techName', 'employeeId', 'vehicleNumber', 'vehicleType'],
+      isActive: true,
+    },
   ];
 
   let seeded = 0;
   for (const template of defaultTemplates) {
-    await storage.createCommunicationTemplate(template as any);
-    seeded++;
+    if (!existingNames.has(template.name)) {
+      await storage.createCommunicationTemplate(template as any);
+      seeded++;
+      console.log(`[COMMUNICATION] Seeded missing template: ${template.name}`);
+    }
   }
 
-  console.log(`[COMMUNICATION] Seeded ${seeded} default templates`);
+  if (seeded === 0) {
+    console.log(`[COMMUNICATION] All default templates already exist`);
+  } else {
+    console.log(`[COMMUNICATION] Seeded ${seeded} default templates`);
+  }
   return seeded;
 }

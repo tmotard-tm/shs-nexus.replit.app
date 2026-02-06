@@ -29,6 +29,8 @@
 | Sprint 10 | HR Separation Data Integration | ✅ Complete | 2026-02-05 |
 | Sprint 11 | Mobile Phone from TPMS | ✅ Complete | 2026-02-05 |
 | Communication Hub | Template Management MVP | ✅ Complete | 2026-02-05 |
+| Bug Fixes | Template seeding + FK constraint | ✅ Complete | 2026-02-06 |
+| Sprint 12 | Phase 2 Email Notifications | ✅ Complete | 2026-02-06 |
 
 ### In Progress 🚧
 
@@ -41,7 +43,6 @@
 | Sprint | Feature | Description |
 |--------|---------|-------------|
 | Sprint 12 | FleetScope Deep Link | Add link to FleetScope for easier routing lookup |
-| Sprint 12 | Phase 2 Email Notifications | Notify Fleet team when Phase 2 tasks created |
 | Sprint 12 | SMS via Twilio | Implement SMS sending in Communication Hub |
 
 ---

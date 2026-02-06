@@ -197,6 +197,17 @@ async function initializeSnowflake() {
   // Seed templates during startup
   await seedTemplatesOnStartup();
 
+  // Seed communication hub default templates (creates missing ones)
+  try {
+    const { seedDefaultTemplates } = await import("./communication-service");
+    const seeded = await seedDefaultTemplates();
+    if (seeded > 0) {
+      log(`✅ Communication Hub: seeded ${seeded} missing templates`);
+    }
+  } catch (error) {
+    console.error("⚠️ Communication Hub template seeding failed:", error);
+  }
+
   // Initialize Snowflake service
   await initializeSnowflake();
 

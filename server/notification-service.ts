@@ -33,7 +33,7 @@ export async function sendToolAuditNotification(params: ToolAuditNotificationPar
       source: 'tool-audit-notification',
       ldapId: params.ldapId,
     },
-    sentBy: 'system',
+    sentBy: undefined,
   });
 
   return {
@@ -51,6 +51,63 @@ interface CreditCardDeactivationParams {
   racfId: string;
   lastDayWorked: string;
   reason: string;
+}
+
+interface Phase2NotificationParams {
+  techName: string;
+  employeeId: string;
+  vehicleNumber: string;
+  vehicleType: string;
+  workflowId: string;
+  recipients: string[];
+}
+
+export async function sendPhase2TasksCreatedNotification(params: Phase2NotificationParams): Promise<{
+  success: boolean;
+  results: Array<{ recipient: string; status: string; error?: string }>;
+}> {
+  console.log(`[PHASE 2 NOTIFICATION] Sending Phase 2 tasks created notification for ${params.techName}`);
+  
+  if (params.recipients.length === 0) {
+    console.log(`[PHASE 2 NOTIFICATION] No recipients configured, skipping notification`);
+    return { success: true, results: [] };
+  }
+
+  const vehicleTypeLabel = params.vehicleType === 'byov' ? 'BYOV' 
+    : params.vehicleType === 'rental' ? 'Rental' 
+    : 'Company Fleet';
+
+  const results: Array<{ recipient: string; status: string; error?: string }> = [];
+
+  for (const recipient of params.recipients) {
+    try {
+      const result = await sendCommunication({
+        templateName: 'phase2-tasks-created',
+        recipient,
+        variables: {
+          techName: params.techName,
+          employeeId: params.employeeId,
+          vehicleNumber: params.vehicleNumber,
+          vehicleType: vehicleTypeLabel,
+        },
+        metadata: {
+          source: 'phase2-tasks-created',
+          workflowId: params.workflowId,
+          techName: params.techName,
+        },
+        sentBy: undefined,
+      });
+      results.push({ recipient, status: result.status, error: result.error });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      results.push({ recipient, status: 'failed', error: errorMsg });
+    }
+  }
+
+  const successCount = results.filter(r => r.status === 'sent' || r.status === 'simulated').length;
+  console.log(`[PHASE 2 NOTIFICATION] Sent to ${successCount}/${params.recipients.length} recipients`);
+
+  return { success: true, results };
 }
 
 export async function sendCreditCardDeactivationNotification(params: CreditCardDeactivationParams): Promise<{
@@ -74,7 +131,7 @@ export async function sendCreditCardDeactivationNotification(params: CreditCardD
       source: 'credit-card-deactivation',
       employeeId: params.employeeId,
     },
-    sentBy: 'system',
+    sentBy: undefined,
   });
 
   return {

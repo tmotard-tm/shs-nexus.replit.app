@@ -89,6 +89,23 @@ Preferred communication style: Simple, everyday language.
 
 # Recent Changes
 
+## 2026-02-06: Bug Fixes + Phase 2 Email Notifications ✅
+
+### Bug Fixes
+- Fixed `seedDefaultTemplates()` to check for missing templates individually instead of skipping when any templates exist
+- Fixed foreign key constraint error in `communication_logs` by passing `undefined` instead of `'system'` for `sentBy` in system-triggered notifications
+- Added communication template seeding at startup in `server/index.ts`
+
+### Phase 2 Email Notifications
+- New `phase2-tasks-created` communication template (professional HTML email)
+- New `sendPhase2TasksCreatedNotification()` function in notification-service.ts
+- Integrated into `createPhase2FleetTasks()` in storage.ts (both MemStorage and DatabaseStorage)
+- Recipients sourced from `PHASE2_NOTIFICATION_RECIPIENTS` env var or users with Fleet department
+- Template starts in `simulated` mode (safe by default, switchable via Communication Hub)
+- Non-blocking: notification failures don't prevent Phase 2 task creation
+
+---
+
 ## 2026-02-05: Communication Hub MVP ✅
 
 ### New Feature
@@ -234,36 +251,28 @@ Preferred communication style: Simple, everyday language.
 
 ---
 
-# Session Handoff (2026-02-05)
+# Session Handoff (2026-02-06)
 
 ## Last Session Summary
-- **Completed**: Communication Hub MVP with template management, mode control, and developer-only access
-- **Next**: FleetScope deep link, Phase 2 email notifications, SMS implementation
+- **Completed**: Bug fixes (template seeding, FK constraint), Phase 2 Email Notifications
+- **Next**: FleetScope deep link, SMS implementation
 - **Blockers**: None
 
 ## Current State
 - **App Status**: Running without errors
 - **Working Features**:
-  - **NEW**: Communication Hub at `/communication-hub` (Developer-only)
-    - Templates tab: Edit content, preview with variables, toggle simulated/whitelisted/live modes
-    - Whitelist tab: Add/remove test emails and phone numbers for whitelisted mode
-    - History tab: View all send logs with filtering by status
-  - Tool Audit emails now use Communication Hub templates
-  - All existing offboarding features continue working
-- **Key Communication Hub Endpoints** (all require developer role):
-  - `GET /api/communication/templates` - list all templates
-  - `PATCH /api/communication/templates/:id` - update template content/mode
-  - `GET /api/communication/whitelist` - list whitelisted recipients
-  - `POST /api/communication/whitelist` - add to whitelist
-  - `GET /api/communication/logs` - view send history
-- **Template Modes**:
-  - `simulated`: Logs message without sending (default for safety)
-  - `whitelisted`: Only sends if recipient is in whitelist
-  - `live`: Sends to actual recipient
+  - Communication Hub at `/communication-hub` (Developer-only)
+  - Tool Audit emails use Communication Hub templates
+  - **NEW**: Phase 2 email notifications when all Day 0 tasks complete
+  - All offboarding features working
+- **Phase 2 Notification Setup**:
+  - Template `phase2-tasks-created` in Communication Hub (starts simulated)
+  - Set `PHASE2_NOTIFICATION_RECIPIENTS` env var for email recipients (comma-separated)
+  - Or assign users to Fleet department for automatic recipient lookup
+  - Toggle template to `whitelisted` or `live` mode via Communication Hub
 - **Known Issues**: SMS not yet implemented (shows as simulated)
 
 ## Recommended Next Steps
 1. Implement SMS sending via Twilio integration
 2. Add FleetScope deep link for easier routing lookup
-3. Implement Phase 2 email notifications when Fleet tasks are created
-4. Add input validation (Zod schemas) to communication routes
+3. Add input validation (Zod schemas) to communication routes

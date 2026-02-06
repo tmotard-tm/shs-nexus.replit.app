@@ -2522,6 +2522,40 @@ export class MemStorage implements IStorage {
       await this.createFleetQueueItem(shopTask as any);
 
       console.log(`✅ Created Phase 2 Fleet tasks for workflow ${workflowId} (vehicle type: ${vehicleType})`);
+
+      // Send Phase 2 notification to Fleet team
+      try {
+        const { sendPhase2TasksCreatedNotification } = await import("./notification-service");
+        
+        let recipients: string[] = [];
+        const envRecipients = process.env.PHASE2_NOTIFICATION_RECIPIENTS;
+        if (envRecipients) {
+          recipients = envRecipients.split(',').map(e => e.trim()).filter(Boolean);
+        } else {
+          const allUsers = await this.getUsers();
+          recipients = allUsers
+            .filter(u => u.email && u.departments?.some(d => 
+              d.toLowerCase().includes('fleet')
+            ))
+            .map(u => u.email!)
+            .filter(Boolean);
+        }
+
+        if (recipients.length > 0) {
+          await sendPhase2TasksCreatedNotification({
+            techName,
+            employeeId,
+            vehicleNumber,
+            vehicleType,
+            workflowId,
+            recipients,
+          });
+        } else {
+          console.log(`[PHASE 2] No Fleet team recipients found for notification`);
+        }
+      } catch (notifyError) {
+        console.error('[PHASE 2] Failed to send notification (non-blocking):', notifyError);
+      }
     } catch (error) {
       console.error('Error creating Phase 2 Fleet tasks:', error);
     }
@@ -5912,6 +5946,40 @@ export class DatabaseStorage implements IStorage {
       await this.createFleetQueueItem(shopTask as any);
 
       console.log(`✅ Created Phase 2 Fleet tasks for workflow ${workflowId} (vehicle type: ${vehicleType})`);
+
+      // Send Phase 2 notification to Fleet team
+      try {
+        const { sendPhase2TasksCreatedNotification } = await import("./notification-service");
+        
+        let recipients: string[] = [];
+        const envRecipients = process.env.PHASE2_NOTIFICATION_RECIPIENTS;
+        if (envRecipients) {
+          recipients = envRecipients.split(',').map(e => e.trim()).filter(Boolean);
+        } else {
+          const allUsers = await this.getUsers();
+          recipients = allUsers
+            .filter(u => u.email && u.departments?.some(d => 
+              d.toLowerCase().includes('fleet')
+            ))
+            .map(u => u.email!)
+            .filter(Boolean);
+        }
+
+        if (recipients.length > 0) {
+          await sendPhase2TasksCreatedNotification({
+            techName,
+            employeeId,
+            vehicleNumber,
+            vehicleType,
+            workflowId,
+            recipients,
+          });
+        } else {
+          console.log(`[PHASE 2] No Fleet team recipients found for notification`);
+        }
+      } catch (notifyError) {
+        console.error('[PHASE 2] Failed to send notification (non-blocking):', notifyError);
+      }
     } catch (error) {
       console.error('Error creating Phase 2 Fleet tasks:', error);
     }
