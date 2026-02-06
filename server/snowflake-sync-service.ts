@@ -1346,15 +1346,76 @@ export class SnowflakeSyncService {
           const techName = separation.technicianName || separation.ldapId;
 
           // Create offboarding tasks for Fleet, Tools, and Inventory
+          // Tools task uses "Tools Queue -" format with rich HR data for better enrichment
+          const toolsQueueItem: InsertQueueItem = {
+            workflowType: 'offboarding',
+            title: `Tools Queue - ${techName}`,
+            description: `HR separation record for ${techName} (${separation.ldapId}). Last Day: ${separation.lastDay || 'TBD'}. Source: HR Separation Sync.`,
+            status: 'pending',
+            priority: 'medium',
+            requesterId: 'system',
+            department: 'Tools',
+            workflowId: workflowId,
+            workflowStep: 1,
+            data: JSON.stringify({
+              source: 'hr_separation',
+              employee: {
+                enterpriseId: separation.ldapId?.toUpperCase(),
+                employeeId: separation.emplId,
+                fullName: separation.technicianName,
+              },
+              hrSeparation: separation,
+            }),
+            metadata: JSON.stringify({
+              createdVia: 'hr_separation_sync',
+              hrSeparationId: separation.id,
+              tpmsTruckNo: truckInfo.truckNo || null,
+            }),
+          };
+
+          let toolsCreatedItem: any = null;
+          try {
+            toolsCreatedItem = await storage.createToolsQueueItem(toolsQueueItem);
+            result.tasksCreated++;
+            console.log(`[Separation Sync] Created Tools Queue task for ${techName} (${separation.ldapId})`);
+
+            if (separation.personalEmail) {
+              try {
+                const nameParts = (separation.technicianName || '').split(/[,\s]+/);
+                const firstName = nameParts.length > 1 
+                  ? (nameParts[0].includes(',') ? nameParts[1] : nameParts[0]) 
+                  : nameParts[0] || 'Team Member';
+                
+                const emailResult = await sendToolAuditNotification({
+                  email: separation.personalEmail,
+                  firstName: firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
+                  technicianName: separation.technicianName || separation.ldapId,
+                  lastDay: separation.lastDay || 'your scheduled last day',
+                  ldapId: separation.ldapId,
+                });
+                
+                if (emailResult.success && toolsCreatedItem?.id) {
+                  await storage.updateToolsQueueNotificationStatus(toolsCreatedItem.id, true);
+                  result.emailsSent++;
+                  console.log(`[Separation Sync] Tool Audit email sent for ${techName} (test mode: ${emailResult.testMode})`);
+                } else if (!emailResult.success) {
+                  console.log(`[Separation Sync] Tool Audit email failed for ${techName}: ${emailResult.error || 'unknown'}`);
+                  result.emailsSkipped++;
+                }
+              } catch (emailError: any) {
+                console.error(`[Separation Sync] Email error for ${techName}:`, emailError.message);
+                result.emailsSkipped++;
+              }
+            } else {
+              console.log(`[Separation Sync] No personal email for ${techName}, skipping Tool Audit notification`);
+              result.emailsSkipped++;
+            }
+          } catch (toolsError: any) {
+            console.error(`[Separation Sync] Failed to create Tools Queue task for ${techName}:`, toolsError.message);
+          }
+
+          // Fleet and Inventory tasks use Day 0 format
           const day0Tasks = [
-            {
-              title: `Day 0: Recover Equipment & Tools - ${techName}`,
-              description: `IMMEDIATE: Begin equipment/tools recovery for ${techName} (${separation.ldapId}). Truck: ${vehicleNumber || 'TBD'}. Last Day: ${separation.lastDay || 'TBD'}. Source: HR Separation Sync.`,
-              department: 'Tools',
-              step: 'tools_recover_equipment_day0',
-              subtask: 'Tools',
-              workflowStep: 1,
-            },
             {
               title: `Day 0: Fleet Coordination - ${vehicleNumber || techName}`,
               description: `IMMEDIATE: Begin fleet coordination for ${techName} (${separation.ldapId}). Vehicle: ${vehicleNumber || 'TBD'}. Pickup Address: ${separation.fleetPickupAddress || 'TBD'}. Source: HR Separation Sync.`,
@@ -1420,48 +1481,10 @@ export class SnowflakeSyncService {
               }),
             };
 
-            // Route to correct queue
+            // Route to correct queue (Tools handled separately above)
             const deptUpper = task.department.toUpperCase();
-            let createdItem: any = null;
             
-            if (deptUpper === 'TOOLS') {
-              createdItem = await storage.createToolsQueueItem(queueItem);
-              
-              // Sprint 1: Send Tool Audit notification email after creating Tools task
-              if (separation.personalEmail) {
-                try {
-                  // Extract first name from technician name (e.g., "LASTNAME,FIRSTNAME" or "First Last")
-                  const nameParts = (separation.technicianName || '').split(/[,\s]+/);
-                  const firstName = nameParts.length > 1 
-                    ? (nameParts[0].includes(',') ? nameParts[1] : nameParts[0]) 
-                    : nameParts[0] || 'Team Member';
-                  
-                  const emailResult = await sendToolAuditNotification({
-                    email: separation.personalEmail,
-                    firstName: firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
-                    technicianName: separation.technicianName || separation.ldapId,
-                    lastDay: separation.lastDay || 'your scheduled last day',
-                    ldapId: separation.ldapId,
-                  });
-                  
-                  if (emailResult.success && createdItem?.id) {
-                    // Update the Tools queue item with notification status
-                    await storage.updateToolsQueueNotificationStatus(createdItem.id, true);
-                    result.emailsSent++;
-                    console.log(`[Separation Sync] Tool Audit email sent for ${techName} (test mode: ${emailResult.testMode})`);
-                  } else if (!emailResult.success) {
-                    console.log(`[Separation Sync] Tool Audit email failed for ${techName}: ${emailResult.error || 'unknown'}`);
-                    result.emailsSkipped++;
-                  }
-                } catch (emailError: any) {
-                  console.error(`[Separation Sync] Email error for ${techName}:`, emailError.message);
-                  result.emailsSkipped++;
-                }
-              } else {
-                console.log(`[Separation Sync] No personal email for ${techName}, skipping Tool Audit notification`);
-                result.emailsSkipped++;
-              }
-            } else if (deptUpper === 'FLEET') {
+            if (deptUpper === 'FLEET') {
               await storage.createFleetQueueItem(queueItem);
             } else if (deptUpper === 'INVENTORY CONTROL' || deptUpper === 'INVENTORY') {
               await storage.createInventoryQueueItem(queueItem);

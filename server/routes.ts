@@ -222,9 +222,9 @@ async function checkOffboardingDuplicates(data: any, department: string, current
       parsedData = JSON.parse(data);
     }
     
-    // Extract employee identifiers and workflow ID
-    const employeeId = parsedData?.employee?.employeeId || parsedData?.employeeId;
-    const techRacfId = parsedData?.employee?.racfId || parsedData?.techRacfId || parsedData?.employee?.enterpriseId;
+    // Extract employee identifiers and workflow ID (supports both "employee" and "technician" data formats)
+    const employeeId = parsedData?.employee?.employeeId || parsedData?.technician?.employeeId || parsedData?.employeeId;
+    const techRacfId = parsedData?.employee?.racfId || parsedData?.techRacfId || parsedData?.employee?.enterpriseId || parsedData?.technician?.enterpriseId || parsedData?.technician?.techRacfid;
     const workflowType = parsedData?.workflowType;
     const dataWorkflowId = parsedData?.workflowId;
     
@@ -281,8 +281,8 @@ async function checkOffboardingDuplicates(data: any, department: string, current
             }
             
             if (itemData?.workflowType === 'offboarding_sequence') {
-              const itemEmployeeId = itemData?.employee?.employeeId || itemData?.employeeId;
-              const itemTechRacfId = itemData?.employee?.racfId || itemData?.techRacfId || itemData?.employee?.enterpriseId;
+              const itemEmployeeId = itemData?.employee?.employeeId || itemData?.technician?.employeeId || itemData?.employeeId;
+              const itemTechRacfId = itemData?.employee?.racfId || itemData?.techRacfId || itemData?.employee?.enterpriseId || itemData?.technician?.enterpriseId || itemData?.technician?.techRacfid;
               const itemWorkflowId = item.workflowId || itemData?.workflowId;
               
               // Check if employee identifiers match
@@ -1890,74 +1890,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Get existing queue items
-      const existingQueueItems = await storage.getToolsQueueItems();
-      
-      // Build a set of existing enterprise IDs and employee IDs to check for duplicates
-      const existingIds = new Set<string>();
-      for (const item of existingQueueItems) {
-        try {
-          const parsedData = typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
-          const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.techRacfId;
-          const employeeId = parsedData?.employee?.employeeId || parsedData?.employeeId || parsedData?.emplid;
-          if (enterpriseId) existingIds.add(enterpriseId.toUpperCase());
-          if (employeeId) existingIds.add(employeeId);
-        } catch (e) {
-          // Skip items with invalid data
-        }
-      }
-      
-      // Sprint 11: Auto-create queue items for HR techs that don't have one yet
-      const newlyCreatedItems: typeof existingQueueItems = [];
-      for (const hrRecord of hrSeparations) {
-        const ldapUpper = hrRecord.ldapId?.toUpperCase();
-        const emplId = hrRecord.emplId;
-        
-        // Skip if already has a queue item
-        if ((ldapUpper && existingIds.has(ldapUpper)) || (emplId && existingIds.has(emplId))) {
-          continue;
-        }
-        
-        // Look up tech data from all_techs for additional info
-        let techFromDb = null;
-        if (ldapUpper) {
-          techFromDb = await storage.getAllTechByTechRacfid(ldapUpper);
-        }
-        if (!techFromDb && emplId) {
-          techFromDb = await storage.getAllTechByEmployeeId(emplId);
-        }
-        
-        // Create new queue item for this HR separation
-        try {
-          const newItem = await storage.createToolsQueueItem({
-            workflowType: 'offboarding',
-            title: `Tools Queue - ${hrRecord.technicianName || ldapUpper || 'Unknown'}`,
-            description: `HR separation record for ${hrRecord.technicianName || ldapUpper}`,
-            status: 'pending',
-            priority: 'medium',
-            requesterId: 'system',
-            department: 'Tools',
-            data: JSON.stringify({
-              source: 'hr_separation',
-              employee: {
-                enterpriseId: ldapUpper,
-                employeeId: emplId,
-                fullName: hrRecord.technicianName,
-              },
-              hrSeparation: hrRecord,
-            }),
-          });
-          newlyCreatedItems.push(newItem);
-          existingIds.add(ldapUpper || '');
-          existingIds.add(emplId || '');
-          console.log(`[Tools Queue] Auto-created queue item for HR separation: ${hrRecord.technicianName} (${ldapUpper})`);
-        } catch (createError) {
-          console.error(`[Tools Queue] Failed to auto-create queue item for ${ldapUpper}:`, createError);
-        }
-      }
-      
-      // Combine existing and newly created items
-      const allQueueItems = [...existingQueueItems, ...newlyCreatedItems];
+      // Get existing queue items (task creation now handled by Snowflake sync service)
+      const allQueueItems = await storage.getToolsQueueItems();
       
       // Build HR lookup map for quick access
       const hrLookup = new Map<string, typeof hrSeparations[0]>();
@@ -1975,9 +1909,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ? JSON.parse(item.data) 
             : item.data;
           
-          // Try to find tech by employee ID or enterprise ID
-          const employeeId = parsedData?.employee?.employeeId || parsedData?.employeeId || parsedData?.emplid;
-          const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.techRacfId;
+          // Try to find tech by employee ID or enterprise ID (supports both "employee" and "technician" data formats)
+          const employeeId = parsedData?.employee?.employeeId || parsedData?.technician?.employeeId || parsedData?.employeeId || parsedData?.emplid;
+          const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.technician?.enterpriseId || parsedData?.technician?.techRacfid || parsedData?.techRacfId;
           
           let tech = null;
           if (employeeId) {

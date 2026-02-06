@@ -96,10 +96,11 @@ Preferred communication style: Simple, everyday language.
 # Last Session Summary (2026-02-06)
 
 ## Completed
-- Resolved all Git merge conflicts between main branch (Communication Hub features) and SearsDriveLine branch (Vehicle Nexus Data + Weekly Offboarding features)
-- Fixed conflict markers in 3 core files: `shared/schema.ts`, `server/storage.ts`, `server/routes.ts`
-- Successfully merged main into SearsDriveLine branch via Replit Git UI
-- Both feature sets (Communication Hub + Vehicle Nexus Data) now coexist and run without errors
+- Fixed Tools Queue duplicate task issue: two systems were creating tasks for the same employees
+- Moved Tools task auto-creation from GET handler (page load side effect) into Snowflake sync service (scheduled, predictable)
+- Changed sync service to create "Tools Queue -" format tasks with rich HR data instead of sparse "Day 0" format
+- Improved duplicate detection to check both `employee.*` and `technician.*` data structures across all dedup functions
+- Cleaned up 4 duplicate Day 0 tasks from database; retained richer "Tools Queue -" versions
 
 ## Next Steps
 - Implement SMS sending via Twilio integration for Communication Hub
