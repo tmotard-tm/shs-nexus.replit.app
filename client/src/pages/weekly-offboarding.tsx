@@ -31,6 +31,7 @@ interface TermRosterEntry {
   contactPhone: string;
   owner: string;
   truck: string;
+  source?: string;
 }
 
 export default function WeeklyOffboarding() {
@@ -227,6 +228,7 @@ export default function WeeklyOffboarding() {
       keys: string | null;
       repaired: string | null;
       comments: string | null;
+      phoneRecoveryInitiated: string | null;
     }) => {
       return await apiRequest('PUT', `/api/vehicle-nexus-data/${data.vehicleNumber}`, data);
     },

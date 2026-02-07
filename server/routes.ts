@@ -7070,7 +7070,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       
       const formattedData = rows.map(row => {
-        // Build address from components
         const addressParts = [
           row.SNSTV_HOME_ADDR1,
           row.SNSTV_HOME_ADDR2,
@@ -7080,7 +7079,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ].filter(Boolean);
         const address = addressParts.join(', ');
         
-        // Format and combine phone numbers with "/" separator
         const phoneParts = [
           formatPhone(row.SNSTV_MAIN_PHONE),
           formatPhone(row.SNSTV_CELL_PHONE),
@@ -7101,10 +7099,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
           contactPhone: contactPhone,
           owner: getOwner(row.PLANNING_AREA),
           truck: row.TRUCK_LU || '',
+          source: 'term_roster' as string,
         };
       });
-      
-      res.json(formattedData);
+
+      // Collect existing enterprise IDs and employee IDs from main roster (uppercase for comparison)
+      const existingEnterpriseIds = new Set<string>();
+      for (const r of formattedData) {
+        if (r.enterpriseId) existingEnterpriseIds.add(r.enterpriseId.toUpperCase());
+        if (r.emplId) existingEnterpriseIds.add(r.emplId.toUpperCase());
+      }
+
+      // Query SEPARATION_FLEET_DETAILS for additional records not in main roster
+      // Enrich with contact info and tech specialty from the roster/contact views
+      let separationRecords: typeof formattedData = [];
+      try {
+        const sepQuery = `
+          SELECT 
+            s.LDAP_ID,
+            s.TECHNICIAN_NAME,
+            s.EMPLID,
+            s.PLANNING_AREA,
+            s.LAST_DAY,
+            s.EFFECTIVE_SEPARATION_DATE,
+            s.TRUCK_NUMBER,
+            s.CONTACT_NUMBER,
+            s.FLEET_PICKUP_ADDRESS,
+            c.SNSTV_HOME_ADDR1,
+            c.SNSTV_HOME_ADDR2,
+            c.SNSTV_HOME_CITY,
+            c.SNSTV_HOME_STATE,
+            c.SNSTV_HOME_POSTAL,
+            c.SNSTV_MAIN_PHONE,
+            c.SNSTV_CELL_PHONE,
+            c.SNSTV_HOME_PHONE,
+            r.TECH_SPECIALTY
+          FROM PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS s
+          LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+            ON s.EMPLID = c.EMPLID
+          LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW r
+            ON s.EMPLID = r.EMPLID
+          WHERE (s.LAST_DAY >= '2026-01-01' OR s.EFFECTIVE_SEPARATION_DATE >= '2026-01-01')
+          ORDER BY COALESCE(s.LAST_DAY, s.EFFECTIVE_SEPARATION_DATE) DESC NULLS LAST
+        `;
+
+        const sepRows = await snowflakeService.executeQuery(sepQuery) as Array<{
+          LDAP_ID: string;
+          TECHNICIAN_NAME: string | null;
+          EMPLID: string;
+          PLANNING_AREA: string | null;
+          LAST_DAY: string | null;
+          EFFECTIVE_SEPARATION_DATE: string | null;
+          TRUCK_NUMBER: string | null;
+          CONTACT_NUMBER: string | null;
+          FLEET_PICKUP_ADDRESS: string | null;
+          SNSTV_HOME_ADDR1: string | null;
+          SNSTV_HOME_ADDR2: string | null;
+          SNSTV_HOME_CITY: string | null;
+          SNSTV_HOME_STATE: string | null;
+          SNSTV_HOME_POSTAL: string | null;
+          SNSTV_MAIN_PHONE: string | null;
+          SNSTV_CELL_PHONE: string | null;
+          SNSTV_HOME_PHONE: string | null;
+          TECH_SPECIALTY: string | null;
+        }>;
+
+        console.log(`[Weekly Offboarding] Found ${sepRows.length} total separation records, filtering out duplicates...`);
+
+        for (const row of sepRows) {
+          const ldap = (row.LDAP_ID || '').toUpperCase();
+          const emplId = (row.EMPLID || '').toUpperCase();
+          if (!ldap && !emplId) continue;
+          if (ldap && existingEnterpriseIds.has(ldap)) continue;
+          if (!ldap && emplId && existingEnterpriseIds.has(emplId)) continue;
+
+          if (ldap) existingEnterpriseIds.add(ldap);
+          if (emplId) existingEnterpriseIds.add(emplId);
+
+          const homeAddrParts = [
+            row.SNSTV_HOME_ADDR1,
+            row.SNSTV_HOME_ADDR2,
+            row.SNSTV_HOME_CITY,
+            row.SNSTV_HOME_STATE,
+            row.SNSTV_HOME_POSTAL,
+          ].filter(Boolean);
+          const homeAddress = homeAddrParts.join(', ');
+          const address = row.FLEET_PICKUP_ADDRESS || homeAddress;
+
+          const phoneParts = [
+            formatPhone(row.CONTACT_NUMBER),
+            formatPhone(row.SNSTV_MAIN_PHONE),
+            formatPhone(row.SNSTV_CELL_PHONE),
+            formatPhone(row.SNSTV_HOME_PHONE)
+          ].filter(Boolean);
+          const uniquePhones = Array.from(new Set(phoneParts));
+          const contactPhone = uniquePhones.join(' / ');
+
+          separationRecords.push({
+            emplName: row.TECHNICIAN_NAME || '',
+            enterpriseId: row.LDAP_ID || '',
+            emplId: row.EMPLID || '',
+            emplStatus: 'T',
+            effdt: row.EFFECTIVE_SEPARATION_DATE || '',
+            lastDateWorked: row.LAST_DAY || '',
+            planningArea: row.PLANNING_AREA || '',
+            techSpecialty: row.TECH_SPECIALTY || '',
+            address: address,
+            contactPhone: contactPhone,
+            owner: getOwner(row.PLANNING_AREA),
+            truck: row.TRUCK_NUMBER || '',
+            source: 'separation' as string,
+          });
+        }
+
+        console.log(`[Weekly Offboarding] Added ${separationRecords.length} new records from separation table`);
+      } catch (sepError: any) {
+        console.error('[Weekly Offboarding] Error fetching separation records (continuing with main roster only):', sepError.message);
+      }
+
+      const allData = [...formattedData, ...separationRecords];
+      res.json(allData);
     } catch (error: any) {
       console.error("Error fetching weekly offboarding data:", error);
       res.status(500).json({ message: error.message });
