@@ -598,7 +598,7 @@ export function ToolsRecoveryQueue() {
   });
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>({ key: "separationDate", direction: "desc" });
   const itemsPerPage = 10;
 
   const { data: queueItems = [], isLoading, refetch } = useQuery<ToolsQueueItemEnriched[]>({
@@ -696,8 +696,8 @@ export function ToolsRecoveryQueue() {
           bVal = b.techData?.district || "";
           break;
         case "separationDate":
-          aVal = a.techData?.separationDate || "";
-          bVal = b.techData?.separationDate || "";
+          aVal = a.techData?.separationDate ? new Date(a.techData.separationDate).getTime() : 0;
+          bVal = b.techData?.separationDate ? new Date(b.techData.separationDate).getTime() : 0;
           break;
         case "vehicleType":
           aVal = getVehicleType(a);
