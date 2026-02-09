@@ -1890,6 +1890,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      // Parse date range filter (default 30 days, 0 = show all)
+      const parsedDaysBack = parseInt(req.query.daysBack as string);
+      const daysBack = Number.isFinite(parsedDaysBack) ? parsedDaysBack : 30;
+      
+      // Filter HR separations by date range if daysBack > 0
+      if (daysBack > 0) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+        cutoffDate.setHours(0, 0, 0, 0);
+        
+        hrSeparations = hrSeparations.filter(hr => {
+          const sepDate = hr.lastDay || hr.effectiveSeparationDate;
+          if (!sepDate) return true;
+          return new Date(sepDate) >= cutoffDate;
+        });
+        console.log(`[Tools Queue] After ${daysBack}-day filter: ${hrSeparations.length} separations`);
+      }
+      
       // Get existing queue items (task creation now handled by Snowflake sync service)
       const allQueueItems = await storage.getToolsQueueItems();
       
@@ -1965,8 +1983,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               separationCategory: hrRecord?.separationCategory || null,
               hrTruckNumber: hrRecord?.truckNumber || null,
               notes: hrRecord?.notes || null,
-              // Sprint 11: Track if enriched from Snowflake HR data
-              fromSnowflake: !!hrRecord,
+              fromSnowflake: true,
             };
           } else {
             // Fallback: extract from queue item data/title, with HR separation data overlay
@@ -1983,8 +2000,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               separationCategory: hrRecord?.separationCategory || null,
               hrTruckNumber: hrRecord?.truckNumber || null,
               notes: hrRecord?.notes || null,
-              // Sprint 11: Track if enriched from Snowflake HR data
-              fromSnowflake: !!hrRecord,
+              fromSnowflake: true,
             };
           }
         } catch (e) {
@@ -2012,7 +2028,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       }));
       
-      res.json(enrichedItems);
+      // Apply date range filter to enriched items based on separation date
+      let filteredItems = enrichedItems;
+      if (daysBack > 0) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+        cutoffDate.setHours(0, 0, 0, 0);
+        
+        filteredItems = enrichedItems.filter(item => {
+          const sepDate = item.techData?.separationDate;
+          if (!sepDate) return true;
+          return new Date(sepDate) >= cutoffDate;
+        });
+      }
+      
+      res.json(filteredItems);
     } catch (error) {
       console.error('Error fetching enriched tools queue items:', error);
       res.status(500).json({ message: "Failed to fetch Tools queue items" });

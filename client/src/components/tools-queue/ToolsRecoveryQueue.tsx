@@ -95,6 +95,25 @@ function getDaysUntilSeparation(separationDate: string | null): number | null {
   return diffDays;
 }
 
+function getDaysSinceSeparation(separationDate: string | null): number | null {
+  if (!separationDate) return null;
+  const sepDate = new Date(separationDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  sepDate.setHours(0, 0, 0, 0);
+  const diffTime = today.getTime() - sepDate.getTime();
+  return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+}
+
+function getAgingBadge(separationDate: string | null): { label: string; className: string } | null {
+  const daysSince = getDaysSinceSeparation(separationDate);
+  if (daysSince === null) return null;
+  if (daysSince < 0) return { label: "Upcoming", className: "bg-blue-100 text-blue-700 border-blue-200" };
+  if (daysSince <= 7) return { label: "New", className: "bg-green-100 text-green-700 border-green-200" };
+  if (daysSince <= 30) return { label: "Active", className: "bg-amber-100 text-amber-700 border-amber-200" };
+  return { label: "Overdue", className: "bg-red-100 text-red-700 border-red-200" };
+}
+
 function getUrgencyLevel(vehicleType: VehicleType, daysUntilSep: number | null): UrgencyLevel {
   const days = daysUntilSep ?? 999;
   
@@ -147,6 +166,7 @@ interface FilterState {
   vehicleType: string[];
   district: string[];
   incompleteOnly: boolean;
+  daysBack: number;
 }
 
 function ToolsRecoveryFilterBar({
@@ -169,6 +189,7 @@ function ToolsRecoveryFilterBar({
     activeFilters.vehicleType.length > 0 ||
     activeFilters.district.length > 0 ||
     activeFilters.incompleteOnly ||
+    activeFilters.daysBack !== 30 ||
     searchQuery;
 
   return (
@@ -226,6 +247,23 @@ function ToolsRecoveryFilterBar({
           {availableDistricts.map((d) => (
             <SelectItem key={d} value={d}>{d}</SelectItem>
           ))}
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={String(activeFilters.daysBack)}
+        onValueChange={(val) => onFilterChange("daysBack", parseInt(val))}
+      >
+        <SelectTrigger className="w-[160px]">
+          <SelectValue placeholder="Date Range" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="7">Last 7 Days</SelectItem>
+          <SelectItem value="14">Last 14 Days</SelectItem>
+          <SelectItem value="30">Last 30 Days</SelectItem>
+          <SelectItem value="60">Last 60 Days</SelectItem>
+          <SelectItem value="90">Last 90 Days</SelectItem>
+          <SelectItem value="0">All Time</SelectItem>
         </SelectContent>
       </Select>
 
@@ -556,6 +594,7 @@ export function ToolsRecoveryQueue() {
     vehicleType: [],
     district: [],
     incompleteOnly: false,
+    daysBack: 30,
   });
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -563,7 +602,7 @@ export function ToolsRecoveryQueue() {
   const itemsPerPage = 10;
 
   const { data: queueItems = [], isLoading, refetch } = useQuery<ToolsQueueItemEnriched[]>({
-    queryKey: ["/api/tools-queue"],
+    queryKey: [`/api/tools-queue?daysBack=${filters.daysBack}`],
     refetchInterval: 30000,
   });
 
@@ -571,11 +610,20 @@ export function ToolsRecoveryQueue() {
     queryKey: ["/api/users"],
   });
 
+  const invalidateToolsQueue = () => {
+    queryClient.invalidateQueries({
+      predicate: (query) => {
+        const key = query.queryKey[0];
+        return typeof key === "string" && key.startsWith("/api/tools-queue");
+      },
+    });
+  };
+
   const completeMutation = useMutation({
     mutationFn: (itemId: string) =>
       apiRequest("PATCH", `/api/tools-queue/${itemId}/complete`, { completedBy: user?.id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/tools-queue"] });
+      invalidateToolsQueue();
       toast({ title: "Case marked complete" });
       setExpandedRowId(null);
     },
@@ -588,7 +636,7 @@ export function ToolsRecoveryQueue() {
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>
       apiRequest("PATCH", `/api/tools-queue/${queueItemId}/assign`, { assigneeId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/tools-queue"] });
+      invalidateToolsQueue();
       toast({ title: "Case assigned to you" });
     },
     onError: () => {
@@ -695,8 +743,8 @@ export function ToolsRecoveryQueue() {
   };
 
   const handleFilterChange = (type: keyof FilterState, value: any) => {
-    if (type === "incompleteOnly") {
-      setFilters((prev) => ({ ...prev, incompleteOnly: value }));
+    if (type === "incompleteOnly" || type === "daysBack") {
+      setFilters((prev) => ({ ...prev, [type]: value }));
     } else {
       setFilters((prev) => ({ ...prev, [type]: value }));
     }
@@ -705,7 +753,7 @@ export function ToolsRecoveryQueue() {
 
   const handleClearFilters = () => {
     setSearchQuery("");
-    setFilters({ status: [], vehicleType: [], district: [], incompleteOnly: false });
+    setFilters({ status: [], vehicleType: [], district: [], incompleteOnly: false, daysBack: 30 });
     setCurrentPage(1);
   };
 
@@ -849,9 +897,21 @@ export function ToolsRecoveryQueue() {
                       </td>
                       <td className="px-4 py-3 text-slate-600">{row.techData?.district || "N/A"}</td>
                       <td className="px-4 py-3 text-slate-600">
-                        {row.techData?.separationDate
-                          ? new Date(row.techData.separationDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-                          : "N/A"}
+                        <div className="flex flex-col gap-1">
+                          <span>
+                            {row.techData?.separationDate
+                              ? new Date(row.techData.separationDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                              : "N/A"}
+                          </span>
+                          {(() => {
+                            const aging = getAgingBadge(row.techData?.separationDate || null);
+                            return aging ? (
+                              <Badge className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${aging.className}`}>
+                                {aging.label}
+                              </Badge>
+                            ) : null;
+                          })()}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <Badge className={`text-xs ${getVehicleBadgeStyle(vehicleType)}`}>

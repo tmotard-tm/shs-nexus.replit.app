@@ -100,6 +100,9 @@ Preferred communication style: Simple, everyday language.
 - Fixed critical bug: `completeMutation` was not sending `completedBy` field to backend (would cause 400 errors on case completion)
 - Fixed `getSnowflakeSyncService` not imported in contact endpoint (mobile phone lookup was silently failing)
 - Replaced placeholder `#segno` links with properly disabled "Coming Soon" buttons
+- Fixed "Source: Snowflake" tag not showing on all Tools Queue cases (now always true since all cases come from Snowflake)
+- Added 30-day default date filter to Tools Queue (backend `daysBack` query param + frontend dropdown with 7/14/30/60/90/All options)
+- Added aging badges to Tools Queue cases: Upcoming (blue), New (green, ≤7d), Active (amber, 8-30d), Overdue (red, 30+d)
 - Verified app runs cleanly with all 150+ routes registered
 
 ## Next Steps

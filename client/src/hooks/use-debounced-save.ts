@@ -36,7 +36,12 @@ export function useDebouncedSave({ itemId, debounceMs = 500, onError }: UseDebou
     },
     onSuccess: () => {
       setSaveStatus("saved");
-      queryClient.invalidateQueries({ queryKey: ["/api/tools-queue"] });
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey[0];
+          return typeof key === "string" && key.startsWith("/api/tools-queue");
+        },
+      });
       setTimeout(() => {
         setSaveStatus((current) => (current === "saved" ? "idle" : current));
       }, 2000);
