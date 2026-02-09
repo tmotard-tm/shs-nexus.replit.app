@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck } from "lucide-react";
+import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -337,6 +337,29 @@ export default function WeeklyOffboarding() {
     }
   };
 
+  const postOffboardingCounts = (() => {
+    const counts: Record<string, number> = {};
+    for (const entry of filteredRoster) {
+      const filterTruck = entry.truck || (entry.enterpriseId ? manualTruckOverrides[entry.enterpriseId] : null);
+      const nexusInfo = filterTruck ? nexusDataMap.get(filterTruck) : null;
+      const status = nexusInfo?.postOffboardedStatus || '__none__';
+      counts[status] = (counts[status] || 0) + 1;
+    }
+    return counts;
+  })();
+
+  const postOffboardingCardDefs: { key: string; label: string; icon: any; color: string; bg: string }[] = [
+    { key: '__none__', label: 'Not yet confirmed', icon: HelpCircle, color: 'text-gray-500', bg: 'bg-gray-50 dark:bg-gray-900' },
+    { key: 'reserved_for_new_hire', label: 'Reserved for new hire', icon: UserMinus, color: 'text-purple-600', bg: 'bg-purple-50 dark:bg-purple-950' },
+    { key: 'in_repair', label: 'In repair', icon: Wrench, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950' },
+    { key: 'declined_repair', label: 'Declined repair', icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-950' },
+    { key: 'available_for_rental_pmf', label: 'Available to assign or send to PMF', icon: Package, color: 'text-green-600', bg: 'bg-green-50 dark:bg-green-950' },
+    { key: 'sent_to_pmf', label: 'Sent to PMF', icon: MapPin, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950' },
+    { key: 'assigned_to_tech_in_rental', label: 'Assigned to rental', icon: CarFront, color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950' },
+    { key: 'assigned_to_tech', label: 'Assigned to tech', icon: CheckCircle, color: 'text-teal-600', bg: 'bg-teal-50 dark:bg-teal-950' },
+    { key: 'not_found', label: 'Not found', icon: Search, color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950' },
+  ];
+
   const getStatusBadgeVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
     const upperStatus = (status || '').toUpperCase();
     if (upperStatus.includes('TERM') || upperStatus.includes('INACTIVE')) return 'destructive';
@@ -390,7 +413,7 @@ export default function WeeklyOffboarding() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-col gap-4 mb-6">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                 <Card className="bg-red-50 dark:bg-red-950">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
@@ -402,28 +425,22 @@ export default function WeeklyOffboarding() {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="bg-orange-50 dark:bg-orange-950">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Filtered Results</p>
-                        <p className="text-2xl font-bold">{filteredRoster.length}</p>
-                      </div>
-                      <Search className="h-8 w-8 text-orange-600" />
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="bg-blue-50 dark:bg-blue-950">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Unique Statuses</p>
-                        <p className="text-2xl font-bold">{uniqueStatuses.length}</p>
-                      </div>
-                      <AlertCircle className="h-8 w-8 text-blue-600" />
-                    </div>
-                  </CardContent>
-                </Card>
+                {postOffboardingCardDefs.filter(def => (postOffboardingCounts[def.key] || 0) > 0).map(def => {
+                  const IconComp = def.icon;
+                  return (
+                    <Card key={def.key} className={def.bg}>
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-muted-foreground">{def.label}</p>
+                            <p className="text-2xl font-bold">{postOffboardingCounts[def.key] || 0}</p>
+                          </div>
+                          <IconComp className={`h-8 w-8 ${def.color}`} />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
 
               <div className="flex items-center gap-4 flex-wrap">
@@ -487,7 +504,7 @@ export default function WeeklyOffboarding() {
                     <SelectContent>
                       <SelectItem value="all">All Manual Statuses</SelectItem>
                       <SelectItem value="__none__">-- No Status Set --</SelectItem>
-                      {uniqueManualStatuses.map((status) => (
+                      {Array.from(new Set([...uniqueManualStatuses, 'assigned_to_tech_in_rental'])).sort().map((status) => (
                         <SelectItem key={status} value={status}>
                           {manualStatusLabels[status] || status}
                         </SelectItem>
