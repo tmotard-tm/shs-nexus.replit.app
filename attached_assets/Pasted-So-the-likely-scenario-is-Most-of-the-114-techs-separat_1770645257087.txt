@@ -1,0 +1,86 @@
+So the likely scenario is: Most of the 114 techs' separation dates are older than 30 days (before ~January 10, 2026), so they're being filtered out. Only 1 tech has a separation date within the last 30 days, which is why you see exactly 1 case. > This is incorrect so please investigate further because this is the wrong hypothesis
+
+You're right, let me dig deeper instead of assuming. Let me check what's actually happening when the endpoint runs.
+
+Interesting — no user has TOOLS in their departments array. But the user said 1 case is showing (not a 403 error), so they must be logged in as a developer who bypasses the check. Let me look at the getToolsQueueItems storage method — maybe the filtering is happening there:
+
+The getToolsQueueItems storage method is straightforward — just SELECT * FROM queue_items WHERE department = 'Tools'. No hidden filter there. So the storage returns all 114 items.
+
+Let me look more carefully at the endpoint flow. My date hypothesis was wrong, so let me trace the exact logic. The key question: what does getAllConfirmedSeparations() return, and what happens during enrichment? Let me check if the Snowflake call could be failing silently and returning 0 records, which would make the hrLookup map empty:
+
+Wait — I need to look at this from a completely different angle. Let me check the previous server logs from when the endpoint was actually called successfully, to see the actual log output:
+
+The logs from the last run don't show the Tools Queue endpoint being hit with the debug output. Let me look at the browser console logs more carefully — the endpoint was called and returned 200, but I need to see what the actual response contained. Let me check the earlier log file:
+
+Let me look at the actual data of the 1 item that IS showing versus the others. Let me check if maybe there's a duplicate route registration issue — there are TWO /api/weekly-offboarding routes and possibly two /api/tools-queue routes:
+
+Only one GET /api/tools-queue route — no duplicate. The issue must be in the enrichment/filtering logic. Let me now look at the enrichment more carefully. On line 2038-2042, it filters by separation date. But the data I saw has lastDayWorked: "2025-08-31" embedded in the queue item JSON. During enrichment, the code looks up the tech in all_techs table and in the HR separation map. Let me check what all_techs has:
+
+Now let me trace the exact enrichment logic with a sample backfill item. The backfilled data has employee.racfId = "KGALVEZ" and employee.employeeId = "51024629565". The enrichment code at line 1931-1932:
+
+employeeId = parsedData?.employee?.employeeId  → "51024629565"
+enterpriseId = parsedData?.employee?.racfId     → wait...
+Let me re-read lines 1931-1932 more carefully:
+
+Now let me look at the backfill data structure. From the SQL output, one sample item has:
+
+"employee": {"name": "GALVEZ, KYRON", "racfId": "KGALVEZ", "employeeId": "51024629565", "enterpriseId": "KGALVEZ"},
+"technician": {"techName": "GALVEZ, KYRON", "techRacfid": "KGALVEZ", "enterpriseId": "KGALVEZ", "employeeId": "51024629565"}
+So enterpriseId resolves to "KGALVEZ". The hrLookup map is keyed by LDAP_ID.toUpperCase() and EMPLID. If this tech isn't in the SEPARATION_FLEET_DETAILS table, hrRecord will be null. Then the enrichment falls back to all_techs data for separation date.
+
+But wait — the date filter isn't the issue (you told me that). Let me think about what else could cause only 1 result...
+
+Let me check if the getAllConfirmedSeparations() Snowflake call is actually failing or returning very few records:
+
+No log output means no tools-queue endpoint was hit during those server sessions. The endpoint was only called from the browser (browser console shows GET /api/tools-queue?daysBack=30 -> 200 OK), but the server crashed before I could get the detailed log.
+
+Let me approach this differently. Let me look at what the endpoint actually does to the 114 items. I need to find if any step is eliminating items. Let me re-read the filtering logic more carefully — specifically the second date filter at line 2031-2043:
+
+OK wait — you said the date hypothesis was wrong, so let me look at this from scratch. Let me check whether the enrichment process itself could be throwing errors for most items, causing them to fall into the catch block with fromSnowflake: false. Actually, looking at the code, even if parsing fails, the item still gets added to enrichedItems — it just gets fallback data. The catch block on line 2006 doesn't skip the item.
+
+Let me actually check the most critical thing — what data does the backfill store in the data JSON? Let me look at a few items and their enterprise IDs, then check if those enterprise IDs exist in all_techs:
+
+All those techs exist in all_techs. And many have lastDayWorked dates well within 30 days (Dec 1-5, 2025 would be ~70 days ago from Feb 9, 2026 — so those WOULD be filtered out). But some may have more recent dates in all_techs.
+
+Let me check what all_techs actually has for separation dates for these people:
+
+OK, that's revealing. The most recent last_day_worked in all_techs for any of these 114 techs is December 12, 2025 — which is 59 days ago from today. But you said the date filter hypothesis is wrong, so let me dig into other possibilities. Let me check if the 1 item showing is a non-backfill item, and also check if the Snowflake HR call could be the issue:
+
+All 114 items are from the backfill — and there are zero non-backfill items. So the 1 item showing in the UI isn't a pre-existing item vs backfill distinction.
+
+Let me now look at what the endpoint does from a different angle. Let me check if getSnowflakeSyncService() could be returning something unexpected, and more importantly — let me check if the endpoint might be erroring out during the Promise.all enrichment and only partially returning data:
+
+Wait — line 1949 calls snowflakeSyncService.getMobilePhoneByLdap(enterpriseId) but snowflakeSyncService could potentially be null if Snowflake isn't configured. And that call is inside a try/catch so it wouldn't crash, but it would run for all 114 items. Let me check what getMobilePhoneByLdap does — does it make a live Snowflake query per item?
+
+There it is. getMobilePhoneByLdap makes a live Snowflake query for every single item — 114 separate Snowflake calls. Each one connects, runs a query, etc. But that would just be slow, not reduce the count.
+
+Let me now look at it from the actual result perspective. The endpoint IS returning a 200 with data (browser logs confirm GET /api/tools-queue?daysBack=30 -> 200 OK). So it's not crashing. It's returning some array — with apparently 1 item.
+
+Let me check: could the Promise.all be silently failing? If snowflakeSyncService is null and you call .getMobilePhoneByLdap() on null, that throws a TypeError. It's inside a try/catch per item. But what if snowflakeSyncService is not null, yet getAllConfirmedSeparations() succeeds and returns records with dates, and those DO overlap with the items...
+
+Actually, let me just directly test what the date hypothesis would produce:
+
+OK that's conclusive from the database side:
+
+0 techs have last_day_worked within 30 days
+0 techs have effective_date within 30 days
+0 techs have null dates (which would pass through the filter)
+So if the date filter were the issue, the result would be 0 items, not 1. You're right — the date filter alone doesn't explain the "1 item showing" behavior. Something else is going on.
+
+Let me check if maybe the 1 item is coming from the Snowflake HR separation lookup giving it a recent date that overrides the old all_techs date. The enrichment code prioritizes hrRecord?.lastDay over tech.lastDayWorked. If exactly 1 of the 114 techs appears in SEPARATION_FLEET_DETAILS with a recent date, that one item would survive the 30-day filter while the rest get cut.
+
+I can't query Snowflake directly from SQL, but let me check the endpoint logic one more time to see if there's something I'm missing about how items get included/excluded:
+
+OK, I now understand the full picture after tracing the code carefully. Here's my revised finding:
+
+The issue is actually a combination of two things working together:
+
+The date filter IS involved — but not in the way I originally said. The all_techs data shows 0 techs with dates within 30 days, and 0 techs with null dates. So the date filter alone would yield 0 items, not 1.
+
+The 1 item showing must be a tech that exists in the Snowflake SEPARATION_FLEET_DETAILS HR table with a recent date — because the enrichment code (line 1972) prioritizes hrRecord?.lastDay over tech.lastDayWorked. If exactly 1 of those 114 techs appears in the HR separation table with a date within the last 30 days, that 1 item gets a recent separation date and passes the filter. The other 113 fall back to their all_techs dates (all older than 30 days) and get filtered out.
+
+So the real problem is: the endpoint requires every tech to have an HR separation record with a recent date in order to pass the 30-day filter, but the backfilled items represent techs who were termed weeks/months ago. The all_techs dates are all too old to pass the 30-day window.
+
+Here's the plan to fix this:
+
+The endpoint should not use the tech's separation date as the primary filter for whether to show a Tools task. The Tools Queue should show all active/pending tasks regardless of when the tech was separated — the task exists because work still needs to be done. The daysBack filter should either apply to the queue item's created_at date, or be removed entirely from the Tools Queue (leaving only status-based filtering).
