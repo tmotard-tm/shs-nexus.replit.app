@@ -89,6 +89,9 @@ export function useDebouncedSave({ itemId, module = 'tools', debounceMs = 500, o
     }, debounceMs);
   }, [debounceMs, mutation]);
 
+  const endpointRef = useRef(endpoint);
+  endpointRef.current = endpoint;
+
   useEffect(() => {
     return () => {
       if (timeoutRef.current) {
@@ -98,12 +101,12 @@ export function useDebouncedSave({ itemId, module = 'tools', debounceMs = 500, o
         const dataToSave = { ...pendingDataRef.current };
         pendingDataRef.current = {};
         navigator.sendBeacon?.(
-          endpoint,
+          endpointRef.current,
           new Blob([JSON.stringify(dataToSave)], { type: 'application/json' })
         );
       }
     };
-  }, [itemId]);
+  }, [itemId, module]);
 
   return { save, saveStatus, isPending: mutation.isPending, flushPending };
 }
