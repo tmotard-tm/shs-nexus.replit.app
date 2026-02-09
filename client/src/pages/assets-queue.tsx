@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { QueueItem, User } from "@shared/schema";
-import { Clock, User as UserIcon, Save, CheckCircle } from "lucide-react";
+import { Clock, User as UserIcon, Save, CheckCircle, Phone, Truck, Calendar } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
@@ -126,6 +126,49 @@ export default function AssetsQueuePage() {
       item.taskCreateShippingLabel,
     ];
     return tasks.filter(Boolean).length;
+  };
+
+  const getTechData = (item: QueueItem) => {
+    try {
+      const parsed = item.data ? JSON.parse(item.data) : {};
+      return parsed.technician || parsed.employee || {};
+    } catch { return {}; }
+  };
+
+  const getSeparationDate = (item: QueueItem) => {
+    const td = getTechData(item);
+    const raw = td.separationDate || td.lastDayWorked || null;
+    if (!raw) return null;
+    return new Date(raw);
+  };
+
+  const getAgingBadge = (item: QueueItem) => {
+    const sepDate = getSeparationDate(item);
+    if (!sepDate) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((today.getTime() - sepDate.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) return { label: "Upcoming", className: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300" };
+    if (diffDays <= 7) return { label: "New", className: "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300" };
+    if (diffDays <= 30) return { label: "Active", className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300" };
+    return { label: "Overdue", className: "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300" };
+  };
+
+  const getVehicleLabel = (item: QueueItem) => {
+    if ((item as any).vehicleType === "byov" || (item as any).isByov) return "BYOV";
+    if ((item as any).vehicleType === "rental") return "Rental";
+    return null;
+  };
+
+  const getRoutingLabel = (item: QueueItem) => {
+    const r = (item as any).fleetRoutingDecision;
+    if (!r || r === "Pending") return null;
+    return r;
+  };
+
+  const getPersonalPhone = (item: QueueItem) => {
+    const td = getTechData(item);
+    return td.personalPhone || td.homePhone || td.contactNumber || null;
   };
 
   // Group items by status
@@ -253,6 +296,39 @@ export default function AssetsQueuePage() {
                                 </div>
                               )}
                             </div>
+                            <div className="flex items-center gap-2 mt-2 flex-wrap">
+                              {getSeparationDate(item) && (
+                                <Badge variant="outline" className="text-xs gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  Sep: {getSeparationDate(item)!.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                </Badge>
+                              )}
+                              {(() => {
+                                const aging = getAgingBadge(item);
+                                return aging ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 h-4 font-medium border ${aging.className}`}>
+                                    {aging.label}
+                                  </Badge>
+                                ) : null;
+                              })()}
+                              {getVehicleLabel(item) && (
+                                <Badge variant="outline" className={`text-xs ${getVehicleLabel(item) === "BYOV" ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300" : "bg-purple-50 text-purple-700 border-purple-200"}`}>
+                                  <Truck className="h-3 w-3 mr-1" />
+                                  {getVehicleLabel(item)}
+                                </Badge>
+                              )}
+                              {getPersonalPhone(item) && (
+                                <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                  <Phone className="h-3 w-3 mr-1" />
+                                  Personal Phone
+                                </Badge>
+                              )}
+                              {getRoutingLabel(item) && (
+                                <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300">
+                                  {getRoutingLabel(item)}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                           <div className="flex flex-col items-end gap-2">
                             <div className="flex gap-2">
@@ -318,6 +394,39 @@ export default function AssetsQueuePage() {
                                   <UserIcon className="h-4 w-4" />
                                   {assignedUser.username}
                                 </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-2 flex-wrap">
+                              {getSeparationDate(item) && (
+                                <Badge variant="outline" className="text-xs gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  Sep: {getSeparationDate(item)!.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                </Badge>
+                              )}
+                              {(() => {
+                                const aging = getAgingBadge(item);
+                                return aging ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 h-4 font-medium border ${aging.className}`}>
+                                    {aging.label}
+                                  </Badge>
+                                ) : null;
+                              })()}
+                              {getVehicleLabel(item) && (
+                                <Badge variant="outline" className={`text-xs ${getVehicleLabel(item) === "BYOV" ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300" : "bg-purple-50 text-purple-700 border-purple-200"}`}>
+                                  <Truck className="h-3 w-3 mr-1" />
+                                  {getVehicleLabel(item)}
+                                </Badge>
+                              )}
+                              {getPersonalPhone(item) && (
+                                <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                  <Phone className="h-3 w-3 mr-1" />
+                                  Personal Phone
+                                </Badge>
+                              )}
+                              {getRoutingLabel(item) && (
+                                <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300">
+                                  {getRoutingLabel(item)}
+                                </Badge>
                               )}
                             </div>
                           </div>
@@ -399,6 +508,39 @@ export default function AssetsQueuePage() {
                                   <UserIcon className="h-4 w-4" />
                                   {assignedUser.username}
                                 </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-2 flex-wrap">
+                              {getSeparationDate(item) && (
+                                <Badge variant="outline" className="text-xs gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  Sep: {getSeparationDate(item)!.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                </Badge>
+                              )}
+                              {(() => {
+                                const aging = getAgingBadge(item);
+                                return aging ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 h-4 font-medium border ${aging.className}`}>
+                                    {aging.label}
+                                  </Badge>
+                                ) : null;
+                              })()}
+                              {getVehicleLabel(item) && (
+                                <Badge variant="outline" className={`text-xs ${getVehicleLabel(item) === "BYOV" ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300" : "bg-purple-50 text-purple-700 border-purple-200"}`}>
+                                  <Truck className="h-3 w-3 mr-1" />
+                                  {getVehicleLabel(item)}
+                                </Badge>
+                              )}
+                              {getPersonalPhone(item) && (
+                                <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                  <Phone className="h-3 w-3 mr-1" />
+                                  Personal Phone
+                                </Badge>
+                              )}
+                              {getRoutingLabel(item) && (
+                                <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300">
+                                  {getRoutingLabel(item)}
+                                </Badge>
                               )}
                             </div>
                           </div>

@@ -35,6 +35,9 @@ import {
   CreditCard,
   Package,
   Wifi,
+  Phone,
+  Mail,
+  MapPin,
 } from "lucide-react";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
 import { useDebouncedSave } from "@/hooks/use-debounced-save";
@@ -201,6 +204,7 @@ export function WorkModuleDialog({
     taskCreateShippingLabel: false,
   });
   const [assetsCarrier, setAssetsCarrier] = useState<string>("");
+  const [assetsRouting, setAssetsRouting] = useState<string>("Pending");
 
   const { saveStatus: assetsSaveStatus, save: assetsDebouncedSave } = useDebouncedSave({
     itemId: currentQueueItem?.id || '',
@@ -218,6 +222,7 @@ export function WorkModuleDialog({
         taskCreateShippingLabel: (currentQueueItem as any).taskCreateShippingLabel ?? false,
       });
       setAssetsCarrier((currentQueueItem as any).carrier || "");
+      setAssetsRouting((currentQueueItem as any).fleetRoutingDecision || "Pending");
     }
   }, [currentQueueItem, isAssetsModule]);
 
@@ -230,6 +235,11 @@ export function WorkModuleDialog({
   const handleAssetsCarrierChange = (value: string) => {
     setAssetsCarrier(value);
     assetsDebouncedSave({ carrier: value });
+  };
+
+  const handleAssetsRoutingChange = (value: string) => {
+    setAssetsRouting(value);
+    assetsDebouncedSave({ fleetRoutingDecision: value });
   };
 
   const assetsCompletedCount = Object.values(assetsTaskState).filter(Boolean).length;
@@ -651,70 +661,181 @@ export function WorkModuleDialog({
             
             <TabsContent value="checklist" className="space-y-4">
               {isAssetsModule ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4" />
-                      Recovery Tasks
-                    </CardTitle>
-                    <CardDescription className="flex items-center justify-between">
-                      <span>Complete each task as you work through this case</span>
-                      <Badge variant="secondary" className="ml-2">
-                        {assetsCompletedCount}/6 Complete
-                      </Badge>
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <div className="divide-y divide-border">
-                      {assetsTaskItems.map((task) => {
-                        const Icon = task.icon;
-                        const isChecked = assetsTaskState[task.key];
-                        const isReadonly = currentQueueItem?.status === "completed";
-                        return (
-                          <label
-                            key={task.key}
-                            className={`flex items-start gap-3 p-4 cursor-pointer hover:bg-muted/50 transition-colors ${isChecked ? "bg-muted/30" : ""} ${isReadonly ? "pointer-events-none opacity-70" : ""}`}
-                          >
-                            <Checkbox
-                              checked={isChecked}
-                              onCheckedChange={(checked) => handleAssetsTaskChange(task.key, !!checked)}
-                              className="mt-1"
-                              disabled={isReadonly}
-                            />
-                            <div className="flex-1">
-                              <div className={`text-sm font-medium ${isChecked ? "text-muted-foreground line-through" : "text-foreground"}`}>
-                                {task.label}
-                              </div>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                {task.showCarrier && (
-                                  <Select value={assetsCarrier} onValueChange={handleAssetsCarrierChange} disabled={isReadonly}>
-                                    <SelectTrigger className="h-6 w-[120px] text-xs">
-                                      <SelectValue placeholder="Carrier" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="Verizon">Verizon</SelectItem>
-                                      <SelectItem value="T-Mobile">T-Mobile</SelectItem>
-                                      <SelectItem value="AT&T">AT&T</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                )}
-                                <span className="text-xs text-muted-foreground">{task.desc}</span>
-                              </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="lg:col-span-1 space-y-4">
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <Phone className="h-4 w-4" />
+                          Contact Details
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3 text-sm">
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Mobile Phone:</span>
+                          <span className="font-medium flex items-center gap-1">
+                            <Smartphone className="h-3 w-3 text-muted-foreground" />
+                            {formatPhone(enrichedEmployeeData.cellPhone || techData?.mobilePhone)}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Personal Phone:</span>
+                          {(enrichedEmployeeData.homePhone || techData?.personalPhone || techData?.contactNumber) ? (
+                            <span className="font-medium text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              {formatPhone(enrichedEmployeeData.homePhone || techData?.personalPhone || techData?.contactNumber)}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">N/A</span>
+                          )}
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Email:</span>
+                          {(enrichedEmployeeData.email || enrichedEmployeeData.emailAddress || techData?.email || techData?.personalEmail) ? (
+                            <a
+                              href={`mailto:${enrichedEmployeeData.email || enrichedEmployeeData.emailAddress || techData?.email || techData?.personalEmail}`}
+                              className="font-medium text-blue-600 hover:underline flex items-center gap-1 text-xs"
+                            >
+                              <Mail className="h-3 w-3" />
+                              {enrichedEmployeeData.email || enrichedEmployeeData.emailAddress || techData?.email || techData?.personalEmail}
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground">N/A</span>
+                          )}
+                        </div>
+                        <Separator />
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Separation:</span>
+                          <span className="font-medium">
+                            {enrichedEmployeeData.separationDate || enrichedEmployeeData.lastDayWorked || taskData.separationDate || taskData.lastDayWorked
+                              ? new Date(enrichedEmployeeData.separationDate || enrichedEmployeeData.lastDayWorked || taskData.separationDate || taskData.lastDayWorked).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                              : "N/A"}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Vehicle:</span>
+                          <Badge variant="outline" className="text-xs">
+                            {(currentQueueItem as any)?.vehicleType === "byov" || (currentQueueItem as any)?.isByov ? "BYOV" : 
+                             (currentQueueItem as any)?.vehicleType === "rental" ? "Rental" : 
+                             taskData?.vehicleType ? "Company" : "Unknown"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Fleet Pickup:</span>
+                          <span className="font-medium text-right max-w-[150px] flex items-start justify-end gap-1 text-xs">
+                            <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0 text-amber-500" />
+                            {taskData?.vehicle?.fleetPickupAddress 
+                              ? taskData.vehicle.fleetPickupAddress
+                              : enrichedEmployeeData.homeAddr1 
+                                ? `${enrichedEmployeeData.homeAddr1}${enrichedEmployeeData.homeCity ? `, ${enrichedEmployeeData.homeCity}` : ''}${enrichedEmployeeData.homeState ? ` ${enrichedEmployeeData.homeState}` : ''}`
+                                : "N/A"}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Truck #:</span>
+                          <span className="font-medium font-mono flex items-center gap-1">
+                            <Truck className="h-3 w-3 text-amber-500" />
+                            {enrichedEmployeeData.truckLu || techData?.hrTruckNumber || "N/A"}
+                          </span>
+                        </div>
+                        {(techData?.notes || taskData?.hrNotes) && (
+                          <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md">
+                            <span className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wide">HR Notes:</span>
+                            <p className="text-xs text-foreground mt-1">{techData.notes || taskData.hrNotes}</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <Truck className="h-4 w-4" />
+                          Fleet Routing
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <RadioGroup value={assetsRouting} onValueChange={handleAssetsRoutingChange} disabled={currentQueueItem?.status === "completed"}>
+                          {["PMF", "Pep Boys", "Transfer", "Pending"].map((option) => (
+                            <div key={option} className="flex items-center gap-3 p-2 rounded hover:bg-muted/50">
+                              <RadioGroupItem value={option} id={`assets-routing-${currentQueueItem?.id}-${option}`} />
+                              <Label htmlFor={`assets-routing-${currentQueueItem?.id}-${option}`} className="text-sm font-medium cursor-pointer">
+                                {option}
+                              </Label>
                             </div>
-                            <Icon className={`h-4 w-4 mt-1 ${isChecked ? "text-muted-foreground/50" : "text-muted-foreground"}`} />
-                          </label>
-                        );
-                      })}
-                    </div>
-                    {assetsSaveStatus !== "idle" && (
-                      <div className="text-xs text-center py-2 border-t">
-                        {assetsSaveStatus === "saving" && <span className="text-muted-foreground">Saving...</span>}
-                        {assetsSaveStatus === "saved" && <span className="text-green-600">Saved</span>}
-                        {assetsSaveStatus === "error" && <span className="text-red-600">Error saving</span>}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                          ))}
+                        </RadioGroup>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <div className="lg:col-span-2">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4" />
+                          Recovery Tasks
+                        </CardTitle>
+                        <CardDescription className="flex items-center justify-between">
+                          <span>Complete each task as you work through this case</span>
+                          <Badge variant="secondary" className="ml-2">
+                            {assetsCompletedCount}/6 Complete
+                          </Badge>
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-0">
+                        <div className="divide-y divide-border">
+                          {assetsTaskItems.map((task) => {
+                            const Icon = task.icon;
+                            const isChecked = assetsTaskState[task.key];
+                            const isReadonly = currentQueueItem?.status === "completed";
+                            return (
+                              <label
+                                key={task.key}
+                                className={`flex items-start gap-3 p-4 cursor-pointer hover:bg-muted/50 transition-colors ${isChecked ? "bg-muted/30" : ""} ${isReadonly ? "pointer-events-none opacity-70" : ""}`}
+                              >
+                                <Checkbox
+                                  checked={isChecked}
+                                  onCheckedChange={(checked) => handleAssetsTaskChange(task.key, !!checked)}
+                                  className="mt-1"
+                                  disabled={isReadonly}
+                                />
+                                <div className="flex-1">
+                                  <div className={`text-sm font-medium ${isChecked ? "text-muted-foreground line-through" : "text-foreground"}`}>
+                                    {task.label}
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    {task.showCarrier && (
+                                      <Select value={assetsCarrier} onValueChange={handleAssetsCarrierChange} disabled={isReadonly}>
+                                        <SelectTrigger className="h-6 w-[120px] text-xs">
+                                          <SelectValue placeholder="Carrier" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="Verizon">Verizon</SelectItem>
+                                          <SelectItem value="T-Mobile">T-Mobile</SelectItem>
+                                          <SelectItem value="AT&T">AT&T</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    )}
+                                    <span className="text-xs text-muted-foreground">{task.desc}</span>
+                                  </div>
+                                </div>
+                                <Icon className={`h-4 w-4 mt-1 ${isChecked ? "text-muted-foreground/50" : "text-muted-foreground"}`} />
+                              </label>
+                            );
+                          })}
+                        </div>
+                        {assetsSaveStatus !== "idle" && (
+                          <div className="text-xs text-center py-2 border-t">
+                            {assetsSaveStatus === "saving" && <span className="text-muted-foreground">Saving...</span>}
+                            {assetsSaveStatus === "saved" && <span className="text-green-600">Saved</span>}
+                            {assetsSaveStatus === "error" && <span className="text-red-600">Error saving</span>}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
               ) : (
                 <>
                   {templateLoading && (

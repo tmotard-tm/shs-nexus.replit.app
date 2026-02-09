@@ -179,7 +179,7 @@ export interface IStorage {
   startWorkToolsQueueItem(id: string, workerId: string): Promise<QueueItem | undefined>;
   completeToolsQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
   updateToolsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier' | 'fleetRoutingDecision'>>): Promise<QueueItem | undefined>;
-  updateAssetsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier'>>): Promise<QueueItem | undefined>;
+  updateAssetsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier' | 'fleetRoutingDecision'>>): Promise<QueueItem | undefined>;
   updateToolsQueueNotificationStatus(id: string, sent: boolean): Promise<QueueItem | undefined>;
   
   // BYOV Blocking Logic (Sprint 2)
@@ -2155,7 +2155,7 @@ export class MemStorage implements IStorage {
     return updatedItem;
   }
 
-  async updateAssetsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier'>>): Promise<QueueItem | undefined> {
+  async updateAssetsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier' | 'fleetRoutingDecision'>>): Promise<QueueItem | undefined> {
     const item = this.assetsQueueItems.get(id);
     if (!item) return undefined;
     
@@ -4740,7 +4740,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async updateAssetsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier'>>): Promise<QueueItem | undefined> {
+  async updateAssetsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier' | 'fleetRoutingDecision'>>): Promise<QueueItem | undefined> {
     const result = await db.update(queueItems)
       .set({
         ...updates,

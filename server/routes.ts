@@ -1643,7 +1643,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         taskDisconnectedMPayment, 
         taskCloseSegnoOrders, 
         taskCreateShippingLabel, 
-        carrier
+        carrier,
+        fleetRoutingDecision
       } = req.body;
       
       const updates: Record<string, any> = {};
@@ -1654,6 +1655,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (typeof taskCloseSegnoOrders === 'boolean') updates.taskCloseSegnoOrders = taskCloseSegnoOrders;
       if (typeof taskCreateShippingLabel === 'boolean') updates.taskCreateShippingLabel = taskCreateShippingLabel;
       if (carrier !== undefined) updates.carrier = carrier;
+      if (fleetRoutingDecision !== undefined) updates.fleetRoutingDecision = fleetRoutingDecision;
       
       if (Object.keys(updates).length === 0) {
         return res.status(400).json({ message: "No valid fields to update" });
