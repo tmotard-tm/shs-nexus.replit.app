@@ -1937,20 +1937,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parsedDaysBack = parseInt(req.query.daysBack as string);
       const daysBack = Number.isFinite(parsedDaysBack) ? parsedDaysBack : 30;
       
-      // Filter HR separations by date range if daysBack > 0
-      if (daysBack > 0) {
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-        cutoffDate.setHours(0, 0, 0, 0);
-        
-        hrSeparations = hrSeparations.filter(hr => {
-          const sepDate = hr.lastDay || hr.effectiveSeparationDate;
-          if (!sepDate) return true;
-          return new Date(sepDate) >= cutoffDate;
-        });
-        console.log(`[Tools Queue] After ${daysBack}-day filter: ${hrSeparations.length} separations`);
-      }
-      
       // Get existing queue items (task creation now handled by Snowflake sync service)
       const allQueueItems = await storage.getToolsQueueItems();
       
@@ -2071,7 +2057,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       }));
       
-      // Apply date range filter to enriched items based on separation date
       let filteredItems = enrichedItems;
       if (daysBack > 0) {
         const cutoffDate = new Date();
@@ -2079,9 +2064,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cutoffDate.setHours(0, 0, 0, 0);
         
         filteredItems = enrichedItems.filter(item => {
-          const sepDate = item.techData?.separationDate;
-          if (!sepDate) return true;
-          return new Date(sepDate) >= cutoffDate;
+          const created = item.createdAt;
+          if (!created) return true;
+          return new Date(created) >= cutoffDate;
         });
       }
       
