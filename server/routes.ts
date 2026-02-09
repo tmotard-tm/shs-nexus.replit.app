@@ -1629,6 +1629,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/assets-queue/:id/save-progress", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
+      
+      const { 
+        taskToolsReturn, 
+        taskIphoneReturn, 
+        taskDisconnectedLine, 
+        taskDisconnectedMPayment, 
+        taskCloseSegnoOrders, 
+        taskCreateShippingLabel, 
+        carrier
+      } = req.body;
+      
+      const updates: Record<string, any> = {};
+      if (typeof taskToolsReturn === 'boolean') updates.taskToolsReturn = taskToolsReturn;
+      if (typeof taskIphoneReturn === 'boolean') updates.taskIphoneReturn = taskIphoneReturn;
+      if (typeof taskDisconnectedLine === 'boolean') updates.taskDisconnectedLine = taskDisconnectedLine;
+      if (typeof taskDisconnectedMPayment === 'boolean') updates.taskDisconnectedMPayment = taskDisconnectedMPayment;
+      if (typeof taskCloseSegnoOrders === 'boolean') updates.taskCloseSegnoOrders = taskCloseSegnoOrders;
+      if (typeof taskCreateShippingLabel === 'boolean') updates.taskCreateShippingLabel = taskCreateShippingLabel;
+      if (carrier !== undefined) updates.carrier = carrier;
+      
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No valid fields to update" });
+      }
+      
+      const queueItem = await storage.updateAssetsQueueProgress(req.params.id, updates);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Assets queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      console.error('Error saving assets queue progress:', error);
+      res.status(500).json({ message: "Failed to save progress" });
+    }
+  });
+
   // Inventory Queue Module routes
   app.get("/api/inventory-queue", requireAuth, async (req: any, res) => {
     try {

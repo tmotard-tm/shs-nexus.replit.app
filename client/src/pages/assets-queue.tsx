@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { QueueItem, User } from "@shared/schema";
-import { Clock, User as UserIcon, Save } from "lucide-react";
+import { Clock, User as UserIcon, Save, CheckCircle } from "lucide-react";
 import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
@@ -114,6 +114,18 @@ export default function AssetsQueuePage() {
       case "department_notification": return "📢";
       default: return "📋";
     }
+  };
+
+  const getTaskProgress = (item: QueueItem) => {
+    const tasks = [
+      item.taskToolsReturn,
+      item.taskIphoneReturn,
+      item.taskDisconnectedLine,
+      item.taskDisconnectedMPayment,
+      item.taskCloseSegnoOrders,
+      item.taskCreateShippingLabel,
+    ];
+    return tasks.filter(Boolean).length;
   };
 
   // Group items by status
@@ -247,6 +259,10 @@ export default function AssetsQueuePage() {
                               <Badge variant={getPriorityColor(item.priority)}>{item.priority}</Badge>
                               <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
                             </div>
+                            <Badge variant="outline" className="text-xs">
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Tasks {getTaskProgress(item)}/6
+                            </Badge>
                             <Button
                               size="sm"
                               onClick={(e) => {
@@ -310,17 +326,34 @@ export default function AssetsQueuePage() {
                               <Badge variant={getPriorityColor(item.priority)}>{item.priority}</Badge>
                               <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
                             </div>
+                            <Badge variant="outline" className="text-xs">
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Tasks {getTaskProgress(item)}/6
+                            </Badge>
                             {item.assignedTo === user?.id && (
-                              <Button
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  completeMutation.mutate(item.id);
-                                }}
-                                disabled={completeMutation.isPending}
-                              >
-                                Mark Complete
-                              </Button>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setWorkModuleItem(item);
+                                    setIsWorkModuleOpen(true);
+                                  }}
+                                >
+                                  Continue Work
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    completeMutation.mutate(item.id);
+                                  }}
+                                  disabled={completeMutation.isPending}
+                                >
+                                  Mark Complete
+                                </Button>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -374,6 +407,10 @@ export default function AssetsQueuePage() {
                               <Badge variant={getPriorityColor(item.priority)}>{item.priority}</Badge>
                               <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
                             </div>
+                            <Badge variant="outline" className="text-xs">
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Tasks {getTaskProgress(item)}/6
+                            </Badge>
                           </div>
                         </div>
                       </CardContent>

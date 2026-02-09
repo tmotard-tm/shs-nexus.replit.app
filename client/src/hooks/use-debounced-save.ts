@@ -6,6 +6,7 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 interface UseDebouncedSaveOptions {
   itemId: string;
+  module?: string;
   debounceMs?: number;
   onError?: (error: Error) => void;
 }
@@ -21,14 +22,16 @@ interface ProgressData {
   fleetRoutingDecision?: string | null;
 }
 
-export function useDebouncedSave({ itemId, debounceMs = 500, onError }: UseDebouncedSaveOptions) {
+export function useDebouncedSave({ itemId, module = 'tools', debounceMs = 500, onError }: UseDebouncedSaveOptions) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingDataRef = useRef<ProgressData>({});
 
+  const endpoint = `/api/${module}-queue/${itemId}/save-progress`;
+
   const mutation = useMutation({
     mutationFn: async (data: ProgressData) => {
-      const response = await apiRequest("PATCH", `/api/tools-queue/${itemId}/save-progress`, data);
+      const response = await apiRequest("PATCH", endpoint, data);
       if (!response.ok) {
         throw new Error("Failed to save progress");
       }
@@ -39,7 +42,10 @@ export function useDebouncedSave({ itemId, debounceMs = 500, onError }: UseDebou
       queryClient.invalidateQueries({
         predicate: (query) => {
           const key = query.queryKey[0];
-          return typeof key === "string" && key.startsWith("/api/tools-queue");
+          return typeof key === "string" && (
+            key.startsWith(`/api/${module}-queue`) ||
+            key.startsWith("/api/queues")
+          );
         },
       });
       setTimeout(() => {
@@ -92,7 +98,7 @@ export function useDebouncedSave({ itemId, debounceMs = 500, onError }: UseDebou
         const dataToSave = { ...pendingDataRef.current };
         pendingDataRef.current = {};
         navigator.sendBeacon?.(
-          `/api/tools-queue/${itemId}/save-progress`,
+          endpoint,
           new Blob([JSON.stringify(dataToSave)], { type: 'application/json' })
         );
       }

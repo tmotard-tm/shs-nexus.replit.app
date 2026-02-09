@@ -29,9 +29,15 @@ import {
   AlertTriangle,
   BookOpen,
   ListTodo,
-  Truck
+  Truck,
+  Briefcase,
+  Smartphone,
+  CreditCard,
+  Package,
+  Wifi,
 } from "lucide-react";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
+import { useDebouncedSave } from "@/hooks/use-debounced-save";
 
 interface WorkModuleDialogProps {
   isOpen: boolean;
@@ -66,6 +72,8 @@ export function WorkModuleDialog({
   const [assignedTo, setAssignedTo] = useState<string>("");
   const [adminNotes, setAdminNotes] = useState<string>("");
   const [approvedAmount, setApprovedAmount] = useState<string>("");
+
+  const isAssetsModule = module === 'assets';
 
   // Fetch fresh task data to avoid stale status issues
   const { data: freshQueueItem } = useQuery<QueueItem>({
@@ -181,6 +189,59 @@ export function WorkModuleDialog({
     getStepNotes,
     getSubstepNotes,
   } = useWorkTemplate({ queueItem: currentQueueItem, module });
+
+  type TaskKey = 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel';
+
+  const [assetsTaskState, setAssetsTaskState] = useState<Record<TaskKey, boolean>>({
+    taskToolsReturn: false,
+    taskIphoneReturn: false,
+    taskDisconnectedLine: false,
+    taskDisconnectedMPayment: false,
+    taskCloseSegnoOrders: false,
+    taskCreateShippingLabel: false,
+  });
+  const [assetsCarrier, setAssetsCarrier] = useState<string>("");
+
+  const { saveStatus: assetsSaveStatus, save: assetsDebouncedSave } = useDebouncedSave({
+    itemId: currentQueueItem?.id || '',
+    module: 'assets',
+  });
+
+  useEffect(() => {
+    if (currentQueueItem && isAssetsModule) {
+      setAssetsTaskState({
+        taskToolsReturn: (currentQueueItem as any).taskToolsReturn ?? false,
+        taskIphoneReturn: (currentQueueItem as any).taskIphoneReturn ?? false,
+        taskDisconnectedLine: (currentQueueItem as any).taskDisconnectedLine ?? false,
+        taskDisconnectedMPayment: (currentQueueItem as any).taskDisconnectedMPayment ?? false,
+        taskCloseSegnoOrders: (currentQueueItem as any).taskCloseSegnoOrders ?? false,
+        taskCreateShippingLabel: (currentQueueItem as any).taskCreateShippingLabel ?? false,
+      });
+      setAssetsCarrier((currentQueueItem as any).carrier || "");
+    }
+  }, [currentQueueItem, isAssetsModule]);
+
+  const handleAssetsTaskChange = (key: TaskKey, checked: boolean) => {
+    const newState = { ...assetsTaskState, [key]: checked };
+    setAssetsTaskState(newState);
+    assetsDebouncedSave({ [key]: checked });
+  };
+
+  const handleAssetsCarrierChange = (value: string) => {
+    setAssetsCarrier(value);
+    assetsDebouncedSave({ carrier: value });
+  };
+
+  const assetsCompletedCount = Object.values(assetsTaskState).filter(Boolean).length;
+
+  const assetsTaskItems: { key: TaskKey; label: string; desc: string; icon: any; showCarrier?: boolean }[] = [
+    { key: "taskToolsReturn", label: "Tools Return Asset", desc: "Verify all assigned tools returned", icon: Briefcase },
+    { key: "taskIphoneReturn", label: "iPhone Return Asset", desc: "Check condition and unlock status", icon: Smartphone },
+    { key: "taskDisconnectedLine", label: "Disconnect Phone Line", desc: "Suspend service", icon: Wifi, showCarrier: true },
+    { key: "taskDisconnectedMPayment", label: "Deactivate mPayment", desc: "Remove access in Temples system", icon: CreditCard },
+    { key: "taskCloseSegnoOrders", label: "Close Segno Orders", desc: "Ensure no open work orders remain", icon: FileText },
+    { key: "taskCreateShippingLabel", label: "Create UPS Shipping Label", desc: "Generate QR code for tech", icon: Package },
+  ];
 
   useEffect(() => {
     if (currentQueueItem) {
@@ -589,112 +650,181 @@ export function WorkModuleDialog({
             </TabsList>
             
             <TabsContent value="checklist" className="space-y-4">
-              {templateLoading && (
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-center p-8">
-                      <div className="text-center space-y-2">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-                        <p className="text-sm text-muted-foreground">Loading work template...</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {templateWarning && (
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-2 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                      <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-                      <div>
-                        <p className="text-sm font-medium text-blue-800 dark:text-blue-200">Using Default Template</p>
-                        <p className="text-xs text-blue-700 dark:text-blue-300">{templateWarning}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {templateError && (
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-2 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                      <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
-                      <div>
-                        <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">Template Loading Error</p>
-                        <p className="text-xs text-yellow-700 dark:text-yellow-300">{templateError}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {template && (
-                <TemplateChecklist
-                  template={template}
-                  isStepCompleted={isStepCompleted}
-                  isSubstepCompleted={isSubstepCompleted}
-                  updateStepProgress={updateStepProgress}
-                  updateSubstepProgress={updateSubstepProgress}
-                  getStepNotes={getStepNotes}
-                  getSubstepNotes={getSubstepNotes}
-                  overallProgress={calculateOverallProgress()}
-                  estimatedTimeRemaining={getEstimatedTimeRemaining()}
-                  readonly={currentQueueItem?.status === "completed"}
-                />
-              )}
-
-              {!template && !templateLoading && !templateError && (
+              {isAssetsModule ? (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <ClipboardCheck className="h-4 w-4" />
-                      Standard Task Instructions
+                      <CheckCircle className="h-4 w-4" />
+                      Recovery Tasks
                     </CardTitle>
-                    <CardDescription>
-                      Complete the following items to finish this task
+                    <CardDescription className="flex items-center justify-between">
+                      <span>Complete each task as you work through this case</span>
+                      <Badge variant="secondary" className="ml-2">
+                        {assetsCompletedCount}/6 Complete
+                      </Badge>
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    {taskData.instructions && Array.isArray(taskData.instructions) ? (
-                      <div className="space-y-3">
-                        {taskData.instructions.map((instruction: string, index: number) => (
-                          <div key={index} className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
-                            <Checkbox 
-                              id={`instruction-${index}`}
-                              className="mt-0.5"
-                              data-testid={`checkbox-instruction-${index}`}
+                  <CardContent className="p-0">
+                    <div className="divide-y divide-border">
+                      {assetsTaskItems.map((task) => {
+                        const Icon = task.icon;
+                        const isChecked = assetsTaskState[task.key];
+                        const isReadonly = currentQueueItem?.status === "completed";
+                        return (
+                          <label
+                            key={task.key}
+                            className={`flex items-start gap-3 p-4 cursor-pointer hover:bg-muted/50 transition-colors ${isChecked ? "bg-muted/30" : ""} ${isReadonly ? "pointer-events-none opacity-70" : ""}`}
+                          >
+                            <Checkbox
+                              checked={isChecked}
+                              onCheckedChange={(checked) => handleAssetsTaskChange(task.key, !!checked)}
+                              className="mt-1"
+                              disabled={isReadonly}
                             />
                             <div className="flex-1">
-                              <Label 
-                                htmlFor={`instruction-${index}`}
-                                className="text-sm font-normal cursor-pointer leading-relaxed"
-                              >
-                                {instruction}
-                              </Label>
+                              <div className={`text-sm font-medium ${isChecked ? "text-muted-foreground line-through" : "text-foreground"}`}>
+                                {task.label}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {task.showCarrier && (
+                                  <Select value={assetsCarrier} onValueChange={handleAssetsCarrierChange} disabled={isReadonly}>
+                                    <SelectTrigger className="h-6 w-[120px] text-xs">
+                                      <SelectValue placeholder="Carrier" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Verizon">Verizon</SelectItem>
+                                      <SelectItem value="T-Mobile">T-Mobile</SelectItem>
+                                      <SelectItem value="AT&T">AT&T</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                                <span className="text-xs text-muted-foreground">{task.desc}</span>
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <ClipboardCheck className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                        <p className="text-sm text-muted-foreground">No specific instructions available for this task.</p>
-                        <p className="text-xs text-muted-foreground mt-1">Use your best judgment and department procedures.</p>
+                            <Icon className={`h-4 w-4 mt-1 ${isChecked ? "text-muted-foreground/50" : "text-muted-foreground"}`} />
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {assetsSaveStatus !== "idle" && (
+                      <div className="text-xs text-center py-2 border-t">
+                        {assetsSaveStatus === "saving" && <span className="text-muted-foreground">Saving...</span>}
+                        {assetsSaveStatus === "saved" && <span className="text-green-600">Saved</span>}
+                        {assetsSaveStatus === "error" && <span className="text-red-600">Error saving</span>}
                       </div>
                     )}
-                    
-                    <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-                        <p className="text-sm text-blue-700 dark:text-blue-300">
-                          Complete all necessary work and use the Final Disposition section below to mark the task as complete.
-                        </p>
-                      </div>
-                    </div>
                   </CardContent>
                 </Card>
+              ) : (
+                <>
+                  {templateLoading && (
+                    <Card>
+                      <CardContent className="pt-6">
+                        <div className="flex items-center justify-center p-8">
+                          <div className="text-center space-y-2">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                            <p className="text-sm text-muted-foreground">Loading work template...</p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {templateWarning && (
+                    <Card>
+                      <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                          <div>
+                            <p className="text-sm font-medium text-blue-800 dark:text-blue-200">Using Default Template</p>
+                            <p className="text-xs text-blue-700 dark:text-blue-300">{templateWarning}</p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {templateError && (
+                    <Card>
+                      <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                          <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
+                          <div>
+                            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">Template Loading Error</p>
+                            <p className="text-xs text-yellow-700 dark:text-yellow-300">{templateError}</p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {template && (
+                    <TemplateChecklist
+                      template={template}
+                      isStepCompleted={isStepCompleted}
+                      isSubstepCompleted={isSubstepCompleted}
+                      updateStepProgress={updateStepProgress}
+                      updateSubstepProgress={updateSubstepProgress}
+                      getStepNotes={getStepNotes}
+                      getSubstepNotes={getSubstepNotes}
+                      overallProgress={calculateOverallProgress()}
+                      estimatedTimeRemaining={getEstimatedTimeRemaining()}
+                      readonly={currentQueueItem?.status === "completed"}
+                    />
+                  )}
+
+                  {!template && !templateLoading && !templateError && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <ClipboardCheck className="h-4 w-4" />
+                          Standard Task Instructions
+                        </CardTitle>
+                        <CardDescription>
+                          Complete the following items to finish this task
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        {taskData.instructions && Array.isArray(taskData.instructions) ? (
+                          <div className="space-y-3">
+                            {taskData.instructions.map((instruction: string, index: number) => (
+                              <div key={index} className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                                <Checkbox 
+                                  id={`instruction-${index}`}
+                                  className="mt-0.5"
+                                  data-testid={`checkbox-instruction-${index}`}
+                                />
+                                <div className="flex-1">
+                                  <Label 
+                                    htmlFor={`instruction-${index}`}
+                                    className="text-sm font-normal cursor-pointer leading-relaxed"
+                                  >
+                                    {instruction}
+                                  </Label>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-8">
+                            <ClipboardCheck className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                            <p className="text-sm text-muted-foreground">No specific instructions available for this task.</p>
+                            <p className="text-xs text-muted-foreground mt-1">Use your best judgment and department procedures.</p>
+                          </div>
+                        )}
+                        
+                        <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                            <p className="text-sm text-blue-700 dark:text-blue-300">
+                              Complete all necessary work and use the Final Disposition section below to mark the task as complete.
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
               )}
             </TabsContent>
 
