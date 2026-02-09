@@ -1,5 +1,10 @@
 import { getSnowflakeSyncService } from './snowflake-sync-service';
 import { isSnowflakeConfigured } from './snowflake-service';
+import { db } from './db';
+import { queueItems } from '@shared/schema';
+import { eq, and, isNotNull } from 'drizzle-orm';
+import { getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
+import { storage } from './storage';
 
 const SYNC_HOUR_EST = 5; // 5am EST
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
@@ -118,6 +123,123 @@ async function checkAndRunSeparationPoll(): Promise<void> {
   }
 }
 
+async function backfillToolsQueueItems(): Promise<void> {
+  try {
+    const existingToolsWorkflows = await db.select({ workflowId: queueItems.workflowId })
+      .from(queueItems)
+      .where(eq(queueItems.department, 'Tools'));
+    const toolsWorkflowIds = new Set(existingToolsWorkflows.map(r => r.workflowId).filter(Boolean));
+
+    const ntaoItems = await db.select()
+      .from(queueItems)
+      .where(and(
+        eq(queueItems.department, 'NTAO'),
+        isNotNull(queueItems.workflowId)
+      ));
+
+    const missingItems = ntaoItems.filter(item => item.workflowId && !toolsWorkflowIds.has(item.workflowId));
+
+    if (missingItems.length === 0) {
+      console.log('[Backfill] All workflows already have Tools queue items');
+      return;
+    }
+
+    console.log(`[Backfill] Found ${missingItems.length} workflows missing Tools queue items, creating...`);
+    let created = 0;
+
+    for (const ntaoItem of missingItems) {
+      try {
+        let parsedData: any = {};
+        try {
+          parsedData = typeof ntaoItem.data === 'string' ? JSON.parse(ntaoItem.data) : (ntaoItem.data || {});
+        } catch { /* empty */ }
+
+        const techName = parsedData?.employee?.name || parsedData?.technician?.techName || 'Unknown';
+        const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.technician?.techRacfid || '';
+        const employeeId = parsedData?.employee?.employeeId || parsedData?.technician?.employeeId || '';
+        const vehicleNumber = parsedData?.vehicle?.vehicleNumber || parsedData?.vehicle?.truckNo || '';
+        const lastDayWorked = parsedData?.employee?.lastDayWorked || parsedData?.technician?.lastDayWorked || null;
+
+        const byovStatus = getInitialToolsTaskStatus(vehicleNumber);
+
+        const toolsData = {
+          workflowType: 'offboarding_sequence',
+          step: 'tools_recover_equipment_day0',
+          subtask: 'Tools',
+          workflowStep: 5,
+          phase: 'day0',
+          isDay0Task: true,
+          source: 'backfill',
+          syncedAt: ntaoItem.createdAt?.toISOString() || new Date().toISOString(),
+          submitterInfo: parsedData?.submitterInfo || { id: 'system', name: 'Backfill', email: null },
+          workflowId: ntaoItem.workflowId,
+          vehicleType: parsedData?.vehicleType || 'cargo_van',
+          employee: parsedData?.employee || {
+            name: techName,
+            racfId: enterpriseId,
+            employeeId: employeeId,
+            lastDayWorked: lastDayWorked,
+            enterpriseId: enterpriseId,
+          },
+          vehicle: parsedData?.vehicle || {
+            vehicleNumber: vehicleNumber,
+            vehicleName: vehicleNumber,
+            truckNo: vehicleNumber,
+            location: '',
+            condition: 'unknown',
+            type: 'cargo_van',
+          },
+          submitter: parsedData?.submitter || { name: 'Backfill', submittedAt: new Date().toISOString() },
+          technician: parsedData?.technician || undefined,
+          instructions: [
+            "Contact Employee immediately to arrange equipment return",
+            "Recover company phone and verify it's company-issued",
+            "Collect any tablets, mobile hotspots, or other devices",
+            "Retrieve company credit cards (coordinate with OneCard Help Desk if needed)",
+            "Check for accessories (chargers, cases, cables)",
+            "Wipe all device data per security protocol",
+            "Update asset management system with returned items",
+            "Complete Day 0 task - mark complete once all equipment recovered"
+          ],
+          tpmsLookup: parsedData?.tpmsLookup || { attempted: false, success: false, error: null },
+        };
+
+        const toolsQueueItem = {
+          workflowType: 'offboarding' as const,
+          title: `Day 0: Recover Equipment & Tools - ${techName}`,
+          description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${techName} (${enterpriseId}). Truck ${vehicleNumber || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+          status: ntaoItem.status || 'pending',
+          priority: 'high' as const,
+          requesterId: 'system',
+          department: 'Tools',
+          workflowId: ntaoItem.workflowId!,
+          workflowStep: 5,
+          data: JSON.stringify(toolsData),
+          metadata: JSON.stringify({
+            createdVia: 'tools_backfill',
+            backfilledAt: new Date().toISOString(),
+            sourceNtaoItemId: ntaoItem.id,
+          }),
+          isByov: byovStatus.isByov,
+          blockedActions: byovStatus.blockedActions,
+          fleetRoutingDecision: byovStatus.routingPath,
+          routingReceivedAt: byovStatus.isByov ? new Date() : null,
+          assignedTo: TOOLS_OWNER.id,
+        };
+
+        await storage.createToolsQueueItem(toolsQueueItem);
+        created++;
+      } catch (err) {
+        console.error(`[Backfill] Error creating Tools item for workflow ${ntaoItem.workflowId}:`, err);
+      }
+    }
+
+    console.log(`[Backfill] Created ${created} Tools queue items`);
+  } catch (error) {
+    console.error('[Backfill] Error during Tools queue backfill:', error);
+  }
+}
+
 export function startSyncScheduler(): void {
   if (schedulerRunning) {
     console.log('[Scheduler] Sync scheduler already running');
@@ -135,6 +257,11 @@ export function startSyncScheduler(): void {
     
     // Run check every minute (development only)
     intervalId = setInterval(checkAndRunSync, CHECK_INTERVAL_MS);
+    
+    // Run Tools queue backfill immediately on startup (before scheduled sync)
+    backfillToolsQueueItems().catch(err => 
+      console.error('[Backfill] Startup backfill failed:', err)
+    );
     
     // Delay the initial check by 5 seconds to let Snowflake fully connect
     setTimeout(() => {
