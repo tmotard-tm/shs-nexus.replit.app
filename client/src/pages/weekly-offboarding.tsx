@@ -124,6 +124,9 @@ export default function WeeklyOffboarding() {
     'assigned_to_tech_in_rental': 'Assigned to rental',
     'assigned_to_tech': 'Assigned to tech',
     'not_found': 'Not found',
+    'sent_to_auction': 'Sent to auction',
+    'already_picked_up': 'Already picked up',
+    'unable_to_reach': 'Unable to reach',
   };
 
   // Get unique manual statuses from nexus data
@@ -358,6 +361,9 @@ export default function WeeklyOffboarding() {
     { key: 'assigned_to_tech_in_rental', label: 'Assigned to rental', icon: CarFront, color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950' },
     { key: 'assigned_to_tech', label: 'Assigned to tech', icon: CheckCircle, color: 'text-teal-600', bg: 'bg-teal-50 dark:bg-teal-950' },
     { key: 'not_found', label: 'Not found', icon: Search, color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950' },
+    { key: 'sent_to_auction', label: 'Sent to auction', icon: Truck, color: 'text-rose-600', bg: 'bg-rose-50 dark:bg-rose-950' },
+    { key: 'already_picked_up', label: 'Already picked up', icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950' },
+    { key: 'unable_to_reach', label: 'Unable to reach', icon: AlertCircle, color: 'text-yellow-600', bg: 'bg-yellow-50 dark:bg-yellow-950' },
   ];
 
   const getStatusBadgeVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
@@ -504,7 +510,7 @@ export default function WeeklyOffboarding() {
                     <SelectContent>
                       <SelectItem value="all">All Manual Statuses</SelectItem>
                       <SelectItem value="__none__">-- No Status Set --</SelectItem>
-                      {Array.from(new Set([...uniqueManualStatuses, 'assigned_to_tech_in_rental'])).sort().map((status) => (
+                      {Array.from(new Set([...uniqueManualStatuses, 'assigned_to_tech_in_rental', 'sent_to_auction', 'already_picked_up', 'unable_to_reach'])).sort().map((status) => (
                         <SelectItem key={status} value={status}>
                           {manualStatusLabels[status] || status}
                         </SelectItem>
@@ -777,6 +783,9 @@ export default function WeeklyOffboarding() {
                               <SelectItem value="assigned_to_tech_in_rental">Assigned to rental</SelectItem>
                               <SelectItem value="assigned_to_tech">Assigned to tech</SelectItem>
                               <SelectItem value="not_found">Not found</SelectItem>
+                              <SelectItem value="sent_to_auction">Sent to auction</SelectItem>
+                              <SelectItem value="already_picked_up">Already picked up</SelectItem>
+                              <SelectItem value="unable_to_reach">Unable to reach</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

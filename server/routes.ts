@@ -9250,6 +9250,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             'sent_to_pmf': 'Sent to PMF',
             'assigned_to_tech_in_rental': 'Assigned to rental',
             'not_found': 'Not found',
+            'sent_to_auction': 'Sent to auction',
+            'already_picked_up': 'Already picked up',
+            'unable_to_reach': 'Unable to reach',
           };
           
           const fleetScopePayload = {
