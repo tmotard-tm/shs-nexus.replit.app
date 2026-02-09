@@ -510,7 +510,7 @@ export default function WeeklyOffboarding() {
                     <SelectContent>
                       <SelectItem value="all">All Manual Statuses</SelectItem>
                       <SelectItem value="__none__">-- No Status Set --</SelectItem>
-                      {Array.from(new Set([...uniqueManualStatuses, 'assigned_to_tech_in_rental', 'sent_to_auction', 'already_picked_up', 'unable_to_reach'])).sort().map((status) => (
+                      {Array.from(new Set([...uniqueManualStatuses, 'reserved_for_new_hire', 'in_repair', 'declined_repair', 'available_for_rental_pmf', 'sent_to_pmf', 'assigned_to_tech_in_rental', 'assigned_to_tech', 'not_found', 'sent_to_auction', 'already_picked_up', 'unable_to_reach'])).sort().map((status) => (
                         <SelectItem key={status} value={status}>
                           {manualStatusLabels[status] || status}
                         </SelectItem>
