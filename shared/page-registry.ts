@@ -15,7 +15,6 @@ import {
   Database,
   UserPlus,
   Info,
-  Wrench,
   Mail,
   type LucideIcon
 } from "lucide-react";
@@ -190,15 +189,6 @@ export const PAGES: PageDefinition[] = [
         ],
       },
     ],
-  },
-  {
-    key: "toolsQueue",
-    label: "Tools Queue",
-    description: "Recover equipment and tools from terminated employees",
-    path: "/tools-queue",
-    icon: Wrench,
-    category: "queues",
-    permissionKey: "toolsQueue",
   },
   {
     key: "storageSpots",
