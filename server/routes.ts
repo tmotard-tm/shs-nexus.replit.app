@@ -2042,6 +2042,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
+      // Sort by separation date descending (most recent first), items without dates go to the end
+      filteredItems.sort((a, b) => {
+        const dateA = a.techData?.separationDate ? new Date(a.techData.separationDate).getTime() : 0;
+        const dateB = b.techData?.separationDate ? new Date(b.techData.separationDate).getTime() : 0;
+        return dateB - dateA;
+      });
+      
       res.json(filteredItems);
     } catch (error) {
       console.error('Error fetching enriched tools queue items:', error);
