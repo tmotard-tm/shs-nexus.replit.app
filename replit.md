@@ -96,19 +96,18 @@ Preferred communication style: Simple, everyday language.
 # Last Session Summary (2026-02-09)
 
 ## Completed
-- Production readiness audit for Tools Queue
-- Fixed critical bug: `completeMutation` was not sending `completedBy` field to backend (would cause 400 errors on case completion)
-- Fixed `getSnowflakeSyncService` not imported in contact endpoint (mobile phone lookup was silently failing)
-- Replaced placeholder `#segno` links with properly disabled "Coming Soon" buttons
-- Fixed "Source: Snowflake" tag not showing on all Tools Queue cases (now always true since all cases come from Snowflake)
-- Added 30-day default date filter to Tools Queue (backend `daysBack` query param + frontend dropdown with 7/14/30/60/90/All options)
-- Added aging badges to Tools Queue cases: Upcoming (blue), New (green, ≤7d), Active (amber, 8-30d), Overdue (red, 30+d)
-- Verified app runs cleanly with all 150+ routes registered
+- Added enriched tech data display to Assets WorkModuleDialog: personal phone, mobile phone, email, separation date with aging badge, vehicle type/BYOV badge, fleet pickup address, HR truck number, HR notes, fleet routing radio buttons
+- Added enriched data badges to Assets Queue list cards (all 3 tabs): separation date, aging badge, BYOV/vehicle type, personal phone indicator, fleet routing status
+- Fixed fleet pickup address display to prioritize `taskData.vehicle.fleetPickupAddress` (HR separation data) over roster home address
+- Added HR separation data fallbacks: `contactNumber` for phone, `personalEmail` for email, `hrNotes` for notes
+- Fixed vehicle type display to show "Unknown" instead of misleading "Company" when no vehicleType data exists
+- Verified Assets queue items from Snowflake sync include enriched technician data in JSON fields
 
 ## Next Steps
 - Implement SMS sending via Twilio integration for Communication Hub
 - Add FleetScope deep link for routing lookup
 - Add input validation (Zod schemas) to communication routes
+- Consider consolidating tech-data parsing helpers into shared utility for reuse across queues
 - Review and address pre-existing LSP warnings in `server/storage.ts` (vehicleType MemStorage stubs)
 
 ## Blockers
@@ -118,6 +117,9 @@ Preferred communication style: Simple, everyday language.
 - GET handlers should only read data, never create it (side effects removed)
 - Single source of truth for Tools task creation in sync service prevents race conditions
 - Tools Queue uses rich HR data format; Fleet and Inventory queues still use Day 0 format
+- Assets Queue uses flat 6-checkbox UI (matching Tools Queue pattern) instead of hierarchical template system
+- Assets WorkModuleDialog shows enriched data sidebar with contact info, routing, and fleet pickup alongside task checklist
+- Tech data parsing prioritizes: HR separation data > roster data > task data defaults
 
 # Current State
 
