@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date, index, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date, index, jsonb, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -623,6 +623,19 @@ export const vehicleNexusData = pgTable("vehicle_nexus_data", {
 export const insertVehicleNexusDataSchema = createInsertSchema(vehicleNexusData).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertVehicleNexusData = z.infer<typeof insertVehicleNexusDataSchema>;
 export type VehicleNexusData = typeof vehicleNexusData.$inferSelect;
+
+export const offboardingTruckOverrides = pgTable("offboarding_truck_overrides", {
+  id: serial("id").primaryKey(),
+  enterpriseId: varchar("enterprise_id", { length: 50 }).notNull().unique(),
+  truckNumber: varchar("truck_number", { length: 20 }).notNull(),
+  updatedBy: text("updated_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertOffboardingTruckOverrideSchema = createInsertSchema(offboardingTruckOverrides).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertOffboardingTruckOverride = z.infer<typeof insertOffboardingTruckOverrideSchema>;
+export type OffboardingTruckOverride = typeof offboardingTruckOverrides.$inferSelect;
 
 // Onboarding Hires from Snowflake HR data - tracks new tech hires for weekly truck assignment
 export const onboardingHires = pgTable("onboarding_hires", {

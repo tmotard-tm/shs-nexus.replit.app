@@ -61,6 +61,8 @@ import {
   type InsertCommunicationLog,
   type VehicleNexusData,
   type InsertVehicleNexusData,
+  type OffboardingTruckOverride,
+  type InsertOffboardingTruckOverride,
   users,
   requests,
   apiConfigurations,
@@ -90,6 +92,7 @@ import {
   communicationWhitelist,
   communicationLogs,
   vehicleNexusData,
+  offboardingTruckOverrides,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
@@ -405,6 +408,11 @@ export interface IStorage {
   getVehicleNexusData(vehicleNumber: string): Promise<VehicleNexusData | undefined>;
   getVehicleNexusDataBatch(vehicleNumbers: string[]): Promise<VehicleNexusData[]>;
   upsertVehicleNexusData(data: InsertVehicleNexusData): Promise<VehicleNexusData>;
+
+  // Offboarding Truck Overrides (manual truck assignments for weekly offboarding)
+  getAllOffboardingTruckOverrides(): Promise<OffboardingTruckOverride[]>;
+  upsertOffboardingTruckOverride(data: InsertOffboardingTruckOverride): Promise<OffboardingTruckOverride>;
+  deleteOffboardingTruckOverride(enterpriseId: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -3546,6 +3554,16 @@ export class MemStorage implements IStorage {
   async upsertVehicleNexusData(_data: InsertVehicleNexusData): Promise<VehicleNexusData> {
     throw new Error("MemStorage does not support vehicle nexus data. Use DatabaseStorage.");
   }
+
+  async getAllOffboardingTruckOverrides(): Promise<OffboardingTruckOverride[]> {
+    throw new Error("MemStorage does not support offboarding truck overrides. Use DatabaseStorage.");
+  }
+  async upsertOffboardingTruckOverride(_data: InsertOffboardingTruckOverride): Promise<OffboardingTruckOverride> {
+    throw new Error("MemStorage does not support offboarding truck overrides. Use DatabaseStorage.");
+  }
+  async deleteOffboardingTruckOverride(_enterpriseId: string): Promise<boolean> {
+    throw new Error("MemStorage does not support offboarding truck overrides. Use DatabaseStorage.");
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -6247,6 +6265,39 @@ export class DatabaseStorage implements IStorage {
       }).returning();
       return result[0];
     }
+  }
+
+  async getAllOffboardingTruckOverrides(): Promise<OffboardingTruckOverride[]> {
+    return await db.select().from(offboardingTruckOverrides);
+  }
+
+  async upsertOffboardingTruckOverride(data: InsertOffboardingTruckOverride): Promise<OffboardingTruckOverride> {
+    const existing = await db.select().from(offboardingTruckOverrides)
+      .where(eq(offboardingTruckOverrides.enterpriseId, data.enterpriseId))
+      .limit(1);
+
+    if (existing.length > 0) {
+      const result = await db.update(offboardingTruckOverrides)
+        .set({
+          truckNumber: data.truckNumber,
+          updatedBy: data.updatedBy,
+          updatedAt: new Date(),
+        })
+        .where(eq(offboardingTruckOverrides.enterpriseId, data.enterpriseId))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(offboardingTruckOverrides)
+        .values(data)
+        .returning();
+      return result[0];
+    }
+  }
+
+  async deleteOffboardingTruckOverride(enterpriseId: string): Promise<boolean> {
+    const result = await db.delete(offboardingTruckOverrides)
+      .where(eq(offboardingTruckOverrides.enterpriseId, enterpriseId));
+    return (result.rowCount ?? 0) > 0;
   }
 }
 

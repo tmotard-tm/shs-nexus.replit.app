@@ -9304,6 +9304,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Offboarding Truck Overrides - shared truck assignments for weekly offboarding
+  app.get("/api/offboarding-truck-overrides", requireAuth, async (req: any, res) => {
+    try {
+      const overrides = await storage.getAllOffboardingTruckOverrides();
+      const map: Record<string, string> = {};
+      for (const o of overrides) {
+        map[o.enterpriseId] = o.truckNumber;
+      }
+      res.json(map);
+    } catch (error: any) {
+      console.error("Error fetching truck overrides:", error);
+      res.status(500).json({ message: "Failed to fetch truck overrides", error: error.message });
+    }
+  });
+
+  app.put("/api/offboarding-truck-overrides/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      const { enterpriseId } = req.params;
+      const { truckNumber } = req.body;
+      if (!truckNumber || typeof truckNumber !== 'string') {
+        return res.status(400).json({ message: "truckNumber is required" });
+      }
+      const override = await storage.upsertOffboardingTruckOverride({
+        enterpriseId,
+        truckNumber,
+        updatedBy: req.user?.username || 'unknown',
+      });
+      res.json(override);
+    } catch (error: any) {
+      console.error("Error saving truck override:", error);
+      res.status(500).json({ message: "Failed to save truck override", error: error.message });
+    }
+  });
+
+  app.delete("/api/offboarding-truck-overrides/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      const { enterpriseId } = req.params;
+      await storage.deleteOffboardingTruckOverride(enterpriseId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting truck override:", error);
+      res.status(500).json({ message: "Failed to delete truck override", error: error.message });
+    }
+  });
+
   // Weekly Offboarding - Get term roster from Snowflake view with contact info
   app.get("/api/weekly-offboarding", requireAuth, async (req: any, res) => {
     try {

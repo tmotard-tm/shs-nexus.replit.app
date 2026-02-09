@@ -52,10 +52,18 @@ export default function WeeklyOffboarding() {
   const [nexusComments, setNexusComments] = useState("");
   const [nexusPhoneRecovery, setNexusPhoneRecovery] = useState("");
   const [manualTruck, setManualTruck] = useState("");
-  const [manualTruckOverrides, setManualTruckOverrides] = useState<Record<string, string>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('manualTruckOverrides') || '{}');
-    } catch { return {}; }
+
+  const { data: manualTruckOverrides = {} } = useQuery<Record<string, string>>({
+    queryKey: ['/api/offboarding-truck-overrides'],
+  });
+
+  const saveTruckOverrideMutation = useMutation({
+    mutationFn: async ({ enterpriseId, truckNumber }: { enterpriseId: string; truckNumber: string }) => {
+      return await apiRequest('PUT', `/api/offboarding-truck-overrides/${enterpriseId}`, { truckNumber });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/offboarding-truck-overrides'] });
+    },
   });
 
   // Refs for synchronized scrollbars
@@ -237,11 +245,8 @@ export default function WeeklyOffboarding() {
         title: "Saved",
         description: "Nexus tracking data has been saved.",
       });
-      // Persist manual truck override if truck was manually entered
       if (!selectedEntry?.truck && manualTruck && selectedEntry?.enterpriseId) {
-        const updated = { ...manualTruckOverrides, [selectedEntry.enterpriseId]: manualTruck };
-        setManualTruckOverrides(updated);
-        localStorage.setItem('manualTruckOverrides', JSON.stringify(updated));
+        saveTruckOverrideMutation.mutate({ enterpriseId: selectedEntry.enterpriseId, truckNumber: manualTruck });
       }
       const truckToInvalidate = selectedEntry?.truck || manualTruck;
       if (truckToInvalidate) {
