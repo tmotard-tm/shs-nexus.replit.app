@@ -1,0 +1,37 @@
+The Tools Queue is only showing 1 case because the daysBack filter on the /api/tools-queue endpoint filters by separation date instead of queue item creation date. Most of the 114 backfilled techs were termed 60+ days ago, so they get filtered out by the default 30-day window. Only 1 tech has a recent enough separation date to survive.
+
+The fix is in server/routes.ts in the GET /api/tools-queue handler. Find the second date filter block that looks like this (around line 2031-2043):
+
+// Apply date range filter to enriched items based on separation date
+let filteredItems = enrichedItems;
+if (daysBack > 0) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+  cutoffDate.setHours(0, 0, 0, 0);
+  
+  filteredItems = enrichedItems.filter(item => {
+    const sepDate = item.techData?.separationDate;
+    if (!sepDate) return true;
+    return new Date(sepDate) >= cutoffDate;
+  });
+}
+Change it to filter by the queue item's createdAt date instead of the separation date:
+
+// Apply date range filter based on when the task was created (not separation date)
+let filteredItems = enrichedItems;
+if (daysBack > 0) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+  cutoffDate.setHours(0, 0, 0, 0);
+  
+  filteredItems = enrichedItems.filter(item => {
+    const created = item.createdAt;
+    if (!created) return true;
+    return new Date(created) >= cutoffDate;
+  });
+}
+Also do the same for the first date filter higher up (around line 1897-1909) that filters the HR separations before enrichment — change it to not filter at all, since the queue item createdAt filter will handle the date windowing:
+
+Remove or comment out the first filter block that starts with // Filter HR separations by date range if daysBack > 0.
+
+After this change, the 30-day default filter will show tasks created in the last 30 days (which includes all 114 backfilled items since they were just created), and the separation date will still display on each card for context. Pending tasks won't get hidden just because the tech left a while ago.
