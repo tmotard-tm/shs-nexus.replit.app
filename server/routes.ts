@@ -2104,6 +2104,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ldapId = enterpriseId || tech.techRacfid;
       if (ldapId) {
         try {
+          const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
           const syncService = getSnowflakeSyncService();
           if (syncService) {
             const mobileData = await syncService.getMobilePhoneByLdap(ldapId);

@@ -476,12 +476,10 @@ function ExpandedRowDetails({
                   <ExternalLink className="h-3 w-3 ml-auto" />
                 </a>
               </Button>
-              <Button variant="outline" className="justify-start" asChild>
-                <a href="#segno" target="_blank" rel="noopener noreferrer">
-                  <FileText className="h-4 w-4 mr-2 text-slate-500" />
-                  View in Segno
-                  <ExternalLink className="h-3 w-3 ml-auto" />
-                </a>
+              <Button variant="outline" className="justify-start" disabled>
+                <FileText className="h-4 w-4 mr-2 text-slate-500" />
+                View in Segno
+                <Badge variant="secondary" className="ml-auto text-xs">Coming Soon</Badge>
               </Button>
               <Button variant="outline" className="justify-start" disabled>
                 <Package className="h-4 w-4 mr-2 text-slate-500" />
@@ -575,7 +573,7 @@ export function ToolsRecoveryQueue() {
 
   const completeMutation = useMutation({
     mutationFn: (itemId: string) =>
-      apiRequest("PATCH", `/api/tools-queue/${itemId}/complete`),
+      apiRequest("PATCH", `/api/tools-queue/${itemId}/complete`, { completedBy: user?.id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tools-queue"] });
       toast({ title: "Case marked complete" });

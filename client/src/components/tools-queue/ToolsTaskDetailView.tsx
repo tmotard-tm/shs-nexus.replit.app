@@ -451,13 +451,11 @@ export function ToolsTaskDetailView({
             <Button
               variant="outline"
               className="w-full justify-start"
-              asChild
+              disabled
             >
-              <a href="#segno-pending" target="_blank" rel="noopener noreferrer">
-                <FileText className="h-4 w-4 mr-2" />
-                View in Segno
-                <ExternalLink className="h-3 w-3 ml-auto" />
-              </a>
+              <FileText className="h-4 w-4 mr-2" />
+              View in Segno
+              <Badge variant="secondary" className="ml-auto text-xs">Coming Soon</Badge>
             </Button>
 
             <Button
