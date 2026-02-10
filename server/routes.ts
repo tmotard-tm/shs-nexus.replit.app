@@ -1525,8 +1525,143 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
         return res.status(403).json({ message: "Access denied to Assets queue" });
       }
-      const queueItems = await storage.getAssetsQueueItems();
-      res.json(queueItems);
+
+      const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+      const snowflakeSyncService = getSnowflakeSyncService();
+
+      let hrSeparations: Array<{
+        ldapId: string;
+        technicianName: string | null;
+        emplId: string;
+        lastDay: string | null;
+        effectiveSeparationDate: string | null;
+        truckNumber: string | null;
+        contactNumber: string | null;
+        personalEmail: string | null;
+        fleetPickupAddress: string | null;
+        separationCategory: string | null;
+        notes: string | null;
+      }> = [];
+
+      if (snowflakeSyncService) {
+        try {
+          const hrResult = await snowflakeSyncService.getAllConfirmedSeparations();
+          if (hrResult.success) {
+            hrSeparations = hrResult.records;
+          }
+        } catch (hrError) {
+          console.log('[Assets Queue] Could not fetch HR separations:', hrError);
+        }
+      }
+
+      const parsedDaysBack = parseInt(req.query.daysBack as string);
+      const daysBack = Number.isFinite(parsedDaysBack) ? parsedDaysBack : 30;
+
+      const allQueueItems = await storage.getAssetsQueueItems();
+
+      const hrLookup = new Map<string, typeof hrSeparations[0]>();
+      for (const hr of hrSeparations) {
+        if (hr.ldapId) hrLookup.set(hr.ldapId.toUpperCase(), hr);
+        if (hr.emplId) hrLookup.set(hr.emplId, hr);
+      }
+
+      const enrichedItems = await Promise.all(allQueueItems.map(async (item) => {
+        let techData: any = null;
+
+        try {
+          const parsedData = typeof item.data === 'string'
+            ? JSON.parse(item.data)
+            : item.data;
+
+          const employeeId = parsedData?.employee?.employeeId || parsedData?.technician?.employeeId || parsedData?.employeeId || parsedData?.emplid;
+          const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.technician?.enterpriseId || parsedData?.technician?.techRacfid || parsedData?.techRacfId;
+
+          let tech = null;
+          if (employeeId) {
+            tech = await storage.getAllTechByEmployeeId(employeeId);
+          }
+          if (!tech && enterpriseId) {
+            tech = await storage.getAllTechByTechRacfid(enterpriseId);
+          }
+
+          const hrRecord = hrLookup.get(enterpriseId?.toUpperCase() || '') || hrLookup.get(employeeId || '');
+
+          let mobilePhoneData: { phoneNumber?: string | null } = {};
+          if (enterpriseId && snowflakeSyncService) {
+            try {
+              mobilePhoneData = await snowflakeSyncService.getMobilePhoneByLdap(enterpriseId);
+            } catch (e) {}
+          }
+
+          if (tech) {
+            const addressParts = hrRecord?.fleetPickupAddress
+              ? [hrRecord.fleetPickupAddress]
+              : [tech.homeAddr1, tech.homeAddr2, tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean);
+
+            techData = {
+              techName: tech.techName,
+              enterpriseId: tech.techRacfid,
+              district: tech.districtNo || null,
+              separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || tech.lastDayWorked || tech.effectiveDate || null,
+              mobilePhone: mobilePhoneData?.phoneNumber || null,
+              personalPhone: hrRecord?.contactNumber || tech.cellPhone || tech.homePhone || null,
+              email: hrRecord?.personalEmail || parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
+              address: addressParts.length > 0 ? addressParts.join(', ') : null,
+              fleetPickupAddress: hrRecord?.fleetPickupAddress || null,
+              separationCategory: hrRecord?.separationCategory || null,
+              hrTruckNumber: hrRecord?.truckNumber || null,
+              notes: hrRecord?.notes || null,
+              fromSnowflake: true,
+            };
+          } else {
+            techData = {
+              techName: hrRecord?.technicianName || parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Day 0: Recover Company Equipment - ', '') || 'Unknown',
+              enterpriseId: enterpriseId || employeeId || 'Unknown',
+              district: null,
+              separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
+              mobilePhone: mobilePhoneData?.phoneNumber || null,
+              personalPhone: hrRecord?.contactNumber || parsedData?.employee?.phone || null,
+              email: hrRecord?.personalEmail || parsedData?.employee?.email || null,
+              address: parsedData?.employee?.address || null,
+              fleetPickupAddress: hrRecord?.fleetPickupAddress || null,
+              separationCategory: hrRecord?.separationCategory || null,
+              hrTruckNumber: hrRecord?.truckNumber || null,
+              notes: hrRecord?.notes || null,
+              fromSnowflake: true,
+            };
+          }
+        } catch (e) {
+          techData = {
+            techName: item.title?.replace('Day 0: Recover Company Equipment - ', '') || 'Unknown',
+            enterpriseId: 'Unknown',
+            district: null,
+            separationDate: null,
+            mobilePhone: null,
+            personalPhone: null,
+            email: null,
+            address: null,
+            fleetPickupAddress: null,
+            separationCategory: null,
+            hrTruckNumber: null,
+            notes: null,
+            fromSnowflake: false,
+          };
+        }
+
+        return { ...item, techData };
+      }));
+
+      let filteredItems = enrichedItems;
+      if (daysBack > 0) {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - daysBack);
+        filteredItems = enrichedItems.filter((item) => {
+          const createdAt = item.createdAt ? new Date(item.createdAt) : null;
+          return createdAt ? createdAt >= cutoff : true;
+        });
+      }
+
+      res.json(filteredItems);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch Assets queue items" });
     }
