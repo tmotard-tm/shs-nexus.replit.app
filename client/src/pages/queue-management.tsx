@@ -1077,10 +1077,58 @@ export default function UnifiedQueueManagement() {
             ) : (
               selectedModules.map((module) => {
                 if (module === 'assets') {
+                  const statusCounts = getModuleStatusCounts(filteredItems, module);
+                  const isExpanded = expandedQueues[module] === true;
                   return (
-                    <div key={module}>
-                      <AssetsRecoveryQueue />
-                    </div>
+                    <Card key={module} className="overflow-hidden">
+                      <CardHeader 
+                        className={`cursor-pointer transition-colors hover:bg-muted/50 ${getModuleColor(module)} text-white`}
+                        onClick={() => toggleQueueExpansion(module)}
+                        data-testid={`header-queue-${module}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="flex items-center gap-3">
+                            <span className="text-2xl">{getModuleIcon(module)}</span>
+                            <span>{moduleLabels[module]} Queue</span>
+                            <Badge variant="secondary" className="bg-white/20 text-white border-white/30">
+                              {statusCounts.total} items
+                            </Badge>
+                          </CardTitle>
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2">
+                              {statusCounts.pending > 0 && (
+                                <Badge variant="secondary" className="bg-yellow-500/20 text-white border-yellow-400/30" data-testid={`badge-${module}-pending-count`}>
+                                  {statusCounts.pending} New
+                                </Badge>
+                              )}
+                              {statusCounts.in_progress > 0 && (
+                                <Badge variant="secondary" className="bg-blue-500/20 text-white border-blue-400/30" data-testid={`badge-${module}-progress-count`}>
+                                  {statusCounts.in_progress} In Progress
+                                </Badge>
+                              )}
+                              {statusCounts.completed > 0 && (
+                                <Badge variant="secondary" className="bg-green-500/20 text-white border-green-400/30" data-testid={`badge-${module}-completed-count`}>
+                                  {statusCounts.completed} Completed
+                                </Badge>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-white hover:bg-white/10"
+                              data-testid={`button-toggle-${module}`}
+                            >
+                              {isExpanded ? "▼" : "▶"}
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      {isExpanded && (
+                        <CardContent className="p-6">
+                          <AssetsRecoveryQueue />
+                        </CardContent>
+                      )}
+                    </Card>
                   );
                 }
                 

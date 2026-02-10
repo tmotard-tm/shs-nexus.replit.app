@@ -894,31 +894,6 @@ export function AssetsRecoveryQueue() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="bg-[#1A4B8C] p-1.5 rounded">
-            <LayoutDashboard className="h-4 w-4 text-white" />
-          </div>
-          <h1 className="text-lg font-semibold text-[#1A4B8C]">Assets Recovery Queue</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-slate-500">{stats.total} cases</span>
-          <div className="h-4 w-px bg-slate-200" />
-          <Badge variant="destructive" className="h-6 px-2 gap-1 text-xs">
-            <AlertTriangle className="h-3 w-3" />
-            {stats.urgent} Urgent
-          </Badge>
-          <Badge className="h-6 px-2 gap-1 text-xs bg-[#1A4B8C]">
-            <Clock className="h-3 w-3" />
-            {stats.inProgress} Active
-          </Badge>
-          <Badge className="h-6 px-2 gap-1 text-xs bg-[#36D9A3]/10 text-[#2db386] border border-[#36D9A3]/20">
-            <CheckCircle className="h-3 w-3" />
-            {stats.completed} Done
-          </Badge>
-        </div>
-      </div>
-
       <AssetsRecoveryFilterBar
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
