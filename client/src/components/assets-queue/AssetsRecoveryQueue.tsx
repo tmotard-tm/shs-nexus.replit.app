@@ -991,18 +991,7 @@ export function AssetsRecoveryQueue() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-slate-900">{row.techData?.techName || row.title || "Unknown"}</span>
-                          {getItemSource(row) === "fleet_separation" ? (
-                            <Badge className="text-[10px] px-1.5 py-0 h-4 font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">
-                              Fleet Separation
-                            </Badge>
-                          ) : (
-                            <Badge className="text-[10px] px-1.5 py-0 h-4 font-medium bg-slate-100 text-slate-500 border border-slate-200">
-                              Manual
-                            </Badge>
-                          )}
-                        </div>
+                        <div className="font-medium text-slate-900">{row.techData?.techName || row.title || "Unknown"}</div>
                         <div className="text-xs text-slate-400 font-mono flex items-center gap-2">
                           {row.techData?.enterpriseId || "N/A"}
                           {personalPhone && (
@@ -1011,6 +1000,9 @@ export function AssetsRecoveryQueue() {
                             </span>
                           )}
                         </div>
+                        <span className="text-[10px] text-slate-400 italic">
+                          {getItemSource(row) === "fleet_separation" ? "Fleet Separation" : "Manual"}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600">{row.techData?.district || "N/A"}</td>
                       <td className="px-4 py-3 text-slate-600">
