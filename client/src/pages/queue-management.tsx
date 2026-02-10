@@ -45,7 +45,6 @@ import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
 import { TechCombobox, TechRosterEntry } from "@/components/ui/tech-combobox";
 import { usePreviewRole } from "@/hooks/use-preview-role";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
-import { AssetsRecoveryQueue } from "@/components/assets-queue/AssetsRecoveryQueue";
 
 // Module labels for display
 const moduleLabels = {
@@ -1061,7 +1060,7 @@ export default function UnifiedQueueManagement() {
                   </div>
                 </CardContent>
               </Card>
-            ) : filteredItems.length === 0 && !selectedModules.includes('assets') ? (
+            ) : filteredItems.length === 0 ? (
               <Card>
                 <CardContent className="py-8">
                   <div className="text-center">
@@ -1076,15 +1075,6 @@ export default function UnifiedQueueManagement() {
               </Card>
             ) : (
               selectedModules.map((module) => {
-                // Assets module uses its own enriched table-based component
-                if (module === 'assets') {
-                  return (
-                    <div key={module}>
-                      <AssetsRecoveryQueue />
-                    </div>
-                  );
-                }
-
                 const moduleItems = filteredItems.filter(item => item.module === module);
                 const statusCounts = getModuleStatusCounts(filteredItems, module);
                 const isExpanded = expandedQueues[module] === true; // Default to collapsed
