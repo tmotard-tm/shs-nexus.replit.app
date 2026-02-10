@@ -1999,6 +1999,46 @@ export class SnowflakeSyncService {
         employmentStatus: row.EMPLOYMENT_STATUS?.trim() || null,
       }));
 
+      // Fallback enrichment: for hires missing enterpriseId, try matching by name against all_techs
+      const hiresNeedingEnrichment = hires.filter(h => !h.enterpriseId);
+      if (hiresNeedingEnrichment.length > 0) {
+        console.log(`[OnboardingHires] ${hiresNeedingEnrichment.length} hires missing enterpriseId — attempting name-based fallback from all_techs...`);
+        const allTechsList = await storage.getAllTechs();
+        
+        // Build a lookup map: normalized name -> tech record (skip duplicates to avoid false matches)
+        const normalizeName = (name: string) => name.toUpperCase().replace(/[,.\s]+/g, '').trim();
+        const techByName = new Map<string, { techRacfid: string; employmentStatus: string | null } | 'duplicate'>();
+        for (const tech of allTechsList) {
+          if (tech.techName && tech.techRacfid) {
+            const key = normalizeName(tech.techName);
+            if (techByName.has(key)) {
+              techByName.set(key, 'duplicate');
+            } else {
+              techByName.set(key, {
+                techRacfid: tech.techRacfid.toUpperCase(),
+                employmentStatus: tech.employmentStatus || null,
+              });
+            }
+          }
+        }
+
+        let enrichedCount = 0;
+        for (const hire of hires) {
+          if (!hire.enterpriseId && hire.employeeName) {
+            const match = techByName.get(normalizeName(hire.employeeName));
+            if (match && match !== 'duplicate') {
+              hire.enterpriseId = match.techRacfid;
+              if (!hire.employmentStatus && match.employmentStatus) {
+                hire.employmentStatus = match.employmentStatus;
+              }
+              enrichedCount++;
+              console.log(`[OnboardingHires] Fallback match: "${hire.employeeName}" → enterpriseId=${match.techRacfid}, empStatus=${match.employmentStatus}`);
+            }
+          }
+        }
+        console.log(`[OnboardingHires] Fallback enrichment: ${enrichedCount}/${hiresNeedingEnrichment.length} hires enriched from all_techs`);
+      }
+
       const upsertedCount = await storage.bulkUpsertOnboardingHires(hires);
       result.recordsProcessed = rows.length;
       result.recordsCreated = upsertedCount;
