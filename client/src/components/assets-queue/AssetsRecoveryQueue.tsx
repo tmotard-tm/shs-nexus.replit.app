@@ -172,6 +172,25 @@ function getTaskProgress(item: AssetsQueueItemEnriched): { completed: number; to
   return { completed, total: 6, percentage: (completed / 6) * 100 };
 }
 
+function getItemSource(item: QueueItem): "fleet_separation" | "manual" {
+  try {
+    const parsed = item.data ? JSON.parse(item.data) : {};
+    const source = parsed.source || "";
+    if (
+      source === "snowflake_sync" ||
+      source === "hr_separation" ||
+      source === "hr_separation_sync"
+    ) {
+      return "fleet_separation";
+    }
+    const createdVia = item.metadata ? JSON.parse(item.metadata)?.createdVia : "";
+    if (createdVia === "hr_separation_sync") {
+      return "fleet_separation";
+    }
+  } catch {}
+  return "manual";
+}
+
 function getStatusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
   switch (status) {
     case "completed": return "default";
@@ -194,6 +213,7 @@ interface FilterState {
   vehicleType: string[];
   district: string[];
   incompleteOnly: boolean;
+  includeManual: boolean;
 }
 
 function AssetsRecoveryFilterBar({
@@ -216,6 +236,7 @@ function AssetsRecoveryFilterBar({
     activeFilters.vehicleType.length > 0 ||
     activeFilters.district.length > 0 ||
     activeFilters.incompleteOnly ||
+    activeFilters.includeManual ||
     searchQuery;
 
   return (
@@ -284,6 +305,16 @@ function AssetsRecoveryFilterBar({
       >
         <ListTodo className="h-4 w-4" />
         Incomplete Only
+      </Button>
+
+      <Button
+        variant={activeFilters.includeManual ? "default" : "outline"}
+        size="sm"
+        onClick={() => onFilterChange("includeManual", !activeFilters.includeManual)}
+        className="gap-2"
+      >
+        <Edit3 className="h-4 w-4" />
+        Include Manual
       </Button>
 
       {hasActiveFilters && (
@@ -698,6 +729,7 @@ export function AssetsRecoveryQueue() {
     vehicleType: [],
     district: [],
     incompleteOnly: false,
+    includeManual: false,
   });
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -791,7 +823,10 @@ export function AssetsRecoveryQueue() {
       const taskProgress = getTaskProgress(item);
       const matchesIncomplete = !filters.incompleteOnly || taskProgress.completed < taskProgress.total;
 
-      return matchesSearch && matchesStatus && matchesVehicle && matchesDistrict && matchesIncomplete;
+      const itemSource = getItemSource(item);
+      const matchesSource = filters.includeManual || itemSource === "fleet_separation";
+
+      return matchesSearch && matchesStatus && matchesVehicle && matchesDistrict && matchesIncomplete && matchesSource;
     });
   }, [queueItems, searchQuery, filters]);
 
@@ -862,7 +897,7 @@ export function AssetsRecoveryQueue() {
 
   const handleClearFilters = () => {
     setSearchQuery("");
-    setFilters({ status: [], vehicleType: [], district: [], incompleteOnly: false });
+    setFilters({ status: [], vehicleType: [], district: [], incompleteOnly: false, includeManual: false });
     setCurrentPage(1);
   };
 
@@ -956,16 +991,24 @@ export function AssetsRecoveryQueue() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="font-medium text-slate-900">{row.techData?.techName || row.title || "Unknown"}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-900">{row.techData?.techName || row.title || "Unknown"}</span>
+                          {getItemSource(row) === "fleet_separation" ? (
+                            <Badge className="text-[10px] px-1.5 py-0 h-4 font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">
+                              Fleet Separation
+                            </Badge>
+                          ) : (
+                            <Badge className="text-[10px] px-1.5 py-0 h-4 font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                              Manual
+                            </Badge>
+                          )}
+                        </div>
                         <div className="text-xs text-slate-400 font-mono flex items-center gap-2">
                           {row.techData?.enterpriseId || "N/A"}
                           {personalPhone && (
                             <span className="inline-flex items-center gap-0.5 text-[#2db386]">
                               <Phone className="h-3 w-3" />
                             </span>
-                          )}
-                          {row.techData?.fromSnowflake && (
-                            <span className="text-[10px] text-slate-400 italic">Source: Snowflake</span>
                           )}
                         </div>
                       </td>
