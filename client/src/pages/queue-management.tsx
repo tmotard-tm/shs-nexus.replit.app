@@ -42,6 +42,7 @@ import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
+import { AssetsRecoveryQueue } from "@/components/assets-queue/AssetsRecoveryQueue";
 import { TechCombobox, TechRosterEntry } from "@/components/ui/tech-combobox";
 import { usePreviewRole } from "@/hooks/use-preview-role";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
@@ -1075,6 +1076,14 @@ export default function UnifiedQueueManagement() {
               </Card>
             ) : (
               selectedModules.map((module) => {
+                if (module === 'assets') {
+                  return (
+                    <div key={module}>
+                      <AssetsRecoveryQueue />
+                    </div>
+                  );
+                }
+                
                 const moduleItems = filteredItems.filter(item => item.module === module);
                 const statusCounts = getModuleStatusCounts(filteredItems, module);
                 const isExpanded = expandedQueues[module] === true; // Default to collapsed
