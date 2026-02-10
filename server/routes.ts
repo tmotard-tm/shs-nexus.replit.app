@@ -1672,6 +1672,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/assets-queue/:id/notes", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
+      const { notes } = req.body;
+      if (typeof notes !== 'string') {
+        return res.status(400).json({ message: "Notes must be a string" });
+      }
+      const queueItem = await storage.updateQueueItem(req.params.id, { notes });
+      if (!queueItem) {
+        return res.status(404).json({ message: "Assets queue item not found" });
+      }
+      res.json(queueItem);
+    } catch (error) {
+      console.error('Error updating assets queue notes:', error);
+      res.status(500).json({ message: "Failed to update notes" });
+    }
+  });
+
   // Inventory Queue Module routes
   app.get("/api/inventory-queue", requireAuth, async (req: any, res) => {
     try {
