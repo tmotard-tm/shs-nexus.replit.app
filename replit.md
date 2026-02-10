@@ -93,15 +93,16 @@ Preferred communication style: Simple, everyday language.
 -   **Fleet Scope**: External API for posting vehicle spare status updates (POST to `/api/public/spares/{vehicleNumber}`).
 -   **SendGrid**: Email delivery for Communication Hub templates.
 
-# Last Session Summary (2026-02-09)
+# Last Session Summary (2026-02-10)
 
 ## Completed
-- Added enriched tech data display to Assets WorkModuleDialog: personal phone, mobile phone, email, separation date with aging badge, vehicle type/BYOV badge, fleet pickup address, HR truck number, HR notes, fleet routing radio buttons
-- Added enriched data badges to Assets Queue list cards (all 3 tabs): separation date, aging badge, BYOV/vehicle type, personal phone indicator, fleet routing status
-- Fixed fleet pickup address display to prioritize `taskData.vehicle.fleetPickupAddress` (HR separation data) over roster home address
-- Added HR separation data fallbacks: `contactNumber` for phone, `personalEmail` for email, `hrNotes` for notes
-- Fixed vehicle type display to show "Unknown" instead of misleading "Company" when no vehicleType data exists
-- Verified Assets queue items from Snowflake sync include enriched technician data in JSON fields
+- Redesigned Assets Queue UI from card-based layout to table-based layout matching Tools Queue pattern
+- Created AssetsRecoveryQueue component (~900 lines) in `client/src/components/assets-queue/AssetsRecoveryQueue.tsx`
+- Table features: search, filters (status/vehicle/district), sortable columns, pagination, expandable inline rows
+- Expandable rows include: contact details sidebar, recovery task checkboxes with auto-save, vehicle routing radio buttons, carrier dropdown, notes section, quick actions (Pick Up/Assign, Open Work Module, Mark Complete)
+- Preserved all existing functionality: PickUpRequestDialog (assign to self OR other), WorkModuleDialog access, enriched tech data parsing with HR fallbacks
+- Added notes PATCH endpoint (`/api/assets-queue/:id/notes`) for inline notes editing
+- Updated `client/src/pages/assets-queue.tsx` to use the new component (replaced ~800 lines with ~10 lines)
 
 ## Next Steps
 - Implement SMS sending via Twilio integration for Communication Hub
@@ -118,6 +119,7 @@ Preferred communication style: Simple, everyday language.
 - Single source of truth for Tools task creation in sync service prevents race conditions
 - Tools Queue uses rich HR data format; Fleet and Inventory queues still use Day 0 format
 - Assets Queue uses flat 6-checkbox UI (matching Tools Queue pattern) instead of hierarchical template system
+- Assets Queue now uses table-based layout with expandable inline rows (same pattern as Tools Queue)
 - Assets WorkModuleDialog shows enriched data sidebar with contact info, routing, and fleet pickup alongside task checklist
 - Tech data parsing prioritizes: HR separation data > roster data > task data defaults
 
