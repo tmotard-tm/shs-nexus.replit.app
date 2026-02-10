@@ -400,6 +400,7 @@ function ExpandedRowDetails({
   users,
   onComplete,
   onPickUp,
+  onQuickPickUp,
   onStartWork,
   isCompletePending,
 }: {
@@ -408,6 +409,7 @@ function ExpandedRowDetails({
   users: User[];
   onComplete: (id: string) => void;
   onPickUp: (item: AssetsQueueItemEnriched) => void;
+  onQuickPickUp: (item: AssetsQueueItemEnriched) => void;
   onStartWork: (item: AssetsQueueItemEnriched) => void;
   isCompletePending: boolean;
 }) {
@@ -636,14 +638,24 @@ function ExpandedRowDetails({
             </h4>
             <div className="grid grid-cols-1 gap-2">
               {isPending && (
-                <Button
-                  className="w-full"
-                  style={{ backgroundColor: "#1A4B8C" }}
-                  onClick={() => onPickUp(item)}
-                >
-                  <Check className="h-4 w-4 mr-2" />
-                  Pick Up / Assign
-                </Button>
+                <>
+                  <Button
+                    className="w-full"
+                    style={{ backgroundColor: "#1A4B8C" }}
+                    onClick={() => onQuickPickUp(item)}
+                  >
+                    <Check className="h-4 w-4 mr-2" />
+                    Pick Up
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => onPickUp(item)}
+                  >
+                    <Send className="h-4 w-4 mr-2 text-slate-500" />
+                    Assign
+                  </Button>
+                </>
               )}
 
               {isInProgress && isAssignedToMe && (
@@ -1061,6 +1073,11 @@ export function AssetsRecoveryQueue() {
                             users={users}
                             onComplete={(id) => completeMutation.mutate(id)}
                             onPickUp={(item) => setPickUpItem(item)}
+                            onQuickPickUp={(item) => {
+                              if (user) {
+                                assignMutation.mutate({ queueItemId: item.id, assigneeId: user.id });
+                              }
+                            }}
                             onStartWork={(item) => {
                               setWorkModuleItem(item);
                               setIsWorkModuleOpen(true);
