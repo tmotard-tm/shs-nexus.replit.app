@@ -68,6 +68,7 @@ export default function WeeklyOnboarding() {
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [weekFilter, setWeekFilter] = useState<string>("all");
   const [empStatusFilter, setEmpStatusFilter] = useState<string>("all");
+  const [ownerFilter, setOwnerFilter] = useState<string>("all");
   const [selectedHire, setSelectedHire] = useState<OnboardingHire | null>(null);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [truckNumber, setTruckNumber] = useState("");
@@ -240,6 +241,17 @@ export default function WeeklyOnboarding() {
     return Array.from(statuses).sort();
   })();
 
+  const ownerOptions = (() => {
+    const owners = new Set<string>();
+    hires.forEach(hire => {
+      const owner = getOwnerFromDistrict(hire.district);
+      if (owner && owner !== '-') {
+        owners.add(owner);
+      }
+    });
+    return Array.from(owners).sort();
+  })();
+
   const filteredHires = hires
     .filter(hire => {
       const matchesSearch = !searchQuery || 
@@ -262,8 +274,11 @@ export default function WeeklyOnboarding() {
       
       // Employment status filter
       const matchesEmpStatus = empStatusFilter === "all" || hire.employmentStatus === empStatusFilter;
+
+      // Owner filter
+      const matchesOwner = ownerFilter === "all" || getOwnerFromDistrict(hire.district) === ownerFilter;
       
-      return matchesSearch && matchesAssigned && matchesUnassigned && matchesWeek && matchesEmpStatus;
+      return matchesSearch && matchesAssigned && matchesUnassigned && matchesWeek && matchesEmpStatus && matchesOwner;
     })
     .sort((a, b) => {
       // Sort by service date ascending (oldest to newest)
@@ -638,7 +653,19 @@ export default function WeeklyOnboarding() {
                           </TableHead>
                           <TableHead className="min-w-[200px] bg-background sticky top-0">Job Title</TableHead>
                           <TableHead className="w-[80px] bg-background sticky top-0">District</TableHead>
-                          <TableHead className="bg-background sticky top-0">Owner</TableHead>
+                          <TableHead className="bg-background sticky top-0">
+                            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+                              <SelectTrigger className="h-auto p-0 border-0 bg-transparent shadow-none font-medium text-muted-foreground hover:text-foreground cursor-pointer [&>svg]:ml-1 [&>svg]:h-3 [&>svg]:w-3">
+                                Owner
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Owners</SelectItem>
+                                {ownerOptions.map((owner) => (
+                                  <SelectItem key={owner} value={owner}>{owner}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableHead>
                           <TableHead className="bg-background sticky top-0">City</TableHead>
                           <TableHead className="bg-background sticky top-0">Planning Area</TableHead>
                           <TableHead className="min-w-[200px] bg-background sticky top-0">Address</TableHead>
