@@ -183,7 +183,9 @@ function getTaskProgress(item: AssetsQueueItemEnriched): { completed: number; to
   return { completed, total: 6, percentage: (completed / 6) * 100 };
 }
 
-function getItemSource(item: QueueItem): "fleet_separation" | "manual" {
+type SourceLabel = "fleet_separation" | "terminated_tech" | "both" | "manual";
+
+function getItemSourceFromData(item: QueueItem): boolean {
   try {
     const parsed = item.data ? JSON.parse(item.data) : {};
     const source = parsed.source || "";
@@ -192,14 +194,51 @@ function getItemSource(item: QueueItem): "fleet_separation" | "manual" {
       source === "hr_separation" ||
       source === "hr_separation_sync"
     ) {
-      return "fleet_separation";
+      return true;
     }
     const createdVia = item.metadata ? JSON.parse(item.metadata)?.createdVia : "";
     if (createdVia === "hr_separation_sync") {
-      return "fleet_separation";
+      return true;
     }
   } catch {}
-  return "manual";
+  return false;
+}
+
+function getItemSource(item: QueueItem, offboardingSourceMap: Map<string, Set<string>>): SourceLabel {
+  const fromSync = getItemSourceFromData(item);
+  if (!fromSync) return "manual";
+
+  const techData = parseTechData(item);
+  const eid = (techData?.enterpriseId || "").toUpperCase();
+
+  if (eid && offboardingSourceMap.has(eid)) {
+    const sources = offboardingSourceMap.get(eid)!;
+    const inTermRoster = sources.has("term_roster");
+    const inSeparation = sources.has("separation");
+    if (inTermRoster && inSeparation) return "both";
+    if (inSeparation) return "fleet_separation";
+    if (inTermRoster) return "terminated_tech";
+  }
+
+  return "terminated_tech";
+}
+
+function renderSourceLabels(source: SourceLabel) {
+  switch (source) {
+    case "both":
+      return (
+        <>
+          <span className="text-[10px] text-slate-400 italic">Fleet Separation</span>
+          <span className="text-[10px] text-slate-400 italic"> · Terminated Tech</span>
+        </>
+      );
+    case "fleet_separation":
+      return <span className="text-[10px] text-slate-400 italic">Fleet Separation</span>;
+    case "terminated_tech":
+      return <span className="text-[10px] text-slate-400 italic">Terminated Tech</span>;
+    case "manual":
+      return <span className="text-[10px] text-slate-400 italic">Manual</span>;
+  }
 }
 
 function getStatusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
@@ -798,6 +837,22 @@ export function AssetsRecoveryQueue() {
     queryKey: ["/api/users"],
   });
 
+  const { data: offboardingData = [] } = useQuery<Array<{ enterpriseId: string; source: string }>>({
+    queryKey: ["/api/weekly-offboarding"],
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const offboardingSourceMap = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const record of offboardingData) {
+      const eid = (record.enterpriseId || "").toUpperCase();
+      if (!eid) continue;
+      if (!map.has(eid)) map.set(eid, new Set());
+      map.get(eid)!.add(record.source);
+    }
+    return map;
+  }, [offboardingData]);
+
   const assetsUsers = users.filter(u => u.departments?.includes("ASSETS") || u.role === "developer" || u.role === "admin");
 
   const invalidateAssetsQueue = () => {
@@ -891,12 +946,12 @@ export function AssetsRecoveryQueue() {
       const taskProgress = getTaskProgress(item);
       const matchesIncomplete = !filters.incompleteOnly || taskProgress.completed < taskProgress.total;
 
-      const itemSource = getItemSource(item);
-      const matchesSource = filters.includeManual || itemSource === "fleet_separation";
+      const itemSource = getItemSource(item, offboardingSourceMap);
+      const matchesSource = filters.includeManual || itemSource !== "manual";
 
       return matchesSearch && matchesStatus && matchesVehicle && matchesDistrict && matchesIncomplete && matchesSource;
     });
-  }, [queueItems, searchQuery, filters]);
+  }, [queueItems, searchQuery, filters, offboardingSourceMap]);
 
   const sortedData = useMemo(() => {
     if (!sortConfig) return filteredData;
@@ -1136,8 +1191,8 @@ export function AssetsRecoveryQueue() {
                             </span>
                           )}
                         </div>
-                        <span className="text-[10px] text-slate-400 italic">
-                          {getItemSource(row) === "fleet_separation" ? "Fleet Separation" : "Manual"}
+                        <span>
+                          {renderSourceLabels(getItemSource(row, offboardingSourceMap))}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600">{row.techData?.district || "N/A"}</td>
