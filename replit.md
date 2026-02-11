@@ -126,6 +126,7 @@ Preferred communication style: Simple, everyday language.
 - Tech data parsing prioritizes: HR separation data > roster data > task data defaults
 - Fleet Separation labels use subtle italic gray text (not colored badges) to reduce visual noise
 - "Include Manual" filter defaults to off to focus on real separation requests from Snowflake
+- Source labeling uses dedicated `/api/snowflake/separation-ids` endpoint (lightweight, returns only LDAP_ID + EMPLID) instead of weekly-offboarding (which had deduplication that prevented "both" labels). Sync items are always "Terminated Tech"; if also in SEPARATION_FLEET_DETAILS, they show "Fleet Separation · Terminated Tech".
 
 # Current State
 
@@ -133,7 +134,7 @@ Preferred communication style: Simple, everyday language.
 - **Auth**: `/api/auth/*` (login, register, password management)
 - **Core CRUD**: `/api/users`, `/api/requests`, `/api/configurations`, `/api/activity-logs`
 - **Task Queues**: `/api/ntao-queue`, `/api/assets-queue`, `/api/inventory-queue`, `/api/fleet-queue`, `/api/queues/*`
-- **Snowflake**: `/api/snowflake/*` (status, sync, query, debug)
+- **Snowflake**: `/api/snowflake/*` (status, sync, query, debug, separation-ids)
 - **Holman**: `/api/holman/*` (vehicles, contacts, maintenance, fleet sync, assignment updates)
 - **TPMS**: `/api/tpms/*` (tech info, truck lookups, cache sync)
 - **Vehicle Assignments**: `/api/vehicle-assignments/*`

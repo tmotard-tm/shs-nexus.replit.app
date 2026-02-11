@@ -204,21 +204,14 @@ function getItemSourceFromData(item: QueueItem): boolean {
   return false;
 }
 
-function getItemSource(item: QueueItem, offboardingSourceMap: Map<string, Set<string>>): SourceLabel {
+function getItemSource(item: QueueItem, separationIds: Set<string>): SourceLabel {
   const fromSync = getItemSourceFromData(item);
   if (!fromSync) return "manual";
 
   const techData = parseTechData(item);
   const eid = (techData?.enterpriseId || "").toUpperCase();
 
-  if (eid && offboardingSourceMap.has(eid)) {
-    const sources = offboardingSourceMap.get(eid)!;
-    const inTermRoster = sources.has("term_roster");
-    const inSeparation = sources.has("separation");
-    if (inTermRoster && inSeparation) return "both";
-    if (inSeparation) return "fleet_separation";
-    if (inTermRoster) return "terminated_tech";
-  }
+  if (eid && separationIds.has(eid)) return "both";
 
   return "terminated_tech";
 }
@@ -837,21 +830,14 @@ export function AssetsRecoveryQueue() {
     queryKey: ["/api/users"],
   });
 
-  const { data: offboardingData = [] } = useQuery<Array<{ enterpriseId: string; source: string }>>({
-    queryKey: ["/api/weekly-offboarding"],
-    staleTime: 5 * 60 * 1000,
+  const { data: separationIdsRaw = [] } = useQuery<string[]>({
+    queryKey: ["/api/snowflake/separation-ids"],
+    staleTime: 10 * 60 * 1000,
   });
 
-  const offboardingSourceMap = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    for (const record of offboardingData) {
-      const eid = (record.enterpriseId || "").toUpperCase();
-      if (!eid) continue;
-      if (!map.has(eid)) map.set(eid, new Set());
-      map.get(eid)!.add(record.source);
-    }
-    return map;
-  }, [offboardingData]);
+  const separationIds = useMemo(() => {
+    return new Set(separationIdsRaw.map(id => id.toUpperCase()));
+  }, [separationIdsRaw]);
 
   const assetsUsers = users.filter(u => u.departments?.includes("ASSETS") || u.role === "developer" || u.role === "admin");
 
@@ -946,12 +932,12 @@ export function AssetsRecoveryQueue() {
       const taskProgress = getTaskProgress(item);
       const matchesIncomplete = !filters.incompleteOnly || taskProgress.completed < taskProgress.total;
 
-      const itemSource = getItemSource(item, offboardingSourceMap);
+      const itemSource = getItemSource(item, separationIds);
       const matchesSource = filters.includeManual || itemSource !== "manual";
 
       return matchesSearch && matchesStatus && matchesVehicle && matchesDistrict && matchesIncomplete && matchesSource;
     });
-  }, [queueItems, searchQuery, filters, offboardingSourceMap]);
+  }, [queueItems, searchQuery, filters, separationIds]);
 
   const sortedData = useMemo(() => {
     if (!sortConfig) return filteredData;
@@ -1192,7 +1178,7 @@ export function AssetsRecoveryQueue() {
                           )}
                         </div>
                         <span>
-                          {renderSourceLabels(getItemSource(row, offboardingSourceMap))}
+                          {renderSourceLabels(getItemSource(row, separationIds))}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600">{row.techData?.district || "N/A"}</td>

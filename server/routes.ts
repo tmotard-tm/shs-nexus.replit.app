@@ -6712,6 +6712,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/snowflake/separation-ids", requireAuth, async (req: any, res) => {
+    try {
+      const snowflakeService = SnowflakeSyncService.getInstance();
+      const query = `
+        SELECT DISTINCT UPPER(LDAP_ID) as LDAP_ID, UPPER(EMPLID) as EMPLID
+        FROM PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS
+        WHERE (LDAP_ID IS NOT NULL AND LDAP_ID != '') OR (EMPLID IS NOT NULL AND EMPLID != '')
+      `;
+      const rows = await snowflakeService.executeQuery(query) as Array<{ LDAP_ID: string; EMPLID: string }>;
+      const idSet = new Set<string>();
+      for (const r of rows) {
+        if (r.LDAP_ID) idSet.add(r.LDAP_ID);
+        if (r.EMPLID) idSet.add(r.EMPLID);
+      }
+      const ids = Array.from(idSet);
+      console.log(`[Separation IDs] Returned ${ids.length} unique IDs from SEPARATION_FLEET_DETAILS`);
+      res.json(ids);
+    } catch (error: any) {
+      console.error("Error fetching separation IDs:", error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get tech addresses from Snowflake TPMS data
   app.get("/api/snowflake/tech-addresses/:enterpriseId", requireAuth, async (req: any, res) => {
     const startTime = Date.now();
