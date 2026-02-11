@@ -14,6 +14,7 @@ import {
   Key,
   Database,
   UserPlus,
+  UserMinus,
   Info,
   Mail,
   type LucideIcon
@@ -291,6 +292,15 @@ export const PAGES: PageDefinition[] = [
     icon: UserPlus,
     category: "management",
     permissionKey: "weeklyOnboarding",
+  },
+  {
+    key: "weeklyOffboarding",
+    label: "Weekly Offboarding",
+    description: "Track weekly tech separations and offboarding tasks",
+    path: "/weekly-offboarding",
+    icon: UserMinus,
+    category: "management",
+    permissionKey: "weeklyOffboarding",
   },
   {
     key: "techRoster",
