@@ -1,6 +1,6 @@
 # Nexus System Architecture
 
-> **Last Updated**: 2026-02-06
+> **Last Updated**: 2026-02-11
 > **Purpose**: The "Truth" document for understanding how Nexus works. Read this first.
 
 ---
@@ -81,6 +81,7 @@ Nexus is an **enterprise task management operations platform** that:
 | `pages/` | Page components (queue-management, fleet, offboard-technician, tools-queue, communication-hub, etc.) |
 | `components/` | Reusable UI components |
 | `components/tools-queue/ToolsRecoveryQueue.tsx` | **New (2026-02-04)**: Table-based Tools queue with expandable rows, filters, urgency badges |
+| `components/assets-queue/AssetsRecoveryQueue.tsx` | **New (2026-02-11)**: Table-based Assets queue with expandable rows, fleet separation source detection, split Pick Up/Assign actions |
 | `hooks/` | Custom React hooks (useAuth, use-toast, etc.) |
 | `hooks/use-debounced-save.ts` | Auto-save hook with 500ms debounce for task progress |
 | `lib/` | Utilities (queryClient, utils, role-permissions) |
@@ -318,7 +319,7 @@ GET /api/tools-queue
 
 ---
 
-## Current State (2026-02-06)
+## Current State (2026-02-11)
 
 ### What's Working
 - Sprint 1-5: Tools queue, BYOV detection, blocking logic, Phase 2 triggers
@@ -329,6 +330,16 @@ GET /api/tools-queue
 - Phase 2 Email Notifications: Fleet team notified when all Day 0 tasks complete
 - **Tools Queue duplicate fix**: Single source of truth for task creation (sync service only)
 - **Cross-format duplicate detection**: Checks both `employee.*` and `technician.*` data paths
+- **Sprint 13 - Assets Queue redesign**: Table-based layout with expandable rows, fleet separation source detection, "Include Manual" filter, split Pick Up/Assign actions
+- **Onboarding improvements**: Owner column filter, case/whitespace-tolerant employee matching
+
+### Assets Recovery Queue (`AssetsRecoveryQueue.tsx`)
+- Table-based layout matching Tools Queue pattern
+- NTAO-style collapsible Card header (green color bar, icon, count, status badges)
+- Fleet Separation source detection: `getItemSource()` classifies items by origin
+- "Include Manual" filter toggle (defaults off) to focus on real separation requests
+- Split actions: "Pick Up" (auto-assign to self) and "Assign" (open user selection dialog)
+- Auto-save for task progress with 500ms debounce
 
 ### Communication Hub Highlights
 - Developer-only access (UI and API level enforcement)
@@ -341,11 +352,14 @@ GET /api/tools-queue
 - GET handlers are read-only; task creation happens only in scheduled sync services
 - Tools Queue uses "Tools Queue - NAME" format with rich HR data; Fleet/Inventory use Day 0 format
 - Duplicate detection checks both legacy (`technician.*`) and current (`employee.*`) data structures
+- Assets and Tools queues both use table-based layout with expandable inline rows
+- Tech data parsing prioritizes: HR separation data > roster data > task data defaults
 
 ### Known Issues
 - SMS not yet implemented (shows as simulated)
 - No Zod validation on communication routes
 - One legacy "Day 0: Recover Equipment & Tools - ABALOS" task remains (no equivalent exists)
+- Tech-data parsing helpers duplicated between Tools and Assets queues (consolidation candidate)
 
 ---
 

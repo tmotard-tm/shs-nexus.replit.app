@@ -33,6 +33,12 @@
 | Sprint 12 | Phase 2 Email Notifications | ✅ Complete | 2026-02-06 |
 | Bug Fixes | Tools Queue duplicate task fix | ✅ Complete | 2026-02-06 |
 | Bug Fixes | Cross-format duplicate detection | ✅ Complete | 2026-02-06 |
+| Sprint 13 | Assets Queue Table Redesign (Table + Expandable Rows) | ✅ Complete | 2026-02-11 |
+| Sprint 13 | Assets Queue NTAO-Style Card Header | ✅ Complete | 2026-02-11 |
+| Sprint 13 | Fleet Separation Source Detection & Filtering | ✅ Complete | 2026-02-11 |
+| Sprint 13 | Split Pick Up / Assign Actions | ✅ Complete | 2026-02-11 |
+| Sprint 13 | Onboarding Owner Column Filter | ✅ Complete | 2026-02-11 |
+| Bug Fixes | Employee Matching (case/whitespace) | ✅ Complete | 2026-02-11 |
 
 ### In Progress 🚧
 

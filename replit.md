@@ -93,22 +93,22 @@ Preferred communication style: Simple, everyday language.
 -   **Fleet Scope**: External API for posting vehicle spare status updates (POST to `/api/public/spares/{vehicleNumber}`).
 -   **SendGrid**: Email delivery for Communication Hub templates.
 
-# Last Session Summary (2026-02-10)
+# Last Session Summary (2026-02-11)
 
 ## Completed
-- Redesigned Assets Queue UI from card-based layout to table-based layout matching Tools Queue pattern
-- Created AssetsRecoveryQueue component (~900 lines) in `client/src/components/assets-queue/AssetsRecoveryQueue.tsx`
-- Table features: search, filters (status/vehicle/district), sortable columns, pagination, expandable inline rows
-- Expandable rows include: contact details sidebar, recovery task checkboxes with auto-save, vehicle routing radio buttons, carrier dropdown, notes section, quick actions (Pick Up/Assign, Open Work Module, Mark Complete)
-- Preserved all existing functionality: PickUpRequestDialog (assign to self OR other), WorkModuleDialog access, enriched tech data parsing with HR fallbacks
-- Added notes PATCH endpoint (`/api/assets-queue/:id/notes`) for inline notes editing
-- Updated `client/src/pages/assets-queue.tsx` to use the new component (replaced ~800 lines with ~10 lines)
+- Added NTAO-style collapsible Card header to Assets Queue (green color bar, icon, item count, status badges, expand/collapse toggle)
+- Implemented fleet separation source detection (`getItemSource()`) distinguishing Snowflake-originated vs manual items
+- Added subtle italicized gray "Fleet Separation" / "Manual" labels below enterprise ID in table rows
+- Added "Include Manual" filter toggle (defaults off) to hide test/manual items
+- Split "Pick Up / Assign" button into "Pick Up" (auto-assigns to self) and "Assign" (opens user selection dialog)
+- Added owner column dropdown filter to weekly onboarding table
+- Fixed employee matching to handle case and whitespace differences in Snowflake sync
 
 ## Next Steps
 - Implement SMS sending via Twilio integration for Communication Hub
 - Add FleetScope deep link for routing lookup
 - Add input validation (Zod schemas) to communication routes
-- Consider consolidating tech-data parsing helpers into shared utility for reuse across queues
+- Consolidate tech-data parsing helpers into shared utility for reuse across Tools and Assets queues
 - Review and address pre-existing LSP warnings in `server/storage.ts` (vehicleType MemStorage stubs)
 
 ## Blockers
@@ -122,6 +122,8 @@ Preferred communication style: Simple, everyday language.
 - Assets Queue now uses table-based layout with expandable inline rows (same pattern as Tools Queue)
 - Assets WorkModuleDialog shows enriched data sidebar with contact info, routing, and fleet pickup alongside task checklist
 - Tech data parsing prioritizes: HR separation data > roster data > task data defaults
+- Fleet Separation labels use subtle italic gray text (not colored badges) to reduce visual noise
+- "Include Manual" filter defaults to off to focus on real separation requests from Snowflake
 
 # Current State
 

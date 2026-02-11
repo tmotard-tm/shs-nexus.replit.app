@@ -1,5 +1,34 @@
 # Enhancements & Bug Fixes Log
 
+## 2026-02-11
+
+### Bugs Fixed
+
+| Issue | Description | Resolution |
+|-------|-------------|------------|
+| Employee matching misses | Case and whitespace differences caused missed matches during Snowflake sync | Normalized names with trim/lowercase before comparison |
+
+### Enhancements Made
+
+| Enhancement | Description |
+|-------------|-------------|
+| Assets Queue table redesign | Rebuilt from scratch as table with expandable inline rows, matching Tools Queue pattern |
+| NTAO-style card header | Wrapped Assets Queue with collapsible Card header for visual consistency across all queues |
+| Fleet Separation source detection | `getItemSource()` classifies items as "fleet_separation" or "manual" based on metadata |
+| Include Manual filter | Defaults to off; hides test/manual items to show only real separation requests |
+| Split Pick Up / Assign | "Pick Up" auto-assigns to self; "Assign" opens user selection dialog |
+| Owner column filter | Dropdown filter on onboarding table owner column |
+
+### Technical Debt Identified
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| Consolidate tech-data parsing | Medium | Tools and Assets queues both parse enriched tech data; consider shared utility |
+| No Zod validation on communication routes | Medium | Carried forward from previous sessions |
+| SMS not implemented | Medium | Carried forward - needs Twilio integration |
+
+---
+
 ## 2026-02-06
 
 ### Bugs Fixed
