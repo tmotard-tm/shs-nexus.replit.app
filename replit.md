@@ -105,6 +105,15 @@ Preferred communication style: Simple, everyday language.
 - Database cleanup: Removed 171 orphan "Tools" department items (all had matching Assets Management counterparts)
 - Updated `offboard-technician.tsx` and `template-loader.ts` to use consolidated step name
 
+## Recent Changes (2026-02-11, session 2)
+- **Automated Separation Details Enrichment**: Added `enrichOffboardingWithSeparationDetails()` to snowflake-sync-service.ts. Scans all offboarding queue items, identifies those missing `hrSeparation` data, batch-fetches from Snowflake's `SEPARATION_FLEET_DETAILS`, and merges enrichment (contact info, pickup address, last day, separation category) into each item's `data` field.
+  - Runs immediately after `syncTermedTechs` in the daily 5am sync
+  - Also runs every 12 hours alongside onboarding enrichment
+  - Manual trigger: `POST /api/snowflake/sync/separation-enrichment` (dev/admin only)
+  - First run enriched 56 items (23 separation records matched against 728 offboarding items)
+- **Simplified source detection**: `getItemSourceFromData` fallback now only checks `workflowType === "offboarding_sequence"` (removed requirement for techName/enterpriseId). This fixes Main branch visibility issues for legacy items without explicit source tags.
+- **Orphan filtering**: Display-level filter hides items where techName is "Unknown" AND enterpriseId is empty.
+
 ## Next Steps
 - Implement SMS sending via Twilio integration for Communication Hub
 - Add FleetScope deep link for routing lookup
