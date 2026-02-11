@@ -105,6 +105,12 @@ Preferred communication style: Simple, everyday language.
 - Database cleanup: Removed 171 orphan "Tools" department items (all had matching Assets Management counterparts)
 - Updated `offboard-technician.tsx` and `template-loader.ts` to use consolidated step name
 
+## Recent Changes (2026-02-11, session 3)
+- **Enrichment Bug Fix — HR separation data not displaying in UI**: The enrichment function stored HR data in `parsed.hrSeparation` but the frontend only read from `parsed.technician`/`parsed.employee`. Three fixes applied:
+  1. Backend enrichment now merges key HR fields (contactNumber, personalEmail, fleetPickupAddress, truckNumber, lastDayWorked, separationCategory, hrNotes) directly into the technician object (with null-guards to avoid overwriting existing data)
+  2. Frontend `parseTechData()` now falls back to `parsed.hrSeparation` for each contact field
+  3. `/api/assets-queue/:id/contact` endpoint now includes `hrSeparation` fallback for personalPhone, personalEmail, fleetPickupAddress, and hrTruckNumber
+
 ## Recent Changes (2026-02-11, session 2)
 - **Automated Separation Details Enrichment**: Added `enrichOffboardingWithSeparationDetails()` to snowflake-sync-service.ts. Scans all offboarding queue items, identifies those missing `hrSeparation` data, batch-fetches from Snowflake's `SEPARATION_FLEET_DETAILS`, and merges enrichment (contact info, pickup address, last day, separation category) into each item's `data` field.
   - Runs immediately after `syncTermedTechs` in the daily 5am sync
