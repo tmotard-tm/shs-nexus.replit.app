@@ -1,6 +1,9 @@
 import { getSnowflakeService, isSnowflakeConfigured } from './snowflake-service';
 import { getTPMSService } from './tpms-service';
 import { storage } from './storage';
+import { db } from './db';
+import { queueItems } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCachedAssignment } from '@shared/schema';
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
@@ -2231,6 +2234,163 @@ export class SnowflakeSyncService {
     } catch (error: any) {
       result.errors.push(`Enrich failed: ${error.message}`);
       console.error('[EnrichOnboarding] Failed:', error);
+    }
+
+    return result;
+  }
+
+  async enrichOffboardingWithSeparationDetails(): Promise<{
+    success: boolean;
+    totalOffboarding: number;
+    alreadyEnriched: number;
+    enrichedCount: number;
+    noMatchCount: number;
+    errors: string[];
+  }> {
+    const result = {
+      success: false,
+      totalOffboarding: 0,
+      alreadyEnriched: 0,
+      enrichedCount: 0,
+      noMatchCount: 0,
+      errors: [] as string[],
+    };
+
+    if (!isSnowflakeConfigured()) {
+      result.errors.push('Snowflake is not configured');
+      return result;
+    }
+
+    try {
+      const allItems = await db.select().from(queueItems)
+        .where(eq(queueItems.workflowType, 'offboarding'));
+
+      result.totalOffboarding = allItems.length;
+
+      if (allItems.length === 0) {
+        console.log('[SeparationEnrich] No offboarding queue items found');
+        result.success = true;
+        return result;
+      }
+
+      const needsEnrichment: Array<{ id: string; enterpriseId: string; employeeId: string }> = [];
+
+      for (const item of allItems) {
+        try {
+          const parsed = typeof item.data === 'string' ? JSON.parse(item.data) : (item.data || {});
+
+          if (parsed.hrSeparation && parsed.hrSeparation.success !== false) {
+            result.alreadyEnriched++;
+            continue;
+          }
+
+          const tech = parsed.technician || parsed.employee || {};
+          const eid = (tech.enterpriseId || tech.techRacfid || tech.racfId || '').trim().toUpperCase();
+          const empId = (tech.employeeId || tech.emplId || '').trim();
+
+          if (!eid && !empId) {
+            continue;
+          }
+
+          needsEnrichment.push({ id: item.id, enterpriseId: eid, employeeId: empId });
+        } catch {
+          continue;
+        }
+      }
+
+      console.log(`[SeparationEnrich] ${result.totalOffboarding} total offboarding items, ${result.alreadyEnriched} already enriched, ${needsEnrichment.length} need enrichment`);
+
+      if (needsEnrichment.length === 0) {
+        result.success = true;
+        return result;
+      }
+
+      const separationsResult = await this.getAllConfirmedSeparations();
+      if (!separationsResult.success || separationsResult.records.length === 0) {
+        console.log('[SeparationEnrich] No separation records from Snowflake (or query failed)');
+        result.errors.push(separationsResult.message || 'No separation records available');
+        return result;
+      }
+
+      const sepByLdap = new Map<string, typeof separationsResult.records[0]>();
+      const sepByEmplId = new Map<string, typeof separationsResult.records[0]>();
+      for (const rec of separationsResult.records) {
+        if (rec.ldapId) sepByLdap.set(rec.ldapId.toUpperCase(), rec);
+        if (rec.emplId) sepByEmplId.set(rec.emplId.trim(), rec);
+      }
+
+      console.log(`[SeparationEnrich] Loaded ${separationsResult.records.length} separation records. Matching against ${needsEnrichment.length} items...`);
+
+      for (const item of needsEnrichment) {
+        try {
+          const sep = sepByLdap.get(item.enterpriseId) || sepByEmplId.get(item.employeeId);
+          if (!sep) {
+            result.noMatchCount++;
+            continue;
+          }
+
+          const dbItem = allItems.find(i => i.id === item.id);
+          if (!dbItem) continue;
+
+          const parsed = typeof dbItem.data === 'string' ? JSON.parse(dbItem.data) : (dbItem.data || {});
+
+          parsed.hrSeparation = {
+            success: true,
+            ldapId: sep.ldapId,
+            technicianName: sep.technicianName,
+            emplId: sep.emplId,
+            lastDay: sep.lastDay,
+            effectiveSeparationDate: sep.effectiveSeparationDate,
+            truckNumber: sep.truckNumber,
+            contactNumber: sep.contactNumber,
+            personalEmail: sep.personalEmail,
+            fleetPickupAddress: sep.fleetPickupAddress,
+            separationCategory: sep.separationCategory,
+            notes: sep.notes,
+            enrichedAt: new Date().toISOString(),
+          };
+
+          await storage.updateQueueItem(item.id, { data: JSON.stringify(parsed) });
+
+          result.enrichedCount++;
+        } catch (err: any) {
+          result.errors.push(`Failed to enrich item ${item.id}: ${err.message}`);
+        }
+      }
+
+      result.success = true;
+      console.log(`[SeparationEnrich] Complete: ${result.enrichedCount} enriched, ${result.noMatchCount} no match, ${result.errors.length} errors`);
+
+      await storage.createSyncLog({
+        syncType: 'separation_enrichment',
+        status: 'success',
+        recordsProcessed: needsEnrichment.length,
+        recordsCreated: 0,
+        recordsUpdated: result.enrichedCount,
+        recordsFailed: result.errors.length,
+        details: JSON.stringify({
+          totalOffboarding: result.totalOffboarding,
+          alreadyEnriched: result.alreadyEnriched,
+          enrichedCount: result.enrichedCount,
+          noMatchCount: result.noMatchCount,
+          errors: result.errors,
+        }),
+      });
+    } catch (error: any) {
+      result.errors.push(`Enrichment failed: ${error.message}`);
+      console.error('[SeparationEnrich] Failed:', error);
+
+      try {
+        await storage.createSyncLog({
+          syncType: 'separation_enrichment',
+          status: 'error',
+          recordsProcessed: 0,
+          recordsCreated: 0,
+          recordsUpdated: result.enrichedCount,
+          recordsFailed: 1,
+          details: JSON.stringify({ error: error.message, partialResults: result }),
+        });
+      } catch {}
     }
 
     return result;

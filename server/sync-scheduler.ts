@@ -51,6 +51,11 @@ async function checkAndRunSync(): Promise<void> {
       const termedResult = await syncService.syncTermedTechs('scheduler');
       console.log(`[Scheduler] Termed techs sync complete: ${termedResult.recordsProcessed} processed, ${termedResult.queueItemsCreated} queue items created`);
       
+      // Enrich offboarding items with HR separation details (contact info, pickup address, etc.)
+      console.log('[Scheduler] Starting separation details enrichment...');
+      const enrichResult = await syncService.enrichOffboardingWithSeparationDetails();
+      console.log(`[Scheduler] Separation enrichment complete: ${enrichResult.enrichedCount} enriched, ${enrichResult.noMatchCount} no match`);
+
       // Sync all techs (roster update)
       console.log('[Scheduler] Starting all techs sync...');
       const allTechsResult = await syncService.syncAllTechs('scheduler');
@@ -81,13 +86,16 @@ async function checkAndRunEnrichment(): Promise<void> {
 
     // Run enrichment if we haven't run it yet or if 12 hours have passed
     if (lastEnrichTime === null || (now - lastEnrichTime) >= twelveHoursMs) {
-      console.log(`[Scheduler] Running onboarding enrichment (every ${ENRICH_INTERVAL_HOURS} hours)`);
+      console.log(`[Scheduler] Running enrichments (every ${ENRICH_INTERVAL_HOURS} hours)`);
       
       const syncService = getSnowflakeSyncService();
       const result = await syncService.enrichOnboardingHires();
+      console.log(`[Scheduler] Onboarding enrichment complete: ${result.enrichedCount} records enriched`);
+
+      const sepResult = await syncService.enrichOffboardingWithSeparationDetails();
+      console.log(`[Scheduler] Separation enrichment complete: ${sepResult.enrichedCount} enriched, ${sepResult.noMatchCount} no match`);
       
       lastEnrichTime = now;
-      console.log(`[Scheduler] Onboarding enrichment complete: ${result.enrichedCount} records enriched`);
     }
   } catch (error) {
     console.error('[Scheduler] Error during onboarding enrichment:', error);
