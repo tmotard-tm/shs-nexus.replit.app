@@ -547,7 +547,8 @@ export class TemplateLoader {
       // NTAO Day 0 steps
       'ntao_stop_replenishment_day0': 'stop_shipment',
       
-      // Equipment/Assets Day 0 steps  
+      // Assets Day 0 steps (consolidated Equipment + Tools)
+      'tools_recover_equipment_day0': 'equipment_recovery',
       'equipment_recover_devices_day0': 'equipment_recovery',
       
       // Fleet Day 0 steps - keep as offboarding for now

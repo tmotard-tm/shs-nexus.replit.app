@@ -265,7 +265,6 @@ export class SnowflakeSyncService {
             },
           };
 
-          // Create 4 Day 0 tasks for the offboarding workflow sequence
           const day0Tasks = [
             {
               title: `Day 0: NTAO — National Truck Assortment - Stop Truck Stock Replenishment - ${tech.techName}`,
@@ -285,13 +284,13 @@ export class SnowflakeSyncService {
             },
             {
               title: `Day 0: Recover Company Equipment - ${tech.techName}`,
-              description: `IMMEDIATE TASK: Recover company equipment from ${tech.techName} (${tech.techRacfid}). Vehicle: ${vehicleNumber || 'TBD'}. Contact employee immediately to arrange pickup/return of all company devices and equipment. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+              description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${tech.techName} (${tech.techRacfid}). Truck ${vehicleNumber || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
               department: 'Assets Management',
-              step: 'equipment_recover_devices_day0',
-              subtask: 'Equipment',
+              step: 'tools_recover_equipment_day0',
+              subtask: 'Assets',
               workflowStep: 2,
               instructions: [
-                "Contact employee immediately to arrange equipment return",
+                "Contact Employee immediately to arrange equipment return",
                 "Recover company phone and verify it's company-issued",
                 "Collect any tablets, mobile hotspots, or other devices",
                 "Retrieve company credit cards (coordinate with OneCard Help Desk if needed)",
@@ -333,25 +332,6 @@ export class SnowflakeSyncService {
                 "Clear and cancel any pending parts orders for this vehicle/Employee",
                 "Update inventory system to stop automatic replenishment",
                 "Complete Day 0 task - detailed Inventory work will follow in Phase 2"
-              ],
-            },
-            // Assets task - Day 0 task #5 (consolidated from former Tools queue)
-            {
-              title: `Day 0: Recover Company Equipment - ${tech.techName}`,
-              description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${tech.techName} (${tech.techRacfid}). Truck ${vehicleNumber || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
-              department: 'Assets Management',
-              step: 'tools_recover_equipment_day0',
-              subtask: 'Assets',
-              workflowStep: 5,
-              instructions: [
-                "Contact Employee immediately to arrange equipment return",
-                "Recover company phone and verify it's company-issued",
-                "Collect any tablets, mobile hotspots, or other devices",
-                "Retrieve company credit cards (coordinate with OneCard Help Desk if needed)",
-                "Check for accessories (chargers, cases, cables)",
-                "Wipe all device data per security protocol",
-                "Update asset management system with returned items",
-                "Complete Day 0 task - mark complete once all equipment recovered"
               ],
             },
           ];

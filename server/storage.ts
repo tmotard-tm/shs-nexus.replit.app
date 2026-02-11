@@ -95,7 +95,7 @@ import {
   offboardingTruckOverrides,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, or, inArray, desc, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 
@@ -4966,11 +4966,29 @@ export class DatabaseStorage implements IStorage {
     const cutoffTime = new Date(Date.now() - (daysWindow * 24 * 60 * 60 * 1000));
     const existingTasks: QueueItem[] = [];
     
-    // Find all offboarding tasks that are either:
-    // 1. Open (pending or in_progress status), OR
-    // 2. Created within the last X days
+    const conditions = [
+      eq(queueItems.workflowType, 'offboarding'),
+      or(
+        inArray(queueItems.status, ['pending', 'in_progress']),
+        sql`${queueItems.createdAt} >= ${cutoffTime}`
+      ),
+    ];
+
+    if (employeeId && techRacfId) {
+      conditions.push(
+        or(
+          sql`${queueItems.data}::text ILIKE ${'%' + employeeId + '%'}`,
+          sql`${queueItems.data}::text ILIKE ${'%' + techRacfId + '%'}`
+        )!
+      );
+    } else if (employeeId) {
+      conditions.push(sql`${queueItems.data}::text ILIKE ${'%' + employeeId + '%'}`);
+    } else if (techRacfId) {
+      conditions.push(sql`${queueItems.data}::text ILIKE ${'%' + techRacfId + '%'}`);
+    }
+
     const items = await db.select().from(queueItems)
-      .where(eq(queueItems.workflowType, 'offboarding'))
+      .where(and(...conditions))
       .orderBy(desc(queueItems.createdAt));
     
     for (const item of items) {
@@ -4980,7 +4998,6 @@ export class DatabaseStorage implements IStorage {
           itemData = JSON.parse(itemData);
         }
         
-        // Check if this task belongs to the employee
         const techInfo = (itemData as any)?.technician || (itemData as any)?.employee;
         const itemEmployeeId = techInfo?.employeeId || (itemData as any)?.employeeId;
         const itemTechRacfId = techInfo?.techRacfid || techInfo?.enterpriseId || techInfo?.racfId || (itemData as any)?.techRacfId;
@@ -4989,12 +5006,7 @@ export class DatabaseStorage implements IStorage {
         const techRacfIdMatch = techRacfId && itemTechRacfId && techRacfId.toLowerCase() === itemTechRacfId.toLowerCase();
         
         if (employeeIdMatch || techRacfIdMatch) {
-          const isOpen = item.status === 'pending' || item.status === 'in_progress';
-          const isRecent = item.createdAt && new Date(item.createdAt) >= cutoffTime;
-          
-          if (isOpen || isRecent) {
-            existingTasks.push(item);
-          }
+          existingTasks.push(item);
         }
       } catch (parseError) {
         console.error('Error parsing queue item data for existing task check:', parseError);

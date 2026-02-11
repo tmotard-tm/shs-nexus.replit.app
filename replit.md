@@ -96,19 +96,21 @@ Preferred communication style: Simple, everyday language.
 # Last Session Summary (2026-02-11)
 
 ## Completed
-- Added NTAO-style collapsible Card header to Assets Queue (green color bar, icon, item count, status badges, expand/collapse toggle)
-- Implemented fleet separation source detection (`getItemSource()`) distinguishing Snowflake-originated vs manual items
-- Added subtle italicized gray "Fleet Separation" / "Manual" labels below enterprise ID in table rows
-- Added "Include Manual" filter toggle (defaults off) to hide test/manual items
-- Split "Pick Up / Assign" button into "Pick Up" (auto-assigns to self) and "Assign" (opens user selection dialog)
-- Added owner column dropdown filter to weekly onboarding table
-- Fixed employee matching to handle case and whitespace differences in Snowflake sync
+- **Tools→Assets Queue Consolidation**: Removed all Tools Queue code, merged into unified Assets Queue
+- **Sync Bug Fix (Postmortem)**: 13 employees were not getting offboarding queue items created:
+  - **Root cause**: Orphaned "Tools Queue" items (from pre-consolidation manual creation) contained matching employeeId/techRacfId. `findExistingOffboardingTasks` found those matches and skipped creating new items. After orphan cleanup, no termed_techs sync ran (scheduler is daily 5am only).
+  - **Why it escaped detection**: The sync appeared to run successfully — skipped employees were logged but not flagged as errors. No monitoring alert for "employees pending offboarding" count.
+  - **Fix**: (1) Removed duplicate "Day 0: Recover Company Equipment" task definition (was creating 5 items/employee instead of 4), (2) Optimized `findExistingOffboardingTasks` to use SQL-level filtering instead of full-table scan, (3) Deleted 171 remaining "Tools" department orphan items, (4) Triggered manual sync — created 36 items for 9 employees.
+  - **Prevention**: `findExistingOffboardingTasks` now filters by status+date+employee at SQL level. Both old (`equipment_recover_devices_day0`) and new (`tools_recover_equipment_day0`) step names mapped in template-loader for backward compatibility.
+- Database cleanup: Removed 171 orphan "Tools" department items (all had matching Assets Management counterparts)
+- Updated `offboard-technician.tsx` and `template-loader.ts` to use consolidated step name
 
 ## Next Steps
 - Implement SMS sending via Twilio integration for Communication Hub
 - Add FleetScope deep link for routing lookup
 - Add input validation (Zod schemas) to communication routes
-- Consolidate tech-data parsing helpers into shared utility for reuse across Tools and Assets queues
+- SAGE, RUSSELL A (RSAGE0) not appearing in queue — upstream Snowflake data issue (employment_status='A', no effective_date). Monitor for Snowflake update.
+- 4 employees (SHELTON B, BROWN H, SHELTON J, BILLLUPS) have partial items (Fleet+Inventory only, 2 each). These were correctly skipped by dedup guard; will need manual review or separate sync to add missing NTAO+Assets items.
 - Review and address pre-existing LSP warnings in `server/storage.ts` (vehicleType MemStorage stubs)
 
 ## Blockers
@@ -116,10 +118,10 @@ Preferred communication style: Simple, everyday language.
 
 ## Key Design Decisions
 - GET handlers should only read data, never create it (side effects removed)
-- Single source of truth for Tools task creation in sync service prevents race conditions
-- Tools Queue uses rich HR data format; Fleet and Inventory queues still use Day 0 format
-- Assets Queue uses flat 6-checkbox UI (matching Tools Queue pattern) instead of hierarchical template system
-- Assets Queue now uses table-based layout with expandable inline rows (same pattern as Tools Queue)
+- Sync creates exactly 4 Day 0 tasks per employee: NTAO (step 1), Assets Management (step 2), Fleet (step 3), Inventory (step 4)
+- `findExistingOffboardingTasks` uses SQL-level ILIKE pre-filtering + JSON-level exact match verification (two-phase approach)
+- Both `equipment_recover_devices_day0` and `tools_recover_equipment_day0` step names map to same template for backward compatibility with 171 existing items
+- Assets Queue uses flat 6-checkbox UI and table-based layout with expandable inline rows
 - Assets WorkModuleDialog shows enriched data sidebar with contact info, routing, and fleet pickup alongside task checklist
 - Tech data parsing prioritizes: HR separation data > roster data > task data defaults
 - Fleet Separation labels use subtle italic gray text (not colored badges) to reduce visual noise
@@ -130,7 +132,7 @@ Preferred communication style: Simple, everyday language.
 ## Working Routes (all registered and functional)
 - **Auth**: `/api/auth/*` (login, register, password management)
 - **Core CRUD**: `/api/users`, `/api/requests`, `/api/configurations`, `/api/activity-logs`
-- **Task Queues**: `/api/ntao-queue`, `/api/assets-queue`, `/api/inventory-queue`, `/api/fleet-queue`, `/api/tools-queue`, `/api/queues/*`
+- **Task Queues**: `/api/ntao-queue`, `/api/assets-queue`, `/api/inventory-queue`, `/api/fleet-queue`, `/api/queues/*`
 - **Snowflake**: `/api/snowflake/*` (status, sync, query, debug)
 - **Holman**: `/api/holman/*` (vehicles, contacts, maintenance, fleet sync, assignment updates)
 - **TPMS**: `/api/tpms/*` (tech info, truck lookups, cache sync)
@@ -142,10 +144,15 @@ Preferred communication style: Simple, everyday language.
 - **Templates & Work Progress**: `/api/work-templates/*`, `/api/work-progress/*`
 - **Role Permissions**: `/api/role-permissions/*`
 
+## Queue Item Counts (as of 2026-02-11)
+- NTAO: 181, Assets Management: 181, Fleet Management: 185, Inventory Control: 185
+- 4-item gap: SHELTON B, BROWN H, SHELTON J, BILLLUPS have Fleet+Inventory items only (partial sets from previous sync)
+
 ## Known Issues (Pre-existing, Non-blocking)
 - LSP warnings in `server/storage.ts` for `vehicleType` field in MemStorage stubs (5 diagnostics) — only affects in-memory fallback, not production DatabaseStorage
 - LSP warnings in `server/routes.ts` (3 diagnostics) — non-critical
 - TPMS API calls failing for some truck numbers in Holman enrichment (expected behavior when TPMS has no data for a vehicle)
+- SAGE, RUSSELL A (RSAGE0) missing from offboarding — Snowflake has employment_status='A' and no effective_date
 
 ## Git Branch State
 - Main branch and SearsDriveLine branch are now synchronized with all features merged

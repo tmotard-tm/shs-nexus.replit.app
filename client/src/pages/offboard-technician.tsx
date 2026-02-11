@@ -361,7 +361,7 @@ export default function OffboardTechnician() {
         priority: "high",
         data: JSON.stringify({
           workflowType: "offboarding_sequence",
-          step: "equipment_recover_devices_day0",
+          step: "tools_recover_equipment_day0",
           workflowStep: 2,
           phase: "day0",
           isDay0Task: true,
