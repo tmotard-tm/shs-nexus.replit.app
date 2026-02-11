@@ -54,7 +54,7 @@ Preferred communication style: Simple, everyday language.
 -   **Vehicle Assignment System**: Aggregates data from Snowflake, TPMS, and Holman.
 -   **Fleet Management Page**: Consolidated interface for managing vehicles, including stats, search, filters, actions, and a "Nexus Tracking" section for post-offboarding vehicle information.
 -   **Holman Assignment Sync**: Updates Holman records based on TPMS technician data to resolve assignment discrepancies.
--   **Offboarding Workflow Enhancements**: Includes a "Tools" queue as a Day 0 task with BYOV detection and blocking logic, and a Phase 2 trigger mechanism for creating subsequent fleet tasks based on Day 0 task completion. Features auto-save for task progress.
+-   **Offboarding Workflow Enhancements**: Uses a unified Assets Queue (consolidated from former Tools and Assets queues) as a Day 0 task with BYOV detection and blocking logic, and a Phase 2 trigger mechanism for creating subsequent fleet tasks based on Day 0 task completion. Features auto-save for task progress, tech data enrichment with HR separation data, date range filtering, incomplete task warnings, and a full-page detail view.
 -   **Communication Hub**: Centralized management for email and SMS templates with `Simulated`, `Whitelisted`, and `Live` modes, developer-only access, and audit logging.
 
 # External Dependencies

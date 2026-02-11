@@ -339,7 +339,7 @@ export class SnowflakeSyncService {
             {
               title: `Day 0: Recover Equipment & Tools - ${tech.techName}`,
               description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${tech.techName} (${tech.techRacfid}). Truck ${vehicleNumber || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
-              department: 'Tools',
+              department: 'Assets Management',
               step: 'tools_recover_equipment_day0',
               subtask: 'Tools',
               workflowStep: 5,
@@ -403,23 +403,26 @@ export class SnowflakeSyncService {
             const deptUpper = task.department.toUpperCase();
             if (deptUpper === 'NTAO') {
               createdItem = await storage.createNTAOQueueItem(queueItem);
-            } else if (deptUpper === 'ASSETS MANAGEMENT' || deptUpper === 'ASSETS') {
-              createdItem = await storage.createAssetsQueueItem(queueItem);
+            } else if (deptUpper === 'ASSETS MANAGEMENT' || deptUpper === 'ASSETS' || deptUpper === 'TOOLS') {
+              const isToolsRecoveryTask = task.step === 'tools_recover_equipment_day0' || deptUpper === 'TOOLS';
+              if (isToolsRecoveryTask) {
+                const byovStatus = getInitialToolsTaskStatus(vehicleNumber);
+                const assetsQueueItem = {
+                  ...queueItem,
+                  department: 'Assets Management',
+                  isByov: byovStatus.isByov,
+                  blockedActions: byovStatus.blockedActions,
+                  fleetRoutingDecision: byovStatus.routingPath,
+                  routingReceivedAt: byovStatus.isByov ? new Date() : null,
+                  assignedTo: TOOLS_OWNER.id,
+                };
+                createdItem = await storage.createAssetsQueueItem(assetsQueueItem);
+                console.log(`[Sync] Assets task BYOV status: isByov=${byovStatus.isByov}, truckNo=${vehicleNumber}, blockedActions=${byovStatus.blockedActions.join(',') || 'none'}`);
+              } else {
+                createdItem = await storage.createAssetsQueueItem(queueItem);
+              }
             } else if (deptUpper === 'INVENTORY CONTROL' || deptUpper === 'INVENTORY') {
               createdItem = await storage.createInventoryQueueItem(queueItem);
-            } else if (deptUpper === 'TOOLS') {
-              // Sprint 2: Apply BYOV detection and blocking logic
-              const byovStatus = getInitialToolsTaskStatus(vehicleNumber);
-              const toolsQueueItem = {
-                ...queueItem,
-                isByov: byovStatus.isByov,
-                blockedActions: byovStatus.blockedActions,
-                fleetRoutingDecision: byovStatus.routingPath,
-                routingReceivedAt: byovStatus.isByov ? new Date() : null,
-                assignedTo: TOOLS_OWNER.id,
-              };
-              createdItem = await storage.createToolsQueueItem(toolsQueueItem);
-              console.log(`[Sync] Tools task BYOV status: isByov=${byovStatus.isByov}, truckNo=${vehicleNumber}, blockedActions=${byovStatus.blockedActions.join(',') || 'none'}`);
             } else {
               // Default to Fleet for FLEET and any unknown departments
               createdItem = await storage.createFleetQueueItem(queueItem);
@@ -1354,7 +1357,7 @@ export class SnowflakeSyncService {
             status: 'pending',
             priority: 'medium',
             requesterId: 'system',
-            department: 'Tools',
+            department: 'Assets Management',
             workflowId: workflowId,
             workflowStep: 1,
             data: JSON.stringify({
@@ -1375,7 +1378,7 @@ export class SnowflakeSyncService {
 
           let toolsCreatedItem: any = null;
           try {
-            toolsCreatedItem = await storage.createToolsQueueItem(toolsQueueItem);
+            toolsCreatedItem = await storage.createAssetsQueueItem(toolsQueueItem);
             result.tasksCreated++;
             console.log(`[Separation Sync] Created Tools Queue task for ${techName} (${separation.ldapId})`);
 
@@ -1395,7 +1398,7 @@ export class SnowflakeSyncService {
                 });
                 
                 if (emailResult.success && toolsCreatedItem?.id) {
-                  await storage.updateToolsQueueNotificationStatus(toolsCreatedItem.id, true);
+                  await storage.updateAssetsQueueItem(toolsCreatedItem.id, { notificationSent: true });
                   result.emailsSent++;
                   console.log(`[Separation Sync] Tool Audit email sent for ${techName} (test mode: ${emailResult.testMode})`);
                 } else if (!emailResult.success) {

@@ -455,8 +455,8 @@ export default function OffboardTechnician() {
         })
       });
 
-      // Tools task - Day 0 task #5 (Sprint 1: Schema + Task Creation)
-      await apiRequest("POST", "/api/tools-queue", {
+      // Assets task - Day 0 task #5 (consolidated from Tools queue)
+      await apiRequest("POST", "/api/assets-queue", {
         workflowType: "offboarding",
         title: `Day 0: Recover Equipment & Tools - ${technicianOffboard.techName}`,
         description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${technicianOffboard.techName} (${technicianOffboard.techRacfId}). Truck ${technicianOffboard.vehicleNumber}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,

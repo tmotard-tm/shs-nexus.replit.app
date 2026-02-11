@@ -4,7 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Queue module types for unified queue access
-export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet' | 'tools';
+export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet';
 
 // Role types - Developer, Admin, and Agent
 export type UserRole = 'developer' | 'admin' | 'agent';
@@ -63,7 +63,6 @@ export interface RolePermissionSettings {
       assetsQueue: boolean;
       inventoryQueue: boolean;
       fleetQueue: boolean;
-      toolsQueue: boolean;
     };
     management: {
       enabled: boolean;
@@ -966,19 +965,6 @@ export type InsertVehicle = z.infer<typeof insertVehicleSchema>;
 export type QueueItem = typeof queueItems.$inferSelect;
 export type InsertQueueItem = z.infer<typeof insertQueueItemSchema>;
 
-// Enriched Tools Queue Item with technician data joined from all_techs
-export interface EnrichedToolsQueueItem extends QueueItem {
-  techData?: {
-    techName: string;
-    enterpriseId: string;
-    district: string | null;
-    separationDate: string | null;
-    workPhone: string | null;
-    personalPhone: string | null;
-    email: string | null;
-    address: string | null;
-  };
-}
 export type StorageSpot = typeof storageSpots.$inferSelect;
 export type InsertStorageSpot = z.infer<typeof insertStorageSpotSchema>;
 export type Template = typeof templates.$inferSelect;

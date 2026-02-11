@@ -123,11 +123,11 @@ async function checkAndRunSeparationPoll(): Promise<void> {
   }
 }
 
-async function backfillToolsQueueItems(): Promise<void> {
+async function backfillAssetsQueueItems(): Promise<void> {
   try {
     const existingToolsWorkflows = await db.select({ workflowId: queueItems.workflowId })
       .from(queueItems)
-      .where(eq(queueItems.department, 'Tools'));
+      .where(eq(queueItems.department, 'Assets Management'));
     const toolsWorkflowIds = new Set(existingToolsWorkflows.map(r => r.workflowId).filter(Boolean));
 
     const ntaoItems = await db.select()
@@ -211,7 +211,7 @@ async function backfillToolsQueueItems(): Promise<void> {
           status: ntaoItem.status || 'pending',
           priority: 'high' as const,
           requesterId: 'system',
-          department: 'Tools',
+          department: 'Assets Management',
           workflowId: ntaoItem.workflowId!,
           workflowStep: 5,
           data: JSON.stringify(toolsData),
@@ -227,7 +227,7 @@ async function backfillToolsQueueItems(): Promise<void> {
           assignedTo: TOOLS_OWNER.id,
         };
 
-        await storage.createToolsQueueItem(toolsQueueItem);
+        await storage.createAssetsQueueItem(toolsQueueItem);
         created++;
       } catch (err) {
         console.error(`[Backfill] Error creating Tools item for workflow ${ntaoItem.workflowId}:`, err);
@@ -258,8 +258,7 @@ export function startSyncScheduler(): void {
     // Run check every minute (development only)
     intervalId = setInterval(checkAndRunSync, CHECK_INTERVAL_MS);
     
-    // Run Tools queue backfill immediately on startup (before scheduled sync)
-    backfillToolsQueueItems().catch(err => 
+    backfillAssetsQueueItems().catch(err => 
       console.error('[Backfill] Startup backfill failed:', err)
     );
     

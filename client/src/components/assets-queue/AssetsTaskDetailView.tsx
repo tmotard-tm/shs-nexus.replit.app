@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,6 +22,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { QueueItem, User } from "@shared/schema";
 import { useDebouncedSave } from "@/hooks/use-debounced-save";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   ArrowLeft,
   Phone,
@@ -29,7 +32,6 @@ import {
   Briefcase,
   Smartphone,
   Wifi,
-  WifiOff,
   CreditCard,
   FileText,
   Package,
@@ -38,28 +40,10 @@ import {
   Loader2,
   Truck,
   AlertCircle,
-  Check
+  Check,
+  Save,
+  Edit3,
 } from "lucide-react";
-
-interface ToolsQueueItem extends Omit<QueueItem, 'isByov' | 'fleetRoutingDecision' | 'routingReceivedAt' | 'blockedActions' | 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier'> {
-  isByov?: boolean | null;
-  fleetRoutingDecision?: string | null;
-  routingReceivedAt?: string | null;
-  blockedActions?: string[] | null;
-  taskToolsReturn?: boolean | null;
-  taskIphoneReturn?: boolean | null;
-  taskDisconnectedLine?: boolean | null;
-  taskDisconnectedMPayment?: boolean | null;
-  taskCloseSegnoOrders?: boolean | null;
-  taskCreateShippingLabel?: boolean | null;
-  carrier?: string | null;
-  currentBlockingStatus?: {
-    status: string;
-    routingPath: string | null;
-    blockedActions: string[];
-    isByov: boolean;
-  };
-}
 
 interface ContactInfo {
   personalPhone: string | null;
@@ -83,12 +67,14 @@ interface VehicleLocation {
   lastUpdated?: string;
 }
 
-interface ToolsTaskDetailViewProps {
-  item: ToolsQueueItem;
+interface AssetsTaskDetailViewProps {
+  item: any;
   currentUser?: User;
+  users: User[];
   onBack: () => void;
   onComplete: (itemId: string) => void;
   onAssign?: (itemId: string, assigneeId: string) => void;
+  onPickUp?: (item: any) => void;
   isCompletePending: boolean;
   isAssignPending?: boolean;
 }
@@ -112,15 +98,88 @@ const TASK_LIST: TaskItem[] = [
   { key: 'taskCreateShippingLabel', label: 'Create UPS Shipping Label', description: 'Generate QR code for tech', icon: Package },
 ];
 
-export function ToolsTaskDetailView({
+function InlineNotesCard({ item }: { item: any }) {
+  const [notes, setNotes] = useState(item.notes || "");
+  const [isEditing, setIsEditing] = useState(false);
+  const { toast } = useToast();
+
+  const updateNotesMutation = useMutation({
+    mutationFn: (newNotes: string) =>
+      apiRequest("PATCH", `/api/assets-queue/${item.id}/notes`, { notes: newNotes }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey[0];
+          return typeof key === "string" && key.startsWith("/api/assets-queue");
+        },
+      });
+      setIsEditing(false);
+      toast({ title: "Notes saved" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error saving notes", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg flex items-center gap-2" style={{ color: '#1A4B8C' }}>
+            <FileText className="h-5 w-5" />
+            Notes
+          </CardTitle>
+          {!isEditing ? (
+            <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)} className="h-7 text-xs">
+              <Edit3 className="h-3 w-3 mr-1" />
+              Edit
+            </Button>
+          ) : (
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" onClick={() => { setNotes(item.notes || ""); setIsEditing(false); }} className="h-7 text-xs" disabled={updateNotesMutation.isPending}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={() => updateNotesMutation.mutate(notes)} className="h-7 text-xs" disabled={updateNotesMutation.isPending}>
+                <Save className="h-3 w-3 mr-1" />
+                {updateNotesMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isEditing ? (
+          <Textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Add notes about this case..."
+            className="min-h-[80px] text-sm"
+          />
+        ) : (
+          <div className="p-3 bg-muted rounded-md min-h-[60px]">
+            {item.notes ? (
+              <p className="text-sm whitespace-pre-wrap">{item.notes}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">No notes yet.</p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function AssetsTaskDetailView({
   item,
   currentUser,
+  users,
   onBack,
   onComplete,
   onAssign,
+  onPickUp,
   isCompletePending,
   isAssignPending
-}: ToolsTaskDetailViewProps) {
+}: AssetsTaskDetailViewProps) {
   const isPending = item.status === 'pending';
   const isAssignedToMe = item.assignedTo === currentUser?.id;
   const [taskState, setTaskState] = useState<Record<TaskKey, boolean>>({
@@ -132,7 +191,7 @@ export function ToolsTaskDetailView({
     taskCreateShippingLabel: item.taskCreateShippingLabel ?? false,
   });
   const [carrier, setCarrier] = useState<string>(item.carrier || '');
-  
+
   const normalizeRouting = (value: string | null | undefined): string => {
     if (!value) return 'pending';
     const upper = value.toUpperCase();
@@ -141,12 +200,13 @@ export function ToolsTaskDetailView({
     if (upper === 'TRANSFER' || upper === 'REASSIGNED' || upper.includes('REASSIGN')) return 'TRANSFER';
     return 'pending';
   };
-  
+
   const [routing, setRouting] = useState<string>(normalizeRouting(item.fleetRoutingDecision));
 
-  const { save, saveStatus, flushPending } = useDebouncedSave({ 
+  const { save, saveStatus, flushPending } = useDebouncedSave({
     itemId: item.id,
-    debounceMs: 500 
+    module: 'assets',
+    debounceMs: 500
   });
 
   const handleBack = () => {
@@ -181,11 +241,11 @@ export function ToolsTaskDetailView({
       return {};
     }
   })();
-  const techName = parsedData.techName || parsedData.technicianName || parsedData.employeeName || 'Unknown Technician';
-  const truckNumber = parsedData.vehicleNumber || parsedData.truckNumber || parsedData.truck || '';
+  const techName = parsedData.techName || parsedData.technicianName || parsedData.employeeName || item.techData?.techName || 'Unknown Technician';
+  const truckNumber = parsedData.vehicleNumber || parsedData.truckNumber || parsedData.truck || item.techData?.hrTruckNumber || '';
 
   const { data: contactInfo, isLoading: isContactLoading } = useQuery<ContactInfo>({
-    queryKey: [`/api/tools-queue/${item.id}/contact`],
+    queryKey: ['/api/assets-queue', item.id, 'contact'],
   });
 
   const { data: vehicleLocation, isLoading: isLocationLoading } = useQuery<VehicleLocation>({
@@ -215,18 +275,6 @@ export function ToolsTaskDetailView({
     return parts.length > 0 ? parts.join(', ') : null;
   };
 
-  const getRoutingLabel = (value: string) => {
-    switch (value?.toUpperCase()) {
-      case 'PMF': return 'PMF (Park My Fleet)';
-      case 'PEP_BOYS':
-      case 'PEPBOYS':
-      case 'PEP BOYS': return 'Pep Boys';
-      case 'TRANSFER':
-      case 'REASSIGNED': return 'Transfer/Reassigned';
-      default: return 'Pending';
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -240,7 +288,7 @@ export function ToolsTaskDetailView({
               Day 0: Recover Equipment & Tools - {techName}
             </h1>
             <p className="text-sm text-muted-foreground">
-              Tools Queue Task • {item.status}
+              Assets Queue Task • {item.status}
             </p>
           </div>
         </div>
@@ -283,7 +331,7 @@ export function ToolsTaskDetailView({
           <CardContent className="space-y-4">
             <div className="space-y-3">
               <h4 className="font-medium text-sm text-muted-foreground">Contact Details</h4>
-              
+
               {isContactLoading ? (
                 <div className="space-y-2">
                   <Skeleton className="h-4 w-full" />
@@ -378,13 +426,13 @@ export function ToolsTaskDetailView({
                 const isChecked = taskState[task.key];
                 return (
                   <div key={task.key} className="space-y-2">
-                    <div 
+                    <div
                       className={`flex items-start gap-3 p-2 rounded cursor-pointer transition-colors ${
                         isChecked ? 'bg-green-50 dark:bg-green-900/20' : 'hover:bg-muted'
                       }`}
                       onClick={() => handleTaskToggle(task.key)}
                     >
-                      <Checkbox 
+                      <Checkbox
                         id={task.key}
                         checked={isChecked}
                         onCheckedChange={() => handleTaskToggle(task.key)}
@@ -393,8 +441,8 @@ export function ToolsTaskDetailView({
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <Icon className={`h-4 w-4 ${isChecked ? 'text-green-600' : 'text-muted-foreground'}`} />
-                          <Label 
-                            htmlFor={task.key} 
+                          <Label
+                            htmlFor={task.key}
                             className={`text-sm font-medium cursor-pointer ${isChecked ? 'line-through text-muted-foreground' : ''}`}
                           >
                             {task.label}
@@ -432,7 +480,7 @@ export function ToolsTaskDetailView({
 
             <div className="flex items-center justify-between p-2 bg-muted rounded">
               <span className="text-sm font-medium">Progress</span>
-              <Badge 
+              <Badge
                 variant={completedCount === totalTasks ? "default" : "secondary"}
                 style={completedCount === totalTasks ? { backgroundColor: '#36D9A3' } : {}}
               >
@@ -463,9 +511,9 @@ export function ToolsTaskDetailView({
               className="w-full justify-start"
               asChild
             >
-              <a 
-                href="https://tech-tool-audit-checklist-lucabuccilli1.replit.app/" 
-                target="_blank" 
+              <a
+                href="https://tech-tool-audit-checklist-lucabuccilli1.replit.app/"
+                target="_blank"
                 rel="noopener noreferrer"
               >
                 <Briefcase className="h-4 w-4 mr-2" />
@@ -544,6 +592,9 @@ export function ToolsTaskDetailView({
         </Card>
       </div>
 
+      {/* Notes Section */}
+      <InlineNotesCard item={item} />
+
       <AlertDialog open={showIncompleteWarning} onOpenChange={setShowIncompleteWarning}>
         <AlertDialogContent aria-describedby="incomplete-tasks-description">
           <AlertDialogHeader>
@@ -552,7 +603,7 @@ export function ToolsTaskDetailView({
               Incomplete Tasks
             </AlertDialogTitle>
             <AlertDialogDescription id="incomplete-tasks-description">
-              Only {completedCount} of {totalTasks} tasks are marked complete. 
+              Only {completedCount} of {totalTasks} tasks are marked complete.
               Some tasks may not apply to this case.
               <br /><br />
               Are you sure you want to mark this case complete?
@@ -560,7 +611,7 @@ export function ToolsTaskDetailView({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Go Back</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               onClick={handleConfirmComplete}
               style={{ backgroundColor: '#36D9A3' }}
             >

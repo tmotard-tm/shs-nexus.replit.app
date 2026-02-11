@@ -375,7 +375,7 @@ function hasQueueAccess(user: any, module: QueueModule): boolean {
 // Get accessible queue modules for a user
 function getAccessibleQueueModules(user: any): QueueModule[] {
   if (user.role === 'developer') {
-    return ['ntao', 'assets', 'inventory', 'fleet', 'tools'];
+    return ['ntao', 'assets', 'inventory', 'fleet'];
   }
   
   if (user.departments && Array.isArray(user.departments)) {
@@ -1525,9 +1525,173 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
         return res.status(403).json({ message: "Access denied to Assets queue" });
       }
-      const queueItems = await storage.getAssetsQueueItems();
-      res.json(queueItems);
+      
+      const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+      const snowflakeSyncService = getSnowflakeSyncService();
+      
+      let hrSeparations: Array<{
+        ldapId: string;
+        technicianName: string | null;
+        emplId: string;
+        lastDay: string | null;
+        effectiveSeparationDate: string | null;
+        truckNumber: string | null;
+        contactNumber: string | null;
+        personalEmail: string | null;
+        fleetPickupAddress: string | null;
+        separationCategory: string | null;
+        notes: string | null;
+      }> = [];
+      
+      if (snowflakeSyncService) {
+        try {
+          const hrResult = await snowflakeSyncService.getAllConfirmedSeparations();
+          if (hrResult.success) {
+            hrSeparations = hrResult.records;
+          }
+        } catch (hrError) {
+          console.log('[Assets Queue] Could not fetch HR separations:', hrError);
+        }
+      }
+      
+      const parsedDaysBack = parseInt(req.query.daysBack as string);
+      const daysBack = Number.isFinite(parsedDaysBack) ? parsedDaysBack : 30;
+      
+      const allQueueItems = await storage.getAssetsQueueItems();
+      
+      const hrLookup = new Map<string, typeof hrSeparations[0]>();
+      for (const hr of hrSeparations) {
+        if (hr.ldapId) hrLookup.set(hr.ldapId.toUpperCase(), hr);
+        if (hr.emplId) hrLookup.set(hr.emplId, hr);
+      }
+      
+      const enrichedItems = await Promise.all(allQueueItems.map(async (item) => {
+        let techData: any = null;
+        
+        try {
+          const parsedData = typeof item.data === 'string' 
+            ? JSON.parse(item.data) 
+            : item.data;
+          
+          const employeeId = parsedData?.employee?.employeeId || parsedData?.technician?.employeeId || parsedData?.employeeId || parsedData?.emplid;
+          const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.technician?.enterpriseId || parsedData?.technician?.techRacfid || parsedData?.techRacfId;
+          
+          let tech = null;
+          if (employeeId) {
+            tech = await storage.getAllTechByEmployeeId(employeeId);
+          }
+          if (!tech && enterpriseId) {
+            tech = await storage.getAllTechByTechRacfid(enterpriseId);
+          }
+          
+          const hrRecord = hrLookup.get(enterpriseId?.toUpperCase() || '') || hrLookup.get(employeeId || '');
+          
+          let mobilePhoneData: { phoneNumber?: string | null } = {};
+          if (enterpriseId && snowflakeSyncService) {
+            try {
+              mobilePhoneData = await snowflakeSyncService.getMobilePhoneByLdap(enterpriseId);
+            } catch (e) {
+            }
+          }
+          
+          if (tech) {
+            const addressParts = hrRecord?.fleetPickupAddress
+              ? [hrRecord.fleetPickupAddress]
+              : [
+                  tech.homeAddr1,
+                  tech.homeAddr2,
+                  tech.homeCity,
+                  tech.homeState,
+                  tech.homePostal
+                ].filter(Boolean);
+            
+            techData = {
+              techName: tech.techName,
+              enterpriseId: tech.techRacfid,
+              district: tech.districtNo || null,
+              separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || tech.lastDayWorked || tech.effectiveDate || null,
+              mobilePhone: mobilePhoneData?.phoneNumber || null,
+              personalPhone: hrRecord?.contactNumber || tech.cellPhone || tech.homePhone || null,
+              homePhone: tech.homePhone || null,
+              contactNumber: hrRecord?.contactNumber || null,
+              email: hrRecord?.personalEmail || parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
+              personalEmail: hrRecord?.personalEmail || null,
+              address: addressParts.length > 0 ? addressParts.join(', ') : null,
+              fleetPickupAddress: hrRecord?.fleetPickupAddress || null,
+              separationCategory: hrRecord?.separationCategory || null,
+              hrTruckNumber: hrRecord?.truckNumber || null,
+              notes: hrRecord?.notes || null,
+              fromSnowflake: true,
+            };
+          } else {
+            techData = {
+              techName: hrRecord?.technicianName || parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Tools Queue - ', '').replace('Day 0: Recover Equipment & Tools - ', '') || 'Unknown',
+              enterpriseId: enterpriseId || employeeId || 'Unknown',
+              district: null,
+              separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
+              mobilePhone: mobilePhoneData?.phoneNumber || null,
+              personalPhone: hrRecord?.contactNumber || parsedData?.employee?.phone || null,
+              homePhone: null,
+              contactNumber: hrRecord?.contactNumber || null,
+              email: hrRecord?.personalEmail || parsedData?.employee?.email || null,
+              personalEmail: hrRecord?.personalEmail || null,
+              address: parsedData?.employee?.address || null,
+              fleetPickupAddress: hrRecord?.fleetPickupAddress || null,
+              separationCategory: hrRecord?.separationCategory || null,
+              hrTruckNumber: hrRecord?.truckNumber || null,
+              notes: hrRecord?.notes || null,
+              fromSnowflake: true,
+            };
+          }
+        } catch (e) {
+          techData = {
+            techName: item.title?.replace('Tools Queue - ', '').replace('Day 0: Recover Equipment & Tools - ', '') || 'Unknown',
+            enterpriseId: 'Unknown',
+            district: null,
+            separationDate: null,
+            mobilePhone: null,
+            personalPhone: null,
+            homePhone: null,
+            contactNumber: null,
+            email: null,
+            personalEmail: null,
+            address: null,
+            fleetPickupAddress: null,
+            separationCategory: null,
+            hrTruckNumber: null,
+            notes: null,
+            fromSnowflake: false,
+          };
+        }
+        
+        return {
+          ...item,
+          techData,
+        };
+      }));
+      
+      let filteredItems = enrichedItems;
+      if (daysBack > 0) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+        cutoffDate.setHours(0, 0, 0, 0);
+        
+        filteredItems = enrichedItems.filter(item => {
+          const created = item.createdAt;
+          if (!created) return true;
+          return new Date(created) >= cutoffDate;
+        });
+      }
+      
+      filteredItems.sort((a, b) => {
+        const dateA = a.techData?.separationDate ? new Date(a.techData.separationDate).getTime() : 0;
+        const dateB = b.techData?.separationDate ? new Date(b.techData.separationDate).getTime() : 0;
+        return dateB - dateA;
+      });
+      
+      res.json(filteredItems);
     } catch (error) {
+      console.error('Error fetching enriched assets queue items:', error);
       res.status(500).json({ message: "Failed to fetch Assets queue items" });
     }
   });
@@ -1690,6 +1854,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error updating assets queue notes:', error);
       res.status(500).json({ message: "Failed to update notes" });
+    }
+  });
+
+  app.get("/api/assets-queue/:id/contact", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
+      
+      const queueItem = await storage.getAssetsQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Assets queue item not found" });
+      }
+      
+      let employeeId: string | null = null;
+      let enterpriseId: string | null = null;
+      try {
+        const parsedData = typeof queueItem.data === 'string' 
+          ? JSON.parse(queueItem.data) 
+          : queueItem.data;
+        employeeId = parsedData?.employee?.employeeId || 
+                     parsedData?.employeeId || 
+                     parsedData?.emplid ||
+                     null;
+        enterpriseId = parsedData?.employee?.enterpriseId || 
+                       parsedData?.employee?.racfId || 
+                       parsedData?.techRacfId ||
+                       null;
+      } catch (e) {
+        console.warn('Could not parse employee ID from queue item data:', e);
+      }
+      
+      if (!employeeId && !enterpriseId) {
+        return res.status(404).json({ message: "No employee ID found in queue item" });
+      }
+      
+      let tech = null;
+      if (employeeId) {
+        tech = await storage.getAllTechByEmployeeId(employeeId);
+      }
+      if (!tech && enterpriseId) {
+        tech = await storage.getAllTechByTechRacfid(enterpriseId);
+      }
+      if (!tech) {
+        return res.status(404).json({ message: "Technician not found in employee roster" });
+      }
+      
+      let mobilePhone: string | null = null;
+      const ldapId = enterpriseId || tech.techRacfid;
+      if (ldapId) {
+        try {
+          const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+          const syncService = getSnowflakeSyncService();
+          if (syncService) {
+            const mobileData = await syncService.getMobilePhoneByLdap(ldapId);
+            if (mobileData.success && mobileData.phoneNumber) {
+              mobilePhone = mobileData.phoneNumber;
+            }
+          }
+        } catch (e) {
+        }
+      }
+      
+      res.json({
+        personalPhone: tech.cellPhone || null,
+        mobilePhone: mobilePhone,
+        homePhone: tech.homePhone || null,
+        homeAddress: {
+          line1: tech.homeAddr1 || null,
+          line2: tech.homeAddr2 || null,
+          city: tech.homeCity || null,
+          state: tech.homeState || null,
+          postal: tech.homePostal || null,
+        },
+        employeeId: tech.employeeId,
+        techName: tech.techName,
+      });
+    } catch (error) {
+      console.error('Error fetching contact info:', error);
+      res.status(500).json({ message: "Failed to fetch contact info" });
     }
   });
 
@@ -1915,471 +2160,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Tools Queue Module routes (Sprint 1: Schema + Task Creation)
-  app.get("/api/tools-queue", requireAuth, async (req: any, res) => {
-    try {
-      const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
-        return res.status(403).json({ message: "Access denied to Tools queue" });
-      }
-      
-      // Import Snowflake sync service for separation data
-      const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
-      const snowflakeSyncService = getSnowflakeSyncService();
-      
-      // Sprint 11: Fetch ALL confirmed separations from HR table
-      let hrSeparations: Array<{
-        ldapId: string;
-        technicianName: string | null;
-        emplId: string;
-        lastDay: string | null;
-        effectiveSeparationDate: string | null;
-        truckNumber: string | null;
-        contactNumber: string | null;
-        personalEmail: string | null;
-        fleetPickupAddress: string | null;
-        separationCategory: string | null;
-        notes: string | null;
-      }> = [];
-      
-      if (snowflakeSyncService) {
-        try {
-          const hrResult = await snowflakeSyncService.getAllConfirmedSeparations();
-          if (hrResult.success) {
-            hrSeparations = hrResult.records;
-            console.log(`[Tools Queue] Fetched ${hrSeparations.length} confirmed separations from HR`);
-          }
-        } catch (hrError) {
-          console.log('[Tools Queue] Could not fetch HR separations:', hrError);
-        }
-      }
-      
-      // Parse date range filter (default 30 days, 0 = show all)
-      const parsedDaysBack = parseInt(req.query.daysBack as string);
-      const daysBack = Number.isFinite(parsedDaysBack) ? parsedDaysBack : 30;
-      
-      // Get existing queue items (task creation now handled by Snowflake sync service)
-      const allQueueItems = await storage.getToolsQueueItems();
-      
-      // Build HR lookup map for quick access
-      const hrLookup = new Map<string, typeof hrSeparations[0]>();
-      for (const hr of hrSeparations) {
-        if (hr.ldapId) hrLookup.set(hr.ldapId.toUpperCase(), hr);
-        if (hr.emplId) hrLookup.set(hr.emplId, hr);
-      }
-      
-      // Enrich each queue item with technician data from all_techs and separation data from HR
-      const enrichedItems = await Promise.all(allQueueItems.map(async (item) => {
-        let techData: any = null;
-        
-        try {
-          const parsedData = typeof item.data === 'string' 
-            ? JSON.parse(item.data) 
-            : item.data;
-          
-          // Try to find tech by employee ID or enterprise ID (supports both "employee" and "technician" data formats)
-          const employeeId = parsedData?.employee?.employeeId || parsedData?.technician?.employeeId || parsedData?.employeeId || parsedData?.emplid;
-          const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.technician?.enterpriseId || parsedData?.technician?.techRacfid || parsedData?.techRacfId;
-          
-          let tech = null;
-          if (employeeId) {
-            tech = await storage.getAllTechByEmployeeId(employeeId);
-          }
-          if (!tech && enterpriseId) {
-            tech = await storage.getAllTechByTechRacfid(enterpriseId);
-          }
-          
-          // Sprint 11: Look up HR separation data from our pre-fetched map
-          const hrRecord = hrLookup.get(enterpriseId?.toUpperCase() || '') || hrLookup.get(employeeId || '');
-          
-          // Sprint 11: Fetch mobile phone from TPMS tech table
-          let mobilePhoneData: { phoneNumber?: string | null } = {};
-          if (enterpriseId) {
-            try {
-              mobilePhoneData = await snowflakeSyncService.getMobilePhoneByLdap(enterpriseId);
-            } catch (e) {
-              // Silently continue if mobile phone lookup fails
-            }
-          }
-          
-          if (tech) {
-            // Build full address - prefer HR separation address if available
-            const addressParts = hrRecord?.fleetPickupAddress
-              ? [hrRecord.fleetPickupAddress]
-              : [
-                  tech.homeAddr1,
-                  tech.homeAddr2,
-                  tech.homeCity,
-                  tech.homeState,
-                  tech.homePostal
-                ].filter(Boolean);
-            
-            techData = {
-              techName: tech.techName,
-              enterpriseId: tech.techRacfid,
-              district: tech.districtNo || null,
-              // Sprint 11: Prioritize separation date from HR table, fallback to all_techs
-              separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || tech.lastDayWorked || tech.effectiveDate || null,
-              // Sprint 11: Mobile phone from TPMS tech table (COMTTU_TECH_UN)
-              mobilePhone: mobilePhoneData?.phoneNumber || null,
-              // Sprint 11: Include HR contact number if available
-              personalPhone: hrRecord?.contactNumber || tech.cellPhone || tech.homePhone || null,
-              // Sprint 11: Include personal email from HR if available
-              email: hrRecord?.personalEmail || parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
-              address: addressParts.length > 0 ? addressParts.join(', ') : null,
-              // Sprint 11: Fleet pickup address from HR table
-              fleetPickupAddress: hrRecord?.fleetPickupAddress || null,
-              // Sprint 11: Additional HR separation data
-              separationCategory: hrRecord?.separationCategory || null,
-              hrTruckNumber: hrRecord?.truckNumber || null,
-              notes: hrRecord?.notes || null,
-              fromSnowflake: true,
-            };
-          } else {
-            // Fallback: extract from queue item data/title, with HR separation data overlay
-            techData = {
-              techName: hrRecord?.technicianName || parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Tools Queue - ', '') || 'Unknown',
-              enterpriseId: enterpriseId || employeeId || 'Unknown',
-              district: null,
-              separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
-              mobilePhone: mobilePhoneData?.phoneNumber || null,
-              personalPhone: hrRecord?.contactNumber || parsedData?.employee?.phone || null,
-              email: hrRecord?.personalEmail || parsedData?.employee?.email || null,
-              address: parsedData?.employee?.address || null,
-              fleetPickupAddress: hrRecord?.fleetPickupAddress || null,
-              separationCategory: hrRecord?.separationCategory || null,
-              hrTruckNumber: hrRecord?.truckNumber || null,
-              notes: hrRecord?.notes || null,
-              fromSnowflake: true,
-            };
-          }
-        } catch (e) {
-          // If parsing fails, use fallback data
-          techData = {
-            techName: item.title?.replace('Tools Queue - ', '') || 'Unknown',
-            enterpriseId: 'Unknown',
-            district: null,
-            separationDate: null,
-            mobilePhone: null,
-            personalPhone: null,
-            email: null,
-            address: null,
-            fleetPickupAddress: null,
-            separationCategory: null,
-            hrTruckNumber: null,
-            notes: null,
-            fromSnowflake: false,
-          };
-        }
-        
-        return {
-          ...item,
-          techData,
-        };
-      }));
-      
-      let filteredItems = enrichedItems;
-      if (daysBack > 0) {
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-        cutoffDate.setHours(0, 0, 0, 0);
-        
-        filteredItems = enrichedItems.filter(item => {
-          const created = item.createdAt;
-          if (!created) return true;
-          return new Date(created) >= cutoffDate;
-        });
-      }
-      
-      // Sort by separation date descending (most recent first), items without dates go to the end
-      filteredItems.sort((a, b) => {
-        const dateA = a.techData?.separationDate ? new Date(a.techData.separationDate).getTime() : 0;
-        const dateB = b.techData?.separationDate ? new Date(b.techData.separationDate).getTime() : 0;
-        return dateB - dateA;
-      });
-      
-      res.json(filteredItems);
-    } catch (error) {
-      console.error('Error fetching enriched tools queue items:', error);
-      res.status(500).json({ message: "Failed to fetch Tools queue items" });
-    }
-  });
-
-  app.get("/api/tools-queue/:id", requireAuth, async (req: any, res) => {
-    try {
-      const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
-        return res.status(403).json({ message: "Access denied to Tools queue" });
-      }
-      const queueItem = await storage.getToolsQueueItem(req.params.id);
-      if (!queueItem) {
-        return res.status(404).json({ message: "Tools queue item not found" });
-      }
-      
-      // Sprint 2: Compute current blocking status based on Fleet task (if non-BYOV)
-      let currentBlockingStatus = {
-        status: queueItem.isByov ? 'ROUTING_RECEIVED' : 'AWAITING_ROUTING',
-        routingPath: queueItem.fleetRoutingDecision || null,
-        blockedActions: queueItem.blockedActions || [],
-      };
-      
-      if (!queueItem.isByov && queueItem.workflowId) {
-        const fleetTask = await storage.getFleetTaskByWorkflowId(queueItem.workflowId);
-        if (fleetTask && fleetTask.status === 'completed') {
-          currentBlockingStatus = {
-            status: 'ROUTING_RECEIVED',
-            routingPath: fleetTask.fleetRoutingDecision || 'Fleet Routing',
-            blockedActions: [],
-          };
-        }
-      }
-      
-      res.json({
-        ...queueItem,
-        currentBlockingStatus,
-      });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch Tools queue item" });
-    }
-  });
-
-  // Sprint 6: Contact info endpoint - fetches tech contact info from all_techs table
-  app.get("/api/tools-queue/:id/contact", requireAuth, async (req: any, res) => {
-    try {
-      const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
-        return res.status(403).json({ message: "Access denied to Tools queue" });
-      }
-      
-      const queueItem = await storage.getToolsQueueItem(req.params.id);
-      if (!queueItem) {
-        return res.status(404).json({ message: "Tools queue item not found" });
-      }
-      
-      // Extract employee ID and enterprise ID from queue item data
-      let employeeId: string | null = null;
-      let enterpriseId: string | null = null;
-      try {
-        const parsedData = typeof queueItem.data === 'string' 
-          ? JSON.parse(queueItem.data) 
-          : queueItem.data;
-        employeeId = parsedData?.employee?.employeeId || 
-                     parsedData?.employeeId || 
-                     parsedData?.emplid ||
-                     null;
-        enterpriseId = parsedData?.employee?.enterpriseId || 
-                       parsedData?.employee?.racfId || 
-                       parsedData?.techRacfId ||
-                       null;
-      } catch (e) {
-        console.warn('Could not parse employee ID from queue item data:', e);
-      }
-      
-      if (!employeeId) {
-        return res.status(404).json({ message: "No employee ID found in queue item" });
-      }
-      
-      // Lookup contact info from all_techs table
-      const tech = await storage.getAllTechByEmployeeId(employeeId);
-      if (!tech) {
-        return res.status(404).json({ message: "Technician not found in employee roster" });
-      }
-      
-      // Sprint 11: Fetch mobile phone from TPMS tech table
-      let mobilePhone: string | null = null;
-      const ldapId = enterpriseId || tech.techRacfid;
-      if (ldapId) {
-        try {
-          const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
-          const syncService = getSnowflakeSyncService();
-          if (syncService) {
-            const mobileData = await syncService.getMobilePhoneByLdap(ldapId);
-            if (mobileData.success && mobileData.phoneNumber) {
-              mobilePhone = mobileData.phoneNumber;
-            }
-          }
-        } catch (e) {
-          // Silently continue if mobile phone lookup fails
-        }
-      }
-      
-      // Return mapped contact info
-      res.json({
-        personalPhone: tech.cellPhone || null,
-        mobilePhone: mobilePhone,
-        homePhone: tech.homePhone || null,
-        homeAddress: {
-          line1: tech.homeAddr1 || null,
-          line2: tech.homeAddr2 || null,
-          city: tech.homeCity || null,
-          state: tech.homeState || null,
-          postal: tech.homePostal || null,
-        },
-        employeeId: tech.employeeId,
-        techName: tech.techName,
-      });
-    } catch (error) {
-      console.error('Error fetching contact info:', error);
-      res.status(500).json({ message: "Failed to fetch contact info" });
-    }
-  });
-
-  app.post("/api/tools-queue", checkAnonymousRateLimit, async (req, res) => {
-    try {
-      const sanitizedData = sanitizeInput(req.body);
-      const validatedData = anonymousQueueItemSchema.parse(sanitizedData);
-      
-      const duplicateCheck = await checkOffboardingDuplicates(validatedData.data, 'TOOLS', validatedData.workflowId);
-      if (duplicateCheck.isDuplicate) {
-        return res.status(409).json({ 
-          message: duplicateCheck.message || "Duplicate submission detected",
-          code: "DUPLICATE_OFFBOARDING"
-        });
-      }
-      
-      // Sprint 2: Extract truck number and apply BYOV detection
-      let truckNumber: string | null = null;
-      try {
-        const parsedData = typeof validatedData.data === 'string' 
-          ? JSON.parse(validatedData.data) 
-          : validatedData.data;
-        truckNumber = parsedData?.vehicle?.truckNo || 
-                      parsedData?.vehicle?.vehicleNumber || 
-                      parsedData?.truckNumber || 
-                      null;
-      } catch (e) {
-        console.warn('Could not parse truck number for BYOV detection:', e);
-      }
-      
-      const byovStatus = getInitialToolsTaskStatus(truckNumber);
-      
-      const queueItemData = {
-        ...validatedData,
-        requesterId: "anonymous",
-        department: "Tools" as const,
-        status: "pending" as const,
-        attempts: 0,
-        scheduledFor: validatedData.scheduledFor ? new Date(validatedData.scheduledFor) : null,
-        isByov: byovStatus.isByov,
-        blockedActions: byovStatus.blockedActions,
-        fleetRoutingDecision: byovStatus.routingPath,
-        routingReceivedAt: byovStatus.isByov ? new Date() : null,
-        assignedTo: TOOLS_OWNER.id,
-      };
-      
-      const queueItem = await storage.createToolsQueueItem(queueItemData);
-      console.log(`[Tools Queue] Created task with BYOV status: isByov=${byovStatus.isByov}, truckNo=${truckNumber}, blockedActions=${byovStatus.blockedActions.join(',') || 'none'}`);
-      
-      res.status(201).json({ 
-        id: queueItem.id, 
-        status: queueItem.status, 
-        message: "Queue item created successfully" 
-      });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid form data", errors: error.errors });
-      }
-      console.error('Tools queue creation error:', error);
-      res.status(500).json({ message: "Failed to submit form" });
-    }
-  });
-
-  app.patch("/api/tools-queue/:id/assign", requireAuth, async (req: any, res) => {
-    try {
-      const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
-        return res.status(403).json({ message: "Access denied to Tools queue" });
-      }
-      const { assigneeId, fleetRoutingDecision } = req.body;
-      if (!assigneeId) {
-        return res.status(400).json({ message: "Assignee ID is required" });
-      }
-      
-      // First assign the task
-      let queueItem = await storage.assignToolsQueueItem(req.params.id, assigneeId);
-      if (!queueItem) {
-        return res.status(404).json({ message: "Tools queue item not found" });
-      }
-      
-      // If fleetRoutingDecision is provided, also update that field and clear blockedActions
-      if (fleetRoutingDecision) {
-        queueItem = await storage.updateToolsQueueItem(req.params.id, { 
-          fleetRoutingDecision,
-          routingReceivedAt: new Date(),
-          blockedActions: [], // Clear blocking when routing is received
-        });
-      }
-      
-      res.json(queueItem);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to assign Tools queue item" });
-    }
-  });
-
-  app.patch("/api/tools-queue/:id/complete", requireAuth, async (req: any, res) => {
-    try {
-      const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
-        return res.status(403).json({ message: "Access denied to Tools queue" });
-      }
-      const { completedBy } = req.body;
-      if (!completedBy) {
-        return res.status(400).json({ message: "Completed by user ID is required" });
-      }
-      const queueItem = await storage.completeToolsQueueItem(req.params.id, completedBy);
-      if (!queueItem) {
-        return res.status(404).json({ message: "Tools queue item not found" });
-      }
-      res.json(queueItem);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to complete Tools queue item" });
-    }
-  });
-
-  // Save progress on Tools queue item (auto-save tasks, carrier, routing)
-  app.patch("/api/tools-queue/:id/save-progress", requireAuth, async (req: any, res) => {
-    try {
-      const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || !hasQueueAccess(currentUser, 'tools')) {
-        return res.status(403).json({ message: "Access denied to Tools queue" });
-      }
-      
-      const { 
-        taskToolsReturn, 
-        taskIphoneReturn, 
-        taskDisconnectedLine, 
-        taskDisconnectedMPayment, 
-        taskCloseSegnoOrders, 
-        taskCreateShippingLabel, 
-        carrier,
-        fleetRoutingDecision
-      } = req.body;
-      
-      const updates: Record<string, any> = {};
-      if (typeof taskToolsReturn === 'boolean') updates.taskToolsReturn = taskToolsReturn;
-      if (typeof taskIphoneReturn === 'boolean') updates.taskIphoneReturn = taskIphoneReturn;
-      if (typeof taskDisconnectedLine === 'boolean') updates.taskDisconnectedLine = taskDisconnectedLine;
-      if (typeof taskDisconnectedMPayment === 'boolean') updates.taskDisconnectedMPayment = taskDisconnectedMPayment;
-      if (typeof taskCloseSegnoOrders === 'boolean') updates.taskCloseSegnoOrders = taskCloseSegnoOrders;
-      if (typeof taskCreateShippingLabel === 'boolean') updates.taskCreateShippingLabel = taskCreateShippingLabel;
-      if (carrier !== undefined) updates.carrier = carrier;
-      if (fleetRoutingDecision !== undefined) updates.fleetRoutingDecision = fleetRoutingDecision;
-      
-      if (Object.keys(updates).length === 0) {
-        return res.status(400).json({ message: "No valid fields to update" });
-      }
-      
-      const queueItem = await storage.updateToolsQueueProgress(req.params.id, updates);
-      if (!queueItem) {
-        return res.status(404).json({ message: "Tools queue item not found" });
-      }
-      res.json(queueItem);
-    } catch (error) {
-      console.error('Error saving tools queue progress:', error);
-      res.status(500).json({ message: "Failed to save progress" });
-    }
-  });
-
   // Check for existing open offboarding tasks for an employee
   app.get("/api/offboarding/check-existing", async (req, res) => {
     try {
@@ -2407,7 +2187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taskId = req.params.id;
       
       // Try to find the task in each queue module
-      const modules: QueueModule[] = ["ntao", "assets", "inventory", "fleet", "tools"];
+      const modules: QueueModule[] = ["ntao", "assets", "inventory", "fleet"];
       
       for (const module of modules) {
         const queueItem = await storage.getUnifiedQueueItem(module, taskId);
@@ -2580,7 +2360,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requestedModules = modulesParam.split(',').map(m => m.trim()) as any[];
       
       // Validate modules
-      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'tools'];
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
       const invalidModules = requestedModules.filter(m => !validModules.includes(m));
       if (invalidModules.length > 0) {
         return res.status(400).json({ 
@@ -2668,7 +2448,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requestedModules = modulesParam.split(',').map(m => m.trim()) as any[];
       
       // Validate modules
-      const validModules = ['ntao', 'assets', 'inventory', 'fleet', 'tools'];
+      const validModules = ['ntao', 'assets', 'inventory', 'fleet'];
       const invalidModules = requestedModules.filter(m => !validModules.includes(m));
       if (invalidModules.length > 0) {
         return res.status(400).json({ 
@@ -2751,7 +2531,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       // Calculate stats for each department
-      for (const module of ['ntao', 'assets', 'inventory', 'fleet', 'tools'] as QueueModule[]) {
+      for (const module of ['ntao', 'assets', 'inventory', 'fleet'] as QueueModule[]) {
         let queueItems: any[] = [];
         
         try {
@@ -2767,9 +2547,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
               break;
             case 'fleet':
               queueItems = await storage.getFleetQueueItems();
-              break;
-            case 'tools':
-              queueItems = await storage.getToolsQueueItems();
               break;
           }
         } catch (error) {

@@ -29,7 +29,6 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       assetsQueue: true,
       inventoryQueue: true,
       fleetQueue: true,
-      toolsQueue: true,
     },
     management: {
       enabled: true,
@@ -153,7 +152,6 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       assetsQueue: true,
       inventoryQueue: true,
       fleetQueue: true,
-      toolsQueue: true,
     },
     management: {
       enabled: true,
@@ -276,7 +274,6 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       assetsQueue: true,
       inventoryQueue: true,
       fleetQueue: true,
-      toolsQueue: true,
     },
     management: {
       enabled: false,

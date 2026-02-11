@@ -22,7 +22,7 @@ interface ProgressData {
   fleetRoutingDecision?: string | null;
 }
 
-export function useDebouncedSave({ itemId, module = 'tools', debounceMs = 500, onError }: UseDebouncedSaveOptions) {
+export function useDebouncedSave({ itemId, module = 'assets', debounceMs = 500, onError }: UseDebouncedSaveOptions) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingDataRef = useRef<ProgressData>({});

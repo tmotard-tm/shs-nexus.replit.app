@@ -16,6 +16,17 @@ import type { QueueItem, User } from "@shared/schema";
 import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
+import { AssetsTaskDetailView } from "@/components/assets-queue/AssetsTaskDetailView";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Search,
   AlertTriangle,
@@ -214,6 +225,7 @@ interface FilterState {
   district: string[];
   incompleteOnly: boolean;
   includeManual: boolean;
+  daysBack: number;
 }
 
 function AssetsRecoveryFilterBar({
@@ -237,6 +249,7 @@ function AssetsRecoveryFilterBar({
     activeFilters.district.length > 0 ||
     activeFilters.incompleteOnly ||
     activeFilters.includeManual ||
+    activeFilters.daysBack !== 30 ||
     searchQuery;
 
   return (
@@ -294,6 +307,23 @@ function AssetsRecoveryFilterBar({
           {availableDistricts.map((d) => (
             <SelectItem key={d} value={d}>{d}</SelectItem>
           ))}
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={String(activeFilters.daysBack)}
+        onValueChange={(val) => onFilterChange("daysBack", parseInt(val))}
+      >
+        <SelectTrigger className="w-[160px]">
+          <SelectValue placeholder="Date Range" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="7">Last 7 Days</SelectItem>
+          <SelectItem value="14">Last 14 Days</SelectItem>
+          <SelectItem value="30">Last 30 Days</SelectItem>
+          <SelectItem value="60">Last 60 Days</SelectItem>
+          <SelectItem value="90">Last 90 Days</SelectItem>
+          <SelectItem value="0">All Time</SelectItem>
         </SelectContent>
       </Select>
 
@@ -742,6 +772,7 @@ export function AssetsRecoveryQueue() {
     district: [],
     incompleteOnly: false,
     includeManual: false,
+    daysBack: 30,
   });
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -751,10 +782,13 @@ export function AssetsRecoveryQueue() {
   const [pickUpItem, setPickUpItem] = useState<AssetsQueueItemEnriched | null>(null);
   const [workModuleItem, setWorkModuleItem] = useState<AssetsQueueItemEnriched | null>(null);
   const [isWorkModuleOpen, setIsWorkModuleOpen] = useState(false);
+  const [detailViewItem, setDetailViewItem] = useState<AssetsQueueItemEnriched | null>(null);
+  const [showIncompleteWarning, setShowIncompleteWarning] = useState(false);
+  const [pendingCompleteId, setPendingCompleteId] = useState<string | null>(null);
 
   const { data: rawQueueItems = [], isLoading } = useQuery<QueueItem[]>({
-    queryKey: ["/api/assets-queue"],
-    queryFn: () => apiRequest("GET", "/api/assets-queue").then(res => res.json()),
+    queryKey: ["/api/assets-queue", filters.daysBack],
+    queryFn: () => apiRequest("GET", `/api/assets-queue?daysBack=${filters.daysBack}`).then(res => res.json()),
     refetchInterval: 30000,
   });
 
@@ -782,11 +816,33 @@ export function AssetsRecoveryQueue() {
       invalidateAssetsQueue();
       toast({ title: "Case marked complete" });
       setExpandedRowId(null);
+      setDetailViewItem(null);
     },
     onError: () => {
       toast({ title: "Failed to complete case", variant: "destructive" });
     },
   });
+
+  const handleCompleteWithWarning = (itemId: string) => {
+    const item = queueItems.find(i => i.id === itemId);
+    if (item) {
+      const progress = getTaskProgress(item);
+      if (progress.completed < progress.total) {
+        setPendingCompleteId(itemId);
+        setShowIncompleteWarning(true);
+        return;
+      }
+    }
+    completeMutation.mutate(itemId);
+  };
+
+  const handleConfirmComplete = () => {
+    if (pendingCompleteId) {
+      completeMutation.mutate(pendingCompleteId);
+    }
+    setShowIncompleteWarning(false);
+    setPendingCompleteId(null);
+  };
 
   const assignMutation = useMutation({
     mutationFn: ({ queueItemId, assigneeId }: { queueItemId: string; assigneeId: string }) =>
@@ -909,7 +965,7 @@ export function AssetsRecoveryQueue() {
 
   const handleClearFilters = () => {
     setSearchQuery("");
-    setFilters({ status: [], vehicleType: [], district: [], incompleteOnly: false, includeManual: false });
+    setFilters({ status: [], vehicleType: [], district: [], incompleteOnly: false, includeManual: false, daysBack: 30 });
     setCurrentPage(1);
   };
 
@@ -936,6 +992,65 @@ export function AssetsRecoveryQueue() {
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
       </div>
+    );
+  }
+
+  if (detailViewItem) {
+    return (
+      <>
+        <AssetsTaskDetailView
+          item={detailViewItem}
+          currentUser={user ?? undefined}
+          users={assetsUsers}
+          onBack={() => setDetailViewItem(null)}
+          onComplete={(id) => handleCompleteWithWarning(id)}
+          onAssign={(id, assigneeId) => assignMutation.mutate({ queueItemId: id, assigneeId })}
+          onPickUp={(item) => setPickUpItem(item)}
+          isCompletePending={completeMutation.isPending}
+          isAssignPending={assignMutation.isPending}
+        />
+        <AlertDialog open={showIncompleteWarning} onOpenChange={setShowIncompleteWarning}>
+          <AlertDialogContent aria-describedby="incomplete-tasks-description">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                Incomplete Tasks
+              </AlertDialogTitle>
+              <AlertDialogDescription id="incomplete-tasks-description">
+                {(() => {
+                  const item = queueItems.find(i => i.id === pendingCompleteId);
+                  const progress = item ? getTaskProgress(item) : { completed: 0, total: 6 };
+                  return `Only ${progress.completed} of ${progress.total} tasks are marked complete. Some tasks may not apply to this case.`;
+                })()}
+                <br /><br />
+                Are you sure you want to mark this case complete?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Go Back</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleConfirmComplete}
+                style={{ backgroundColor: '#36D9A3' }}
+              >
+                Complete Anyway
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <PickUpRequestDialog
+          isOpen={!!pickUpItem}
+          onClose={() => setPickUpItem(null)}
+          onPickUp={(agentId) => {
+            if (pickUpItem) {
+              assignMutation.mutate({ queueItemId: pickUpItem.id, assigneeId: agentId });
+            }
+          }}
+          users={assetsUsers}
+          queueModule="assets"
+          isLoading={assignMutation.isPending}
+          currentUser={user}
+        />
+      </>
     );
   }
 
@@ -1003,7 +1118,16 @@ export function AssetsRecoveryQueue() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="font-medium text-slate-900">{row.techData?.techName || row.title || "Unknown"}</div>
+                        <div className="flex items-center gap-1">
+                          <div className="font-medium text-slate-900">{row.techData?.techName || row.title || "Unknown"}</div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setDetailViewItem(row); }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-slate-200 rounded"
+                            title="Open detail view"
+                          >
+                            <ExternalLink className="h-3 w-3 text-[#1A4B8C]" />
+                          </button>
+                        </div>
                         <div className="text-xs text-slate-400 font-mono flex items-center gap-2">
                           {row.techData?.enterpriseId || "N/A"}
                           {personalPhone && (
@@ -1071,7 +1195,7 @@ export function AssetsRecoveryQueue() {
                             item={row}
                             currentUser={user ?? undefined}
                             users={users}
-                            onComplete={(id) => completeMutation.mutate(id)}
+                            onComplete={(id) => handleCompleteWithWarning(id)}
                             onPickUp={(item) => setPickUpItem(item)}
                             onQuickPickUp={(item) => {
                               if (user) {
@@ -1173,6 +1297,35 @@ export function AssetsRecoveryQueue() {
           invalidateAssetsQueue();
         }}
       />
+
+      <AlertDialog open={showIncompleteWarning} onOpenChange={setShowIncompleteWarning}>
+        <AlertDialogContent aria-describedby="incomplete-tasks-description">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Incomplete Tasks
+            </AlertDialogTitle>
+            <AlertDialogDescription id="incomplete-tasks-description">
+              {(() => {
+                const item = queueItems.find(i => i.id === pendingCompleteId);
+                const progress = item ? getTaskProgress(item) : { completed: 0, total: 6 };
+                return `Only ${progress.completed} of ${progress.total} tasks are marked complete. Some tasks may not apply to this case.`;
+              })()}
+              <br /><br />
+              Are you sure you want to mark this case complete?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Go Back</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmComplete}
+              style={{ backgroundColor: '#36D9A3' }}
+            >
+              Complete Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
