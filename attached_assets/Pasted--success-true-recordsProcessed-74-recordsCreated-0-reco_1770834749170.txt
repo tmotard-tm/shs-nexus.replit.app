@@ -1,0 +1,48 @@
+{
+  "success": true,
+  "recordsProcessed": 74,
+  "recordsCreated": 0,
+  "recordsUpdated": 0,
+  "queueItemsCreated": 296,
+  "queueItemsSkipped": 0,
+  "skippedEmployees": [],
+  "errors": [],
+  "duration": 24998,
+  "syncLogId": "05a7c1c0-0c11-4021-906c-edfe6b904834"
+}
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 (no data)
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 (no data)
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 (no data)
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues/stats?modules=assets -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 (no data)
+index-BbIBSUx3.js:48 [API] GET /api/assets-queue?daysBack=0 -> 200 
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets (no data)
+index-BbIBSUx3.js:48 [API] GET /api/queues?modules=assets -> 200 
