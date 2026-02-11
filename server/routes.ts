@@ -1625,7 +1625,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             };
           } else {
             techData = {
-              techName: hrRecord?.technicianName || parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Tools Queue - ', '').replace('Day 0: Recover Equipment & Tools - ', '') || 'Unknown',
+              techName: hrRecord?.technicianName || parsedData?.employee?.fullName || parsedData?.techName || item.title?.replace('Day 0: Recover Company Equipment - ', '').replace('Day 0: Recover Equipment & Tools - ', '') || 'Unknown',
               enterpriseId: enterpriseId || employeeId || 'Unknown',
               district: null,
               separationDate: hrRecord?.lastDay || hrRecord?.effectiveSeparationDate || parsedData?.employee?.lastDayWorked || parsedData?.lastDayWorked || null,
@@ -1645,7 +1645,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } catch (e) {
           techData = {
-            techName: item.title?.replace('Tools Queue - ', '').replace('Day 0: Recover Equipment & Tools - ', '') || 'Unknown',
+            techName: item.title?.replace('Day 0: Recover Company Equipment - ', '').replace('Day 0: Recover Equipment & Tools - ', '') || 'Unknown',
             enterpriseId: 'Unknown',
             district: null,
             separationDate: null,
@@ -2384,9 +2384,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const items = await storage.getUnifiedQueueItems(allowedModules as QueueModule[], status);
       
-      // Sprint 2: Compute currentBlockingStatus for Tools items
+      // Sprint 2: Compute currentBlockingStatus for Assets Management items
       const enrichedItems = await Promise.all(items.map(async (item) => {
-        if (item.department !== 'Tools') {
+        if (item.department !== 'Assets Management') {
           return item;
         }
         

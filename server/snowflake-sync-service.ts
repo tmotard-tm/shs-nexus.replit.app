@@ -335,13 +335,13 @@ export class SnowflakeSyncService {
                 "Complete Day 0 task - detailed Inventory work will follow in Phase 2"
               ],
             },
-            // Tools task - Day 0 task #5 (Sprint 1: Schema + Task Creation)
+            // Assets task - Day 0 task #5 (consolidated from former Tools queue)
             {
-              title: `Day 0: Recover Equipment & Tools - ${tech.techName}`,
+              title: `Day 0: Recover Company Equipment - ${tech.techName}`,
               description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${tech.techName} (${tech.techRacfid}). Truck ${vehicleNumber || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
               department: 'Assets Management',
               step: 'tools_recover_equipment_day0',
-              subtask: 'Tools',
+              subtask: 'Assets',
               workflowStep: 5,
               instructions: [
                 "Contact Employee immediately to arrange equipment return",

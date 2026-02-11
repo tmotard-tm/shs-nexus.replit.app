@@ -165,7 +165,7 @@ async function backfillAssetsQueueItems(): Promise<void> {
         const toolsData = {
           workflowType: 'offboarding_sequence',
           step: 'tools_recover_equipment_day0',
-          subtask: 'Tools',
+          subtask: 'Assets',
           workflowStep: 5,
           phase: 'day0',
           isDay0Task: true,
@@ -206,7 +206,7 @@ async function backfillAssetsQueueItems(): Promise<void> {
 
         const toolsQueueItem = {
           workflowType: 'offboarding' as const,
-          title: `Day 0: Recover Equipment & Tools - ${techName}`,
+          title: `Day 0: Recover Company Equipment - ${techName}`,
           description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${techName} (${enterpriseId}). Truck ${vehicleNumber || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
           status: ntaoItem.status || 'pending',
           priority: 'high' as const,
