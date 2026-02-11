@@ -3,7 +3,7 @@ import { getTPMSService } from './tpms-service';
 import { storage } from './storage';
 import { db } from './db';
 import { queueItems } from '@shared/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCachedAssignment } from '@shared/schema';
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
@@ -2263,7 +2263,10 @@ export class SnowflakeSyncService {
 
     try {
       const allItems = await db.select().from(queueItems)
-        .where(eq(queueItems.workflowType, 'offboarding'));
+        .where(and(
+          eq(queueItems.workflowType, 'offboarding'),
+          eq(queueItems.department, 'Assets Management')
+        ));
 
       result.totalOffboarding = allItems.length;
 
@@ -2298,7 +2301,7 @@ export class SnowflakeSyncService {
         }
       }
 
-      console.log(`[SeparationEnrich] ${result.totalOffboarding} total offboarding items, ${result.alreadyEnriched} already enriched, ${needsEnrichment.length} need enrichment`);
+      console.log(`[SeparationEnrich] ${result.totalOffboarding} Assets Management offboarding items, ${result.alreadyEnriched} already enriched, ${needsEnrichment.length} need enrichment`);
 
       if (needsEnrichment.length === 0) {
         result.success = true;
