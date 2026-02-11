@@ -6714,7 +6714,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/snowflake/separation-ids", requireAuth, async (req: any, res) => {
     try {
-      const snowflakeService = SnowflakeSyncService.getInstance();
+      const snowflakeService = getSnowflakeService();
       const query = `
         SELECT DISTINCT UPPER(LDAP_ID) as LDAP_ID, UPPER(EMPLID) as EMPLID
         FROM PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS
