@@ -91,23 +91,24 @@ function parseTechData(item: QueueItem): TechData | undefined {
     const parsed = item.data ? JSON.parse(item.data) : {};
     const tech = parsed.technician || parsed.employee || {};
     if (!tech || Object.keys(tech).length === 0) return undefined;
+    const hr = parsed.hrSeparation || {};
     return {
-      techName: tech.techName || tech.name || tech.technicianName || "Unknown",
-      enterpriseId: tech.enterpriseId || tech.ldapId || tech.emplId || "",
+      techName: tech.techName || tech.name || tech.technicianName || hr.technicianName || "Unknown",
+      enterpriseId: tech.enterpriseId || tech.ldapId || hr.ldapId || tech.emplId || "",
       district: tech.district || null,
-      separationDate: tech.separationDate || tech.lastDayWorked || tech.effectiveSeparationDate || null,
-      lastDayWorked: tech.lastDayWorked || null,
+      separationDate: tech.separationDate || tech.lastDayWorked || tech.effectiveSeparationDate || hr.lastDay || hr.effectiveSeparationDate || null,
+      lastDayWorked: tech.lastDayWorked || hr.lastDay || null,
       mobilePhone: tech.mobilePhone || null,
-      personalPhone: tech.personalPhone || tech.homePhone || tech.contactNumber || null,
+      personalPhone: tech.personalPhone || tech.homePhone || tech.contactNumber || hr.contactNumber || null,
       homePhone: tech.homePhone || null,
-      contactNumber: tech.contactNumber || null,
-      email: tech.email || tech.personalEmail || null,
-      personalEmail: tech.personalEmail || null,
+      contactNumber: tech.contactNumber || hr.contactNumber || null,
+      email: tech.email || tech.personalEmail || hr.personalEmail || null,
+      personalEmail: tech.personalEmail || hr.personalEmail || null,
       address: tech.address || tech.homeAddress || null,
-      fleetPickupAddress: tech.fleetPickupAddress || null,
-      hrTruckNumber: tech.hrTruckNumber || tech.truckNumber || null,
-      separationCategory: tech.separationCategory || null,
-      notes: tech.notes || tech.hrNotes || null,
+      fleetPickupAddress: tech.fleetPickupAddress || hr.fleetPickupAddress || null,
+      hrTruckNumber: tech.hrTruckNumber || tech.truckNumber || hr.truckNumber || null,
+      separationCategory: tech.separationCategory || hr.separationCategory || null,
+      notes: tech.notes || tech.hrNotes || hr.notes || null,
       fromSnowflake: tech.fromSnowflake,
     };
   } catch {

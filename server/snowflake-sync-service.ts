@@ -2353,6 +2353,18 @@ export class SnowflakeSyncService {
             enrichedAt: new Date().toISOString(),
           };
 
+          const tech = parsed.technician || parsed.employee;
+          if (tech) {
+            if (sep.contactNumber && !tech.contactNumber) tech.contactNumber = sep.contactNumber;
+            if (sep.personalEmail && !tech.personalEmail) tech.personalEmail = sep.personalEmail;
+            if (sep.fleetPickupAddress && !tech.fleetPickupAddress) tech.fleetPickupAddress = sep.fleetPickupAddress;
+            if (sep.truckNumber && !tech.hrTruckNumber) tech.hrTruckNumber = sep.truckNumber;
+            if (sep.separationCategory && !tech.separationCategory) tech.separationCategory = sep.separationCategory;
+            if (sep.lastDay && !tech.lastDayWorked) tech.lastDayWorked = sep.lastDay;
+            if (sep.effectiveSeparationDate && !tech.effectiveSeparationDate) tech.effectiveSeparationDate = sep.effectiveSeparationDate;
+            if (sep.notes && !tech.hrNotes) tech.hrNotes = sep.notes;
+          }
+
           await storage.updateQueueItem(item.id, { data: JSON.stringify(parsed) });
 
           result.enrichedCount++;

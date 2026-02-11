@@ -1918,10 +1918,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      let hrSep: any = null;
+      try {
+        const parsedData = typeof queueItem.data === 'string' 
+          ? JSON.parse(queueItem.data) 
+          : queueItem.data;
+        hrSep = parsedData?.hrSeparation || null;
+      } catch {}
+      
       res.json({
-        personalPhone: tech.cellPhone || null,
+        personalPhone: tech.cellPhone || hrSep?.contactNumber || null,
         mobilePhone: mobilePhone,
         homePhone: tech.homePhone || null,
+        personalEmail: hrSep?.personalEmail || null,
+        fleetPickupAddress: hrSep?.fleetPickupAddress || null,
+        hrTruckNumber: hrSep?.truckNumber || null,
         homeAddress: {
           line1: tech.homeAddr1 || null,
           line2: tech.homeAddr2 || null,
