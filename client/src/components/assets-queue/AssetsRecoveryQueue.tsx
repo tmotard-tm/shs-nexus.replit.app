@@ -200,12 +200,7 @@ function getItemSourceFromData(item: QueueItem): boolean {
     if (createdVia === "hr_separation_sync") {
       return true;
     }
-    const tech = parsed.technician || parsed.employee || {};
-    if (
-      parsed.workflowType === "offboarding_sequence" &&
-      (tech.enterpriseId || tech.techRacfid) &&
-      (tech.techName || tech.name || tech.technicianName)
-    ) {
+    if (parsed.workflowType === "offboarding_sequence") {
       return true;
     }
   } catch {}
@@ -943,7 +938,10 @@ export function AssetsRecoveryQueue() {
       const itemSource = getItemSource(item, separationIds);
       const matchesSource = filters.includeManual || itemSource !== "manual";
 
-      return matchesSearch && matchesStatus && matchesVehicle && matchesDistrict && matchesIncomplete && matchesSource;
+      const isOrphan = techData?.techName === "Unknown" && !techData?.enterpriseId;
+      const matchesNotOrphan = !isOrphan;
+
+      return matchesSearch && matchesStatus && matchesVehicle && matchesDistrict && matchesIncomplete && matchesSource && matchesNotOrphan;
     });
   }, [queueItems, searchQuery, filters, separationIds]);
 
