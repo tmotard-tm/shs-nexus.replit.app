@@ -6380,6 +6380,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/snowflake/sync/separation-enrichment/trigger", async (_req: any, res) => {
+    try {
+      if (process.env.NODE_ENV === 'production') {
+        return res.status(403).json({ message: "Not available in production" });
+      }
+      const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+      const syncService = getSnowflakeSyncService();
+      const result = await syncService.enrichOffboardingWithSeparationDetails();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error running separation enrichment:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   app.post("/api/snowflake/sync/separation-enrichment", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
