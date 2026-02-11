@@ -200,6 +200,12 @@ function getItemSourceFromData(item: QueueItem): boolean {
     if (createdVia === "hr_separation_sync") {
       return true;
     }
+    if (
+      parsed.workflowType === "offboarding_sequence" &&
+      (parsed.technician?.enterpriseId || parsed.technician?.techRacfid || parsed.employee?.enterpriseId)
+    ) {
+      return true;
+    }
   } catch {}
   return false;
 }
