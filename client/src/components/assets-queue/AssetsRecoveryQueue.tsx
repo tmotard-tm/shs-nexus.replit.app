@@ -140,12 +140,17 @@ function parseTechData(item: QueueItem): TechData | undefined {
     const tech = parsed.technician || parsed.employee || {};
     if (!tech || Object.keys(tech).length === 0) return undefined;
     const hr = parsed.hrSeparation || {};
+    const roster = parsed.rosterContact || {};
 
-    const phoneSrc = pickSourced(hr.contactNumber, tech.personalPhone || tech.homePhone || tech.contactNumber);
+    const rosterPhone = roster.cellPhone || roster.homePhone || roster.mainPhone || tech.personalPhone || tech.homePhone || tech.contactNumber;
+    const rosterAddr = [roster.homeAddr1, roster.homeAddr2, roster.homeCity, roster.homeState, roster.homePostal].filter(Boolean).join(', ') || tech.address || tech.homeAddress;
+    const rosterTruck = roster.truckLu || tech.hrTruckNumber || tech.truckNumber;
+
+    const phoneSrc = pickSourced(hr.contactNumber, rosterPhone);
     const emailSrc = pickSourced(hr.personalEmail, tech.email || tech.personalEmail);
-    const addressSrc = pickSourced(null, tech.address || tech.homeAddress);
+    const addressSrc = pickSourced(null, rosterAddr);
     const fleetPickupSrc = pickSourced(hr.fleetPickupAddress, tech.fleetPickupAddress);
-    const truckSrc = pickSourced(hr.truckNumber, tech.hrTruckNumber || tech.truckNumber);
+    const truckSrc = pickSourced(hr.truckNumber, rosterTruck);
     const sepCatSrc = pickSourced(hr.separationCategory, tech.separationCategory);
     const lastDaySrc = pickSourced(hr.lastDay, tech.lastDayWorked);
 
@@ -155,9 +160,9 @@ function parseTechData(item: QueueItem): TechData | undefined {
       district: tech.district || null,
       separationDate: tech.separationDate || tech.lastDayWorked || tech.effectiveSeparationDate || hr.lastDay || hr.effectiveSeparationDate || null,
       lastDayWorked: lastDaySrc.value,
-      mobilePhone: tech.mobilePhone || null,
+      mobilePhone: roster.mainPhone || tech.mobilePhone || null,
       personalPhone: phoneSrc.value,
-      homePhone: tech.homePhone || null,
+      homePhone: roster.homePhone || tech.homePhone || null,
       contactNumber: tech.contactNumber || hr.contactNumber || null,
       email: emailSrc.value,
       personalEmail: tech.personalEmail || hr.personalEmail || null,

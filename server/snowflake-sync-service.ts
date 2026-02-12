@@ -2277,15 +2277,11 @@ export class SnowflakeSyncService {
       }
 
       const needsEnrichment: Array<{ id: string; enterpriseId: string; employeeId: string }> = [];
+      const needsRosterEnrichment: Array<{ id: string; enterpriseId: string; employeeId: string }> = [];
 
       for (const item of allItems) {
         try {
           const parsed = typeof item.data === 'string' ? JSON.parse(item.data) : (item.data || {});
-
-          if (parsed.hrSeparation && parsed.hrSeparation.success !== false) {
-            result.alreadyEnriched++;
-            continue;
-          }
 
           const tech = parsed.technician || parsed.employee || {};
           const eid = (tech.enterpriseId || tech.techRacfid || tech.racfId || '').trim().toUpperCase();
@@ -2295,13 +2291,65 @@ export class SnowflakeSyncService {
             continue;
           }
 
+          if (!parsed.rosterContact) {
+            needsRosterEnrichment.push({ id: item.id, enterpriseId: eid, employeeId: empId });
+          }
+
+          if (parsed.hrSeparation && parsed.hrSeparation.success !== false) {
+            result.alreadyEnriched++;
+            continue;
+          }
+
           needsEnrichment.push({ id: item.id, enterpriseId: eid, employeeId: empId });
         } catch {
           continue;
         }
       }
 
-      console.log(`[SeparationEnrich] ${result.totalOffboarding} Assets Management offboarding items, ${result.alreadyEnriched} already enriched, ${needsEnrichment.length} need enrichment`);
+      let rosterEnrichedCount = 0;
+      if (needsRosterEnrichment.length > 0) {
+        console.log(`[SeparationEnrich] ${needsRosterEnrichment.length} items need roster contact enrichment`);
+        for (const item of needsRosterEnrichment) {
+          try {
+            let rosterTech: any = null;
+            if (item.employeeId) {
+              rosterTech = await storage.getAllTechByEmployeeId(item.employeeId);
+            }
+            if (!rosterTech && item.enterpriseId) {
+              rosterTech = await storage.getAllTechByTechRacfid(item.enterpriseId);
+            }
+            if (!rosterTech) continue;
+
+            const dbItem = allItems.find(i => i.id === item.id);
+            if (!dbItem) continue;
+
+            const parsed = typeof dbItem.data === 'string' ? JSON.parse(dbItem.data) : (dbItem.data || {});
+
+            parsed.rosterContact = {
+              cellPhone: rosterTech.cellPhone || null,
+              homePhone: rosterTech.homePhone || null,
+              mainPhone: rosterTech.mainPhone || null,
+              homeAddr1: rosterTech.homeAddr1 || null,
+              homeAddr2: rosterTech.homeAddr2 || null,
+              homeCity: rosterTech.homeCity || null,
+              homeState: rosterTech.homeState || null,
+              homePostal: rosterTech.homePostal || null,
+              truckLu: rosterTech.truckLu || null,
+              enrichedAt: new Date().toISOString(),
+            };
+
+            const updatedData = JSON.stringify(parsed);
+            await storage.updateQueueItem(item.id, { data: updatedData });
+            (dbItem as any).data = updatedData;
+            rosterEnrichedCount++;
+          } catch (err: any) {
+            result.errors.push(`Roster enrichment failed for ${item.id}: ${err.message}`);
+          }
+        }
+        console.log(`[SeparationEnrich] Roster contact enrichment: ${rosterEnrichedCount} items updated`);
+      }
+
+      console.log(`[SeparationEnrich] ${result.totalOffboarding} Assets Management offboarding items, ${result.alreadyEnriched} already enriched, ${needsEnrichment.length} need separation enrichment`);
 
       if (needsEnrichment.length === 0) {
         result.success = true;
@@ -2312,6 +2360,7 @@ export class SnowflakeSyncService {
       if (!separationsResult.success || separationsResult.records.length === 0) {
         console.log('[SeparationEnrich] No separation records from Snowflake (or query failed)');
         result.errors.push(separationsResult.message || 'No separation records available');
+        result.success = true;
         return result;
       }
 
