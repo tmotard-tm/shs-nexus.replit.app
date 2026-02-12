@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +51,7 @@ import {
   ExternalLink,
   Send,
   UserX,
+  UserCheck,
   Loader2,
   Save,
   Edit3,
@@ -566,6 +567,7 @@ function ExpandedRowDetails({
   onQuickPickUp,
   onStartWork,
   isCompletePending,
+  isAssignFailed,
 }: {
   item: AssetsQueueItemEnriched;
   currentUser?: User;
@@ -575,6 +577,7 @@ function ExpandedRowDetails({
   onQuickPickUp: (item: AssetsQueueItemEnriched) => void;
   onStartWork: (item: AssetsQueueItemEnriched) => void;
   isCompletePending: boolean;
+  isAssignFailed: boolean;
 }) {
   const { toast } = useToast();
   const techData = item.techData;
@@ -585,6 +588,20 @@ function ExpandedRowDetails({
 
   const personalPhone = techData?.personalPhone || techData?.homePhone || techData?.contactNumber || null;
   const email = techData?.email || techData?.personalEmail || null;
+
+  const [justPickedUp, setJustPickedUp] = useState(false);
+
+  useEffect(() => {
+    if (item.status !== 'pending') {
+      setJustPickedUp(false);
+    }
+  }, [item.status, item.assignedTo]);
+
+  useEffect(() => {
+    if (isAssignFailed && justPickedUp) {
+      setJustPickedUp(false);
+    }
+  }, [isAssignFailed, justPickedUp]);
 
   const [taskState, setTaskState] = useState<Record<TaskKey, boolean>>({
     taskToolsReturn: item.taskToolsReturn ?? false,
@@ -810,12 +827,15 @@ function ExpandedRowDetails({
               Quick Actions
             </h4>
             <div className="grid grid-cols-1 gap-2">
-              {isPending && (
+              {isPending && !justPickedUp && (
                 <>
                   <Button
                     className="w-full"
                     style={{ backgroundColor: "#1A4B8C" }}
-                    onClick={() => onQuickPickUp(item)}
+                    onClick={() => {
+                      setJustPickedUp(true);
+                      onQuickPickUp(item);
+                    }}
                   >
                     <Check className="h-4 w-4 mr-2" />
                     Pick Up
@@ -831,15 +851,49 @@ function ExpandedRowDetails({
                 </>
               )}
 
-              {isInProgress && isAssignedToMe && (
-                <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={() => onStartWork(item)}
-                >
-                  <Briefcase className="h-4 w-4 mr-2 text-slate-500" />
-                  Open Work Module
-                </Button>
+              {(justPickedUp && isPending) && (
+                <div className="space-y-2">
+                  <Button
+                    className="w-full pointer-events-none"
+                    style={{ backgroundColor: "#36D9A3" }}
+                    disabled
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Picked Up
+                  </Button>
+                  <div className="flex items-center justify-center gap-1.5 text-xs text-[#2db386] font-medium">
+                    <UserCheck className="h-3 w-3" />
+                    Assigned to you
+                  </div>
+                </div>
+              )}
+
+              {(isInProgress || (justPickedUp && !isPending)) && isAssignedToMe && (
+                <>
+                  {isInProgress && !justPickedUp && (
+                    <div className="space-y-2 mb-2">
+                      <div className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-md bg-[#36D9A3]/10 border border-[#36D9A3]/30">
+                        <CheckCircle className="h-4 w-4 text-[#36D9A3]" />
+                        <span className="text-sm font-medium text-[#2db386]">Picked Up</span>
+                      </div>
+                    </div>
+                  )}
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={() => onStartWork(item)}
+                  >
+                    <Briefcase className="h-4 w-4 mr-2 text-slate-500" />
+                    Open Work Module
+                  </Button>
+                </>
+              )}
+
+              {isInProgress && !isAssignedToMe && (
+                <div className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-md bg-slate-100 border border-slate-200">
+                  <UserX className="h-4 w-4 text-slate-500" />
+                  <span className="text-sm font-medium text-slate-600">Assigned to {assignedUser?.username || 'another agent'}</span>
+                </div>
               )}
 
               <Button variant="outline" className="justify-start" asChild>
@@ -889,7 +943,7 @@ function ExpandedRowDetails({
                   </>
                 )}
               </Button>
-              {isPending && !isAssignedToMe && (
+              {isPending && !isAssignedToMe && !justPickedUp && (
                 <p className="text-xs text-muted-foreground text-center">
                   Pick up the case first to mark complete
                 </p>
@@ -1362,6 +1416,7 @@ export function AssetsRecoveryQueue() {
                               setIsWorkModuleOpen(true);
                             }}
                             isCompletePending={completeMutation.isPending}
+                            isAssignFailed={assignMutation.isError}
                           />
                         </td>
                       </tr>
