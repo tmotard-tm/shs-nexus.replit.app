@@ -41,6 +41,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       weeklyOnboarding: true,
       weeklyOffboarding: true,
       vehicleAssignments: true,
+      communicationHub: true,
       techRoster: true,
     },
     activities: {
@@ -121,6 +122,13 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       editSpot: true,
       deleteSpot: true,
     },
+    communicationHub: {
+      enabled: true,
+      editTemplates: true,
+      changeMode: true,
+      manageWhitelist: true,
+      viewLogs: true,
+    },
   },
 };
 
@@ -165,6 +173,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       weeklyOnboarding: true,
       weeklyOffboarding: true,
       vehicleAssignments: true,
+      communicationHub: true,
       techRoster: true,
     },
     activities: {
@@ -244,6 +253,13 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       editSpot: true,
       deleteSpot: false,
     },
+    communicationHub: {
+      enabled: true,
+      editTemplates: true,
+      changeMode: false,
+      manageWhitelist: true,
+      viewLogs: true,
+    },
   },
 };
 
@@ -287,6 +303,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       weeklyOnboarding: false,
       weeklyOffboarding: false,
       vehicleAssignments: false,
+      communicationHub: false,
       techRoster: false,
     },
     activities: {
@@ -366,6 +383,13 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       editSpot: false,
       deleteSpot: false,
     },
+    communicationHub: {
+      enabled: false,
+      editTemplates: false,
+      changeMode: false,
+      manageWhitelist: false,
+      viewLogs: false,
+    },
   },
 };
 
@@ -434,11 +458,22 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/tech-roster': () => perms.sidebar.management.techRoster,
     '/weekly-onboarding': () => perms.sidebar.management.weeklyOnboarding,
     '/weekly-offboarding': () => perms.sidebar.management.weeklyOffboarding,
+    '/communication-hub': () => perms.sidebar.management.communicationHub,
     '/role-permissions': () => perms.sidebar.management.rolePermissions,
+    '/holman-integration': () => perms.sidebar.management.integrations,
+    '/field-mapping': () => perms.sidebar.management.integrations,
+    '/decommissions-queue': () => perms.sidebar.queues.queueManagement,
+    '/active-vehicles': () => perms.sidebar.management.fleetManagement,
+    '/test-repair-results': () => perms.sidebar.management.integrations,
     '/activity': () => perms.sidebar.activities.activityLogs,
     '/activity-logs': () => perms.sidebar.activities.activityLogs,
     '/change-password': () => perms.sidebar.account.changePassword,
     '/help': () => perms.sidebar.helpAndTutorial.tutorial,
+    '/about': () => perms.sidebar.helpAndTutorial.about,
+    '/tutorial': () => perms.sidebar.helpAndTutorial.tutorial,
+    '/fleet-distribution': () => perms.sidebar.dashboards.vehicleAssignmentDash,
+    '/analytics-board': () => perms.sidebar.dashboards.vehicleAssignmentDash,
+    '/rental-dashboard': () => perms.sidebar.dashboards.rentalReductionDash,
   };
 
   // Check exact route match
@@ -448,6 +483,24 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
 
   // Handle wildcard patterns for forms - all authenticated users can access forms
   if (route.startsWith('/forms/')) {
+    return true;
+  }
+
+  // Handle task work routes - all authenticated users can access their assigned tasks
+  if (route.startsWith('/tasks/')) {
+    return true;
+  }
+
+  // Legacy form routes - all authenticated users can access these
+  const legacyFormRoutes = [
+    '/create-vehicle-location',
+    '/assign-vehicle-location',
+    '/update-vehicle',
+    '/onboard-hire',
+    '/offboard-technician',
+    '/sears-drive-enrollment',
+  ];
+  if (legacyFormRoutes.includes(route)) {
     return true;
   }
 

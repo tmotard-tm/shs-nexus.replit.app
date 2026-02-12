@@ -303,6 +303,22 @@ export const PAGES: PageDefinition[] = [
     permissionKey: "weeklyOffboarding",
   },
   {
+    key: "vehicleAssignments",
+    label: "Vehicle Assignments",
+    description: "Manage technician vehicle assignments and sync with TPMS",
+    path: "/vehicle-assignments",
+    icon: Truck,
+    category: "management",
+    permissionKey: "vehicleAssignments",
+    features: [
+      { key: "viewAssignments", label: "View Assignments", description: "Show/hide assignment list" },
+      { key: "createAssignment", label: "Create Assignment", description: "Show/hide Create Assignment button" },
+      { key: "editAssignment", label: "Edit Assignment", description: "Show/hide Edit Assignment button" },
+      { key: "deleteAssignment", label: "Delete Assignment", description: "Show/hide Delete Assignment button" },
+      { key: "syncFromTPMS", label: "Sync from TPMS", description: "Show/hide Sync from TPMS button" },
+    ],
+  },
+  {
     key: "techRoster",
     label: "Tech Roster",
     description: "View technician roster from Snowflake",

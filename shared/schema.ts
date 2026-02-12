@@ -75,6 +75,7 @@ export interface RolePermissionSettings {
       weeklyOnboarding: boolean;
       weeklyOffboarding: boolean;
       vehicleAssignments: boolean;
+      communicationHub: boolean;
       techRoster: boolean;
     };
     activities: {
@@ -157,6 +158,13 @@ export interface RolePermissionSettings {
       createSpot: boolean;
       editSpot: boolean;
       deleteSpot: boolean;
+    };
+    communicationHub: {
+      enabled: boolean;
+      editTemplates: boolean;
+      changeMode: boolean;
+      manageWhitelist: boolean;
+      viewLogs: boolean;
     };
   };
 }
