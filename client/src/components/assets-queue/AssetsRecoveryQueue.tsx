@@ -82,7 +82,6 @@ interface TechData {
   fleetPickupAddress: string | null;
   hrTruckNumber: string | null;
   separationCategory: string | null;
-  notes: string | null;
   fromSnowflake?: boolean;
   sources: {
     personalPhone: DataSource;
@@ -142,11 +141,39 @@ function parseTechData(item: QueueItem): TechData | undefined {
     const hr = parsed.hrSeparation || {};
     const roster = parsed.rosterContact || {};
 
-    const rosterPhone = roster.cellPhone || roster.homePhone || roster.mainPhone || tech.personalPhone || tech.homePhone || tech.contactNumber;
+    const rosterCellPhone = roster.cellPhone || null;
+    const rosterMainPhone = roster.mainPhone || null;
+    const rosterHomePhone = roster.homePhone || null;
     const rosterAddr = [roster.homeAddr1, roster.homeAddr2, roster.homeCity, roster.homeState, roster.homePostal].filter(Boolean).join(', ') || tech.address || tech.homeAddress;
     const rosterTruck = roster.truckLu || tech.hrTruckNumber || tech.truckNumber;
 
-    const phoneSrc = pickSourced(hr.contactNumber, rosterPhone);
+    const personalPhoneRoster = rosterCellPhone || tech.personalPhone || tech.homePhone || tech.contactNumber || null;
+    const mobilePhoneRoster = rosterMainPhone || tech.mobilePhone || null;
+
+    const resolvedPersonal = hr.contactNumber || personalPhoneRoster;
+    const resolvedMobile = mobilePhoneRoster;
+
+    let finalMobile: string | null;
+    let finalPersonal: string | null;
+
+    if (resolvedMobile && resolvedPersonal) {
+      finalMobile = resolvedMobile;
+      finalPersonal = resolvedPersonal === resolvedMobile ? null : resolvedPersonal;
+    } else if (resolvedMobile) {
+      finalMobile = resolvedMobile;
+      finalPersonal = null;
+    } else if (resolvedPersonal) {
+      finalMobile = resolvedPersonal;
+      finalPersonal = null;
+    } else {
+      finalMobile = null;
+      finalPersonal = null;
+    }
+
+    const phoneSrc = finalPersonal
+      ? pickSourced(hr.contactNumber && hr.contactNumber === finalPersonal ? hr.contactNumber : null, finalPersonal)
+      : { value: null, source: null as DataSource };
+
     const emailSrc = pickSourced(hr.personalEmail, tech.email || tech.personalEmail);
     const addressSrc = pickSourced(null, rosterAddr);
     const fleetPickupSrc = pickSourced(hr.fleetPickupAddress, tech.fleetPickupAddress);
@@ -160,9 +187,9 @@ function parseTechData(item: QueueItem): TechData | undefined {
       district: tech.district || null,
       separationDate: tech.separationDate || tech.lastDayWorked || tech.effectiveSeparationDate || hr.lastDay || hr.effectiveSeparationDate || null,
       lastDayWorked: lastDaySrc.value,
-      mobilePhone: roster.mainPhone || tech.mobilePhone || null,
-      personalPhone: phoneSrc.value,
-      homePhone: roster.homePhone || tech.homePhone || null,
+      mobilePhone: finalMobile || null,
+      personalPhone: finalPersonal || null,
+      homePhone: rosterHomePhone || tech.homePhone || null,
       contactNumber: tech.contactNumber || hr.contactNumber || null,
       email: emailSrc.value,
       personalEmail: tech.personalEmail || hr.personalEmail || null,
@@ -170,7 +197,6 @@ function parseTechData(item: QueueItem): TechData | undefined {
       fleetPickupAddress: fleetPickupSrc.value,
       hrTruckNumber: truckSrc.value,
       separationCategory: sepCatSrc.value,
-      notes: tech.notes || tech.hrNotes || hr.notes || null,
       fromSnowflake: tech.fromSnowflake,
       sources: {
         personalPhone: phoneSrc.source,
@@ -678,12 +704,6 @@ function ExpandedRowDetails({
                   {techData?.hrTruckNumber || "N/A"}
                 </span>
               </div>
-              {techData?.notes && (
-                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-md">
-                  <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">HR Notes:</span>
-                  <p className="text-sm text-slate-700 mt-1">{techData.notes}</p>
-                </div>
-              )}
               {assignedUser && (
                 <div className="flex items-start justify-between mt-2 pt-2 border-t border-slate-100">
                   <span className="text-sm text-slate-500">Assigned To:</span>

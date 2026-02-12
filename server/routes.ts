@@ -1935,9 +1935,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rosterAddress = [tech.homeAddr1, tech.homeAddr2, tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ') || null;
       const sepAddress = hrSep?.fleetPickupAddress || null;
 
+      const rosterPersonal = tech.cellPhone || null;
+      const rosterMobile = tech.mainPhone || null;
+      const tpmsMobile = mobilePhone || rosterMobile;
+      const resolvedPersonal = hrSep?.contactNumber || rosterPersonal;
+
+      let finalMobile: string | null;
+      let finalPersonal: string | null;
+
+      if (tpmsMobile && resolvedPersonal) {
+        finalMobile = tpmsMobile;
+        finalPersonal = resolvedPersonal === tpmsMobile ? null : resolvedPersonal;
+      } else if (tpmsMobile) {
+        finalMobile = tpmsMobile;
+        finalPersonal = null;
+      } else if (resolvedPersonal) {
+        finalMobile = resolvedPersonal;
+        finalPersonal = null;
+      } else {
+        finalMobile = null;
+        finalPersonal = null;
+      }
+
+      const mobileSource = finalMobile
+        ? (mobilePhone ? 'roster' as const : (rosterMobile && finalMobile === rosterMobile ? 'roster' as const : (resolvedPersonal && finalMobile === resolvedPersonal ? (hrSep?.contactNumber ? 'separation' as const : 'roster' as const) : null)))
+        : null;
+      const personalSource = finalPersonal
+        ? (hrSep?.contactNumber && hrSep.contactNumber === finalPersonal ? 'separation' as const : 'roster' as const)
+        : null;
+
       res.json({
-        personalPhone: pickWithSource(hrSep?.contactNumber, tech.cellPhone),
-        mobilePhone: { value: mobilePhone, source: mobilePhone ? 'roster' as const : null },
+        personalPhone: { value: finalPersonal || null, source: personalSource },
+        mobilePhone: { value: finalMobile || null, source: mobileSource },
         mainPhone: { value: tech.mainPhone || null, source: tech.mainPhone ? 'roster' as const : null },
         homePhone: { value: tech.homePhone || null, source: tech.homePhone ? 'roster' as const : null },
         personalEmail: pickWithSource(hrSep?.personalEmail, null),
