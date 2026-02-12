@@ -45,10 +45,21 @@ import {
   Edit3,
 } from "lucide-react";
 
+type DataSource = 'separation' | 'roster' | null;
+interface SourcedField {
+  value: string | null;
+  source: DataSource;
+}
+
 interface ContactInfo {
-  personalPhone: string | null;
-  mobilePhone: string | null;
-  homePhone: string | null;
+  personalPhone: SourcedField;
+  mobilePhone: SourcedField;
+  mainPhone: SourcedField;
+  homePhone: SourcedField;
+  personalEmail: SourcedField;
+  address: SourcedField;
+  fleetPickupAddress: SourcedField;
+  hrTruckNumber: SourcedField;
   homeAddress: {
     line1: string | null;
     line2: string | null;
@@ -58,6 +69,34 @@ interface ContactInfo {
   };
   employeeId: string;
   techName: string;
+  separationCategory: string | null;
+}
+
+function SourceDot({ source, className }: { source: DataSource; className?: string }) {
+  if (!source) return null;
+  const color = source === 'separation' ? 'bg-purple-500' : 'bg-blue-500';
+  const title = source === 'separation' ? 'HR Separation Data' : 'Employee Roster Data';
+  return (
+    <span
+      className={`inline-block w-2 h-2 rounded-full ${color} ${className || ''}`}
+      title={title}
+    />
+  );
+}
+
+function SourceLegend() {
+  return (
+    <div className="flex items-center gap-3 text-[11px] text-slate-500">
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2 h-2 rounded-full bg-purple-500" />
+        HR Separation
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
+        Employee Roster
+      </span>
+    </div>
+  );
 }
 
 interface VehicleLocation {
@@ -340,16 +379,20 @@ export function AssetsTaskDetailView({
                 </div>
               ) : contactInfo ? (
                 <div className="space-y-2">
+                  <SourceLegend />
                   <div className="flex items-center gap-2 text-sm">
                     <Smartphone className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium">Mobile:</span>
-                    <span>{contactInfo.mobilePhone || 'Not available'}</span>
+                    <span>{contactInfo.mobilePhone?.value || 'Not available'}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Phone className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">Personal:</span>
-                    {contactInfo.personalPhone ? (
-                      <span className="text-green-600 font-medium">{contactInfo.personalPhone}</span>
+                    <span className="font-medium flex items-center gap-1">
+                      Personal:
+                      <SourceDot source={contactInfo.personalPhone?.source} />
+                    </span>
+                    {contactInfo.personalPhone?.value ? (
+                      <span className="text-green-600 font-medium">{contactInfo.personalPhone.value}</span>
                     ) : (
                       <div className="flex items-center gap-2">
                         <span className="text-muted-foreground">Not available</span>
@@ -362,13 +405,55 @@ export function AssetsTaskDetailView({
                   <div className="flex items-center gap-2 text-sm">
                     <Phone className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium">Home:</span>
-                    <span>{contactInfo.homePhone || 'Not available'}</span>
+                    <span>{contactInfo.homePhone?.value || 'Not available'}</span>
                   </div>
+                  {contactInfo.personalEmail?.value && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium flex items-center gap-1">
+                        Email:
+                        <SourceDot source={contactInfo.personalEmail.source} />
+                      </span>
+                      <a href={`mailto:${contactInfo.personalEmail.value}`} className="text-[#1A4B8C] hover:underline">
+                        {contactInfo.personalEmail.value}
+                      </a>
+                    </div>
+                  )}
                   <div className="flex items-start gap-2 text-sm">
                     <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
-                    <span className="font-medium">Address:</span>
+                    <span className="font-medium flex items-center gap-1">
+                      Address:
+                      <SourceDot source={contactInfo.address?.source} />
+                    </span>
                     <span>{formatAddress(contactInfo.homeAddress) || 'Not available'}</span>
                   </div>
+                  {contactInfo.fleetPickupAddress?.value && (
+                    <div className="flex items-start gap-2 text-sm">
+                      <MapPin className="h-4 w-4 text-amber-500 mt-0.5" />
+                      <span className="font-medium flex items-center gap-1">
+                        Fleet Pickup:
+                        <SourceDot source={contactInfo.fleetPickupAddress.source} />
+                      </span>
+                      <span>{contactInfo.fleetPickupAddress.value}</span>
+                    </div>
+                  )}
+                  {contactInfo.hrTruckNumber?.value && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Truck className="h-4 w-4 text-amber-500" />
+                      <span className="font-medium flex items-center gap-1">
+                        HR Truck:
+                        <SourceDot source={contactInfo.hrTruckNumber.source} />
+                      </span>
+                      <span>{contactInfo.hrTruckNumber.value}</span>
+                    </div>
+                  )}
+                  {contactInfo.separationCategory && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Briefcase className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">Category:</span>
+                      <Badge variant="outline" className="text-xs">{contactInfo.separationCategory}</Badge>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-sm text-muted-foreground">

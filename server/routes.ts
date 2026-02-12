@@ -1926,13 +1926,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hrSep = parsedData?.hrSeparation || null;
       } catch {}
       
+      const pickWithSource = (sepVal: string | null | undefined, rosterVal: string | null | undefined) => {
+        if (sepVal) return { value: sepVal, source: 'separation' as const };
+        if (rosterVal) return { value: rosterVal, source: 'roster' as const };
+        return { value: null, source: null };
+      };
+
+      const rosterAddress = [tech.homeAddr1, tech.homeAddr2, tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ') || null;
+      const sepAddress = hrSep?.fleetPickupAddress || null;
+
       res.json({
-        personalPhone: tech.cellPhone || hrSep?.contactNumber || null,
-        mobilePhone: mobilePhone,
-        homePhone: tech.homePhone || null,
-        personalEmail: hrSep?.personalEmail || null,
-        fleetPickupAddress: hrSep?.fleetPickupAddress || null,
-        hrTruckNumber: hrSep?.truckNumber || null,
+        personalPhone: pickWithSource(hrSep?.contactNumber, tech.cellPhone),
+        mobilePhone: { value: mobilePhone, source: mobilePhone ? 'roster' as const : null },
+        mainPhone: { value: tech.mainPhone || null, source: tech.mainPhone ? 'roster' as const : null },
+        homePhone: { value: tech.homePhone || null, source: tech.homePhone ? 'roster' as const : null },
+        personalEmail: pickWithSource(hrSep?.personalEmail, null),
+        address: pickWithSource(null, rosterAddress),
+        fleetPickupAddress: pickWithSource(sepAddress, null),
+        hrTruckNumber: pickWithSource(hrSep?.truckNumber, tech.truckLu || null),
         homeAddress: {
           line1: tech.homeAddr1 || null,
           line2: tech.homeAddr2 || null,
@@ -1942,6 +1953,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         employeeId: tech.employeeId,
         techName: tech.techName,
+        separationCategory: hrSep?.separationCategory || null,
       });
     } catch (error) {
       console.error('Error fetching contact info:', error);

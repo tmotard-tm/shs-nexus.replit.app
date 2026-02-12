@@ -60,6 +60,12 @@ type VehicleType = "company" | "byov" | "rental";
 type RoutingDestination = "PMF" | "Pep Boys" | "Transfer" | "Pending";
 type UrgencyLevel = "CRITICAL" | "HIGH" | "STANDARD";
 
+type DataSource = 'separation' | 'roster' | null;
+interface SourcedField {
+  value: string | null;
+  source: DataSource;
+}
+
 interface TechData {
   techName: string;
   enterpriseId: string;
@@ -78,6 +84,42 @@ interface TechData {
   separationCategory: string | null;
   notes: string | null;
   fromSnowflake?: boolean;
+  sources: {
+    personalPhone: DataSource;
+    email: DataSource;
+    address: DataSource;
+    fleetPickupAddress: DataSource;
+    hrTruckNumber: DataSource;
+    separationCategory: DataSource;
+    lastDayWorked: DataSource;
+  };
+}
+
+function SourceDot({ source, className }: { source: DataSource; className?: string }) {
+  if (!source) return null;
+  const color = source === 'separation' ? 'bg-purple-500' : 'bg-blue-500';
+  const title = source === 'separation' ? 'HR Separation Data' : 'Employee Roster Data';
+  return (
+    <span
+      className={`inline-block w-2 h-2 rounded-full ${color} ${className || ''}`}
+      title={title}
+    />
+  );
+}
+
+function SourceLegend() {
+  return (
+    <div className="flex items-center gap-3 text-[11px] text-slate-500">
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2 h-2 rounded-full bg-purple-500" />
+        HR Separation
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
+        Employee Roster
+      </span>
+    </div>
+  );
 }
 
 interface AssetsQueueItemEnriched extends QueueItem {
@@ -86,30 +128,54 @@ interface AssetsQueueItemEnriched extends QueueItem {
 
 type TaskKey = 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel';
 
+function pickSourced(sepVal: string | null | undefined, rosterVal: string | null | undefined): { value: string | null; source: DataSource } {
+  if (sepVal) return { value: sepVal, source: 'separation' };
+  if (rosterVal) return { value: rosterVal, source: 'roster' };
+  return { value: null, source: null };
+}
+
 function parseTechData(item: QueueItem): TechData | undefined {
   try {
     const parsed = item.data ? JSON.parse(item.data) : {};
     const tech = parsed.technician || parsed.employee || {};
     if (!tech || Object.keys(tech).length === 0) return undefined;
     const hr = parsed.hrSeparation || {};
+
+    const phoneSrc = pickSourced(hr.contactNumber, tech.personalPhone || tech.homePhone || tech.contactNumber);
+    const emailSrc = pickSourced(hr.personalEmail, tech.email || tech.personalEmail);
+    const addressSrc = pickSourced(null, tech.address || tech.homeAddress);
+    const fleetPickupSrc = pickSourced(hr.fleetPickupAddress, tech.fleetPickupAddress);
+    const truckSrc = pickSourced(hr.truckNumber, tech.hrTruckNumber || tech.truckNumber);
+    const sepCatSrc = pickSourced(hr.separationCategory, tech.separationCategory);
+    const lastDaySrc = pickSourced(hr.lastDay, tech.lastDayWorked);
+
     return {
       techName: tech.techName || tech.name || tech.technicianName || hr.technicianName || "Unknown",
       enterpriseId: tech.enterpriseId || tech.ldapId || hr.ldapId || tech.emplId || "",
       district: tech.district || null,
       separationDate: tech.separationDate || tech.lastDayWorked || tech.effectiveSeparationDate || hr.lastDay || hr.effectiveSeparationDate || null,
-      lastDayWorked: tech.lastDayWorked || hr.lastDay || null,
+      lastDayWorked: lastDaySrc.value,
       mobilePhone: tech.mobilePhone || null,
-      personalPhone: tech.personalPhone || tech.homePhone || tech.contactNumber || hr.contactNumber || null,
+      personalPhone: phoneSrc.value,
       homePhone: tech.homePhone || null,
       contactNumber: tech.contactNumber || hr.contactNumber || null,
-      email: tech.email || tech.personalEmail || hr.personalEmail || null,
+      email: emailSrc.value,
       personalEmail: tech.personalEmail || hr.personalEmail || null,
-      address: tech.address || tech.homeAddress || null,
-      fleetPickupAddress: tech.fleetPickupAddress || hr.fleetPickupAddress || null,
-      hrTruckNumber: tech.hrTruckNumber || tech.truckNumber || hr.truckNumber || null,
-      separationCategory: tech.separationCategory || hr.separationCategory || null,
+      address: addressSrc.value,
+      fleetPickupAddress: fleetPickupSrc.value,
+      hrTruckNumber: truckSrc.value,
+      separationCategory: sepCatSrc.value,
       notes: tech.notes || tech.hrNotes || hr.notes || null,
       fromSnowflake: tech.fromSnowflake,
+      sources: {
+        personalPhone: phoneSrc.source,
+        email: emailSrc.source,
+        address: addressSrc.source,
+        fleetPickupAddress: fleetPickupSrc.source,
+        hrTruckNumber: truckSrc.source,
+        separationCategory: sepCatSrc.source,
+        lastDayWorked: lastDaySrc.source,
+      },
     };
   } catch {
     return undefined;
@@ -540,6 +606,7 @@ function ExpandedRowDetails({
               Contact Details
             </h4>
             <div className="bg-white p-4 rounded-md border border-slate-200 shadow-sm space-y-3">
+              <SourceLegend />
               <div className="flex items-start justify-between">
                 <span className="text-sm text-slate-500">Mobile Phone:</span>
                 <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
@@ -548,7 +615,10 @@ function ExpandedRowDetails({
                 </span>
               </div>
               <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500">Personal Phone:</span>
+                <span className="text-sm text-slate-500 flex items-center gap-1">
+                  Personal Phone:
+                  <SourceDot source={techData?.sources.personalPhone || null} />
+                </span>
                 {personalPhone ? (
                   <span className="text-sm font-medium text-[#2db386] bg-[#36D9A3]/10 px-2 py-0.5 rounded flex items-center gap-1">
                     <Phone className="h-3 w-3" />
@@ -559,7 +629,10 @@ function ExpandedRowDetails({
                 )}
               </div>
               <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500">Email:</span>
+                <span className="text-sm text-slate-500 flex items-center gap-1">
+                  Email:
+                  <SourceDot source={techData?.sources.email || null} />
+                </span>
                 {email ? (
                   <a href={`mailto:${email}`} className="text-sm font-medium text-[#1A4B8C] hover:underline flex items-center gap-1">
                     <Mail className="h-3 w-3" />
@@ -570,7 +643,10 @@ function ExpandedRowDetails({
                 )}
               </div>
               <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500">Address:</span>
+                <span className="text-sm text-slate-500 flex items-center gap-1">
+                  Address:
+                  <SourceDot source={techData?.sources.address || null} />
+                </span>
                 <span className="text-sm font-medium text-slate-900 text-right max-w-[200px] flex items-start justify-end gap-1">
                   <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0" />
                   {techData?.address || "N/A"}
@@ -578,14 +654,20 @@ function ExpandedRowDetails({
               </div>
               <Separator className="my-2" />
               <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500">Fleet Pickup Address:</span>
+                <span className="text-sm text-slate-500 flex items-center gap-1">
+                  Fleet Pickup Address:
+                  <SourceDot source={techData?.sources.fleetPickupAddress || null} />
+                </span>
                 <span className="text-sm font-medium text-slate-900 text-right max-w-[200px] flex items-start justify-end gap-1">
                   <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0 text-amber-500" />
                   {techData?.fleetPickupAddress || "N/A"}
                 </span>
               </div>
               <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500">HR Truck Number:</span>
+                <span className="text-sm text-slate-500 flex items-center gap-1">
+                  HR Truck Number:
+                  <SourceDot source={techData?.sources.hrTruckNumber || null} />
+                </span>
                 <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
                   <Truck className="h-3 w-3 text-amber-500" />
                   {techData?.hrTruckNumber || "N/A"}
