@@ -371,6 +371,7 @@ export const QUICK_ACTIONS: PageFeature[] = [
   { key: "onboarding", label: "Onboarding", description: "Access to Onboarding quick action" },
   { key: "assignVehicle", label: "Assign or Update Vehicle", description: "Access to Vehicle Assignment quick action" },
   { key: "weeklyOnboarding", label: "Weekly Onboarding", description: "Access to Weekly Onboarding Truck Assignment quick action" },
+  { key: "weeklyOffboarding", label: "Weekly Offboarding", description: "Access to Weekly Offboarding quick action" },
   { key: "createVehicle", label: "Create New Vehicle", description: "Access to Create Vehicle quick action" },
 ];
 
