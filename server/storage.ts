@@ -4522,7 +4522,7 @@ export class DatabaseStorage implements IStorage {
         ...updates,
         updatedAt: new Date()
       })
-      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'ASSETS')))
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Assets Management')))
       .returning();
     return result[0];
   }
