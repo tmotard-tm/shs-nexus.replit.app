@@ -1,0 +1,50 @@
+Task: Update Tool Audit Notification Email with Crystal's Approved Language
+
+Crystal (Legal/Policy) reviewed our draft tool audit notification email and rejected the "payroll adjustments" language. She provided approved, policy-compliant replacement text. Update the email template accordingly.
+
+What to Change
+In the tool audit notification email (likely in server/email-service.ts or wherever the notification email body is defined), find and replace the email body text.
+
+Find this (or similar) in the email body:
+
+As part of your onboarding, you signed a Tool Accountability Policy 
+acknowledging your responsibility for company-provided tools. Completing 
+this form helps us verify your inventory and avoid any payroll adjustments 
+on your final check.
+Replace with Crystal's approved language:
+
+As a reminder, you acknowledged the Policy and Acknowledgment for 
+Company-Provided Technician Tools, either during onboarding (for 
+technicians hired after policy launch) or via Segno (for incumbents).
+Under the Policy, technicians are responsible for:
+- Safeguarding company-provided tools
+- Returning all company-provided tools upon separation
+- Notifying their supervisor of any lost or damaged tools
+- Reimbursing the Company for the replacement value of any tools not 
+  returned, in accordance with the Policy and applicable state law
+To ensure an accurate inventory and a smooth offboarding process, please 
+complete the Tool Audit form by [date]:
+[Insert Form Link]
+Completing this audit helps verify your current inventory and determine 
+whether any follow-up is required under the Policy.
+Important: Language That Must NOT Appear Anywhere
+Search the entire codebase for these phrases and remove/replace if found:
+
+"payroll adjustments"
+"payroll deductions"
+"avoid any payroll adjustments on your final check"
+"Unreturned tools may result in payroll deductions"
+Crystal flagged these as non-compliant because payroll deduction rules are state-specific, some states require repayment via cash/check only, and implying automatic deduction is legally problematic.
+
+Do NOT Change
+The email subject line (keep as-is)
+The form link URL (keep the existing https://tech-tool-audit-checklist-lucabuccilli1.replit.app?ldap=[LDAP_ID])
+The email sending logic, skip conditions, or duplicate prevention
+Luca's Tool Audit form itself (that's a separate coordination item)
+Acceptance Criteria
+ Email body uses Crystal's approved language (exact text above)
+ No references to "payroll adjustments" or "payroll deductions" anywhere in the codebase
+ Email still sends correctly with personalized fields (name, last day, LDAP in link)
+ Test mode still works (TOOL_AUDIT_EMAIL_TEST_MODE=true, sends to stephen.wong@transformco.com)
+When Done
+Report: files changed, confirm no "payroll" language remains, screenshot of updated email template if possible.
