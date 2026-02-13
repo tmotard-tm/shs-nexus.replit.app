@@ -250,7 +250,7 @@ export const PAGES: PageDefinition[] = [
     description: "Manage email and SMS templates, whitelists, and message logs",
     path: "/communication-hub",
     icon: Mail,
-    category: "management",
+    category: "activities",
     permissionKey: "communicationHub",
     features: [
       { key: "editTemplates", label: "Edit Templates", description: "Show/hide template editing" },
