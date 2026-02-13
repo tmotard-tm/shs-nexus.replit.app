@@ -46,6 +46,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
     activities: {
       enabled: true,
       activityLogs: true,
+      communicationHub: true,
     },
     account: {
       enabled: true,
