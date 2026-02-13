@@ -103,26 +103,36 @@ export async function sendCommunication(options: SendOptions): Promise<SendResul
     actualRecipient = null;
   } else if (mode === 'whitelisted') {
     const whitelistType = template.type === 'email' ? 'email' : 'phone';
-    const isWhitelisted = await storage.isInWhitelist(whitelistType, recipient);
+    const whitelistEntries = await storage.getWhitelistEntriesByType(whitelistType);
     
-    if (!isWhitelisted) {
-      console.log(`[COMMUNICATION - BLOCKED] Recipient not in whitelist: ${recipient}`);
+    if (whitelistEntries.length === 0) {
+      console.log(`[COMMUNICATION - BLOCKED] No ${whitelistType} addresses in whitelist`);
       status = 'blocked';
-      errorMessage = `Recipient "${recipient}" is not in the ${whitelistType} whitelist`;
+      errorMessage = `No ${whitelistType} addresses in whitelist. Add at least one to test.`;
     } else {
-      console.log(`[COMMUNICATION - WHITELISTED] Sending to whitelisted recipient: ${recipient}`);
+      const whitelistAddresses = whitelistEntries.map(e => e.value);
+      console.log(`[COMMUNICATION - WHITELISTED] Original recipient: ${recipient}. Redirecting to whitelisted addresses: ${whitelistAddresses.join(', ')}`);
       
       if (template.type === 'email') {
-        const sent = await sendEmail({
-          to: recipient,
-          from: 'stephen.wong@transformco.com',
-          subject: renderedSubject || 'Notification',
-          html: renderedHtml || undefined,
-          text: renderedText,
-        });
-        status = sent ? 'sent' : 'failed';
-        actualRecipient = sent ? recipient : null;
-        if (!sent) errorMessage = 'Email delivery failed';
+        let allSent = true;
+        const sentTo: string[] = [];
+        for (const whitelistAddr of whitelistAddresses) {
+          const sent = await sendEmail({
+            to: whitelistAddr,
+            from: 'stephen.wong@transformco.com',
+            subject: `[TEST - Original recipient: ${recipient}] ${renderedSubject || 'Notification'}`,
+            html: renderedHtml || undefined,
+            text: renderedText,
+          });
+          if (sent) {
+            sentTo.push(whitelistAddr);
+          } else {
+            allSent = false;
+          }
+        }
+        status = sentTo.length > 0 ? 'sent' : 'failed';
+        actualRecipient = sentTo.length > 0 ? sentTo.join(', ') : null;
+        if (!allSent) errorMessage = `Some deliveries failed. Sent to: ${sentTo.join(', ')}`;
       } else {
         console.log(`[COMMUNICATION] SMS not yet implemented`);
         status = 'simulated';
