@@ -1,6 +1,6 @@
 # Nexus System Architecture
 
-> **Last Updated**: 2026-02-11
+> **Last Updated**: 2026-02-13
 > **Purpose**: The "Truth" document for understanding how Nexus works. Read this first.
 
 ---
@@ -108,7 +108,7 @@ All queues share the `queueItems` table with these key fields:
 - `task_*` columns - Task checklist booleans (tools_return, iphone_return, etc.)
 - `carrier` - Shipping carrier selection
 - `blockedActions` - Actions blocked until conditions met
-- `fleetRoutingDecision` - PMF, Pep Boys, or Reassigned
+- `fleetRoutingDecision` - PMF, Pep Boys, or Reassigned (legacy; Assets Queue now uses `vehicle_nexus_data.postOffboardedStatus`)
 
 ---
 
@@ -319,7 +319,7 @@ GET /api/tools-queue
 
 ---
 
-## Current State (2026-02-11)
+## Current State (2026-02-13)
 
 ### What's Working
 - Sprint 1-5: Tools queue, BYOV detection, blocking logic, Phase 2 triggers
@@ -332,6 +332,10 @@ GET /api/tools-queue
 - **Cross-format duplicate detection**: Checks both `employee.*` and `technician.*` data paths
 - **Sprint 13 - Assets Queue redesign**: Table-based layout with expandable rows, fleet separation source detection, "Include Manual" filter, split Pick Up/Assign actions
 - **Onboarding improvements**: Owner column filter, case/whitespace-tolerant employee matching
+- **Sprint 14 - Whitelist mode**: Emails sent TO all whitelisted addresses with test prefix in subject
+- **Sprint 14 - Vehicle Disposition**: Read-only disposition from `vehicle_nexus_data.postOffboardedStatus` replaces manual routing radio buttons
+- **Sprint 14 - Communication Hub nav**: Moved under Activity section in sidebar
+- **Sprint 14 - Legal compliance**: Removed payroll adjustment language from templates
 
 ### Assets Recovery Queue (`AssetsRecoveryQueue.tsx`)
 - Table-based layout matching Tools Queue pattern
@@ -340,11 +344,13 @@ GET /api/tools-queue
 - "Include Manual" filter toggle (defaults off) to focus on real separation requests
 - Split actions: "Pick Up" (auto-assign to self) and "Assign" (open user selection dialog)
 - Auto-save for task progress with 500ms debounce
+- **Disposition column** (2026-02-13): Shows `postOffboardedStatus` from `vehicle_nexus_data` via batch fetch; replaces old routing radio buttons
 
 ### Communication Hub Highlights
 - Developer-only access (UI and API level enforcement)
+- Located under Activity section in sidebar navigation
 - Three tabs: Templates, Whitelist, History
-- Mode-aware sending: simulated (logs only), whitelisted (test recipients), live (real)
+- Mode-aware sending: simulated (logs only), whitelisted (sends TO all whitelisted with test prefix), live (real)
 - Tool Audit emails now routed through Communication Hub templates
 - Phase 2 completion emails via `phase2-tasks-created` template
 
@@ -354,6 +360,7 @@ GET /api/tools-queue
 - Duplicate detection checks both legacy (`technician.*`) and current (`employee.*`) data structures
 - Assets and Tools queues both use table-based layout with expandable inline rows
 - Tech data parsing prioritizes: HR separation data > roster data > task data defaults
+- Vehicle disposition is set on Weekly Offboarding page, consumed read-only in Assets Queue
 
 ### Known Issues
 - SMS not yet implemented (shows as simulated)

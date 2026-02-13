@@ -39,6 +39,10 @@
 | Sprint 13 | Split Pick Up / Assign Actions | ✅ Complete | 2026-02-11 |
 | Sprint 13 | Onboarding Owner Column Filter | ✅ Complete | 2026-02-11 |
 | Bug Fixes | Employee Matching (case/whitespace) | ✅ Complete | 2026-02-11 |
+| Sprint 14 | Whitelist Mode — Send TO All Whitelisted | ✅ Complete | 2026-02-13 |
+| Sprint 14 | Vehicle Disposition Integration (replaces Routing) | ✅ Complete | 2026-02-13 |
+| Sprint 14 | Communication Hub Navigation (moved to Activity) | ✅ Complete | 2026-02-13 |
+| Sprint 14 | Offboarding Communication Legal Compliance | ✅ Complete | 2026-02-13 |
 
 ### In Progress 🚧
 

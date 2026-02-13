@@ -1,5 +1,33 @@
 # Enhancements & Bug Fixes Log
 
+## 2026-02-13
+
+### Bugs Fixed
+
+| Issue | Description | Resolution |
+|-------|-------------|------------|
+| Whitelist email routing | Whitelist mode only sent to original recipient if on whitelist | Now sends TO all whitelisted addresses with `[TEST - Original recipient: ...]` subject prefix |
+| Legal compliance | Communication templates contained "payroll adjustments/deductions" language | Removed payroll-related language from all user-facing templates |
+
+### Enhancements Made
+
+| Enhancement | Description |
+|-------------|-------------|
+| Vehicle Disposition | Replaced manual Routing radio buttons with read-only Disposition badge from `vehicle_nexus_data.postOffboardedStatus` |
+| Disposition column | Assets Queue table column renamed from "Routing" to "Disposition" with batch-fetched vehicle data |
+| Communication Hub nav | Moved from standalone sidebar item into Activity section for better organization |
+| Code cleanup | Removed unused `RoutingDestination` type, `getRouting()` function, and 7 unused screenshot images |
+
+### Technical Debt Identified
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| Consolidate tech-data parsing | Medium | Carried forward — Tools and Assets queues both parse enriched tech data |
+| No Zod validation on communication routes | Medium | Carried forward |
+| SMS not implemented | Medium | Carried forward — needs Twilio integration |
+
+---
+
 ## 2026-02-11
 
 ### Bugs Fixed
