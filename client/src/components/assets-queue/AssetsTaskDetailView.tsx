@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -231,17 +230,6 @@ export function AssetsTaskDetailView({
   });
   const [carrier, setCarrier] = useState<string>(item.carrier || '');
 
-  const normalizeRouting = (value: string | null | undefined): string => {
-    if (!value) return 'pending';
-    const upper = value.toUpperCase();
-    if (upper === 'PMF') return 'PMF';
-    if (upper === 'PEP_BOYS' || upper === 'PEPBOYS' || upper === 'PEP BOYS') return 'PEP_BOYS';
-    if (upper === 'TRANSFER' || upper === 'REASSIGNED' || upper.includes('REASSIGN')) return 'TRANSFER';
-    return 'pending';
-  };
-
-  const [routing, setRouting] = useState<string>(normalizeRouting(item.fleetRoutingDecision));
-
   const { save, saveStatus, flushPending } = useDebouncedSave({
     itemId: item.id,
     module: 'assets',
@@ -292,6 +280,13 @@ export function AssetsTaskDetailView({
     enabled: !!truckNumber && truckNumber !== 'Unknown',
   });
 
+  const { data: vehicleNexusData } = useQuery<{ postOffboardedStatus: string | null }>({
+    queryKey: ['/api/vehicle-nexus-data', truckNumber],
+    enabled: !!truckNumber && truckNumber !== 'Unknown',
+  });
+
+  const disposition = vehicleNexusData?.postOffboardedStatus || null;
+
   const handleTaskToggle = (key: TaskKey) => {
     const newValue = !taskState[key];
     setTaskState(prev => ({ ...prev, [key]: newValue }));
@@ -301,11 +296,6 @@ export function AssetsTaskDetailView({
   const handleCarrierChange = (value: string) => {
     setCarrier(value);
     save({ carrier: value || null });
-  };
-
-  const handleRoutingChange = (value: string) => {
-    setRouting(value);
-    save({ fleetRoutingDecision: value === 'pending' ? null : value });
   };
 
   const formatAddress = (addr: ContactInfo['homeAddress'] | undefined) => {
@@ -362,10 +352,10 @@ export function AssetsTaskDetailView({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Column 1: Contact & Routing */}
+        {/* Column 1: Contact & Disposition */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg" style={{ color: '#1A4B8C' }}>Contact & Routing</CardTitle>
+            <CardTitle className="text-lg" style={{ color: '#1A4B8C' }}>Contact & Disposition</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-3">
@@ -466,25 +456,18 @@ export function AssetsTaskDetailView({
             <Separator />
 
             <div className="space-y-3">
-              <h4 className="font-medium text-sm text-muted-foreground">Vehicle Routing</h4>
-              <RadioGroup value={routing} onValueChange={handleRoutingChange} className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="PMF" id="routing-pmf" />
-                  <Label htmlFor="routing-pmf" className="text-sm cursor-pointer">PMF (Park My Fleet)</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="PEP_BOYS" id="routing-pepboys" />
-                  <Label htmlFor="routing-pepboys" className="text-sm cursor-pointer">Pep Boys</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="TRANSFER" id="routing-transfer" />
-                  <Label htmlFor="routing-transfer" className="text-sm cursor-pointer">Transfer/Reassigned</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="pending" id="routing-pending" />
-                  <Label htmlFor="routing-pending" className="text-sm cursor-pointer">Pending</Label>
-                </div>
-              </RadioGroup>
+              <h4 className="font-medium text-sm text-muted-foreground">Vehicle Disposition</h4>
+              <div className="p-3 bg-muted/50 rounded-lg border">
+                {disposition ? (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-sm font-medium bg-white">
+                      {disposition}
+                    </Badge>
+                  </div>
+                ) : (
+                  <span className="text-sm text-muted-foreground italic">No disposition set — update on Weekly Offboarding page</span>
+                )}
+              </div>
 
               {vehicleLocation && !isLocationLoading && vehicleLocation.address && (
                 <div className="mt-3 p-2 bg-muted rounded text-sm">

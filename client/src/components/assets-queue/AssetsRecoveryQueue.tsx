@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -58,7 +57,6 @@ import {
 } from "lucide-react";
 
 type VehicleType = "company" | "byov" | "rental";
-type RoutingDestination = "PMF" | "Pep Boys" | "Transfer" | "Pending";
 type UrgencyLevel = "CRITICAL" | "HIGH" | "STANDARD";
 
 type DataSource = 'separation' | 'roster' | null;
@@ -225,13 +223,6 @@ function getVehicleType(item: AssetsQueueItemEnriched): VehicleType {
   return "company";
 }
 
-function getRouting(item: AssetsQueueItemEnriched): RoutingDestination {
-  const routing = item.fleetRoutingDecision?.toLowerCase() || "";
-  if (routing.includes("pmf")) return "PMF";
-  if (routing.includes("pep") || routing.includes("boys")) return "Pep Boys";
-  if (routing.includes("transfer") || routing.includes("reassign")) return "Transfer";
-  return "Pending";
-}
 
 function getDaysSinceSeparation(separationDate: string | null): number | null {
   if (!separationDate) return null;
@@ -613,7 +604,13 @@ function ExpandedRowDetails({
   });
 
   const [carrier, setCarrier] = useState<string>(item.carrier || "");
-  const [routing, setRouting] = useState<string>(item.fleetRoutingDecision || "Pending");
+
+  const truckNumber = techData?.hrTruckNumber || '';
+  const { data: vehicleNexusData } = useQuery<{ postOffboardedStatus: string | null }>({
+    queryKey: ['/api/vehicle-nexus-data', truckNumber],
+    enabled: !!truckNumber && truckNumber !== 'N/A',
+  });
+  const disposition = vehicleNexusData?.postOffboardedStatus || null;
 
   const { saveStatus, save: debouncedSave } = useDebouncedSave({ itemId: item.id, module: 'assets' });
 
@@ -626,11 +623,6 @@ function ExpandedRowDetails({
   const handleCarrierChange = (value: string) => {
     setCarrier(value);
     debouncedSave({ carrier: value });
-  };
-
-  const handleRoutingChange = (value: string) => {
-    setRouting(value);
-    debouncedSave({ fleetRoutingDecision: value });
   };
 
   const completedTasksCount = Object.values(taskState).filter(Boolean).length;
@@ -733,19 +725,18 @@ function ExpandedRowDetails({
           <div className="space-y-3">
             <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider flex items-center gap-2">
               <Truck className="h-4 w-4 text-slate-500" />
-              Vehicle Routing
+              Vehicle Disposition
             </h4>
             <div className="bg-white p-4 rounded-md border border-slate-200 shadow-sm">
-              <RadioGroup value={routing} onValueChange={handleRoutingChange}>
-                {["PMF", "Pep Boys", "Transfer", "Pending"].map((option) => (
-                  <div key={option} className="flex items-center gap-3 p-2 rounded hover:bg-slate-50">
-                    <RadioGroupItem value={option} id={`routing-${item.id}-${option}`} />
-                    <Label htmlFor={`routing-${item.id}-${option}`} className="text-sm font-medium text-slate-700 cursor-pointer">
-                      {option}
-                    </Label>
-                  </div>
-                ))}
-              </RadioGroup>
+              {disposition ? (
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-sm font-medium">
+                    {disposition}
+                  </Badge>
+                </div>
+              ) : (
+                <span className="text-sm text-slate-400 italic">No disposition set — update on Weekly Offboarding page</span>
+              )}
             </div>
           </div>
         </div>
@@ -1000,6 +991,26 @@ export function AssetsRecoveryQueue() {
     staleTime: 10 * 60 * 1000,
   });
 
+  const vehicleNumbers = useMemo(() => {
+    return [...new Set(queueItems.map(item => item.techData?.hrTruckNumber).filter(Boolean) as string[])];
+  }, [queueItems]);
+
+  const { data: vehicleNexusBatchData = {} } = useQuery<Record<string, { postOffboardedStatus: string | null }>>({
+    queryKey: ["/api/vehicle-nexus-data/batch", vehicleNumbers],
+    queryFn: async () => {
+      if (vehicleNumbers.length === 0) return {};
+      const res = await apiRequest("POST", "/api/vehicle-nexus-data/batch", { vehicleNumbers });
+      const arr = await res.json();
+      const map: Record<string, { postOffboardedStatus: string | null }> = {};
+      for (const item of arr) {
+        map[item.vehicleNumber] = { postOffboardedStatus: item.postOffboardedStatus };
+      }
+      return map;
+    },
+    enabled: vehicleNumbers.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const separationIds = useMemo(() => {
     return new Set(separationIdsRaw.map(id => id.toUpperCase()));
   }, [separationIdsRaw]);
@@ -1129,8 +1140,8 @@ export function AssetsRecoveryQueue() {
           bVal = getVehicleType(b);
           break;
         case "routing":
-          aVal = getRouting(a);
-          bVal = getRouting(b);
+          aVal = (a.techData?.hrTruckNumber ? vehicleNexusBatchData[a.techData.hrTruckNumber]?.postOffboardedStatus : null) || '';
+          bVal = (b.techData?.hrTruckNumber ? vehicleNexusBatchData[b.techData.hrTruckNumber]?.postOffboardedStatus : null) || '';
           break;
         case "status":
           aVal = a.status;
@@ -1191,7 +1202,7 @@ export function AssetsRecoveryQueue() {
     { key: "district", label: "District", width: "w-20" },
     { key: "separationDate", label: "Last Day", width: "w-28" },
     { key: "vehicleType", label: "Vehicle", width: "w-24" },
-    { key: "routing", label: "Routing", width: "w-24" },
+    { key: "routing", label: "Disposition", width: "w-28" },
     { key: "status", label: "Status", width: "w-28" },
     { key: "tasks", label: "Tasks", width: "w-32" },
   ];
@@ -1301,7 +1312,7 @@ export function AssetsRecoveryQueue() {
             <tbody className="divide-y divide-slate-100">
               {paginatedData.map((row) => {
                 const vehicleType = getVehicleType(row);
-                const routing = getRouting(row);
+                const rowDisposition = row.techData?.hrTruckNumber ? vehicleNexusBatchData[row.techData.hrTruckNumber]?.postOffboardedStatus : null;
                 const sepDate = row.techData?.separationDate || null;
                 const daysUntilSep = getDaysUntilSeparation(sepDate);
                 const urgency = getUrgencyLevel(vehicleType, daysUntilSep);
@@ -1372,7 +1383,13 @@ export function AssetsRecoveryQueue() {
                           {vehicleType === "byov" ? "BYOV" : vehicleType === "rental" ? "Rental" : "Company"}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{routing}</td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {rowDisposition ? (
+                          <span className="text-xs font-medium">{rowDisposition}</span>
+                        ) : (
+                          <span className="text-xs text-slate-400 italic">Pending</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <Badge variant={getStatusBadgeVariant(row.status)} className="text-xs">
                           {formatStatus(row.status)}
