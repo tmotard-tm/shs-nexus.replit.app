@@ -215,9 +215,17 @@ export async function seedDefaultTemplates(): Promise<number> {
   <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
     <p>Hello {{firstName}},</p>
     
-    <p>As part of your offboarding process, you are required to complete a <strong>Tool Audit</strong> before your last day on <strong>{{lastDay}}</strong>.</p>
+    <p>As a reminder, you acknowledged the Policy and Acknowledgment for Company-Provided Technician Tools, either during onboarding (for technicians hired after policy launch) or via Segno (for incumbents).</p>
     
-    <p>This audit helps us ensure all company-issued tools and equipment are properly accounted for. Please complete this as soon as possible.</p>
+    <p>Under the Policy, technicians are responsible for:</p>
+    <ul style="margin: 10px 0 20px 20px; color: #333;">
+      <li>Safeguarding company-provided tools</li>
+      <li>Returning all company-provided tools upon separation</li>
+      <li>Notifying their supervisor of any lost or damaged tools</li>
+      <li>Reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law</li>
+    </ul>
+    
+    <p>To ensure an accurate inventory and a smooth offboarding process, please complete the Tool Audit form by <strong>{{lastDay}}</strong>:</p>
     
     <div style="text-align: center; margin: 30px 0;">
       <a href="https://tech-tool-audit-checklist-lucabuccilli1.replit.app?ldap={{ldapId}}" 
@@ -227,7 +235,7 @@ export async function seedDefaultTemplates(): Promise<number> {
     </div>
     
     <p style="color: #64748b; font-size: 14px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
-      <strong>Important:</strong> Per company policy, you are responsible for all tools issued to you. Any missing or damaged tools may result in payroll deductions.
+      Completing this audit helps verify your current inventory and determine whether any follow-up is required under the Policy.
     </p>
     
     <p style="color: #64748b; font-size: 12px; margin-top: 20px;">
@@ -238,13 +246,21 @@ export async function seedDefaultTemplates(): Promise<number> {
 </html>`,
       textContent: `Hello {{firstName}},
 
-As part of your offboarding process, you are required to complete a Tool Audit before your last day on {{lastDay}}.
+As a reminder, you acknowledged the Policy and Acknowledgment for Company-Provided Technician Tools, either during onboarding (for technicians hired after policy launch) or via Segno (for incumbents).
 
-Please complete the audit at: https://tech-tool-audit-checklist-lucabuccilli1.replit.app?ldap={{ldapId}}
+Under the Policy, technicians are responsible for:
+- Safeguarding company-provided tools
+- Returning all company-provided tools upon separation
+- Notifying their supervisor of any lost or damaged tools
+- Reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law
 
-Important: Per company policy, you are responsible for all tools issued to you. Any missing or damaged tools may result in payroll deductions.
+To ensure an accurate inventory and a smooth offboarding process, please complete the Tool Audit form by {{lastDay}}:
 
-This is an automated message from the Nexus Offboarding System.`,
+https://tech-tool-audit-checklist-lucabuccilli1.replit.app?ldap={{ldapId}}
+
+Completing this audit helps verify your current inventory and determine whether any follow-up is required under the Policy.
+
+This is an automated message from the Nexus Offboarding System. If you have questions, please contact your supervisor.`,
       variables: ['firstName', 'lastDay', 'ldapId'],
       isActive: true,
     },
