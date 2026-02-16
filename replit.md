@@ -93,10 +93,17 @@ Preferred communication style: Simple, everyday language.
 - **Tech-data parsing consolidation**: Extracted shared types, components, and utilities into `client/src/components/assets-queue/tech-data-utils.tsx`; refactored `AssetsRecoveryQueue.tsx` and `AssetsTaskDetailView.tsx` to import from shared module
 - **Backlog cleanup**: Removed FleetScope Deep Link (no longer needed), moved SMS/Twilio to Phase 2
 
+## Sprint 16 — Completed
+- **Assets Queue performance optimization**: Reduced load time from ~60s to under 2s
+- **GET /api/assets-queue refactor**: Returns raw queue items from Postgres only, no Snowflake enrichment; timing instrumentation added
+- **POST /api/assets-queue/details**: New batch endpoint for on-demand enrichment (HR separation, phone numbers, personal email, pickup address); accepts up to 20 IDs per request; graceful fallback when Snowflake is unavailable
+- **Lazy-loaded expanded row details**: `ExpandedRowDetails` in `AssetsRecoveryQueue.tsx` fetches enrichment data on row expand with loading state; task checkboxes and quick actions render immediately
+- **Design decision**: List endpoint serves from Postgres only; enrichment deferred to row expand (trade-off: brief loading spinner vs instant list load)
+
 ## Session Handoff
 
 ### What Was Built Today
-Sprint 15 focused on code quality — consolidating duplicated tech-data parsing logic across Assets Queue components into a single shared module. Also cleaned up the backlog by removing completed/unnecessary items and deferring SMS integration to Phase 2.
+Sprint 16 focused on performance — the Assets Queue list endpoint was decoupled from Snowflake, with enrichment moved to a lazy-loaded batch endpoint called on row expand. This reduced initial page load from ~60s (196+ sequential Snowflake queries) to under 2s (Postgres-only).
 
 ### Current Blockers
 - None
