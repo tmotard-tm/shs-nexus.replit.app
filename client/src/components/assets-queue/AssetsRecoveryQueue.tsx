@@ -432,8 +432,16 @@ function ExpandedRowDetails({
   const isAssignedToMe = item.assignedTo === currentUser?.id;
   const assignedUser = users.find(u => u.id === item.assignedTo);
 
-  const personalPhone = techData?.personalPhone || techData?.homePhone || techData?.contactNumber || null;
-  const email = techData?.email || techData?.personalEmail || null;
+  const { data: enrichedDetails, isLoading: isLoadingDetails } = useQuery<Record<string, any>>({
+    queryKey: ["/api/assets-queue/details", item.id],
+    queryFn: () => apiRequest("POST", "/api/assets-queue/details", { ids: [item.id] }).then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const detailData = enrichedDetails?.[item.id];
+
+  const personalPhone = detailData?.personalPhone || detailData?.homePhone || detailData?.contactNumber || techData?.personalPhone || techData?.homePhone || techData?.contactNumber || null;
+  const email = detailData?.email || detailData?.personalEmail || techData?.email || techData?.personalEmail || null;
 
   const [justPickedUp, setJustPickedUp] = useState(false);
 
@@ -460,7 +468,7 @@ function ExpandedRowDetails({
 
   const [carrier, setCarrier] = useState<string>(item.carrier || "");
 
-  const truckNumber = techData?.hrTruckNumber || '';
+  const truckNumber = detailData?.hrTruckNumber || techData?.hrTruckNumber || '';
   const { data: vehicleNexusData } = useQuery<{ postOffboardedStatus: string | null }>({
     queryKey: ['/api/vehicle-nexus-data', truckNumber],
     enabled: !!truckNumber && truckNumber !== 'N/A',
@@ -501,78 +509,87 @@ function ExpandedRowDetails({
               Contact Details
             </h4>
             <div className="bg-white p-4 rounded-md border border-slate-200 shadow-sm space-y-3">
-              <SourceLegend />
-              <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500">Mobile Phone:</span>
-                <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
-                  <Smartphone className="h-3 w-3 text-slate-400" />
-                  {techData?.mobilePhone || "N/A"}
-                </span>
-              </div>
-              <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500 flex items-center gap-1">
-                  Personal Phone:
-                  <SourceDot source={techData?.sources.personalPhone || null} />
-                </span>
-                {personalPhone ? (
-                  <span className="text-sm font-medium text-[#2db386] bg-[#36D9A3]/10 px-2 py-0.5 rounded flex items-center gap-1">
-                    <Phone className="h-3 w-3" />
-                    {personalPhone}
-                  </span>
-                ) : (
-                  <span className="text-sm text-slate-400">N/A</span>
-                )}
-              </div>
-              <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500 flex items-center gap-1">
-                  Email:
-                  <SourceDot source={techData?.sources.email || null} />
-                </span>
-                {email ? (
-                  <a href={`mailto:${email}`} className="text-sm font-medium text-[#1A4B8C] hover:underline flex items-center gap-1">
-                    <Mail className="h-3 w-3" />
-                    {email}
-                  </a>
-                ) : (
-                  <span className="text-sm text-slate-400">N/A</span>
-                )}
-              </div>
-              <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500 flex items-center gap-1">
-                  Address:
-                  <SourceDot source={techData?.sources.address || null} />
-                </span>
-                <span className="text-sm font-medium text-slate-900 text-right max-w-[200px] flex items-start justify-end gap-1">
-                  <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0" />
-                  {techData?.address || "N/A"}
-                </span>
-              </div>
-              <Separator className="my-2" />
-              <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500 flex items-center gap-1">
-                  Fleet Pickup Address:
-                  <SourceDot source={techData?.sources.fleetPickupAddress || null} />
-                </span>
-                <span className="text-sm font-medium text-slate-900 text-right max-w-[200px] flex items-start justify-end gap-1">
-                  <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0 text-amber-500" />
-                  {techData?.fleetPickupAddress || "N/A"}
-                </span>
-              </div>
-              <div className="flex items-start justify-between">
-                <span className="text-sm text-slate-500 flex items-center gap-1">
-                  HR Truck Number:
-                  <SourceDot source={techData?.sources.hrTruckNumber || null} />
-                </span>
-                <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
-                  <Truck className="h-3 w-3 text-amber-500" />
-                  {techData?.hrTruckNumber || "N/A"}
-                </span>
-              </div>
-              {assignedUser && (
-                <div className="flex items-start justify-between mt-2 pt-2 border-t border-slate-100">
-                  <span className="text-sm text-slate-500">Assigned To:</span>
-                  <span className="text-sm font-medium text-slate-900">{assignedUser.username}</span>
+              {isLoadingDetails ? (
+                <div className="flex items-center gap-2 py-4 justify-center">
+                  <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                  <span className="text-sm text-slate-500">Loading details...</span>
                 </div>
+              ) : (
+                <>
+                  <SourceLegend />
+                  <div className="flex items-start justify-between">
+                    <span className="text-sm text-slate-500">Mobile Phone:</span>
+                    <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
+                      <Smartphone className="h-3 w-3 text-slate-400" />
+                      {detailData?.mobilePhone || techData?.mobilePhone || "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between">
+                    <span className="text-sm text-slate-500 flex items-center gap-1">
+                      Personal Phone:
+                      <SourceDot source={techData?.sources?.personalPhone || null} />
+                    </span>
+                    {personalPhone ? (
+                      <span className="text-sm font-medium text-[#2db386] bg-[#36D9A3]/10 px-2 py-0.5 rounded flex items-center gap-1">
+                        <Phone className="h-3 w-3" />
+                        {personalPhone}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-slate-400">N/A</span>
+                    )}
+                  </div>
+                  <div className="flex items-start justify-between">
+                    <span className="text-sm text-slate-500 flex items-center gap-1">
+                      Email:
+                      <SourceDot source={techData?.sources?.email || null} />
+                    </span>
+                    {email ? (
+                      <a href={`mailto:${email}`} className="text-sm font-medium text-[#1A4B8C] hover:underline flex items-center gap-1">
+                        <Mail className="h-3 w-3" />
+                        {email}
+                      </a>
+                    ) : (
+                      <span className="text-sm text-slate-400">N/A</span>
+                    )}
+                  </div>
+                  <div className="flex items-start justify-between">
+                    <span className="text-sm text-slate-500 flex items-center gap-1">
+                      Address:
+                      <SourceDot source={techData?.sources?.address || null} />
+                    </span>
+                    <span className="text-sm font-medium text-slate-900 text-right max-w-[200px] flex items-start justify-end gap-1">
+                      <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                      {detailData?.address || techData?.address || "N/A"}
+                    </span>
+                  </div>
+                  <Separator className="my-2" />
+                  <div className="flex items-start justify-between">
+                    <span className="text-sm text-slate-500 flex items-center gap-1">
+                      Fleet Pickup Address:
+                      <SourceDot source={techData?.sources?.fleetPickupAddress || null} />
+                    </span>
+                    <span className="text-sm font-medium text-slate-900 text-right max-w-[200px] flex items-start justify-end gap-1">
+                      <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0 text-amber-500" />
+                      {detailData?.fleetPickupAddress || techData?.fleetPickupAddress || "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between">
+                    <span className="text-sm text-slate-500 flex items-center gap-1">
+                      HR Truck Number:
+                      <SourceDot source={techData?.sources?.hrTruckNumber || null} />
+                    </span>
+                    <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
+                      <Truck className="h-3 w-3 text-amber-500" />
+                      {detailData?.hrTruckNumber || techData?.hrTruckNumber || "N/A"}
+                    </span>
+                  </div>
+                  {assignedUser && (
+                    <div className="flex items-start justify-between mt-2 pt-2 border-t border-slate-100">
+                      <span className="text-sm text-slate-500">Assigned To:</span>
+                      <span className="text-sm font-medium text-slate-900">{assignedUser.username}</span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

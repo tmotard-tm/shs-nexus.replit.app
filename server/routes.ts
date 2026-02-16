@@ -1520,15 +1520,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Assets Queue Module routes
   app.get("/api/assets-queue", requireAuth, async (req: any, res) => {
+    const startTime = Date.now();
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
       if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
         return res.status(403).json({ message: "Access denied to Assets queue" });
       }
-      
+
+      const parsedDaysBack = parseInt(req.query.daysBack as string);
+      const daysBack = Number.isFinite(parsedDaysBack) ? parsedDaysBack : 30;
+
+      const allQueueItems = await storage.getAssetsQueueItems();
+
+      let filteredItems = allQueueItems;
+      if (daysBack > 0) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+        cutoffDate.setHours(0, 0, 0, 0);
+
+        filteredItems = allQueueItems.filter(item => {
+          const created = item.createdAt;
+          if (!created) return true;
+          return new Date(created) >= cutoffDate;
+        });
+      }
+
+      const elapsed = Date.now() - startTime;
+      console.log(`[Assets Queue] GET /api/assets-queue returned ${filteredItems.length} items in ${elapsed}ms (daysBack=${daysBack})`);
+
+      res.json(filteredItems);
+    } catch (error) {
+      const elapsed = Date.now() - startTime;
+      console.error(`[Assets Queue] Error after ${elapsed}ms:`, error);
+      res.status(500).json({ message: "Failed to fetch Assets queue items" });
+    }
+  });
+
+  app.post("/api/assets-queue/details", requireAuth, async (req: any, res) => {
+    const startTime = Date.now();
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
+
+      const { ids } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ message: "ids array is required" });
+      }
+      if (ids.length > 20) {
+        return res.status(400).json({ message: "Maximum 20 items per batch" });
+      }
+
       const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
       const snowflakeSyncService = getSnowflakeSyncService();
-      
+
       let hrSeparations: Array<{
         ldapId: string;
         technicianName: string | null;
@@ -1542,7 +1588,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         separationCategory: string | null;
         notes: string | null;
       }> = [];
-      
+
       if (snowflakeSyncService) {
         try {
           const hrResult = await snowflakeSyncService.getAllConfirmedSeparations();
@@ -1550,32 +1596,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
             hrSeparations = hrResult.records;
           }
         } catch (hrError) {
-          console.log('[Assets Queue] Could not fetch HR separations:', hrError);
+          console.log('[Assets Details] Could not fetch HR separations:', hrError);
         }
       }
-      
-      const parsedDaysBack = parseInt(req.query.daysBack as string);
-      const daysBack = Number.isFinite(parsedDaysBack) ? parsedDaysBack : 30;
-      
-      const allQueueItems = await storage.getAssetsQueueItems();
-      
+
       const hrLookup = new Map<string, typeof hrSeparations[0]>();
       for (const hr of hrSeparations) {
         if (hr.ldapId) hrLookup.set(hr.ldapId.toUpperCase(), hr);
         if (hr.emplId) hrLookup.set(hr.emplId, hr);
       }
-      
-      const enrichedItems = await Promise.all(allQueueItems.map(async (item) => {
+
+      const results: Record<string, any> = {};
+
+      for (const id of ids) {
+        const item = await storage.getAssetsQueueItem(id);
+        if (!item) continue;
+
         let techData: any = null;
-        
         try {
-          const parsedData = typeof item.data === 'string' 
-            ? JSON.parse(item.data) 
+          const parsedData = typeof item.data === 'string'
+            ? JSON.parse(item.data)
             : item.data;
-          
+
           const employeeId = parsedData?.employee?.employeeId || parsedData?.technician?.employeeId || parsedData?.employeeId || parsedData?.emplid;
           const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.technician?.enterpriseId || parsedData?.technician?.techRacfid || parsedData?.techRacfId;
-          
+
           let tech = null;
           if (employeeId) {
             tech = await storage.getAllTechByEmployeeId(employeeId);
@@ -1583,9 +1628,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (!tech && enterpriseId) {
             tech = await storage.getAllTechByTechRacfid(enterpriseId);
           }
-          
+
           const hrRecord = hrLookup.get(enterpriseId?.toUpperCase() || '') || hrLookup.get(employeeId || '');
-          
+
           let mobilePhoneData: { phoneNumber?: string | null } = {};
           if (enterpriseId && snowflakeSyncService) {
             try {
@@ -1593,7 +1638,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             } catch (e) {
             }
           }
-          
+
           if (tech) {
             const addressParts = hrRecord?.fleetPickupAddress
               ? [hrRecord.fleetPickupAddress]
@@ -1604,7 +1649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   tech.homeState,
                   tech.homePostal
                 ].filter(Boolean);
-            
+
             techData = {
               techName: tech.techName,
               enterpriseId: tech.techRacfid,
@@ -1663,36 +1708,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             fromSnowflake: false,
           };
         }
-        
-        return {
-          ...item,
-          techData,
-        };
-      }));
-      
-      let filteredItems = enrichedItems;
-      if (daysBack > 0) {
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-        cutoffDate.setHours(0, 0, 0, 0);
-        
-        filteredItems = enrichedItems.filter(item => {
-          const created = item.createdAt;
-          if (!created) return true;
-          return new Date(created) >= cutoffDate;
-        });
+
+        results[id] = techData;
       }
-      
-      filteredItems.sort((a, b) => {
-        const dateA = a.techData?.separationDate ? new Date(a.techData.separationDate).getTime() : 0;
-        const dateB = b.techData?.separationDate ? new Date(b.techData.separationDate).getTime() : 0;
-        return dateB - dateA;
-      });
-      
-      res.json(filteredItems);
+
+      const elapsed = Date.now() - startTime;
+      console.log(`[Assets Details] POST /api/assets-queue/details enriched ${Object.keys(results).length} items in ${elapsed}ms`);
+
+      res.json(results);
     } catch (error) {
-      console.error('Error fetching enriched assets queue items:', error);
-      res.status(500).json({ message: "Failed to fetch Assets queue items" });
+      const elapsed = Date.now() - startTime;
+      console.error(`[Assets Details] Error after ${elapsed}ms:`, error);
+      res.status(500).json({ message: "Failed to fetch asset details" });
     }
   });
 
