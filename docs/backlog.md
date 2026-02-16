@@ -54,7 +54,6 @@
 
 | Sprint | Feature | Description |
 |--------|---------|-------------|
-| Sprint 12 | FleetScope Deep Link | Add link to FleetScope for easier routing lookup |
 | Sprint 12 | SMS via Twilio | Implement SMS sending in Communication Hub |
 
 ---
