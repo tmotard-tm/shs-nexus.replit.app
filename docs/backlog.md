@@ -43,6 +43,7 @@
 | Sprint 14 | Vehicle Disposition Integration (replaces Routing) | ✅ Complete | 2026-02-13 |
 | Sprint 14 | Communication Hub Navigation (moved to Activity) | ✅ Complete | 2026-02-13 |
 | Sprint 14 | Offboarding Communication Legal Compliance | ✅ Complete | 2026-02-13 |
+| Sprint 15 | Tech-Data Parsing Consolidation | ✅ Complete | 2026-02-16 |
 
 ### In Progress 🚧
 
@@ -54,7 +55,7 @@
 
 | Sprint | Feature | Description |
 |--------|---------|-------------|
-| Sprint 12 | SMS via Twilio | Implement SMS sending in Communication Hub |
+| Phase 2 | SMS via Twilio | Implement SMS sending in Communication Hub (deferred — no defined use case yet) |
 
 ---
 

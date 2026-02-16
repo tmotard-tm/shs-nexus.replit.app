@@ -24,6 +24,12 @@ import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
+  type DataSource,
+  type ContactInfo,
+  SourceDot,
+  SourceLegend,
+} from "@/components/assets-queue/tech-data-utils";
+import {
   ArrowLeft,
   Phone,
   Mail,
@@ -44,59 +50,6 @@ import {
   Edit3,
 } from "lucide-react";
 
-type DataSource = 'separation' | 'roster' | null;
-interface SourcedField {
-  value: string | null;
-  source: DataSource;
-}
-
-interface ContactInfo {
-  personalPhone: SourcedField;
-  mobilePhone: SourcedField;
-  mainPhone: SourcedField;
-  homePhone: SourcedField;
-  personalEmail: SourcedField;
-  address: SourcedField;
-  fleetPickupAddress: SourcedField;
-  hrTruckNumber: SourcedField;
-  homeAddress: {
-    line1: string | null;
-    line2: string | null;
-    city: string | null;
-    state: string | null;
-    postal: string | null;
-  };
-  employeeId: string;
-  techName: string;
-  separationCategory: string | null;
-}
-
-function SourceDot({ source, className }: { source: DataSource; className?: string }) {
-  if (!source) return null;
-  const color = source === 'separation' ? 'bg-purple-500' : 'bg-blue-500';
-  const title = source === 'separation' ? 'HR Separation Data' : 'Employee Roster Data';
-  return (
-    <span
-      className={`inline-block w-2 h-2 rounded-full ${color} ${className || ''}`}
-      title={title}
-    />
-  );
-}
-
-function SourceLegend() {
-  return (
-    <div className="flex items-center gap-3 text-[11px] text-slate-500">
-      <span className="flex items-center gap-1">
-        <span className="inline-block w-2 h-2 rounded-full bg-purple-500" />
-        HR Separation
-      </span>
-      <span className="flex items-center gap-1">
-        <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
-        Employee Roster
-      </span>
-    </div>
-  );
-}
 
 interface VehicleLocation {
   lat?: number;

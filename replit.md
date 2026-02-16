@@ -87,19 +87,16 @@ Preferred communication style: Simple, everyday language.
 -   **Fleet Scope**: External API for posting vehicle spare status updates.
 -   **SendGrid**: Email delivery for Communication Hub templates.
 
-# Recent Changes (2026-02-13)
+# Recent Changes (2026-02-16)
 
-## Sprint 14 — Completed
-- **Whitelist mode**: Emails now sent TO all whitelisted addresses with `[TEST - Original recipient: ...]` subject prefix
-- **Vehicle Disposition**: Replaced routing radio buttons with read-only disposition from `vehicle_nexus_data.postOffboardedStatus`
-- **Communication Hub nav**: Moved under Activity section in sidebar (developer-only)
-- **Legal compliance**: Removed payroll adjustment language from templates
-- **Code cleanup**: Removed unused types/functions, deleted 7 unused screenshot images
+## Sprint 15 — Completed
+- **Tech-data parsing consolidation**: Extracted shared types, components, and utilities into `client/src/components/assets-queue/tech-data-utils.tsx`; refactored `AssetsRecoveryQueue.tsx` and `AssetsTaskDetailView.tsx` to import from shared module
+- **Backlog cleanup**: Removed FleetScope Deep Link (no longer needed), moved SMS/Twilio to Phase 2
 
 ## Session Handoff
 
 ### What Was Built Today
-Sprint 14 focused on communication improvements and Assets Queue disposition integration. The whitelist email mode was reworked for proper test routing, vehicle disposition now flows from the Weekly Offboarding page into the Assets Queue as a read-only field, and the Communication Hub was reorganized under the Activity section.
+Sprint 15 focused on code quality — consolidating duplicated tech-data parsing logic across Assets Queue components into a single shared module. Also cleaned up the backlog by removing completed/unnecessary items and deferring SMS integration to Phase 2.
 
 ### Current Blockers
 - None
@@ -108,7 +105,5 @@ Sprint 14 focused on communication improvements and Assets Queue disposition int
 - None
 
 ### Recommended Next Steps
-1. **Data source provenance dots**: Implement colored dots (purple = HR Separation, blue = Employee Roster) showing where enriched data came from in the Assets Queue detail view
-2. **SMS integration**: Implement Twilio-based SMS sending in Communication Hub
-3. **Zod validation**: Add input validation to communication API routes
-4. **Tech-data parsing consolidation**: Extract shared parsing utilities used by both Tools and Assets queues
+1. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
+2. **Zod validation**: Add input validation to communication API routes (low priority — developer-only feature)

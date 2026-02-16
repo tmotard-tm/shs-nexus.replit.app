@@ -1,5 +1,28 @@
 # Daily Schedule
 
+## 2026-02-16
+
+### Today's Focus
+1. Tech-data parsing consolidation (Sprint 15)
+2. Documentation updates
+
+### Completed
+- [x] Created shared `tech-data-utils.tsx` module with `DataSource`, `SourcedField`, `TechData`, `ContactInfo` types, `SourceDot`/`SourceLegend` components, and `pickSourced`/`parseTechData`/`enrichItem` utilities
+- [x] Refactored `AssetsRecoveryQueue.tsx` to import from shared module (removed ~120 lines of duplicated code)
+- [x] Refactored `AssetsTaskDetailView.tsx` to import from shared module (removed ~50 lines of duplicated code)
+- [x] Removed FleetScope Deep Link from backlog (no longer needed — disposition handled through Fleet offboarding)
+- [x] Moved SMS/Twilio to Phase 2 enhancements (no defined use case yet)
+- [x] Updated backlog, enhancements log, and daily schedule
+
+### Carryover from Previous Session
+- None (all Feb 13 tasks completed)
+
+### Status
+- App Health: Running without errors
+- Sprint 15: Tech-data parsing consolidation complete
+
+---
+
 ## 2026-02-09
 
 ### Today's Focus

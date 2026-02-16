@@ -1,6 +1,6 @@
 # Nexus System Architecture
 
-> **Last Updated**: 2026-02-13
+> **Last Updated**: 2026-02-16
 > **Purpose**: The "Truth" document for understanding how Nexus works. Read this first.
 
 ---
@@ -81,7 +81,8 @@ Nexus is an **enterprise task management operations platform** that:
 | `pages/` | Page components (queue-management, fleet, offboard-technician, tools-queue, communication-hub, etc.) |
 | `components/` | Reusable UI components |
 | `components/tools-queue/ToolsRecoveryQueue.tsx` | **New (2026-02-04)**: Table-based Tools queue with expandable rows, filters, urgency badges |
-| `components/assets-queue/AssetsRecoveryQueue.tsx` | **New (2026-02-11)**: Table-based Assets queue with expandable rows, fleet separation source detection, split Pick Up/Assign actions |
+| `components/assets-queue/tech-data-utils.tsx` | **New (2026-02-16)**: Shared types (`DataSource`, `TechData`, `ContactInfo`), components (`SourceDot`, `SourceLegend`), and utilities (`pickSourced`, `parseTechData`, `enrichItem`) for Assets Queue |
+| `components/assets-queue/AssetsRecoveryQueue.tsx` | **Updated (2026-02-16)**: Table-based Assets queue with expandable rows, fleet separation source detection, split Pick Up/Assign actions; imports shared parsing from tech-data-utils |
 | `hooks/` | Custom React hooks (useAuth, use-toast, etc.) |
 | `hooks/use-debounced-save.ts` | Auto-save hook with 500ms debounce for task progress |
 | `lib/` | Utilities (queryClient, utils, role-permissions) |
@@ -319,7 +320,7 @@ GET /api/tools-queue
 
 ---
 
-## Current State (2026-02-13)
+## Current State (2026-02-16)
 
 ### What's Working
 - Sprint 1-5: Tools queue, BYOV detection, blocking logic, Phase 2 triggers
@@ -363,10 +364,9 @@ GET /api/tools-queue
 - Vehicle disposition is set on Weekly Offboarding page, consumed read-only in Assets Queue
 
 ### Known Issues
-- SMS not yet implemented (shows as simulated)
+- SMS not yet implemented (shows as simulated; deferred to Phase 2)
 - No Zod validation on communication routes
 - One legacy "Day 0: Recover Equipment & Tools - ABALOS" task remains (no equivalent exists)
-- Tech-data parsing helpers duplicated between Tools and Assets queues (consolidation candidate)
 
 ---
 

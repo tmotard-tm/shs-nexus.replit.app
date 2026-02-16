@@ -1,5 +1,28 @@
 # Enhancements & Bug Fixes Log
 
+## 2026-02-16
+
+### Enhancements Made
+
+| Enhancement | Description |
+|-------------|-------------|
+| Tech-data parsing consolidation | Extracted shared types (`DataSource`, `SourcedField`, `TechData`, `ContactInfo`), components (`SourceDot`, `SourceLegend`), and utilities (`pickSourced`, `parseTechData`, `enrichItem`) into `tech-data-utils.tsx`; refactored `AssetsRecoveryQueue.tsx` and `AssetsTaskDetailView.tsx` to import from shared module |
+
+### Technical Debt Resolved
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Consolidate tech-data parsing | Resolved | Shared module eliminates ~150 lines of duplication across Assets Queue components |
+
+### Technical Debt Remaining
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| No Zod validation on communication routes | Low | Developer-only feature behind auth; low real-world risk |
+| SMS not implemented | Phase 2 | Deferred — no defined SMS use case yet |
+
+---
+
 ## 2026-02-13
 
 ### Bugs Fixed
