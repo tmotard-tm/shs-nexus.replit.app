@@ -1,0 +1,48 @@
+Objective
+- Assets queue list endpoint (GET /api/assets-queue) must meet p95 < 2 seconds under typical load.
+- List view can return minimal fields only. Expanded row details may load in 1–3 seconds with a “Loading details…” state.
+- List is already paginated.
+
+Critical requirement
+- Keep Snowflake off the list endpoint’s critical path: no per-item Snowflake calls, and no Snowflake-dependent filters/sorts on list load.
+
+Step 1: Inventory filters and sorts (must do first)
+- For AssetsRecoveryQueue table, enumerate every list-level:
+  - filter (search, status, district, separation-related toggles, include manual, etc.)
+  - sort option(s)
+- For each filter/sort, label the dependency source for the field(s) involved:
+  - Postgres queue_items only
+  - Postgres joined tables (ex: all_techs, vehicle_nexus_data)
+  - computed fields (derived from existing Postgres data)
+  - Snowflake-derived fields (direct or via snowflakeSyncService)
+- Output a short recommendation table: filter/sort name -> required fields -> recommended source -> stays on list or moves to details.
+
+Step 2: Enforce list vs details split
+- Update GET /api/assets-queue to return only the minimal fields required to render the list and support the approved list-level filters/sorts (from Step 1).
+- Move enrichment (phone numbers, HR separation details, any Snowflake-only fields) to a details endpoint triggered on row expand:
+  - Prefer POST /api/assets-queue/details with { ids: [...] } to batch expanded rows when users open multiple.
+
+Step 3: If a list filter/sort currently depends on Snowflake data, choose one of these (recommend the simplest)
+Option A (preferred): Materialize into Postgres
+- During the daily Snowflake sync (or via a background job), write the needed field(s) into Postgres so list filtering/sorting is fast and local.
+Option B: TTL cache in Postgres
+- Create a Postgres cache table for the Snowflake-derived field(s) with fetchedAt; list endpoint uses cached values only.
+Option C: Move the filter/sort to details-only
+- If it’s not essential for list workflow, remove it from list-level filtering/sorting and show it only in expanded details.
+
+Step 4: Caching rules
+- Phone numbers: TTL cache in Postgres (24h default is fine). No manual refresh button.
+- Graceful degradation: list must load even if Snowflake is down; expanded details may show partial data.
+
+Step 5: Measurement
+- Add timing instrumentation and confirm p95 < 2s for GET /api/assets-queue.
+- Include before/after timing logs in the response.
+
+Guardrails
+- Do not refactor unrelated code.
+- Do not introduce new env vars unless strictly necessary.
+- Keep UX unchanged except faster list load and lazy details loading.
+
+Please start by answering:
+1) Which exact list filters/sorts currently depend on enriched fields (phone, roster district, separation info, etc.)?
+2) For any that depend on Snowflake-derived fields, which option (A/B/C) do you recommend and why?
