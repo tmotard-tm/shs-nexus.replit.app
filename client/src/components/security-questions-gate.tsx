@@ -70,7 +70,8 @@ export function SecurityQuestionsGate() {
   const usedQuestionIds = selectedQuestions.map(q => q.questionId).filter(Boolean);
 
   return (
-    <div className="fixed inset-0 z-[9999] bg-background/95 backdrop-blur-sm flex items-center justify-center p-4" data-testid="security-questions-gate">
+    <div className="fixed inset-0 z-[9999] bg-background/95 backdrop-blur-sm overflow-y-auto" data-testid="security-questions-gate">
+      <div className="min-h-full flex items-center justify-center p-4 py-8">
       <Card className="w-full max-w-lg shadow-2xl border-2">
         <CardHeader className="text-center space-y-3">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
@@ -144,6 +145,7 @@ export function SecurityQuestionsGate() {
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }
