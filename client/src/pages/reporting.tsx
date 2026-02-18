@@ -193,12 +193,12 @@ function MarkdownRenderer({ content }: { content: string }) {
 }
 
 const SUGGESTED_QUESTIONS = [
-  "Give me an overview of all queue performance today",
-  "Which department has the most pending tasks?",
-  "Who are the top performing agents this month?",
-  "What's the average resolution time across all queues?",
-  "Show me the activity trends for the past week",
-  "How many active users do we have and what are their roles?",
+  "Give me a full fleet health report — vehicle dispositions, repairs, and key recovery status",
+  "How many offboarded vehicles are still unresolved or missing?",
+  "Break down the Holman fleet by make, fuel type, and state",
+  "What's the current onboarding pipeline? How many new hires still need trucks?",
+  "Show me storage location utilization across all facilities",
+  "Which queues have the most backlog and what are the bottlenecks?",
 ];
 
 export default function Reporting() {

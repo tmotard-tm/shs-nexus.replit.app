@@ -17,7 +17,7 @@ import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql, eq, and, gte, lte, inArray, desc, SQL } from "drizzle-orm";
-import { queueItems } from "@shared/schema";
+import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { pmfApiService } from "./pmf-api-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
@@ -3024,13 +3024,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const [ntaoItems, assetsItems, inventoryItems, fleetItems, activityLogs, allUsers] = await Promise.all([
+    const [ntaoItems, assetsItems, inventoryItems, fleetItems, activityLogs, allUsers, nexusVehicles, holmanVehicles, vehicleAssignments, hires, spots] = await Promise.all([
       storage.getNTAOQueueItems().catch(() => []),
       storage.getAssetsQueueItems().catch(() => []),
       storage.getInventoryQueueItems().catch(() => []),
       storage.getFleetQueueItems().catch(() => []),
       storage.getActivityLogs().catch(() => []),
       storage.getUsers().catch(() => []),
+      db.select().from(vehicleNexusData).catch(() => []),
+      db.select().from(holmanVehiclesCache).catch(() => []),
+      db.select().from(techVehicleAssignments).catch(() => []),
+      storage.getOnboardingHires().catch(() => []),
+      db.select().from(storageSpots).catch(() => []),
     ]);
 
     const allQueues = [
@@ -3114,6 +3119,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
       topAgents.push({ username, completed });
     }
 
+    const nexusStatusBreakdown: Record<string, number> = {};
+    for (const v of nexusVehicles) {
+      const status = v.postOffboardedStatus || 'unset';
+      nexusStatusBreakdown[status] = (nexusStatusBreakdown[status] || 0) + 1;
+    }
+
+    const nexusKeysBreakdown: Record<string, number> = {};
+    for (const v of nexusVehicles) {
+      const key = v.keys || 'unknown';
+      nexusKeysBreakdown[key] = (nexusKeysBreakdown[key] || 0) + 1;
+    }
+
+    const nexusRepairBreakdown: Record<string, number> = {};
+    for (const v of nexusVehicles) {
+      const rep = v.repaired || 'unknown';
+      nexusRepairBreakdown[rep] = (nexusRepairBreakdown[rep] || 0) + 1;
+    }
+
+    const holmanByStatus: Record<string, number> = {};
+    const holmanByMake: Record<string, number> = {};
+    const holmanByState: Record<string, number> = {};
+    const holmanByFuel: Record<string, number> = {};
+    for (const h of holmanVehicles) {
+      const status = h.statusCode === 1 ? 'active' : 'inactive';
+      holmanByStatus[status] = (holmanByStatus[status] || 0) + 1;
+      if (h.makeName) holmanByMake[h.makeName] = (holmanByMake[h.makeName] || 0) + 1;
+      if (h.state) holmanByState[h.state] = (holmanByState[h.state] || 0) + 1;
+      if (h.fuelType) holmanByFuel[h.fuelType] = (holmanByFuel[h.fuelType] || 0) + 1;
+    }
+
+    const fleetQueueByType: Record<string, number> = {};
+    const fleetQueueByStatus: Record<string, number> = {};
+    const fleetQueueByVehicleType: Record<string, number> = {};
+    for (const item of fleetItems) {
+      const wf = item.workflowType || 'unknown';
+      fleetQueueByType[wf] = (fleetQueueByType[wf] || 0) + 1;
+      const s = item.status || 'unknown';
+      fleetQueueByStatus[s] = (fleetQueueByStatus[s] || 0) + 1;
+      const vt = item.vehicleType || 'unknown';
+      fleetQueueByVehicleType[vt] = (fleetQueueByVehicleType[vt] || 0) + 1;
+    }
+
+    const assetsQueueByType: Record<string, number> = {};
+    const assetsQueueByStatus: Record<string, number> = {};
+    for (const item of assetsItems) {
+      const wf = item.workflowType || 'unknown';
+      assetsQueueByType[wf] = (assetsQueueByType[wf] || 0) + 1;
+      const s = item.status || 'unknown';
+      assetsQueueByStatus[s] = (assetsQueueByStatus[s] || 0) + 1;
+    }
+
+    const onboardingByEmploymentStatus: Record<string, number> = {};
+    const onboardingTruckAssigned: { assigned: number; unassigned: number } = { assigned: 0, unassigned: 0 };
+    for (const h of hires) {
+      const s = h.employmentStatus || 'unknown';
+      onboardingByEmploymentStatus[s] = (onboardingByEmploymentStatus[s] || 0) + 1;
+      if (h.truckAssigned) onboardingTruckAssigned.assigned++;
+      else onboardingTruckAssigned.unassigned++;
+    }
+
+    const storageUtilization = spots.map(s => ({
+      name: s.name,
+      city: s.city,
+      state: s.state,
+      available: s.availableSpots,
+      total: s.totalCapacity,
+      utilization: s.totalCapacity > 0 ? Math.round((1 - s.availableSpots / s.totalCapacity) * 100) : 0,
+      status: s.status,
+    }));
+
     return {
       generatedAt: now.toISOString(),
       queueSummary,
@@ -3129,6 +3204,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         byRole: usersByRole,
       },
       topAgents,
+      vehicleIntelligence: {
+        nexusTracking: {
+          totalTracked: nexusVehicles.length,
+          byDisposition: nexusStatusBreakdown,
+          byKeyStatus: nexusKeysBreakdown,
+          byRepairStatus: nexusRepairBreakdown,
+          phoneRecoveryInitiated: nexusVehicles.filter(v => v.phoneRecoveryInitiated === 'yes').length,
+        },
+        holmanFleet: {
+          totalVehicles: holmanVehicles.length,
+          byStatus: holmanByStatus,
+          byMake: holmanByMake,
+          byState: holmanByState,
+          byFuelType: holmanByFuel,
+        },
+        assignments: {
+          activeAssignments: vehicleAssignments.filter(a => a.assignmentStatus === 'active').length,
+          totalAssignments: vehicleAssignments.length,
+        },
+        fleetQueue: {
+          total: fleetItems.length,
+          byWorkflowType: fleetQueueByType,
+          byStatus: fleetQueueByStatus,
+          byVehicleType: fleetQueueByVehicleType,
+        },
+        assetsQueue: {
+          total: assetsItems.length,
+          byWorkflowType: assetsQueueByType,
+          byStatus: assetsQueueByStatus,
+        },
+        onboarding: {
+          totalHires: hires.length,
+          byEmploymentStatus: onboardingByEmploymentStatus,
+          truckAssignment: onboardingTruckAssigned,
+        },
+        storageLocations: storageUtilization,
+      },
     };
   }
 
@@ -3171,12 +3283,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const reportData = await generateReportData();
 
-      const systemPrompt = `You are Nexus AI, an intelligent reporting assistant for the SHS Nexus enterprise task management platform. You have access to real-time application data and can analyze it to answer questions.
+      const systemPrompt = `You are Nexus AI, an intelligent reporting assistant for the SHS Nexus enterprise task management platform. This is a fleet management and service operations platform managing technician workforces and vehicle fleets. You have access to real-time application data.
 
 Here is the current application data snapshot:
 
-QUEUE SUMMARY:
+QUEUE SUMMARY (across all departments):
 ${JSON.stringify(reportData.queueSummary, null, 2)}
+
+VEHICLE INTELLIGENCE:
+${JSON.stringify(reportData.vehicleIntelligence, null, 2)}
 
 ACTIVITY BY DAY (last 7 days):
 ${JSON.stringify(reportData.activityByDay, null, 2)}
@@ -3193,10 +3308,22 @@ ${JSON.stringify(reportData.topAgents, null, 2)}
 RECENT ACTIVITY (last 100 events):
 ${JSON.stringify(reportData.recentActivity?.slice(0, 30), null, 2)}
 
+CONTEXT & TERMINOLOGY:
+- "Nexus Tracking" / vehicleNexusData = post-offboarding vehicle disposition tracking
+- postOffboardedStatus values: assigned_to_tech, reserved_for_new_hire, in_repair, declined_repair, sent_to_pmf, sent_to_auction, available_for_rental_pmf, not_found, unable_to_reach, already_picked_up, assigned_to_tech_in_rental
+- Holman = external fleet management partner; holmanVehiclesCache stores vehicle details (make, model, year, state, fuel type, status)
+- TPMS = Tire Pressure Monitoring System, provides technician-to-truck assignments
+- Assets Queue = offboarding workflow for recovering company vehicles/assets from departing technicians
+- Fleet Queue = vehicle assignment, decommission, and fleet management tasks
+- BYOV = "Bring Your Own Vehicle" (technicians using personal vehicles)
+- Storage locations = physical lots where fleet vehicles are stored between assignments
+- Onboarding hires = new technicians who need truck assignments
+
 Guidelines:
-- Answer questions about task queues, productivity, user activity, and operational metrics.
+- Answer questions about fleet operations, vehicle statuses, offboarding disposition, assignments, and operational metrics.
 - Provide specific numbers and data when available.
-- When analyzing trends, reference the actual data points.
+- When analyzing fleet health, consider: disposition breakdown, repair pipeline, key recovery, storage utilization, and assignment gaps.
+- Identify actionable insights: vehicles needing attention, bottlenecks, unresolved offboarding items.
 - Format responses clearly with headings, bullet points, and tables when appropriate.
 - If data is insufficient to answer a question, say so honestly.
 - You can perform calculations, comparisons, and identify patterns in the data.
