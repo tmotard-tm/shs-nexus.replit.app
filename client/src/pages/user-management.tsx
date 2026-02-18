@@ -26,7 +26,12 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Plus, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft, Eye, EyeOff, Filter, ChevronDown, Search, X } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createInsertSchema } from "drizzle-zod";
@@ -56,6 +61,9 @@ export default function UserManagement() {
   const [managingUser, setManagingUser] = useState<User | null>(null);
   const [passwordResetUser, setPasswordResetUser] = useState<User | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [roleFilter, setRoleFilter] = useState<string>("all");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
@@ -324,12 +332,31 @@ export default function UserManagement() {
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
-  // Filter users by department
-  const filteredUsers = departmentFilter === "all" 
-    ? allUsers 
-    : departmentFilter === "no-department"
-    ? allUsers.filter((u: User) => !u.departments || u.departments.length === 0)
-    : allUsers.filter((u: User) => u.departments?.includes(departmentFilter));
+  const activeFilterCount = [
+    searchQuery.length > 0,
+    departmentFilter !== "all",
+    roleFilter !== "all",
+  ].filter(Boolean).length;
+
+  const filteredUsers = allUsers.filter((u: User) => {
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matchesUsername = u.username.toLowerCase().includes(query);
+      const matchesEmail = u.email.toLowerCase().includes(query);
+      if (!matchesUsername && !matchesEmail) return false;
+    }
+    if (departmentFilter !== "all") {
+      if (departmentFilter === "no-department") {
+        if (u.departments && u.departments.length > 0) return false;
+      } else {
+        if (!u.departments?.includes(departmentFilter)) return false;
+      }
+    }
+    if (roleFilter !== "all") {
+      if (u.role !== roleFilter) return false;
+    }
+    return true;
+  });
 
   // Statistics - dynamically count users per role
   const userStats = {
@@ -633,31 +660,133 @@ export default function UserManagement() {
 
       {/* Users Table */}
       <Card>
-        <CardHeader>
+        <CardHeader className="space-y-4">
           <div className="flex justify-between items-center">
             <div>
               <CardTitle>All Users</CardTitle>
-              <CardDescription>Manage user accounts and permissions</CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                <SelectTrigger className="w-48" data-testid="select-department-filter">
-                  <SelectValue placeholder="Filter by department" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Departments</SelectItem>
-                  <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
-                  <SelectItem value="Assets Management">Assets Management</SelectItem>
-                  <SelectItem value="Inventory Control">Inventory Control</SelectItem>
-                  <SelectItem value="Fleet Management">Fleet Management</SelectItem>
-                </SelectContent>
-              </Select>
+              <CardDescription>
+                Manage user accounts and permissions
+                {activeFilterCount > 0 && (
+                  <span className="ml-2 text-blue-600 dark:text-blue-400 font-medium">
+                    ({filteredUsers.length} of {allUsers.length} shown)
+                  </span>
+                )}
+              </CardDescription>
             </div>
           </div>
+
+          <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <div className="flex items-center gap-2">
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" size="sm" data-testid="button-toggle-filters" className="gap-2">
+                  <Filter className="h-4 w-4" />
+                  Filters
+                  {activeFilterCount > 0 && (
+                    <Badge variant="default" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs rounded-full">
+                      {activeFilterCount}
+                    </Badge>
+                  )}
+                  <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${filtersOpen ? 'rotate-180' : ''}`} />
+                </Button>
+              </CollapsibleTrigger>
+              {activeFilterCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setDepartmentFilter("all");
+                    setRoleFilter("all");
+                  }}
+                  data-testid="button-clear-filters"
+                  className="text-muted-foreground hover:text-foreground gap-1"
+                >
+                  <X className="h-3 w-3" />
+                  Clear all
+                </Button>
+              )}
+            </div>
+            <CollapsibleContent className="mt-3">
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by username or email..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 bg-background"
+                    data-testid="input-search-users"
+                  />
+                  {searchQuery && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
+                      onClick={() => setSearchQuery("")}
+                      data-testid="button-clear-search"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground font-medium">Department</Label>
+                    <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                      <SelectTrigger className="w-48" data-testid="select-department-filter">
+                        <SelectValue placeholder="Filter by department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Departments</SelectItem>
+                        <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
+                        <SelectItem value="ASSETS">Assets</SelectItem>
+                        <SelectItem value="INVENTORY">Inventory</SelectItem>
+                        <SelectItem value="FLEET">Fleet</SelectItem>
+                        <SelectItem value="no-department">No Department</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground font-medium">Role</Label>
+                    <Select value={roleFilter} onValueChange={setRoleFilter}>
+                      <SelectTrigger className="w-48" data-testid="select-role-filter">
+                        <SelectValue placeholder="Filter by role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Roles</SelectItem>
+                        {availableRoles.map(role => (
+                          <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">Loading users...</div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="text-center py-8">
+              <Search className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+              <p className="text-muted-foreground">No users found matching your filters.</p>
+              {activeFilterCount > 0 && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setDepartmentFilter("all");
+                    setRoleFilter("all");
+                  }}
+                  className="mt-1"
+                >
+                  Clear all filters
+                </Button>
+              )}
+            </div>
           ) : (
             <Table>
               <TableHeader>
