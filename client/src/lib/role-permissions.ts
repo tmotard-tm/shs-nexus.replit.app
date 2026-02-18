@@ -21,6 +21,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       vehicleAssignmentDash: true,
       operationsDash: true,
       rentalReductionDash: true,
+      reporting: true,
     },
     queues: {
       enabled: true,
@@ -144,6 +145,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       vehicleAssignmentDash: true,
       operationsDash: true,
       rentalReductionDash: true,
+      reporting: false,
     },
     queues: {
       enabled: true,
@@ -169,6 +171,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
     activities: {
       enabled: true,
       activityLogs: true,
+      communicationHub: true,
     },
     account: {
       enabled: true,
@@ -265,6 +268,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       vehicleAssignmentDash: false,
       operationsDash: false,
       rentalReductionDash: false,
+      reporting: false,
     },
     queues: {
       enabled: true,
@@ -290,6 +294,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
     activities: {
       enabled: false,
       activityLogs: false,
+      communicationHub: false,
     },
     account: {
       enabled: true,
@@ -446,6 +451,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/fleet-distribution': () => perms.sidebar.dashboards.vehicleAssignmentDash,
     '/analytics-board': () => perms.sidebar.dashboards.vehicleAssignmentDash,
     '/rental-dashboard': () => perms.sidebar.dashboards.rentalReductionDash,
+    '/reporting': () => perms.sidebar.dashboards.reporting,
   };
 
   // Check exact route match

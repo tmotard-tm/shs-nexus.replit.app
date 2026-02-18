@@ -58,6 +58,7 @@ export interface RolePermissionSettings {
       vehicleAssignmentDash: boolean;
       operationsDash: boolean;
       rentalReductionDash: boolean;
+      reporting: boolean;
     };
     queues: {
       enabled: boolean;
@@ -83,6 +84,7 @@ export interface RolePermissionSettings {
     activities: {
       enabled: boolean;
       activityLogs: boolean;
+      communicationHub: boolean;
     };
     account: {
       enabled: boolean;
