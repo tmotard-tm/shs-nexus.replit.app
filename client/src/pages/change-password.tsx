@@ -4,14 +4,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Shield, Eye, EyeOff, CheckCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Shield, Eye, EyeOff, CheckCircle, KeyRound, Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { PREDEFINED_SECURITY_QUESTIONS } from "@shared/schema";
 
 // Form validation schema
 const changePasswordSchema = z.object({
@@ -236,6 +238,9 @@ export default function ChangePassword() {
         </CardContent>
       </Card>
 
+      {/* Security Questions Setup */}
+      <SecurityQuestionsSetup />
+
       {/* Security Tips */}
       <Card>
         <CardHeader>
@@ -265,5 +270,154 @@ export default function ChangePassword() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function SecurityQuestionsSetup() {
+  const { toast } = useToast();
+  const [selectedQuestions, setSelectedQuestions] = useState<Array<{ questionId: string; questionText: string; answer: string }>>([
+    { questionId: "", questionText: "", answer: "" },
+    { questionId: "", questionText: "", answer: "" },
+  ]);
+
+  const statusQuery = useQuery<{ hasSecurityQuestions: boolean }>({
+    queryKey: ["/api/auth/security-questions/status"],
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (questions: Array<{ questionId: string; questionText: string; answer: string }>) =>
+      apiRequest("POST", "/api/auth/security-questions/setup", { questions }),
+    onSuccess: () => {
+      toast({ title: "Saved", description: "Security questions have been updated." });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/security-questions/status"] });
+      setSelectedQuestions([
+        { questionId: "", questionText: "", answer: "" },
+        { questionId: "", questionText: "", answer: "" },
+      ]);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleQuestionChange = (index: number, questionId: string) => {
+    const question = PREDEFINED_SECURITY_QUESTIONS.find(q => q.id === questionId);
+    if (!question) return;
+    setSelectedQuestions(prev => {
+      const updated = [...prev];
+      updated[index] = { questionId: question.id, questionText: question.text, answer: updated[index].answer };
+      return updated;
+    });
+  };
+
+  const handleAnswerChange = (index: number, answer: string) => {
+    setSelectedQuestions(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], answer };
+      return updated;
+    });
+  };
+
+  const handleSave = () => {
+    const incomplete = selectedQuestions.some(q => !q.questionId || !q.answer.trim());
+    if (incomplete) {
+      toast({ title: "Incomplete", description: "Please select a question and provide an answer for each row.", variant: "destructive" });
+      return;
+    }
+    const uniqueIds = new Set(selectedQuestions.map(q => q.questionId));
+    if (uniqueIds.size !== selectedQuestions.length) {
+      toast({ title: "Duplicate Questions", description: "Each security question must be different.", variant: "destructive" });
+      return;
+    }
+    saveMutation.mutate(selectedQuestions);
+  };
+
+  const usedQuestionIds = selectedQuestions.map(q => q.questionId).filter(Boolean);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <KeyRound className="h-5 w-5" />
+          Security Questions
+        </CardTitle>
+        <CardDescription>
+          Set up security questions to reset your password if you forget it.
+          {statusQuery.data?.hasSecurityQuestions && (
+            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+              Already set up
+            </span>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {statusQuery.isLoading ? (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading...
+          </div>
+        ) : (
+          <>
+            {statusQuery.data?.hasSecurityQuestions && (
+              <Alert>
+                <CheckCircle className="h-4 w-4" />
+                <AlertDescription>
+                  Your security questions are already set up. You can update them below by selecting new questions and answers.
+                </AlertDescription>
+              </Alert>
+            )}
+            {selectedQuestions.map((sq, idx) => (
+              <div key={idx} className="space-y-2 p-4 border rounded-lg">
+                <Label>Question {idx + 1}</Label>
+                <Select
+                  value={sq.questionId}
+                  onValueChange={(val) => handleQuestionChange(idx, val)}
+                >
+                  <SelectTrigger data-testid={`select-sq-${idx}`}>
+                    <SelectValue placeholder="Select a security question" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PREDEFINED_SECURITY_QUESTIONS.map(q => (
+                      <SelectItem
+                        key={q.id}
+                        value={q.id}
+                        disabled={usedQuestionIds.includes(q.id) && sq.questionId !== q.id}
+                      >
+                        {q.text}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder="Your answer"
+                  value={sq.answer}
+                  onChange={(e) => handleAnswerChange(idx, e.target.value)}
+                  data-testid={`input-sq-answer-${idx}`}
+                />
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              Answers are not case-sensitive. Choose questions only you would know the answer to.
+            </p>
+            <div className="flex justify-end">
+              <Button
+                onClick={handleSave}
+                disabled={saveMutation.isPending}
+                data-testid="button-save-security-questions"
+              >
+                {saveMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  statusQuery.data?.hasSecurityQuestions ? "Update Security Questions" : "Save Security Questions"
+                )}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

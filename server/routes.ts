@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import crypto from 'crypto';
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema, securityQuestionSetupSchema, PREDEFINED_SECURITY_QUESTIONS, StoredSecurityQuestion } from "@shared/schema";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
@@ -698,8 +698,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/users", requireAuth, async (req: any, res) => {
     try {
       const users = await storage.getUsers();
-      // Remove passwords from response for security
-      const safeUsers = users.map(user => ({ ...user, password: undefined }));
+      const safeUsers = users.map(user => {
+        const sq = user.securityQuestions as StoredSecurityQuestion[] | null;
+        return {
+          ...user,
+          password: undefined,
+          securityQuestions: sq && sq.length >= 2 ? sq.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+        };
+      });
       res.json(safeUsers);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch users" });
@@ -713,7 +719,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
-      res.json({ ...user, password: undefined });
+      const sq = user.securityQuestions as StoredSecurityQuestion[] | null;
+      res.json({
+        ...user,
+        password: undefined,
+        securityQuestions: sq && sq.length >= 2 ? sq.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+      });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch user" });
     }
@@ -1361,6 +1372,169 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Password reset confirmation error:", error);
       res.status(500).json({ message: "Failed to reset password" });
+    }
+  });
+
+  // Security Questions - Get available questions list
+  app.get("/api/auth/security-questions", async (_req, res) => {
+    res.json(PREDEFINED_SECURITY_QUESTIONS);
+  });
+
+  // Security Questions - Setup (requires auth)
+  app.post("/api/auth/security-questions/setup", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+
+      const parsed = securityQuestionSetupSchema.safeParse(req.body.questions);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid security questions" });
+      }
+
+      const questions = parsed.data;
+      const uniqueIds = new Set(questions.map(q => q.questionId));
+      if (uniqueIds.size !== questions.length) {
+        return res.status(400).json({ message: "Each security question must be different" });
+      }
+
+      const storedQuestions: StoredSecurityQuestion[] = await Promise.all(
+        questions.map(async (q) => ({
+          questionId: q.questionId,
+          questionText: q.questionText,
+          answerHash: await bcrypt.hash(q.answer.trim().toLowerCase(), 10),
+        }))
+      );
+
+      await storage.updateUser(currentUser.id, { securityQuestions: storedQuestions });
+
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "security_questions_setup",
+        entityType: "user",
+        entityId: currentUser.id,
+        details: `User ${currentUser.username} set up ${storedQuestions.length} security questions`,
+      });
+
+      res.json({ message: "Security questions saved successfully" });
+    } catch (error) {
+      console.error("Security questions setup error:", error);
+      res.status(500).json({ message: "Failed to save security questions" });
+    }
+  });
+
+  // Security Questions - Check if user has them set up (requires auth)
+  app.get("/api/auth/security-questions/status", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+
+      const questions = currentUser.securityQuestions as StoredSecurityQuestion[] | null;
+      res.json({ hasSecurityQuestions: !!(questions && questions.length >= 2) });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check security questions status" });
+    }
+  });
+
+  // Security Questions - Get questions for a user (anonymous, for forgot password flow)
+  app.post("/api/auth/security-questions/get-questions", async (req, res) => {
+    try {
+      const { username } = req.body;
+      if (!username) return res.status(400).json({ message: "Username is required" });
+
+      const user = await storage.getUserByUsername(username.trim().toLowerCase());
+      if (!user || !user.isActive) {
+        return res.status(404).json({ message: "No account found with that username, or security questions have not been set up. Please contact your admin." });
+      }
+
+      const questions = user.securityQuestions as StoredSecurityQuestion[] | null;
+      if (!questions || questions.length < 2) {
+        return res.status(404).json({ message: "Security questions have not been set up for this account. Please contact your admin." });
+      }
+
+      res.json({
+        questions: questions.map(q => ({ questionId: q.questionId, questionText: q.questionText })),
+      });
+    } catch (error) {
+      console.error("Get security questions error:", error);
+      res.status(500).json({ message: "Failed to retrieve security questions" });
+    }
+  });
+
+  // Security Questions - Verify answers and reset password (anonymous)
+  const securityQuestionVerifyLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: { message: "Too many failed attempts. Please try again in 15 minutes." },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  app.post("/api/auth/security-questions/verify-and-reset", securityQuestionVerifyLimiter, async (req, res) => {
+    try {
+      const { username, answers, newPassword } = req.body;
+
+      if (!username || !answers || !newPassword) {
+        return res.status(400).json({ message: "Username, answers, and new password are required" });
+      }
+
+      if (!validatePasswordRequirements(newPassword)) {
+        return res.status(400).json({ message: "New password must be at least 10 characters long." });
+      }
+
+      const user = await storage.getUserByUsername(username.trim().toLowerCase());
+      if (!user || !user.isActive) {
+        return res.status(400).json({ message: "Verification failed. Please check your answers and try again." });
+      }
+
+      const questions = user.securityQuestions as StoredSecurityQuestion[] | null;
+      if (!questions || questions.length < 2) {
+        return res.status(400).json({ message: "Verification failed. Please check your answers and try again." });
+      }
+
+      const answersArray = answers as Array<{ questionId: string; answer: string }>;
+      if (!Array.isArray(answersArray) || answersArray.length !== questions.length) {
+        return res.status(400).json({ message: "All security questions must be answered" });
+      }
+
+      let allCorrect = true;
+      for (const stored of questions) {
+        const submitted = answersArray.find(a => a.questionId === stored.questionId);
+        if (!submitted) { allCorrect = false; break; }
+        const match = await bcrypt.compare(submitted.answer.trim().toLowerCase(), stored.answerHash);
+        if (!match) { allCorrect = false; break; }
+      }
+
+      if (!allCorrect) {
+        await storage.createActivityLog({
+          userId: user.id,
+          action: "security_question_verify_failed",
+          entityType: "user",
+          entityId: user.id,
+          details: `Failed security question verification for password reset (user: ${user.username})`,
+        });
+        return res.status(400).json({ message: "One or more answers are incorrect. Please try again." });
+      }
+
+      const screeningResult = await checkPasswordCompromised(newPassword);
+      if (screeningResult.isCompromised) {
+        return res.status(400).json({ message: "This password has been found in data breaches and cannot be used. Please choose a different password." });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await storage.updateUser(user.id, { password: hashedPassword });
+
+      await storage.createActivityLog({
+        userId: user.id,
+        action: "password_reset_via_security_questions",
+        entityType: "user",
+        entityId: user.id,
+        details: `Password reset via security questions for user ${user.username}`,
+      });
+
+      res.json({ message: "Password reset successfully. You can now log in with your new password." });
+    } catch (error) {
+      console.error("Security question verify error:", error);
+      res.status(500).json({ message: "Failed to verify security questions" });
     }
   });
 

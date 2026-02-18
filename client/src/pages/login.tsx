@@ -45,13 +45,12 @@ export default function Login() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
-  // Forgot password state
+  // Forgot password / security questions state
   const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
-  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
-  const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
-  const [resetStep, setResetStep] = useState<"email" | "token" | "done">("email");
-  const [resetToken, setResetToken] = useState("");
+  const [resetStep, setResetStep] = useState<"username" | "questions" | "done">("username");
+  const [resetUsername, setResetUsername] = useState("");
+  const [securityQuestions, setSecurityQuestions] = useState<Array<{ questionId: string; questionText: string }>>([]);
+  const [securityAnswers, setSecurityAnswers] = useState<Record<string, string>>({});
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -86,47 +85,51 @@ export default function Login() {
     }
   };
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
+  const parseApiError = (error: any, fallback: string): string => {
+    try {
+      const raw = error.message || "";
+      const jsonPart = raw.includes("{") ? raw.substring(raw.indexOf("{")) : "";
+      if (jsonPart) {
+        const parsed = JSON.parse(jsonPart);
+        if (parsed.message) return parsed.message;
+      }
+    } catch {}
+    return fallback;
+  };
+
+  const handleLookupUsername = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!forgotPasswordEmail.trim()) {
-      toast({
-        title: "Email Required",
-        description: "Please enter your email address",
-        variant: "destructive",
-      });
+    if (!resetUsername.trim()) {
+      toast({ title: "Username Required", description: "Please enter your Enterprise ID", variant: "destructive" });
       return;
     }
 
-    setForgotPasswordLoading(true);
-
+    setResetLoading(true);
     try {
-      await apiRequest("POST", "/api/auth/forgot-password", {
-        email: forgotPasswordEmail.trim()
+      const res = await apiRequest("POST", "/api/auth/security-questions/get-questions", {
+        username: resetUsername.trim(),
       });
-      
-      setForgotPasswordSent(true);
-      setResetStep("token");
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to send password reset email. Please try again.",
-        variant: "destructive",
-      });
+      const data = await res.json();
+      setSecurityQuestions(data.questions);
+      setSecurityAnswers({});
+      setResetStep("questions");
+    } catch (error: any) {
+      toast({ title: "Unable to Reset", description: parseApiError(error, "Could not find account or security questions are not set up."), variant: "destructive" });
     } finally {
-      setForgotPasswordLoading(false);
+      setResetLoading(false);
     }
   };
 
-  const handleResetPassword = async (e: React.FormEvent) => {
+  const handleVerifyAndReset = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!resetToken.trim()) {
-      toast({ title: "Token Required", description: "Please enter the reset token from your email", variant: "destructive" });
+
+    const unanswered = securityQuestions.some(q => !securityAnswers[q.questionId]?.trim());
+    if (unanswered) {
+      toast({ title: "Answers Required", description: "Please answer all security questions", variant: "destructive" });
       return;
     }
-    if (!newPassword || newPassword.length < 8) {
-      toast({ title: "Invalid Password", description: "Password must be at least 8 characters long", variant: "destructive" });
+    if (!newPassword || newPassword.length < 10) {
+      toast({ title: "Invalid Password", description: "Password must be at least 10 characters long", variant: "destructive" });
       return;
     }
     if (newPassword !== confirmNewPassword) {
@@ -136,23 +139,14 @@ export default function Login() {
 
     setResetLoading(true);
     try {
-      await apiRequest("POST", "/api/auth/reset-password", {
-        resetToken: resetToken.trim(),
+      await apiRequest("POST", "/api/auth/security-questions/verify-and-reset", {
+        username: resetUsername.trim(),
+        answers: securityQuestions.map(q => ({ questionId: q.questionId, answer: securityAnswers[q.questionId] || "" })),
         newPassword,
       });
       setResetStep("done");
-      toast({ title: "Password Reset", description: "Your password has been reset successfully. You can now log in." });
     } catch (error: any) {
-      let description = "Invalid or expired token. Please request a new one.";
-      try {
-        const raw = error.message || "";
-        const jsonPart = raw.includes("{") ? raw.substring(raw.indexOf("{")) : "";
-        if (jsonPart) {
-          const parsed = JSON.parse(jsonPart);
-          if (parsed.message) description = parsed.message;
-        }
-      } catch {}
-      toast({ title: "Reset Failed", description, variant: "destructive" });
+      toast({ title: "Reset Failed", description: parseApiError(error, "Verification failed. Please check your answers."), variant: "destructive" });
     } finally {
       setResetLoading(false);
     }
@@ -160,10 +154,10 @@ export default function Login() {
 
   const handleForgotPasswordDialogChange = (open: boolean) => {
     if (!open) {
-      setForgotPasswordEmail("");
-      setForgotPasswordSent(false);
-      setResetStep("email");
-      setResetToken("");
+      setResetStep("username");
+      setResetUsername("");
+      setSecurityQuestions([]);
+      setSecurityAnswers({});
       setNewPassword("");
       setConfirmNewPassword("");
       setShowNewPassword(false);
@@ -240,42 +234,43 @@ export default function Login() {
           </form>
           
           <div className="mt-4 text-center">
-            <span
-              className="text-sm text-muted-foreground cursor-not-allowed"
+            <button
+              type="button"
+              className="text-sm text-primary hover:underline cursor-pointer"
               data-testid="link-forgot-password"
-              title="Password reset is temporarily unavailable. Please contact your supervisor or admin."
+              onClick={() => setShowForgotPassword(true)}
             >
               Forgot Password?
-            </span>
+            </button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Forgot Password Dialog */}
+      {/* Forgot Password Dialog - Security Questions Flow */}
       <Dialog open={showForgotPassword} onOpenChange={handleForgotPasswordDialogChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Reset Password</DialogTitle>
             <DialogDescription>
-              {resetStep === "email" && "Enter your email address and we'll send you a reset code."}
-              {resetStep === "token" && "Enter the reset code from your email and choose a new password."}
+              {resetStep === "username" && "Enter your Enterprise ID to look up your security questions."}
+              {resetStep === "questions" && "Answer your security questions and set a new password."}
               {resetStep === "done" && "Your password has been reset successfully."}
             </DialogDescription>
           </DialogHeader>
           
-          {resetStep === "email" && (
-            <form onSubmit={handleForgotPassword} className="space-y-4">
+          {resetStep === "username" && (
+            <form onSubmit={handleLookupUsername} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="forgot-email">Email Address</Label>
+                <Label htmlFor="reset-username">Enterprise ID</Label>
                 <Input
-                  id="forgot-email"
-                  type="email"
-                  value={forgotPasswordEmail}
-                  onChange={(e) => setForgotPasswordEmail(e.target.value)}
-                  placeholder="Enter your email address"
+                  id="reset-username"
+                  type="text"
+                  value={resetUsername}
+                  onChange={(e) => setResetUsername(e.target.value)}
+                  placeholder="Enter your Enterprise ID"
                   required
-                  disabled={forgotPasswordLoading}
-                  data-testid="input-forgot-email"
+                  disabled={resetLoading}
+                  data-testid="input-reset-username"
                 />
               </div>
               <div className="flex gap-2">
@@ -284,7 +279,7 @@ export default function Login() {
                   variant="outline"
                   onClick={() => handleForgotPasswordDialogChange(false)}
                   className="flex-1"
-                  disabled={forgotPasswordLoading}
+                  disabled={resetLoading}
                   data-testid="button-cancel-forgot-password"
                 >
                   Cancel
@@ -292,42 +287,40 @@ export default function Login() {
                 <Button 
                   type="submit"
                   className="flex-1"
-                  disabled={forgotPasswordLoading}
-                  data-testid="button-submit-forgot-password"
+                  disabled={resetLoading}
+                  data-testid="button-lookup-username"
                 >
-                  {forgotPasswordLoading ? (
+                  {resetLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Sending...
+                      Looking up...
                     </>
                   ) : (
-                    "Send Reset Code"
+                    "Continue"
                   )}
                 </Button>
               </div>
             </form>
           )}
 
-          {resetStep === "token" && (
-            <form onSubmit={handleResetPassword} className="space-y-4">
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                <p className="text-sm text-blue-800 dark:text-blue-200">
-                  A reset code has been sent to <strong>{forgotPasswordEmail}</strong>. Check your inbox and spam folder.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reset-token">Reset Code</Label>
-                <Input
-                  id="reset-token"
-                  type="text"
-                  value={resetToken}
-                  onChange={(e) => setResetToken(e.target.value)}
-                  placeholder="Paste the reset code from your email"
-                  required
-                  disabled={resetLoading}
-                  data-testid="input-reset-token"
-                />
-              </div>
+          {resetStep === "questions" && (
+            <form onSubmit={handleVerifyAndReset} className="space-y-4">
+              {securityQuestions.map((q, idx) => (
+                <div key={q.questionId} className="space-y-2">
+                  <Label htmlFor={`sq-${q.questionId}`}>{idx + 1}. {q.questionText}</Label>
+                  <Input
+                    id={`sq-${q.questionId}`}
+                    type="text"
+                    value={securityAnswers[q.questionId] || ""}
+                    onChange={(e) => setSecurityAnswers(prev => ({ ...prev, [q.questionId]: e.target.value }))}
+                    placeholder="Your answer"
+                    required
+                    disabled={resetLoading}
+                    data-testid={`input-sq-${q.questionId}`}
+                  />
+                </div>
+              ))}
+              <hr className="border-border" />
               <div className="space-y-2">
                 <Label htmlFor="new-password">New Password</Label>
                 <div className="relative">
@@ -336,7 +329,7 @@ export default function Login() {
                     type={showNewPassword ? "text" : "password"}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="At least 8 characters"
+                    placeholder="At least 10 characters"
                     required
                     disabled={resetLoading}
                     data-testid="input-new-password"
@@ -368,7 +361,7 @@ export default function Login() {
                 <Button 
                   type="button"
                   variant="outline"
-                  onClick={() => { setResetStep("email"); setForgotPasswordSent(false); setResetToken(""); setNewPassword(""); setConfirmNewPassword(""); }}
+                  onClick={() => { setResetStep("username"); setSecurityAnswers({}); setNewPassword(""); setConfirmNewPassword(""); }}
                   className="flex-1"
                   disabled={resetLoading}
                 >

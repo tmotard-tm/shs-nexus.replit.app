@@ -100,13 +100,21 @@ Preferred communication style: Simple, everyday language.
 - **Lazy-loaded expanded row details**: `ExpandedRowDetails` in `AssetsRecoveryQueue.tsx` fetches enrichment data on row expand with loading state; task checkboxes and quick actions render immediately
 - **Design decision**: List endpoint serves from Postgres only; enrichment deferred to row expand (trade-off: brief loading spinner vs instant list load)
 
+## Sprint 17 — In Progress (2026-02-18)
+- **User-level Permission Overrides**: Three-state toggle system (Default/Granted/Denied) with hierarchical permission tree, stored as sparse JSONB in users table. Visual indicators in user management table.
+- **Admin Role Permissions Access**: Admins can view Role Permissions page (view-only for developer/admin roles, editable for agent and custom roles).
+- **Vehicle Assignments page removed**: Navigation and routing removed; API endpoints retained for Fleet Management dependencies.
+- **Security Questions Password Reset**: Replaced email-based forgot password flow with security questions. Users set up 2 questions from predefined list on Change Password page. Forgot password dialog on login verifies answers and allows password reset without email. Rate-limited verification endpoint. Admin visibility of security question status (SQ badge) in user management table.
+- **Schema**: `securityQuestions` JSONB column on users table; answers hashed with bcrypt, case-insensitive comparison.
+- **Routes**: `GET /api/auth/security-questions`, `POST .../setup`, `GET .../status`, `POST .../get-questions`, `POST .../verify-and-reset`
+
 ## Session Handoff
 
 ### What Was Built Today
-Sprint 16 focused on performance — the Assets Queue list endpoint was decoupled from Snowflake, with enrichment moved to a lazy-loaded batch endpoint called on row expand. This reduced initial page load from ~60s (196+ sequential Snowflake queries) to under 2s (Postgres-only).
+Sprint 17: Permission overrides system, admin access to role permissions, removed Vehicle Assignments page, and security questions-based password reset (replacing email/SendGrid approach due to quota limits).
 
 ### Current Blockers
-- None
+- SendGrid credits exceeded — email delivery disabled; security questions used as alternative for password reset
 
 ### Pending Decisions
 - None
@@ -114,3 +122,4 @@ Sprint 16 focused on performance — the Assets Queue list endpoint was decouple
 ### Recommended Next Steps
 1. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
 2. **Zod validation**: Add input validation to communication API routes (low priority — developer-only feature)
+3. **Alternative email provider**: Consider Resend or Mailgun if email-based features are needed again

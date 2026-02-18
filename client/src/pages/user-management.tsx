@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft, Eye, EyeOff, Filter, ChevronDown, ChevronRight, Search, X, UserCog, RotateCcw } from "lucide-react";
+import { Plus, Trash2, Shield, Users, UserCheck, Key, KeyRound, Settings, ArrowLeft, Eye, EyeOff, Filter, ChevronDown, ChevronRight, Search, X, UserCog, RotateCcw } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
@@ -1094,6 +1094,17 @@ export default function UserManagement() {
                           <Badge variant="outline" className="text-amber-600 border-amber-400 text-xs" title="Has permission overrides">
                             <UserCog className="h-3 w-3 mr-0.5" />
                             Overrides
+                          </Badge>
+                        )}
+                        {(user as any).securityQuestions && Array.isArray((user as any).securityQuestions) && (user as any).securityQuestions.length > 0 ? (
+                          <Badge variant="outline" className="text-blue-600 border-blue-300 text-xs" title="Security questions set up">
+                            <KeyRound className="h-3 w-3 mr-0.5" />
+                            SQ
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-gray-400 border-gray-300 text-xs" title="No security questions set up">
+                            <KeyRound className="h-3 w-3 mr-0.5" />
+                            No SQ
                           </Badge>
                         )}
                       </div>

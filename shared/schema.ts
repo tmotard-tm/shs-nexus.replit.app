@@ -18,6 +18,7 @@ export const users = pgTable("users", {
   departments: text("departments").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET']
   isActive: boolean("is_active").notNull().default(true), // Whether the user can log in
   permissionOverrides: jsonb("permission_overrides"), // Sparse user-level permission overrides (same structure as RolePermissionSettings, only stores differences)
+  securityQuestions: jsonb("security_questions"), // Array of {questionId, questionText, answerHash} for password reset
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => {
   return {
@@ -674,6 +675,32 @@ export const onboardingHires = pgTable("onboarding_hires", {
     enterpriseIdIdx: index("onboarding_hires_enterprise_id_idx").on(table.enterpriseId),
   };
 });
+
+// Security Questions for password reset
+export interface StoredSecurityQuestion {
+  questionId: string;
+  questionText: string;
+  answerHash: string;
+}
+
+export const PREDEFINED_SECURITY_QUESTIONS = [
+  { id: "q1", text: "What is the name of your first pet?" },
+  { id: "q2", text: "What city were you born in?" },
+  { id: "q3", text: "What is your mother's maiden name?" },
+  { id: "q4", text: "What was the name of your first school?" },
+  { id: "q5", text: "What is your favorite movie?" },
+  { id: "q6", text: "What street did you grow up on?" },
+  { id: "q7", text: "What was the make of your first car?" },
+  { id: "q8", text: "What is your favorite sports team?" },
+] as const;
+
+export const securityQuestionSetupSchema = z.array(
+  z.object({
+    questionId: z.string(),
+    questionText: z.string(),
+    answer: z.string().min(2, "Answer must be at least 2 characters"),
+  })
+).min(2, "You must set up at least 2 security questions").max(3, "Maximum 3 security questions");
 
 // Password validation schema
 export const passwordValidationSchema = z.string()
