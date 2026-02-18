@@ -45,6 +45,7 @@ import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import WeeklyOffboarding from "@/pages/weekly-offboarding";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
+import Reporting from "@/pages/reporting";
 import CommunicationHub from "@/pages/communication-hub";
 import TestRepairResults from "@/pages/test-repair-results";
 import About from "@/pages/about";
@@ -349,6 +350,14 @@ function Router() {
       <Route path="/analytics-board">
         <ProtectedRoute>
           <AnalyticsBoard />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/reporting">
+        <ProtectedRoute>
+          <MainContent>
+            <Reporting />
+          </MainContent>
         </ProtectedRoute>
       </Route>
       

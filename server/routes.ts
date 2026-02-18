@@ -3015,6 +3015,224 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  async function generateReportData() {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [ntaoItems, assetsItems, inventoryItems, fleetItems, activityLogs, allUsers] = await Promise.all([
+      storage.getNTAOQueueItems().catch(() => []),
+      storage.getAssetsQueueItems().catch(() => []),
+      storage.getInventoryQueueItems().catch(() => []),
+      storage.getFleetQueueItems().catch(() => []),
+      storage.getActivityLogs().catch(() => []),
+      storage.getUsers().catch(() => []),
+    ]);
+
+    const allQueues = [
+      { module: 'ntao', label: 'NTAO', items: ntaoItems },
+      { module: 'assets', label: 'Assets', items: assetsItems },
+      { module: 'inventory', label: 'Inventory', items: inventoryItems },
+      { module: 'fleet', label: 'Fleet', items: fleetItems },
+    ];
+
+    const queueSummary = allQueues.map(q => {
+      const total = q.items.length;
+      const statusCounts = { new: 0, in_progress: 0, completed: 0, cancelled: 0 };
+      let completedToday = 0, completedThisWeek = 0, completedThisMonth = 0;
+      const agentWorkload: Record<string, number> = {};
+
+      for (const item of q.items) {
+        const s = (item.status || 'new') as keyof typeof statusCounts;
+        if (s in statusCounts) statusCounts[s]++;
+        if (item.status === 'completed' && item.completedAt) {
+          const d = new Date(item.completedAt);
+          if (d >= startOfToday) completedToday++;
+          if (d >= startOfWeek) completedThisWeek++;
+          if (d >= startOfMonth) completedThisMonth++;
+        }
+        if (item.assignedTo && item.status === 'in_progress') {
+          agentWorkload[item.assignedTo] = (agentWorkload[item.assignedTo] || 0) + 1;
+        }
+      }
+
+      const recentCompleted = q.items.filter(i => i.status === 'completed' && i.completedAt && new Date(i.completedAt) >= thirtyDaysAgo);
+      let avgResolutionHours = 0;
+      if (recentCompleted.length > 0) {
+        const totalMs = recentCompleted.reduce((sum, i) => {
+          return sum + (new Date(i.completedAt!).getTime() - new Date(i.createdAt!).getTime());
+        }, 0);
+        avgResolutionHours = Math.round((totalMs / recentCompleted.length) / (1000 * 60 * 60) * 10) / 10;
+      }
+
+      return {
+        module: q.module, label: q.label, total,
+        ...statusCounts, completedToday, completedThisWeek, completedThisMonth,
+        avgResolutionHours, agentWorkload,
+      };
+    });
+
+    const recentActivity = activityLogs
+      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())
+      .slice(0, 100);
+
+    const activityByDay: Record<string, number> = {};
+    for (const log of activityLogs) {
+      if (log.createdAt && new Date(log.createdAt) >= sevenDaysAgo) {
+        const day = new Date(log.createdAt).toISOString().split('T')[0];
+        activityByDay[day] = (activityByDay[day] || 0) + 1;
+      }
+    }
+
+    const activityByAction: Record<string, number> = {};
+    for (const log of activityLogs) {
+      if (log.createdAt && new Date(log.createdAt) >= thirtyDaysAgo) {
+        activityByAction[log.action] = (activityByAction[log.action] || 0) + 1;
+      }
+    }
+
+    const activeUsers = allUsers.filter(u => u.isActive);
+    const usersByRole: Record<string, number> = {};
+    for (const u of activeUsers) {
+      usersByRole[u.role] = (usersByRole[u.role] || 0) + 1;
+    }
+
+    const topAgents: { username: string; completed: number }[] = [];
+    const agentCompletions: Record<string, number> = {};
+    for (const q of allQueues) {
+      for (const item of q.items) {
+        if (item.status === 'completed' && item.assignedTo && item.completedAt && new Date(item.completedAt) >= thirtyDaysAgo) {
+          agentCompletions[item.assignedTo] = (agentCompletions[item.assignedTo] || 0) + 1;
+        }
+      }
+    }
+    for (const [username, completed] of Object.entries(agentCompletions).sort((a, b) => b[1] - a[1]).slice(0, 10)) {
+      topAgents.push({ username, completed });
+    }
+
+    return {
+      generatedAt: now.toISOString(),
+      queueSummary,
+      activityByDay,
+      activityByAction,
+      recentActivity: recentActivity.map(a => ({
+        id: a.id, action: a.action, userId: a.userId,
+        details: a.details, timestamp: a.createdAt,
+      })),
+      userStats: {
+        totalActive: activeUsers.length,
+        totalInactive: allUsers.length - activeUsers.length,
+        byRole: usersByRole,
+      },
+      topAgents,
+    };
+  }
+
+  // Reporting API (developer only)
+  app.get("/api/reports", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Reports require developer role." });
+      }
+
+      const reportData = await generateReportData();
+      res.json(reportData);
+    } catch (error) {
+      console.error('Error generating reports:', error);
+      res.status(500).json({ message: "Failed to generate reports" });
+    }
+  });
+
+  // AI Reporting Chat endpoint (developer only)
+  // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+  app.post("/api/reports/chat", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Reports require developer role." });
+      }
+
+      const { message, conversationHistory } = req.body;
+      if (!message) {
+        return res.status(400).json({ message: "Message is required" });
+      }
+
+      if (!process.env.OPENAI_API_KEY) {
+        return res.status(500).json({ message: "OpenAI API key is not configured. Please add it in Secrets." });
+      }
+
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+      const reportData = await generateReportData();
+
+      const systemPrompt = `You are Nexus AI, an intelligent reporting assistant for the SHS Nexus enterprise task management platform. You have access to real-time application data and can analyze it to answer questions.
+
+Here is the current application data snapshot:
+
+QUEUE SUMMARY:
+${JSON.stringify(reportData.queueSummary, null, 2)}
+
+ACTIVITY BY DAY (last 7 days):
+${JSON.stringify(reportData.activityByDay, null, 2)}
+
+ACTIVITY BY ACTION TYPE (last 30 days):
+${JSON.stringify(reportData.activityByAction, null, 2)}
+
+USER STATISTICS:
+${JSON.stringify(reportData.userStats, null, 2)}
+
+TOP PERFORMING AGENTS (last 30 days):
+${JSON.stringify(reportData.topAgents, null, 2)}
+
+RECENT ACTIVITY (last 100 events):
+${JSON.stringify(reportData.recentActivity?.slice(0, 30), null, 2)}
+
+Guidelines:
+- Answer questions about task queues, productivity, user activity, and operational metrics.
+- Provide specific numbers and data when available.
+- When analyzing trends, reference the actual data points.
+- Format responses clearly with headings, bullet points, and tables when appropriate.
+- If data is insufficient to answer a question, say so honestly.
+- You can perform calculations, comparisons, and identify patterns in the data.
+- Keep responses concise but thorough.
+- Use markdown formatting for readability.`;
+
+      const messages: any[] = [
+        { role: "system", content: systemPrompt },
+      ];
+
+      if (conversationHistory && Array.isArray(conversationHistory)) {
+        for (const msg of conversationHistory.slice(-10)) {
+          messages.push({ role: msg.role, content: msg.content });
+        }
+      }
+
+      messages.push({ role: "user", content: message });
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-5",
+        messages,
+        max_completion_tokens: 4096,
+      });
+
+      const reply = response.choices[0].message.content || "I couldn't generate a response. Please try again.";
+
+      res.json({ reply, dataTimestamp: reportData.generatedAt });
+    } catch (error: any) {
+      console.error('AI Reports chat error:', error);
+      if (error?.status === 401 || error?.code === 'invalid_api_key') {
+        return res.status(500).json({ message: "Invalid OpenAI API key. Please check your configuration." });
+      }
+      res.status(500).json({ message: "Failed to generate AI response. Please try again." });
+    }
+  });
+
   // Productivity Dashboard Export API (Superadmin only)
   app.get("/api/productivity-export/:department", requireAuth, async (req: any, res) => {
     try {
