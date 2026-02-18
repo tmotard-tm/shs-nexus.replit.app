@@ -88,10 +88,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch {}
     setUser(null);
     setRequiresSecurityQuestions(false);
     localStorage.removeItem("user");
+    window.location.href = "/login";
   };
 
   const clearSecurityQuestionsRequirement = () => {
