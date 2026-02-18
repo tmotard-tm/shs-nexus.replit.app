@@ -50,6 +50,12 @@ export default function Login() {
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
   const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
   const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
+  const [resetStep, setResetStep] = useState<"email" | "token" | "done">("email");
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,6 +106,7 @@ export default function Login() {
       });
       
       setForgotPasswordSent(true);
+      setResetStep("token");
     } catch (error) {
       toast({
         title: "Error",
@@ -111,11 +118,50 @@ export default function Login() {
     }
   };
 
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!resetToken.trim()) {
+      toast({ title: "Token Required", description: "Please enter the reset token from your email", variant: "destructive" });
+      return;
+    }
+    if (!newPassword || newPassword.length < 8) {
+      toast({ title: "Invalid Password", description: "Password must be at least 8 characters long", variant: "destructive" });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast({ title: "Passwords Don't Match", description: "Please make sure both passwords match", variant: "destructive" });
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      await apiRequest("POST", "/api/auth/reset-password", {
+        resetToken: resetToken.trim(),
+        newPassword,
+      });
+      setResetStep("done");
+      toast({ title: "Password Reset", description: "Your password has been reset successfully. You can now log in." });
+    } catch (error: any) {
+      toast({
+        title: "Reset Failed",
+        description: error.message || "Invalid or expired token. Please request a new one.",
+        variant: "destructive",
+      });
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   const handleForgotPasswordDialogChange = (open: boolean) => {
     if (!open) {
-      // Only reset form state when closing
       setForgotPasswordEmail("");
       setForgotPasswordSent(false);
+      setResetStep("email");
+      setResetToken("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setShowNewPassword(false);
     }
     setShowForgotPassword(open);
   };
@@ -189,13 +235,14 @@ export default function Login() {
           </form>
           
           <div className="mt-4 text-center">
-            <span
-              className="text-sm text-muted-foreground cursor-not-allowed"
+            <button
+              type="button"
+              className="text-sm text-primary hover:underline cursor-pointer"
               data-testid="link-forgot-password"
-              title="Password reset is temporarily unavailable. Please contact your supervisor or admin."
+              onClick={() => setShowForgotPassword(true)}
             >
               Forgot Password?
-            </span>
+            </button>
           </div>
         </CardContent>
       </Card>
@@ -206,32 +253,13 @@ export default function Login() {
           <DialogHeader>
             <DialogTitle>Reset Password</DialogTitle>
             <DialogDescription>
-              {forgotPasswordSent 
-                ? "Check your email for password reset instructions."
-                : "Enter your email address and we'll send you a password reset link."
-              }
+              {resetStep === "email" && "Enter your email address and we'll send you a reset code."}
+              {resetStep === "token" && "Enter the reset code from your email and choose a new password."}
+              {resetStep === "done" && "Your password has been reset successfully."}
             </DialogDescription>
           </DialogHeader>
           
-          {forgotPasswordSent ? (
-            <div className="space-y-4">
-              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-                <p className="text-sm text-green-800 dark:text-green-200">
-                  If an account exists with the email <strong>{forgotPasswordEmail}</strong>, you will receive a password reset email shortly.
-                </p>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Please check your inbox and spam folder. The reset link will expire in 1 hour.
-              </p>
-              <Button 
-                onClick={() => handleForgotPasswordDialogChange(false)} 
-                className="w-full"
-                data-testid="button-close-forgot-password"
-              >
-                Back to Login
-              </Button>
-            </div>
-          ) : (
+          {resetStep === "email" && (
             <form onSubmit={handleForgotPassword} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="forgot-email">Email Address</Label>
@@ -269,11 +297,113 @@ export default function Login() {
                       Sending...
                     </>
                   ) : (
-                    "Send Reset Link"
+                    "Send Reset Code"
                   )}
                 </Button>
               </div>
             </form>
+          )}
+
+          {resetStep === "token" && (
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                <p className="text-sm text-blue-800 dark:text-blue-200">
+                  A reset code has been sent to <strong>{forgotPasswordEmail}</strong>. Check your inbox and spam folder.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-token">Reset Code</Label>
+                <Input
+                  id="reset-token"
+                  type="text"
+                  value={resetToken}
+                  onChange={(e) => setResetToken(e.target.value)}
+                  placeholder="Paste the reset code from your email"
+                  required
+                  disabled={resetLoading}
+                  data-testid="input-reset-token"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-password">New Password</Label>
+                <div className="relative">
+                  <Input
+                    id="new-password"
+                    type={showNewPassword ? "text" : "password"}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="At least 8 characters"
+                    required
+                    disabled={resetLoading}
+                    data-testid="input-new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    tabIndex={-1}
+                  >
+                    {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-new-password">Confirm New Password</Label>
+                <Input
+                  id="confirm-new-password"
+                  type={showNewPassword ? "text" : "password"}
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  placeholder="Re-enter your new password"
+                  required
+                  disabled={resetLoading}
+                  data-testid="input-confirm-new-password"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  type="button"
+                  variant="outline"
+                  onClick={() => { setResetStep("email"); setForgotPasswordSent(false); }}
+                  className="flex-1"
+                  disabled={resetLoading}
+                >
+                  Back
+                </Button>
+                <Button 
+                  type="submit"
+                  className="flex-1"
+                  disabled={resetLoading}
+                  data-testid="button-reset-password"
+                >
+                  {resetLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Resetting...
+                    </>
+                  ) : (
+                    "Reset Password"
+                  )}
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {resetStep === "done" && (
+            <div className="space-y-4">
+              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                <p className="text-sm text-green-800 dark:text-green-200">
+                  Your password has been updated. You can now sign in with your new password.
+                </p>
+              </div>
+              <Button 
+                onClick={() => handleForgotPasswordDialogChange(false)} 
+                className="w-full"
+                data-testid="button-close-forgot-password"
+              >
+                Back to Login
+              </Button>
+            </div>
           )}
         </DialogContent>
       </Dialog>
