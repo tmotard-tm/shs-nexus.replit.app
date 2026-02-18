@@ -298,6 +298,10 @@ export default function UserManagement() {
   const isAdmin = currentUser?.role === 'admin';
   const canManageAccess = isSuperAdmin || isAdmin;
 
+  const assignableRoles = isSuperAdmin
+    ? availableRoles
+    : availableRoles.filter(r => r.value !== 'developer');
+
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
       case 'developer':
@@ -460,7 +464,7 @@ export default function UserManagement() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableRoles.map(role => (
+                    {assignableRoles.map(role => (
                       <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
                     ))}
                   </SelectContent>
@@ -940,7 +944,7 @@ export default function UserManagement() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {availableRoles.map(role => (
+                          {assignableRoles.map(role => (
                             <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
                           ))}
                         </SelectContent>

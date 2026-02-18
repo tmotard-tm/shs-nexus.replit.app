@@ -727,6 +727,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const userData = insertUserSchema.parse(req.body);
+
+      if (currentUser.role !== 'developer' && userData.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can create users with the developer role." });
+      }
       
       // Check if user already exists
       const existingUser = await storage.getUserByUsername(userData.username);
@@ -1060,6 +1064,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: `Invalid role specified. Valid roles are: ${validRoles.join(', ')}` });
       }
 
+      if (currentUser.role !== 'developer' && role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can assign the developer role." });
+      }
+
       // Validate departments if provided
       const validDepartments = ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'];
       if (departments && Array.isArray(departments)) {
@@ -1073,6 +1081,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const targetUser = await storage.getUser(id);
       if (!targetUser) {
         return res.status(404).json({ message: "User not found" });
+      }
+
+      if (currentUser.role !== 'developer' && targetUser.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can modify other developer accounts." });
       }
 
       // Prepare updates object
