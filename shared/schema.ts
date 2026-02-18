@@ -16,6 +16,7 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
   role: text("role").notNull().default("agent"), // developer, agent (simplified from 9 roles)
   departments: text("departments").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET']
+  isActive: boolean("is_active").notNull().default(true), // Whether the user can log in
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => {
   return {

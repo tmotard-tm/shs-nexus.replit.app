@@ -459,6 +459,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
+      if (!user.isActive) {
+        await storage.createActivityLog({
+          userId: user.id,
+          action: 'login_failed',
+          entityType: 'auth',
+          entityId: user.id,
+          details: `Login denied for deactivated user "${enterpriseId}" from IP: ${ipAddress}`,
+        });
+        return res.status(403).json({ message: "Your account has been deactivated. Please contact an administrator." });
+      }
+
       // Use bcrypt to compare the provided password with the hashed password
       const isPasswordValid = await bcrypt.compare(password, user.password);
       
@@ -901,13 +912,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/users/:id/reset-password", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'developer') {
-        return res.status(403).json({ message: "Access denied. Password reset requires developer role." });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Password reset requires developer or admin role." });
       }
       
       const { id } = req.params;
       
-      // Protect seed accounts from password reset by other admins
+      // Protect seed accounts from password reset by other users
       if (id === 'emergency-admin-2025-id' && currentUser.id !== id) {
         return res.status(403).json({ message: "Access denied. Cannot reset password for seed accounts." });
       }
@@ -1025,12 +1036,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin Role Management - Super admins can update user roles and departments
+  // Admin Role Management - Developers and admins can update user roles and departments
   app.post("/api/users/:id/update-role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'developer') {
-        return res.status(403).json({ message: "Access denied. Role management requires developer role." });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Role management requires developer or admin role." });
       }
       
       const { id } = req.params;
@@ -1040,7 +1051,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. Cannot modify role for seed accounts." });
       }
       
-      const { role, departments } = req.body;
+      const { role, departments, isActive } = req.body;
       
       // Validate role if provided - check against roles in role_permissions table
       const rolePermissions = await storage.getAllRolePermissions();
@@ -1068,6 +1079,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updates: any = {};
       if (role !== undefined) updates.role = role;
       if (departments !== undefined) updates.departments = departments;
+      if (isActive !== undefined) updates.isActive = isActive;
 
       // Update user
       const updatedUser = await storage.updateUser(id, updates);

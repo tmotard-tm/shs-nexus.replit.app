@@ -198,7 +198,7 @@ export default function UserManagement() {
 
   // Admin role management mutation (for access: role, departments)
   const roleUpdateMutation = useMutation({
-    mutationFn: ({ userId, updates }: { userId: string; updates: { role?: string; departments?: string[] } }) =>
+    mutationFn: ({ userId, updates }: { userId: string; updates: { role?: string; departments?: string[]; isActive?: boolean } }) =>
       apiRequest("POST", `/api/users/${userId}/update-role`, updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
@@ -244,10 +244,11 @@ export default function UserManagement() {
     })),
   });
 
-  const roleManagementForm = useForm<{ role: string; departments: string[] }>({
+  const roleManagementForm = useForm<{ role: string; departments: string[]; isActive: boolean }>({
     resolver: zodResolver(z.object({
       role: z.string().min(1, "Role is required"),
-      departments: z.array(z.string())
+      departments: z.array(z.string()),
+      isActive: z.boolean()
     })),
   });
 
@@ -268,7 +269,7 @@ export default function UserManagement() {
     }
   };
 
-  const onRoleManagementSubmit = (data: { role: string; departments: string[] }) => {
+  const onRoleManagementSubmit = (data: { role: string; departments: string[]; isActive: boolean }) => {
     if (managingUser) {
       roleUpdateMutation.mutate({ 
         userId: managingUser.id, 
@@ -287,12 +288,15 @@ export default function UserManagement() {
     roleManagementForm.reset({
       role: user.role,
       departments: user.departments || [],
+      isActive: user.isActive ?? true,
     });
   };
 
-  // Get current user info to check if developer
+  // Get current user info to check role-based permissions
   const { user: currentUser } = useAuth();
   const isSuperAdmin = currentUser?.role === 'developer';
+  const isAdmin = currentUser?.role === 'admin';
+  const canManageAccess = isSuperAdmin || isAdmin;
 
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
@@ -796,6 +800,7 @@ export default function UserManagement() {
                   <TableHead>Role</TableHead>
                   <TableHead>Departments</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -826,9 +831,16 @@ export default function UserManagement() {
                     <TableCell data-testid={`text-created-${user.id}`}>
                       {new Date(user.createdAt).toLocaleDateString()}
                     </TableCell>
+                    <TableCell>
+                      {user.isActive === false ? (
+                        <Badge variant="outline" className="text-red-500 border-red-300">Inactive</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-green-600 border-green-300">Active</Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {isSuperAdmin && (
+                        {canManageAccess && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -848,15 +860,17 @@ export default function UserManagement() {
                         >
                           <Settings className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => deleteUserMutation.mutate(user.id)}
-                          className="text-red-600 hover:text-red-700"
-                          data-testid={`button-delete-${user.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {isSuperAdmin && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => deleteUserMutation.mutate(user.id)}
+                            className="text-red-600 hover:text-red-700"
+                            data-testid={`button-delete-${user.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -909,8 +923,8 @@ export default function UserManagement() {
               </form>
             </div>
 
-            {/* Access Section - Only visible to developers */}
-            {isSuperAdmin && (
+            {/* Access Section - Visible to developers and admins */}
+            {canManageAccess && (
               <>
                 <hr className="border-border" />
                 <div className="space-y-4">
@@ -965,6 +979,27 @@ export default function UserManagement() {
                             </Label>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Account Status</Label>
+                      <div className="flex items-center space-x-3 mt-2 p-3 rounded-lg border bg-muted/30">
+                        <input
+                          type="checkbox"
+                          id="manage-isActive"
+                          checked={roleManagementForm.watch("isActive") ?? true}
+                          onChange={(e) => roleManagementForm.setValue("isActive", e.target.checked)}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          data-testid="checkbox-is-active"
+                        />
+                        <div>
+                          <Label htmlFor="manage-isActive" className="text-sm font-medium cursor-pointer">
+                            Active Account
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            Inactive users will not be able to log in
+                          </p>
+                        </div>
                       </div>
                     </div>
                     <div className="flex justify-end">
