@@ -54,6 +54,7 @@ import { PermissionProtectedRoute } from "@/components/permission-protected-rout
 import { PublicFormRoute } from "@/components/public-form-route";
 import { RoleProtectedRoute } from "@/components/role-protected-route";
 import { RoleBasedHome } from "@/components/role-based-home";
+import { SecurityQuestionsGate } from "@/components/security-questions-gate";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -385,6 +386,7 @@ function App() {
                     <OnboardingProvider>
                       <Toaster />
                       <OnboardingOverlay />
+                      <SecurityQuestionsGate />
                       <BackgroundSyncManager />
                       <Router />
                     </OnboardingProvider>

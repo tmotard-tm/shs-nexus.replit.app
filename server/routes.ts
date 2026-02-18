@@ -515,7 +515,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       console.log(`[LOGIN] User ${user.username} logged in with role: ${user.role}`);
-      res.json({ user: { ...user, password: undefined } });
+      const sq = user.securityQuestions as StoredSecurityQuestion[] | null;
+      const hasSecurityQuestions = !!(sq && sq.length >= 3);
+      res.json({
+        user: {
+          ...user,
+          password: undefined,
+          securityQuestions: hasSecurityQuestions ? sq!.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+        },
+        requiresSecurityQuestions: !hasSecurityQuestions,
+      });
     } catch (error) {
       res.status(500).json({ message: "Login failed" });
     }
@@ -703,7 +712,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return {
           ...user,
           password: undefined,
-          securityQuestions: sq && sq.length >= 2 ? sq.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+          securityQuestions: sq && sq.length >= 3 ? sq.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
         };
       });
       res.json(safeUsers);
@@ -723,7 +732,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         ...user,
         password: undefined,
-        securityQuestions: sq && sq.length >= 2 ? sq.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+        securityQuestions: sq && sq.length >= 3 ? sq.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch user" });
@@ -1429,7 +1438,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!currentUser) return res.status(404).json({ message: "User not found" });
 
       const questions = currentUser.securityQuestions as StoredSecurityQuestion[] | null;
-      res.json({ hasSecurityQuestions: !!(questions && questions.length >= 2) });
+      res.json({ hasSecurityQuestions: !!(questions && questions.length >= 3) });
     } catch (error) {
       res.status(500).json({ message: "Failed to check security questions status" });
     }
@@ -1447,12 +1456,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const questions = user.securityQuestions as StoredSecurityQuestion[] | null;
-      if (!questions || questions.length < 2) {
+      if (!questions || questions.length < 3) {
         return res.status(404).json({ message: "Security questions have not been set up for this account. Please contact your admin." });
       }
 
+      const shuffled = [...questions].sort(() => Math.random() - 0.5);
+      const challenge = shuffled.slice(0, 2);
+
       res.json({
-        questions: questions.map(q => ({ questionId: q.questionId, questionText: q.questionText })),
+        questions: challenge.map(q => ({ questionId: q.questionId, questionText: q.questionText })),
       });
     } catch (error) {
       console.error("Get security questions error:", error);
@@ -1487,19 +1499,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const questions = user.securityQuestions as StoredSecurityQuestion[] | null;
-      if (!questions || questions.length < 2) {
+      if (!questions || questions.length < 3) {
         return res.status(400).json({ message: "Verification failed. Please check your answers and try again." });
       }
 
       const answersArray = answers as Array<{ questionId: string; answer: string }>;
-      if (!Array.isArray(answersArray) || answersArray.length !== questions.length) {
-        return res.status(400).json({ message: "All security questions must be answered" });
+      if (!Array.isArray(answersArray) || answersArray.length < 2) {
+        return res.status(400).json({ message: "You must answer at least 2 security questions" });
       }
 
       let allCorrect = true;
-      for (const stored of questions) {
-        const submitted = answersArray.find(a => a.questionId === stored.questionId);
-        if (!submitted) { allCorrect = false; break; }
+      for (const submitted of answersArray) {
+        const stored = questions.find(q => q.questionId === submitted.questionId);
+        if (!stored) { allCorrect = false; break; }
         const match = await bcrypt.compare(submitted.answer.trim().toLowerCase(), stored.answerHash);
         if (!match) { allCorrect = false; break; }
       }

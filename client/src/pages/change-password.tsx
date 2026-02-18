@@ -278,6 +278,7 @@ function SecurityQuestionsSetup() {
   const [selectedQuestions, setSelectedQuestions] = useState<Array<{ questionId: string; questionText: string; answer: string }>>([
     { questionId: "", questionText: "", answer: "" },
     { questionId: "", questionText: "", answer: "" },
+    { questionId: "", questionText: "", answer: "" },
   ]);
 
   const statusQuery = useQuery<{ hasSecurityQuestions: boolean }>({
@@ -291,6 +292,7 @@ function SecurityQuestionsSetup() {
       toast({ title: "Saved", description: "Security questions have been updated." });
       queryClient.invalidateQueries({ queryKey: ["/api/auth/security-questions/status"] });
       setSelectedQuestions([
+        { questionId: "", questionText: "", answer: "" },
         { questionId: "", questionText: "", answer: "" },
         { questionId: "", questionText: "", answer: "" },
       ]);
@@ -342,7 +344,7 @@ function SecurityQuestionsSetup() {
           Security Questions
         </CardTitle>
         <CardDescription>
-          Set up security questions to reset your password if you forget it.
+          Set up at least 3 security questions. If you forget your password, you'll be asked to answer 2 of them.
           {statusQuery.data?.hasSecurityQuestions && (
             <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
               Already set up

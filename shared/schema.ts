@@ -700,7 +700,7 @@ export const securityQuestionSetupSchema = z.array(
     questionText: z.string(),
     answer: z.string().min(2, "Answer must be at least 2 characters"),
   })
-).min(2, "You must set up at least 2 security questions").max(3, "Maximum 3 security questions");
+).min(3, "You must set up at least 3 security questions").max(5, "Maximum 5 security questions");
 
 // Password validation schema
 export const passwordValidationSchema = z.string()
