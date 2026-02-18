@@ -168,7 +168,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       integrations: false,
       userManagement: true,
       templateManagement: true,
-      rolePermissions: false,
+      rolePermissions: true,
       fleetManagement: true,
       weeklyOnboarding: true,
       weeklyOffboarding: true,
@@ -426,7 +426,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
   // Admin can access most routes (permissions-based)
   if (userRole === 'admin') {
     // Admin-specific route restrictions
-    const adminRestrictedRoutes = ['/role-permissions', '/integrations'];
+    const adminRestrictedRoutes = ['/integrations'];
     if (adminRestrictedRoutes.includes(route)) {
       return false;
     }

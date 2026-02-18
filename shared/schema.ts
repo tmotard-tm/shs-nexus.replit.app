@@ -17,6 +17,7 @@ export const users = pgTable("users", {
   role: text("role").notNull().default("agent"), // developer, agent (simplified from 9 roles)
   departments: text("departments").array(), // Array of accessible departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET']
   isActive: boolean("is_active").notNull().default(true), // Whether the user can log in
+  permissionOverrides: jsonb("permission_overrides"), // Sparse user-level permission overrides (same structure as RolePermissionSettings, only stores differences)
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => {
   return {

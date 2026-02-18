@@ -1118,6 +1118,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get user permission overrides
+  app.get("/api/users/:id/permission-overrides", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Permission overrides require developer or admin role." });
+      }
+
+      const { id } = req.params;
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (currentUser.role !== 'developer' && targetUser.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can view developer permission overrides." });
+      }
+
+      res.json({ 
+        userId: targetUser.id,
+        username: targetUser.username,
+        role: targetUser.role,
+        permissionOverrides: targetUser.permissionOverrides || null 
+      });
+    } catch (error) {
+      console.error("Error fetching permission overrides:", error);
+      res.status(500).json({ message: "Failed to fetch permission overrides" });
+    }
+  });
+
+  // Set user permission overrides
+  app.patch("/api/users/:id/permission-overrides", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Permission overrides require developer or admin role." });
+      }
+
+      const { id } = req.params;
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (currentUser.role !== 'developer' && targetUser.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can modify developer permission overrides." });
+      }
+
+      if (currentUser.role === 'admin' && targetUser.role === 'admin' && currentUser.id !== targetUser.id) {
+        return res.status(403).json({ message: "Access denied. Admins cannot modify permission overrides for other admins." });
+      }
+
+      const { permissionOverrides } = req.body;
+
+      const updatedUser = await storage.updateUser(id, { permissionOverrides: permissionOverrides || null });
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to update permission overrides" });
+      }
+
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "user_permission_overrides_updated",
+        entityType: "user",
+        entityId: id,
+        details: `${currentUser.username} updated permission overrides for user ${targetUser.username}. Overrides: ${JSON.stringify(permissionOverrides)}`,
+      });
+
+      res.json({ 
+        message: "Permission overrides updated successfully",
+        user: { ...updatedUser, password: undefined }
+      });
+    } catch (error) {
+      console.error("Error updating permission overrides:", error);
+      res.status(500).json({ message: "Failed to update permission overrides" });
+    }
+  });
+
+  // Clear user permission overrides
+  app.delete("/api/users/:id/permission-overrides", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Permission overrides require developer or admin role." });
+      }
+
+      const { id } = req.params;
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (currentUser.role !== 'developer' && targetUser.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can modify developer permission overrides." });
+      }
+
+      const updatedUser = await storage.updateUser(id, { permissionOverrides: null });
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to clear permission overrides" });
+      }
+
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "user_permission_overrides_cleared",
+        entityType: "user",
+        entityId: id,
+        details: `${currentUser.username} cleared all permission overrides for user ${targetUser.username}`,
+      });
+
+      res.json({ 
+        message: "Permission overrides cleared successfully",
+        user: { ...updatedUser, password: undefined }
+      });
+    } catch (error) {
+      console.error("Error clearing permission overrides:", error);
+      res.status(500).json({ message: "Failed to clear permission overrides" });
+    }
+  });
+
   // Forgot Password Initiation (generates temporary reset token and sends email)
   app.post("/api/auth/forgot-password", async (req, res) => {
     try {
