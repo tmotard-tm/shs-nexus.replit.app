@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,8 @@ export function SecurityQuestionsGate() {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
+
+  const gateRef = useRef<HTMLDivElement | null>(null);
 
   if (!user || !requiresSecurityQuestions) return null;
 
@@ -70,7 +72,7 @@ export function SecurityQuestionsGate() {
   const usedQuestionIds = selectedQuestions.map(q => q.questionId).filter(Boolean);
 
   return (
-    <div className="fixed inset-0 z-[9999] bg-background/95 backdrop-blur-sm flex items-center justify-center p-4" data-testid="security-questions-gate">
+    <div ref={(el) => { gateRef.current = el; }} className="fixed inset-0 z-[9999] bg-background/95 backdrop-blur-sm flex items-center justify-center p-4" data-testid="security-questions-gate">
       <Card className="w-full max-w-lg shadow-2xl border-2">
         <CardHeader className="text-center space-y-3">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
@@ -92,7 +94,7 @@ export function SecurityQuestionsGate() {
                 <SelectTrigger data-testid={`gate-select-sq-${idx}`}>
                   <SelectValue placeholder="Select a security question" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent container={gateRef.current}>
                   {PREDEFINED_SECURITY_QUESTIONS.map(q => (
                     <SelectItem
                       key={q.id}
