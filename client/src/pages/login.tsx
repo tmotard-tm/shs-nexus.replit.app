@@ -143,11 +143,16 @@ export default function Login() {
       setResetStep("done");
       toast({ title: "Password Reset", description: "Your password has been reset successfully. You can now log in." });
     } catch (error: any) {
-      toast({
-        title: "Reset Failed",
-        description: error.message || "Invalid or expired token. Please request a new one.",
-        variant: "destructive",
-      });
+      let description = "Invalid or expired token. Please request a new one.";
+      try {
+        const raw = error.message || "";
+        const jsonPart = raw.includes("{") ? raw.substring(raw.indexOf("{")) : "";
+        if (jsonPart) {
+          const parsed = JSON.parse(jsonPart);
+          if (parsed.message) description = parsed.message;
+        }
+      } catch {}
+      toast({ title: "Reset Failed", description, variant: "destructive" });
     } finally {
       setResetLoading(false);
     }
@@ -364,7 +369,7 @@ export default function Login() {
                 <Button 
                   type="button"
                   variant="outline"
-                  onClick={() => { setResetStep("email"); setForgotPasswordSent(false); }}
+                  onClick={() => { setResetStep("email"); setForgotPasswordSent(false); setResetToken(""); setNewPassword(""); setConfirmNewPassword(""); }}
                   className="flex-1"
                   disabled={resetLoading}
                 >
