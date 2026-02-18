@@ -40,7 +40,6 @@ import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
-import VehicleAssignments from "@/pages/vehicle-assignments";
 import FleetManagement from "@/pages/fleet-management";
 import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import WeeklyOffboarding from "@/pages/weekly-offboarding";
@@ -277,12 +276,6 @@ function Router() {
       <Route path="/tech-roster">
         <ProtectedRoute>
           <TechRoster />
-        </ProtectedRoute>
-      </Route>
-
-      <Route path="/vehicle-assignments">
-        <ProtectedRoute>
-          <VehicleAssignments />
         </ProtectedRoute>
       </Route>
 

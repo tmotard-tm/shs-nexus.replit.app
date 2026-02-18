@@ -76,7 +76,6 @@ export interface RolePermissionSettings {
       fleetManagement: boolean;
       weeklyOnboarding: boolean;
       weeklyOffboarding: boolean;
-      vehicleAssignments: boolean;
       communicationHub: boolean;
       techRoster: boolean;
     };
@@ -146,14 +145,6 @@ export interface RolePermissionSettings {
       syncToHolman: boolean;
       unassignVehicle: boolean;
       viewHistory: boolean;
-    };
-    vehicleAssignments: {
-      enabled: boolean;
-      viewAssignments: boolean;
-      createAssignment: boolean;
-      editAssignment: boolean;
-      deleteAssignment: boolean;
-      syncFromTPMS: boolean;
     };
     storageSpots: {
       enabled: boolean;
