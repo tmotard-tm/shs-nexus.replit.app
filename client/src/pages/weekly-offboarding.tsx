@@ -431,6 +431,21 @@ export default function WeeklyOffboarding() {
                     </div>
                   </CardContent>
                 </Card>
+                <Card className="bg-blue-50 dark:bg-blue-950">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Statuses Set</p>
+                        <p className="text-2xl font-bold">
+                          {Object.entries(postOffboardingCounts)
+                            .filter(([key]) => key !== '__none__' && key !== 'not_found')
+                            .reduce((sum, [, count]) => sum + count, 0)}
+                        </p>
+                      </div>
+                      <CheckCircle className="h-8 w-8 text-blue-600" />
+                    </div>
+                  </CardContent>
+                </Card>
                 {postOffboardingCardDefs.filter(def => (postOffboardingCounts[def.key] || 0) > 0).map(def => {
                   const IconComp = def.icon;
                   return (
