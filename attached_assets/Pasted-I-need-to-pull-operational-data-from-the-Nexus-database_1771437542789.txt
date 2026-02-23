@@ -1,0 +1,49 @@
+I need to pull operational data from the Nexus database and Snowflake for an EBITDA impact analysis of the offboarding process redesign. Please query the following and return the results as simple tables. Actual numbers only, no projections.
+
+1. Separation Volume (from all_techs table, sourced from Snowflake PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS)
+
+Query the all_techs table for all records where effectiveDate is in the past (terminated employees). Return:
+
+Total count of terminated technicians
+Monthly breakdown (group by month using effectiveDate), going back as far as data exists
+Monthly average
+If possible, also query PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS directly in Snowflake for a longer historical view (12+ months) since the all_techs table only retains records within a rolling window.
+
+2. Vehicle Type Breakdown (from all_techs or queue_items)
+
+For terminated technicians, how many had each vehicle type? The vehicleType field in offboarding records uses values: sears-fleet, byov, rental. Return counts by type. If vehicleType is stored in the queue_items.data JSON payload rather than all_techs, parse it from there.
+
+3. Task Generation and Completion (from queue_items table)
+
+Query queue_items where workflowType = 'offboarding':
+
+Total tasks generated
+Count by status (pending, in_progress, completed, failed, cancelled)
+Count by department (NTAO, Assets Management, Inventory Control, Fleet Management)
+For completed tasks: average time from createdAt to completedAt (in days), broken down by department
+Count of unique workflowId values (= unique offboarding cases)
+Of those unique workflows: how many have all 4 Day 0 tasks completed? How many have Phase 2 tasks created (workflowStep >= 10)?
+4. Task Duration by Stage (from queue_items)
+
+For offboarding workflows that have at least some completed tasks:
+
+Average days from task createdAt to completedAt, grouped by department
+Average days from task createdAt to firstResponseAt (time to first action), grouped by department
+Longest open task (oldest createdAt where status is still pending or in_progress)
+5. Segno Tool Data (if accessible)
+
+If you have access to Segno data (either via API or Snowflake tables):
+
+Average number of tool records per technician
+If dollar values exist in tool records, average total value per technician
+Total number of tool records in the system
+If Segno data is not accessible from Nexus, just say so and I will request it separately.
+
+6. Automated vs. Manual Step Count
+
+This one you can answer from code knowledge:
+
+How many steps in the offboarding workflow are fully automated (no human action required)?
+How many require manual intervention?
+List each step and label it automated or manual.
+Format: Return each section as a simple markdown table. Include the date range of the data and any caveats (e.g., "development data only," "production data since [date]").
