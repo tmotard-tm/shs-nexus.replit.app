@@ -33,10 +33,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser(freshUserData);
             localStorage.setItem("user", JSON.stringify(freshUserData));
 
-            const sqStatus = await fetch("/api/auth/security-questions/status", { credentials: "include" });
-            if (sqStatus.ok) {
-              const { hasSecurityQuestions } = await sqStatus.json();
-              setRequiresSecurityQuestions(!hasSecurityQuestions);
+            try {
+              const sqStatus = await fetch("/api/auth/security-questions/status", { credentials: "include" });
+              if (sqStatus.ok) {
+                const { hasSecurityQuestions } = await sqStatus.json();
+                setRequiresSecurityQuestions(!hasSecurityQuestions);
+              } else {
+                console.warn("Security questions status check failed, prompting setup as fallback");
+                setRequiresSecurityQuestions(true);
+              }
+            } catch (sqError) {
+              console.warn("Security questions status check error, prompting setup as fallback:", sqError);
+              setRequiresSecurityQuestions(true);
             }
           } else if (response.status === 401) {
             console.log("Session expired, clearing stored user");
