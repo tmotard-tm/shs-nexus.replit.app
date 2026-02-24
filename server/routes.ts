@@ -1925,7 +1925,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (!personalEmail) {
-        return res.status(400).json({ message: "No personal email found for this technician. A personal email is required to send the tool audit notification." });
+        const commTemplate = await storage.getCommunicationTemplateByName('tool-audit-notification');
+        const templateMode = commTemplate?.mode || 'simulated';
+        if (templateMode === 'live') {
+          return res.status(400).json({ message: "No personal email found for this technician. A personal email is required to send the tool audit notification in Live mode." });
+        }
+        personalEmail = `no-email-on-file@technician.placeholder`;
+        console.log(`[Tool Audit] No personal email for ${techName} (${ldapId}). Mode is '${templateMode}' — using placeholder; delivery goes to configured addresses.`);
       }
 
       let firstName = 'Team Member';
