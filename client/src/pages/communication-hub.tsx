@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -98,6 +98,115 @@ function getStatusIcon(status: string) {
     case 'failed': return <X className="h-3 w-3" />;
     default: return null;
   }
+}
+
+function ResizableHistoryTable({ logs, getModeColor, getStatusColor, getStatusIcon }: {
+  logs: CommunicationLog[];
+  getModeColor: (mode: string) => string;
+  getStatusColor: (status: string) => string;
+  getStatusIcon: (status: string) => any;
+}) {
+  const defaultWidths = [140, 180, 260, 110, 180, 300];
+  const [colWidths, setColWidths] = useState(defaultWidths);
+  const resizingCol = useRef<number | null>(null);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
+  const onMouseDown = useCallback((colIndex: number, e: { clientX: number; preventDefault: () => void }) => {
+    e.preventDefault();
+    resizingCol.current = colIndex;
+    startX.current = e.clientX;
+    startWidth.current = colWidths[colIndex];
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (resizingCol.current === null) return;
+      const diff = ev.clientX - startX.current;
+      const newWidth = Math.max(60, startWidth.current + diff);
+      setColWidths(prev => {
+        const next = [...prev];
+        next[resizingCol.current!] = newWidth;
+        return next;
+      });
+    };
+
+    const onMouseUp = () => {
+      resizingCol.current = null;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [colWidths]);
+
+  const headers = ['Time', 'Template', 'Recipient', 'Mode', 'Status', 'Subject'];
+
+  return (
+    <Card>
+      <div className="overflow-x-auto">
+        <table className="w-full" style={{ tableLayout: 'fixed', minWidth: colWidths.reduce((a, b) => a + b, 0) }}>
+          <thead>
+            <tr className="border-b bg-muted/50">
+              {headers.map((header, i) => (
+                <th
+                  key={header}
+                  className="relative text-left font-semibold text-sm text-muted-foreground px-4 py-3"
+                  style={{ width: colWidths[i] }}
+                >
+                  {header}
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40 transition-colors"
+                    onMouseDown={(e) => onMouseDown(i, e)}
+                    style={{ zIndex: 1 }}
+                  />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((log) => (
+              <tr key={log.id} className="border-b hover:bg-muted/30 transition-colors">
+                <td className="px-4 py-3 text-muted-foreground whitespace-nowrap" style={{ width: colWidths[0] }}>
+                  {format(new Date(log.sentAt), 'MMM d, h:mm a')}
+                </td>
+                <td className="px-4 py-3" style={{ width: colWidths[1] }}>
+                  <Badge variant="outline" className="flex items-center gap-1.5 w-fit text-sm py-1 px-2">
+                    {log.type === 'email' ? <Mail className="h-3.5 w-3.5" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                    {log.templateName}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3" style={{ width: colWidths[2] }}>
+                  <div className="font-mono text-sm break-all">{log.intendedRecipient}</div>
+                  {log.actualRecipient && log.actualRecipient !== log.intendedRecipient && (
+                    <div className="text-sm text-muted-foreground mt-0.5">Sent to: {log.actualRecipient}</div>
+                  )}
+                </td>
+                <td className="px-4 py-3" style={{ width: colWidths[3] }}>
+                  <Badge className={`${getModeColor(log.mode)} text-sm py-1 px-2`}>{log.mode}</Badge>
+                </td>
+                <td className="px-4 py-3" style={{ width: colWidths[4] }}>
+                  <Badge className={`${getStatusColor(log.status)} flex items-center gap-1.5 w-fit text-sm py-1 px-2`}>
+                    {getStatusIcon(log.status)}
+                    {log.status}
+                  </Badge>
+                  {log.errorMessage && (
+                    <div className="text-sm text-red-500 mt-1">{log.errorMessage}</div>
+                  )}
+                </td>
+                <td className="px-4 py-3" style={{ width: colWidths[5] }} title={log.subject || undefined}>
+                  <div className="break-words">{log.subject || '-'}</div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
 }
 
 export default function CommunicationHub() {
@@ -432,56 +541,7 @@ export default function CommunicationHub() {
               </CardContent>
             </Card>
           ) : (
-            <Card>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Time</TableHead>
-                    <TableHead>Template</TableHead>
-                    <TableHead>Recipient</TableHead>
-                    <TableHead>Mode</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Subject</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {logs.map((log) => (
-                    <TableRow key={log.id}>
-                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                        {format(new Date(log.sentAt), 'MMM d, h:mm a')}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="flex items-center gap-1 w-fit">
-                          {log.type === 'email' ? <Mail className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
-                          {log.templateName}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-mono text-sm">{log.intendedRecipient}</div>
-                        {log.actualRecipient && log.actualRecipient !== log.intendedRecipient && (
-                          <div className="text-xs text-muted-foreground">Sent to: {log.actualRecipient}</div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={getModeColor(log.mode)}>{log.mode}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={`${getStatusColor(log.status)} flex items-center gap-1 w-fit`}>
-                          {getStatusIcon(log.status)}
-                          {log.status}
-                        </Badge>
-                        {log.errorMessage && (
-                          <div className="text-xs text-red-500 mt-1">{log.errorMessage}</div>
-                        )}
-                      </TableCell>
-                      <TableCell className="max-w-[200px] truncate" title={log.subject || undefined}>
-                        {log.subject || '-'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
+            <ResizableHistoryTable logs={logs} getModeColor={getModeColor} getStatusColor={getStatusColor} getStatusIcon={getStatusIcon} />
           )}
         </TabsContent>
       </Tabs>
