@@ -21,24 +21,26 @@ interface EmailParams {
   html?: string;
 }
 
-export async function sendEmail(params: EmailParams): Promise<boolean> {
-  // Use the verified sender if no from address provided or if the from address isn't verified
+export interface EmailResult {
+  success: boolean;
+  error?: string;
+}
+
+export async function sendEmail(params: EmailParams): Promise<EmailResult> {
   const fromEmail = params.from || DEFAULT_FROM_EMAIL;
   
-  // Ensure we have valid content - SendGrid requires non-empty content
   const textContent = params.text || (params.html ? params.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : 'Please view this email in an HTML-capable email client.');
   const htmlContent = params.html || params.text || textContent;
   
   const msg = {
     to: params.to,
-    from: DEFAULT_FROM_EMAIL, // Always use verified sender
+    from: DEFAULT_FROM_EMAIL,
     replyTo: fromEmail !== DEFAULT_FROM_EMAIL ? fromEmail : undefined,
     subject: params.subject,
     text: textContent,
     html: htmlContent,
   };
 
-  // If no API key, log the email but return false to indicate it wasn't sent
   if (!apiKey) {
     console.warn('========================================');
     console.warn('EMAIL NOT SENT - SENDGRID_API_KEY not configured');
@@ -50,19 +52,32 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
     console.warn('Message would have been:');
     console.warn(msg.text);
     console.warn('========================================');
-    return false;
+    return { success: false, error: 'SendGrid API key not configured' };
   }
 
   try {
     await sgMail.send(msg);
     console.log(`Email sent successfully to ${params.to}: ${params.subject}`);
-    return true;
+    return { success: true };
   } catch (error: any) {
     console.error('SendGrid email error:', error);
-    if (error.response) {
-      console.error('SendGrid error details:', error.response.body);
+    let errorDetail = 'Unknown SendGrid error';
+    if (error.response?.body) {
+      const body = error.response.body;
+      if (body.errors && Array.isArray(body.errors) && body.errors.length > 0) {
+        errorDetail = body.errors.map((e: any) => e.message || e.field || JSON.stringify(e)).join('; ');
+      } else if (body.message) {
+        errorDetail = body.message;
+      } else if (typeof body === 'string') {
+        errorDetail = body;
+      } else {
+        errorDetail = JSON.stringify(body);
+      }
+    } else if (error.message) {
+      errorDetail = error.message;
     }
-    return false;
+    console.error('SendGrid error details:', errorDetail);
+    return { success: false, error: errorDetail };
   }
 }
 

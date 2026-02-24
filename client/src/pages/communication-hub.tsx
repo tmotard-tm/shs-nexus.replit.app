@@ -106,7 +106,7 @@ function ResizableHistoryTable({ logs, getModeColor, getStatusColor, getStatusIc
   getStatusColor: (status: string) => string;
   getStatusIcon: (status: string) => any;
 }) {
-  const defaultWidths = [140, 180, 260, 110, 180, 300];
+  const defaultWidths = [140, 180, 260, 110, 280, 300];
   const [colWidths, setColWidths] = useState(defaultWidths);
   const resizingCol = useRef<number | null>(null);
   const startX = useRef(0);
@@ -194,7 +194,9 @@ function ResizableHistoryTable({ logs, getModeColor, getStatusColor, getStatusIc
                     {log.status}
                   </Badge>
                   {log.errorMessage && (
-                    <div className="text-sm text-red-500 mt-1">{log.errorMessage}</div>
+                    <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5 break-words">
+                      <span className="font-semibold">Reason: </span>{log.errorMessage}
+                    </div>
                   )}
                 </td>
                 <td className="px-4 py-3" style={{ width: colWidths[5] }} title={log.subject || undefined}>

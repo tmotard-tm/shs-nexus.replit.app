@@ -114,25 +114,28 @@ export async function sendCommunication(options: SendOptions): Promise<SendResul
       console.log(`[COMMUNICATION - WHITELISTED] Original recipient: ${recipient}. Redirecting to whitelisted addresses: ${whitelistAddresses.join(', ')}`);
       
       if (template.type === 'email') {
-        let allSent = true;
         const sentTo: string[] = [];
+        const failedDetails: string[] = [];
         for (const whitelistAddr of whitelistAddresses) {
-          const sent = await sendEmail({
+          const result = await sendEmail({
             to: whitelistAddr,
             from: 'stephen.wong@transformco.com',
             subject: `[TEST - Original recipient: ${recipient}] ${renderedSubject || 'Notification'}`,
             html: renderedHtml || undefined,
             text: renderedText,
           });
-          if (sent) {
+          if (result.success) {
             sentTo.push(whitelistAddr);
           } else {
-            allSent = false;
+            failedDetails.push(`${whitelistAddr}: ${result.error || 'Unknown error'}`);
           }
         }
         status = sentTo.length > 0 ? 'sent' : 'failed';
         actualRecipient = sentTo.length > 0 ? sentTo.join(', ') : null;
-        if (!allSent) errorMessage = `Some deliveries failed. Sent to: ${sentTo.join(', ')}`;
+        if (failedDetails.length > 0) {
+          errorMessage = failedDetails.join('; ');
+          if (sentTo.length > 0) errorMessage = `Partial success (sent to: ${sentTo.join(', ')}). Failures: ${failedDetails.join('; ')}`;
+        }
       } else {
         console.log(`[COMMUNICATION] SMS not yet implemented`);
         status = 'simulated';
@@ -143,16 +146,16 @@ export async function sendCommunication(options: SendOptions): Promise<SendResul
     console.log(`[COMMUNICATION - LIVE] Sending ${template.type} to: ${recipient}`);
     
     if (template.type === 'email') {
-      const sent = await sendEmail({
+      const result = await sendEmail({
         to: recipient,
         from: 'stephen.wong@transformco.com',
         subject: renderedSubject || 'Notification',
         html: renderedHtml || undefined,
         text: renderedText,
       });
-      status = sent ? 'sent' : 'failed';
-      actualRecipient = sent ? recipient : null;
-      if (!sent) errorMessage = 'Email delivery failed';
+      status = result.success ? 'sent' : 'failed';
+      actualRecipient = result.success ? recipient : null;
+      if (!result.success) errorMessage = result.error || 'Email delivery failed';
     } else {
       console.log(`[COMMUNICATION] SMS not yet implemented`);
       status = 'simulated';
