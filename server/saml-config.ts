@@ -24,7 +24,7 @@ export function getBaseUrl(): string {
 export function getSamlConfig(): SamlConfig {
   const baseUrl = getBaseUrl();
   const callbackUrl = `${baseUrl}/auth/saml/acs`;
-  const entityId = process.env.SAML_SP_ENTITY_ID || `${baseUrl}/auth/saml/metadata`;
+  const entityId = process.env.SAML_SP_ENTITY_ID || "nexus-app";
 
   return {
     callbackUrl,
@@ -32,7 +32,7 @@ export function getSamlConfig(): SamlConfig {
     issuer: entityId,
     idpCert: IDP_CERT,
     logoutUrl: IDP_SLO_URL,
-    identifierFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
+    identifierFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
     wantAssertionsSigned: true,
     wantAuthnResponseSigned: false,
     acceptedClockSkewMs: 5 * 60 * 1000,
@@ -101,7 +101,7 @@ export function generateSpMetadata(strategy: SamlStrategy): string {
   return `<?xml version="1.0"?>
 <md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="${entityId}">
   <md:SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol" AuthnRequestsSigned="false" WantAssertionsSigned="true">
-    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</md:NameIDFormat>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
     <md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="${acsUrl}" index="1" isDefault="true"/>
     <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="${baseUrl}/auth/logout"/>
   </md:SPSSODescriptor>
@@ -123,7 +123,7 @@ export function printSpDetails(): void {
   console.log(`2. Entity ID: ${config.issuer}`);
   console.log(`3. Relay State URL: ${baseUrl}`);
   console.log("4. NameID: uid (enterprise id)");
-  console.log("5. NameID Format: urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified");
+  console.log("5. NameID Format: urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress");
   console.log(`6. Metadata URL: ${baseUrl}/auth/saml/metadata`);
   console.log(`7. IdP SSO URL: ${IDP_SSO_URL}`);
   console.log(`8. IdP SLO URL: ${IDP_SLO_URL}`);
