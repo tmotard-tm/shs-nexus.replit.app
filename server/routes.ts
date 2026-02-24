@@ -1884,6 +1884,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/assets-queue/:id/send-tool-audit", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
+
+      const queueItem = await storage.getAssetsQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Assets queue item not found" });
+      }
+
+      const parsedData = typeof queueItem.data === 'string'
+        ? JSON.parse(queueItem.data)
+        : queueItem.data || {};
+
+      const tech = parsedData.technician || parsedData.employee || {};
+      const hr = parsedData.hrSeparation || {};
+      const roster = parsedData.rosterContact || {};
+
+      const techName = tech.techName || tech.name || tech.technicianName || hr.technicianName || queueItem.title || "Team Member";
+      const ldapId = tech.enterpriseId || tech.ldapId || hr.ldapId || tech.techRacfid || "";
+      let personalEmail = tech.personalEmail || hr.personalEmail || roster.personalEmail || tech.email || "";
+      const lastDay = hr.lastDay || tech.lastDayWorked || tech.separationDate || "your scheduled last day";
+
+      if (!personalEmail && ldapId) {
+        try {
+          const allTechRecord = await storage.getAllTechByTechRacfid(ldapId);
+          if (allTechRecord) {
+            personalEmail = (allTechRecord as any).personalEmail || (allTechRecord as any).email || "";
+          }
+        } catch (e) {
+          console.warn('[Tool Audit] Could not look up enriched tech data:', e);
+        }
+      }
+
+      if (!ldapId) {
+        return res.status(400).json({ message: "No enterprise ID found for this technician" });
+      }
+
+      if (!personalEmail) {
+        return res.status(400).json({ message: "No personal email found for this technician. A personal email is required to send the tool audit notification." });
+      }
+
+      let firstName = 'Team Member';
+      if (techName.includes(',')) {
+        const afterComma = techName.split(',')[1]?.trim().split(/\s+/)[0];
+        if (afterComma) firstName = afterComma;
+      } else {
+        const firstToken = techName.trim().split(/\s+/)[0];
+        if (firstToken) firstName = firstToken;
+      }
+
+      const { sendToolAuditNotification } = await import("./notification-service");
+      const result = await sendToolAuditNotification({
+        email: personalEmail,
+        firstName: firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
+        technicianName: techName,
+        lastDay,
+        ldapId,
+      });
+
+      if (result.success) {
+        await storage.updateAssetsQueueItem(req.params.id, { toolAuditNotificationSent: true, toolAuditNotificationSentAt: new Date() });
+      }
+
+      res.json({
+        success: result.success,
+        testMode: result.testMode,
+        intendedRecipient: result.intendedRecipient,
+        actualRecipient: result.actualRecipient,
+        error: result.error,
+        techName,
+        ldapId,
+      });
+    } catch (error) {
+      console.error('Error sending tool audit notification:', error);
+      res.status(500).json({ message: "Failed to send tool audit notification" });
+    }
+  });
+
   app.get("/api/assets-queue/:id/contact", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);

@@ -48,8 +48,70 @@ import {
   Check,
   Save,
   Edit3,
+  Send,
 } from "lucide-react";
 
+
+function SendToolAuditButton({ itemId, techData }: { itemId: string; techData?: any }) {
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/assets-queue/${itemId}/send-tool-audit`);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast({
+          title: "Tool Audit Notification Sent",
+          description: `Sent to ${data.actualRecipient}${data.testMode ? ' (simulated)' : ''}`,
+        });
+        queryClient.invalidateQueries({ queryKey: ['/api/assets-queue'] });
+      } else {
+        toast({
+          title: "Failed to Send",
+          description: data.error || "Unknown error",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: any) => {
+      let message = "Failed to send tool audit notification";
+      if (error?.message) {
+        const match = error.message.match(/^\d+:\s*(.+)/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[1]);
+            message = parsed.message || message;
+          } catch {
+            message = match[1];
+          }
+        } else {
+          message = error.message;
+        }
+      }
+      toast({ title: "Error", description: message, variant: "destructive" });
+    },
+  });
+
+  const hasEmail = techData?.personalEmail || techData?.email;
+
+  return (
+    <Button
+      variant="outline"
+      className="w-full justify-start"
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+    >
+      {mutation.isPending ? (
+        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+      ) : (
+        <Send className="h-4 w-4 mr-2" />
+      )}
+      {mutation.isPending ? "Sending..." : "Send Tool Audit Notification"}
+      {!hasEmail && <Badge variant="secondary" className="ml-auto text-xs">No Email</Badge>}
+    </Button>
+  );
+}
 
 interface VehicleLocation {
   lat?: number;
@@ -543,15 +605,7 @@ export function AssetsTaskDetailView({
               </a>
             </Button>
 
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              disabled
-            >
-              <Mail className="h-4 w-4 mr-2" />
-              Send Reminder Email
-              <Badge variant="secondary" className="ml-auto text-xs">Coming Soon</Badge>
-            </Button>
+            <SendToolAuditButton itemId={item.id} techData={item.techData} />
 
             <Button
               variant="outline"
