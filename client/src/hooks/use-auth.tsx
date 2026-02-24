@@ -54,6 +54,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.warn("Error verifying session:", response.status, response.statusText);
             setUser(parsedUser);
           }
+        } else {
+          // SAML SSO INTEGRATION - Check if we have a valid session cookie from SSO
+          try {
+            const ssoRes = await fetch("/api/auth/sso-user", { credentials: "include" });
+            if (ssoRes.ok) {
+              const data = await ssoRes.json();
+              setUser(data.user);
+              localStorage.setItem("user", JSON.stringify(data.user));
+              setRequiresSecurityQuestions(!!data.requiresSecurityQuestions);
+            }
+          } catch {
+            // No SSO session - that's fine
+          }
         }
       } catch (error) {
         console.error("Session verification error:", error);
@@ -103,7 +116,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setRequiresSecurityQuestions(false);
     localStorage.removeItem("user");
-    window.location.href = "/login";
+    // SAML SSO INTEGRATION - Redirect to IdP logout
+    window.location.href = "/auth/logout";
   };
 
   const clearSecurityQuestionsRequirement = () => {

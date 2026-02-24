@@ -6,34 +6,40 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Settings, Eye, EyeOff, Loader2, Shield, AlertCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
-// Validates the next URL parameter to prevent open redirect attacks
 function validateNextUrl(next: string | null): string {
   if (!next) return '/';
   
   try {
-    // Create absolute URL to test origin
     const url = new URL(next, window.location.origin);
     
-    // Only allow same-origin paths
     if (url.origin !== window.location.origin) {
       return '/';
     }
     
-    // Prevent redirect back to login
     if (url.pathname === '/login') {
       return '/';
     }
     
-    // Return the validated path with query and hash
     return `${url.pathname}${url.search}${url.hash}`;
   } catch {
-    // Invalid URL format
     return '/';
   }
+}
+
+function getSsoErrorMessage(error: string | null): string | null {
+  if (!error) return null;
+  const messages: Record<string, string> = {
+    sso_failed: "SSO authentication failed. Please try again or contact your administrator.",
+    user_not_found: "Your enterprise account was not found in this application. Please contact your administrator.",
+    sso_session_failed: "SSO sign-in completed but session could not be established. Please try again.",
+    session_creation_failed: "An error occurred during sign-in. Please try again.",
+  };
+  return messages[error] || "An unexpected error occurred during sign-in.";
 }
 
 export default function Login() {
@@ -41,11 +47,11 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showManualLogin, setShowManualLogin] = useState(false);
   const { login } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
-  // Forgot password / security questions state
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetStep, setResetStep] = useState<"username" | "questions" | "done">("username");
   const [resetUsername, setResetUsername] = useState("");
@@ -56,6 +62,15 @@ export default function Login() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
 
+  // SAML SSO INTEGRATION - Check for SSO error in URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const ssoError = getSsoErrorMessage(urlParams.get("error"));
+
+  const handleSsoLogin = () => {
+    const nextUrl = urlParams.get('next') || '/';
+    window.location.href = `/auth/login?next=${encodeURIComponent(nextUrl)}`;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -63,8 +78,6 @@ export default function Login() {
     try {
       const success = await login(enterpriseId, password);
       if (success) {
-        // Read the next parameter from URL and redirect to intended destination
-        const urlParams = new URLSearchParams(window.location.search);
         const nextUrl = urlParams.get('next');
         setLocation(validateNextUrl(nextUrl));
       } else {
@@ -179,70 +192,115 @@ export default function Login() {
             Enterprise task management operations platform designed to automate repetitive tasks, centralize scattered information, and synchronize updates across multiple systems.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="enterpriseId">Enterprise ID</Label>
-              <Input
-                id="enterpriseId"
-                type="text"
-                value={enterpriseId}
-                onChange={(e) => setEnterpriseId(e.target.value)}
-                placeholder="Enter your Enterprise ID"
-                required
-                data-testid="input-enterprise-id"
-              />
+        <CardContent className="space-y-4">
+          {ssoError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{ssoError}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* SAML SSO INTEGRATION - Primary SSO login button */}
+          <Button
+            onClick={handleSsoLogin}
+            className="w-full h-11"
+            variant="default"
+            data-testid="button-sso-login"
+          >
+            <Shield className="mr-2 h-4 w-4" />
+            Sign In with Enterprise SSO
+          </Button>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  required
-                  data-testid="input-password"
-                  className="pr-10"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                  onClick={() => setShowPassword(!showPassword)}
-                  data-testid="button-toggle-password"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4 text-gray-500" />
-                  ) : (
-                    <Eye className="h-4 w-4 text-gray-500" />
-                  )}
-                </Button>
-              </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                {showManualLogin ? "or" : ""}
+              </span>
             </div>
-            <Button 
-              type="submit" 
-              className="w-full" 
-              disabled={isLoading}
-              data-testid="button-login"
-            >
-              {isLoading ? "Signing in..." : "Sign In"}
-            </Button>
-          </form>
-          
-          <div className="mt-4 text-center">
-            <button
-              type="button"
-              className="text-sm text-primary hover:underline cursor-pointer"
-              data-testid="link-forgot-password"
-              onClick={() => setShowForgotPassword(true)}
-            >
-              Forgot Password?
-            </button>
           </div>
+
+          {!showManualLogin ? (
+            <div className="text-center">
+              <button
+                type="button"
+                className="text-sm text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                onClick={() => setShowManualLogin(true)}
+                data-testid="link-manual-login"
+              >
+                Use Enterprise ID & Password instead
+              </button>
+            </div>
+          ) : (
+            <>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="enterpriseId">Enterprise ID</Label>
+                  <Input
+                    id="enterpriseId"
+                    type="text"
+                    value={enterpriseId}
+                    onChange={(e) => setEnterpriseId(e.target.value)}
+                    placeholder="Enter your Enterprise ID"
+                    required
+                    data-testid="input-enterprise-id"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      required
+                      data-testid="input-password"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowPassword(!showPassword)}
+                      data-testid="button-toggle-password"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4 text-gray-500" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-gray-500" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                <Button 
+                  type="submit" 
+                  className="w-full" 
+                  disabled={isLoading}
+                  variant="outline"
+                  data-testid="button-login"
+                >
+                  {isLoading ? "Signing in..." : "Sign In with Password"}
+                </Button>
+              </form>
+              
+              <div className="text-center">
+                <button
+                  type="button"
+                  className="text-sm text-primary hover:underline cursor-pointer"
+                  data-testid="link-forgot-password"
+                  onClick={() => setShowForgotPassword(true)}
+                >
+                  Forgot Password?
+                </button>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 

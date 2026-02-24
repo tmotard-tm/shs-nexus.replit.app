@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" entityID="sso.searshc.com/nexus">
+  <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>
+MIIEETCCAvmgAwIBAgIJAJ77RDuevC3xMA0GCSqGSIb3DQEBCwUAMIGeMQswCQYDVQQGEwJVUzELMAkGA1UECAwCSUwxGDAWBgNVBAcMD0hPRkZNQU4gRVNUQVRFUzEdMBsGA1UECgwUU0VBUlMgSE9MRElOR1MgQ09SUC4xDDAKBgNVBAsMA1NTTzEYMBYGA1UEAwwPc3NvLnNlYXJzaGMuY29tMSEwHwYJKoZIhvcNAQkBFhJ3ZWJhZG1Ac2VhcnNoYy5jb20wHhcNMTcwNDA1MTgxNzE3WhcNMzcwMzMxMTgxNzE3WjCBnjELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAklMMRgwFgYDVQQHDA9IT0ZGTUFOIEVTVEFURVMxHTAbBgNVBAoMFFNFQVJTIEhPTERJTkdTIENPUlAuMQwwCgYDVQQLDANTU08xGDAWBgNVBAMMD3Nzby5zZWFyc2hjLmNvbTEhMB8GCSqGSIb3DQEJARYSd2ViYWRtQHNlYXJzaGMuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnWgxPG2Kd8eO/UhMaSA9GR4IkJNaAIln59NatIcGBWuTmhcay3QGrgiw71CSumMSnIYawKw2YDworsQi1K9ep3+4y9qs4QgcohkFc/WgnEblgkqghbHUUldb8Pt9pxixihPQ1Rdh9lxzZhP6iTS7SpIJlUmy60g6OpMwxHcXKA7sjoiD6DT5+lo4jxk6Y1aWgvnnDGHgstzNhldn1SH8rmbuUkXKGbe9VBovWnSYbyh7G5iI3zW8AUmiqzxK+epHYPXedjSGTmaaX/s2w4jwSnVOr01lflL24P6P+9WISzBKueLdLAtebQMvfZibtBct2BgDGZYO/NNj/w1BPrENVwIDAQABo1AwTjAdBgNVHQ4EFgQUisDlFxO8bxq2P0qBSpoM2Atwn5IwHwYDVR0jBBgwFoAUisDlFxO8bxq2P0qBSpoM2Atwn5IwDAYDVR0TBAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAl/qf37LuAgLFczr8OdMkImXkyFbaqKq2gP0idsdJdyiOTc/ReridZaflguBt4i/AKNqtLtYSGnSjLGWQvU+XcPHYhFACmoIb+G/i6h33a8kMqQ7RPXVuQm+/UFSnS0rUPVmh3bpzSvtnyXyJjiQUcTAE+oQAgO9kUSLqylgtp3QYvvfGx++7XZuO4rPRCEMzDON+1qiCan2XUgIM6NIpIJaFCuAqW44GczU5Y73mXKniDG2d/BS0Berlqt2FOdLraF9sKc2qODH9+gjwg31fWXTENHNBZljmyIWcOAPD0Qy9Rrjry6hRS344QKqpveUyik1Im8EAs5iFzUFaren3TQ==
+</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+    <md:KeyDescriptor use="encryption">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+<ds:X509Certificate>
+MIIEETCCAvmgAwIBAgIJAJ77RDuevC3xMA0GCSqGSIb3DQEBCwUAMIGeMQswCQYDVQQGEwJVUzELMAkGA1UECAwCSUwxGDAWBgNVBAcMD0hPRkZNQU4gRVNUQVRFUzEdMBsGA1UECgwUU0VBUlMgSE9MRElOR1MgQ09SUC4xDDAKBgNVBAsMA1NTTzEYMBYGA1UEAwwPc3NvLnNlYXJzaGMuY29tMSEwHwYJKoZIhvcNAQkBFhJ3ZWJhZG1Ac2VhcnNoYy5jb20wHhcNMTcwNDA1MTgxNzE3WhcNMzcwMzMxMTgxNzE3WjCBnjELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAklMMRgwFgYDVQQHDA9IT0ZGTUFOIEVTVEFURVMxHTAbBgNVBAoMFFNFQVJTIEhPTERJTkdTIENPUlAuMQwwCgYDVQQLDANTU08xGDAWBgNVBAMMD3Nzby5zZWFyc2hjLmNvbTEhMB8GCSqGSIb3DQEJARYSd2ViYWRtQHNlYXJzaGMuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnWgxPG2Kd8eO/UhMaSA9GR4IkJNaAIln59NatIcGBWuTmhcay3QGrgiw71CSumMSnIYawKw2YDworsQi1K9ep3+4y9qs4QgcohkFc/WgnEblgkqghbHUUldb8Pt9pxixihPQ1Rdh9lxzZhP6iTS7SpIJlUmy60g6OpMwxHcXKA7sjoiD6DT5+lo4jxk6Y1aWgvnnDGHgstzNhldn1SH8rmbuUkXKGbe9VBovWnSYbyh7G5iI3zW8AUmiqzxK+epHYPXedjSGTmaaX/s2w4jwSnVOr01lflL24P6P+9WISzBKueLdLAtebQMvfZibtBct2BgDGZYO/NNj/w1BPrENVwIDAQABo1AwTjAdBgNVHQ4EFgQUisDlFxO8bxq2P0qBSpoM2Atwn5IwHwYDVR0jBBgwFoAUisDlFxO8bxq2P0qBSpoM2Atwn5IwDAYDVR0TBAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAl/qf37LuAgLFczr8OdMkImXkyFbaqKq2gP0idsdJdyiOTc/ReridZaflguBt4i/AKNqtLtYSGnSjLGWQvU+XcPHYhFACmoIb+G/i6h33a8kMqQ7RPXVuQm+/UFSnS0rUPVmh3bpzSvtnyXyJjiQUcTAE+oQAgO9kUSLqylgtp3QYvvfGx++7XZuO4rPRCEMzDON+1qiCan2XUgIM6NIpIJaFCuAqW44GczU5Y73mXKniDG2d/BS0Berlqt2FOdLraF9sKc2qODH9+gjwg31fWXTENHNBZljmyIWcOAPD0Qy9Rrjry6hRS344QKqpveUyik1Im8EAs5iFzUFaren3TQ==
+</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+<!-- Single Logout is supported but it must be initiated at the Idp with a URL of https://sso.searshc.com/idp-nexus/saml2/idp/initSLO.php?RelayState=https://sso.searshc.com/nexus-->
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:transient</md:NameIDFormat>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://sso.searshc.com/idp-nexus/saml2/idp/SSOService.php"/>
+    <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://sso.searshc.com/idp-nexus/saml2/idp/initSLO.php"/>
+    <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://sso.searshc.com/idp-nexus/saml2/idp/initSLO.php"/>
+  </md:IDPSSODescriptor>
+  <md:ContactPerson contactType="technical">
+    <md:GivenName>SSO</md:GivenName>
+    <md:SurName>Administrator</md:SurName>
+    <md:EmailAddress>webadm@searshc.com</md:EmailAddress>
+  </md:ContactPerson>
+</md:EntityDescriptor>

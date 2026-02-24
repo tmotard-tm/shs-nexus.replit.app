@@ -21,6 +21,9 @@ import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignmen
 import { holmanApiService } from "./holman-api-service";
 import { pmfApiService } from "./pmf-api-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
+// SAML SSO INTEGRATION
+import passport from "passport";
+import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
 
 // Initialize session cleanup on startup
 try {
@@ -437,7 +440,102 @@ const upload = multer({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   console.log("=== STARTING ROUTE REGISTRATION ===");
-  
+
+  // SAML SSO INTEGRATION - Initialize passport and SAML strategy
+  const samlStrategy = createSamlStrategy();
+  passport.use("saml", samlStrategy);
+  passport.serializeUser((user: any, done: any) => done(null, user));
+  passport.deserializeUser((user: any, done: any) => done(null, user));
+  app.use(passport.initialize());
+  printSpDetails();
+
+  // SAML SSO INTEGRATION - Auth endpoints
+  app.get("/auth/login", (req, res, next) => {
+    const relayState = req.query.next as string || "/";
+    passport.authenticate("saml", {
+      failureRedirect: "/login?error=sso_failed",
+      additionalParams: { RelayState: relayState },
+    } as any)(req, res, next);
+  });
+
+  app.post("/auth/saml/acs", passport.authenticate("saml", { session: false, failureRedirect: "/login?error=sso_failed" }), async (req: any, res) => {
+    try {
+      const user = req.user;
+      if (!user || !user.id) {
+        console.error("[SAML SSO] ACS callback - no user in request");
+        return res.redirect("/login?error=user_not_found");
+      }
+
+      const sessionId = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      await storage.createSession({
+        id: sessionId,
+        userId: user.id,
+        username: user.username,
+        expiresAt
+      });
+
+      res.cookie('sessionId', sessionId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        expires: expiresAt,
+        path: '/'
+      });
+
+      console.log(`[SAML SSO] Session created for user: ${user.username}`);
+
+      const relayState = req.body.RelayState || "/";
+      res.redirect(`/sso-callback?relay=${encodeURIComponent(relayState)}`);
+    } catch (error) {
+      console.error("[SAML SSO] Error in ACS callback:", error);
+      res.redirect("/login?error=session_creation_failed");
+    }
+  });
+
+  app.get("/auth/saml/metadata", (_req, res) => {
+    const metadata = generateSpMetadata(samlStrategy);
+    res.type("application/xml");
+    res.send(metadata);
+  });
+
+  app.get("/auth/logout", async (req: any, res) => {
+    const cookieHeader = req.headers.cookie;
+    const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
+    if (sessionId) {
+      try { await storage.deleteSession(sessionId); } catch {}
+    }
+    res.clearCookie('sessionId', { path: '/' });
+
+    const idpSloUrl = "https://sso.searshc.com/idp-nexus/saml2/idp/initSLO.php";
+    const baseUrl = getBaseUrl();
+    const relayState = encodeURIComponent(`${baseUrl}/login`);
+    res.redirect(`${idpSloUrl}?RelayState=${relayState}`);
+  });
+
+  app.get("/api/auth/sso-user", requireAuth, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const sq = user.securityQuestions as StoredSecurityQuestion[] | null;
+      const hasSecurityQuestions = !!(sq && sq.length >= 3);
+      res.json({
+        user: {
+          ...user,
+          password: undefined,
+          securityQuestions: hasSecurityQuestions ? sq!.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+        },
+        requiresSecurityQuestions: !hasSecurityQuestions,
+      });
+    } catch (error) {
+      console.error("[SAML SSO] Error fetching SSO user:", error);
+      res.status(500).json({ message: "Failed to fetch user data" });
+    }
+  });
+
   // Auth routes
   console.log("Registering auth routes...");
   app.post("/api/auth/login", loginRateLimiter, async (req, res) => {

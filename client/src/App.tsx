@@ -17,6 +17,8 @@ import { OnboardingOverlay } from "@/components/onboarding-overlay";
 import { PreviewModeBanner } from "@/components/preview-mode-banner";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
+// SAML SSO INTEGRATION
+import SsoCallback from "@/pages/sso-callback";
 import AssistanceSelection from "@/pages/assistance-selection";
 import CreateVehicle from "@/pages/create-vehicle-location";
 import AssignVehicleLocation from "@/pages/assign-vehicle-location";
@@ -78,6 +80,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/login" component={Login} />
+      {/* SAML SSO INTEGRATION */}
+      <Route path="/sso-callback" component={SsoCallback} />
       
       <Route path="/">
         <ProtectedRoute>

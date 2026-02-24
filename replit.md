@@ -30,7 +30,8 @@ Preferred communication style: Simple, everyday language.
 -   **Database ORM**: Drizzle ORM with PostgreSQL dialect
 -   **Validation**: Zod schemas (shared with client)
 -   **API Design**: RESTful
--   **Authentication**: Simple credential-based with session management via cookies
+-   **Authentication**: SAML SSO (primary) + credential-based fallback, session management via cookies
+-   **SAML Library**: @node-saml/passport-saml with passport.js
 
 ## Data Storage
 -   **Database**: PostgreSQL with Neon serverless driver
@@ -38,7 +39,8 @@ Preferred communication style: Simple, everyday language.
 -   **Migrations**: Drizzle Kit
 
 ## Authentication & Authorization
--   **Authentication**: Username/password, session management via cookies.
+-   **Authentication**: SAML SSO via custom IdP (sso.searshc.com) as primary login, username/password as fallback. Session management via httpOnly cookies.
+-   **SAML SSO**: IdP Entity ID `sso.searshc.com/nexus`, NameID maps to `username` field (enterprise ID). Routes: `GET /auth/login` (initiate), `POST /auth/saml/acs` (callback), `GET /auth/saml/metadata` (SP metadata), `GET /auth/logout` (SLO). Config in `server/saml-config.ts`.
 -   **Authorization**: Role-based access control (Developer, Admin, Agent) with department assignments.
 -   **Role Permissions System**: Granular UI visibility control for pages, sections, features, and actions, managed via a hierarchical checkbox tree and stored in a `role_permissions` JSONB column.
 
@@ -111,18 +113,30 @@ Preferred communication style: Simple, everyday language.
 - **Routes**: `GET /api/reports` (data aggregation), `POST /api/reports/chat` (AI analysis)
 - **Page registry**: Added under "dashboards" category with `reporting` permission key.
 
+## Sprint 18 — In Progress (2026-02-24)
+- **SAML SSO Integration**: Implemented SAML 2.0 Service Provider using `@node-saml/passport-saml` with custom IdP at `sso.searshc.com/nexus`.
+- **SSO Flow**: `GET /auth/login` initiates SAML AuthnRequest, `POST /auth/saml/acs` handles assertion callback with session creation, `GET /auth/saml/metadata` serves SP metadata XML, `GET /auth/logout` destroys session and redirects to IdP SLO.
+- **User mapping**: NameID (enterprise ID) maps to `username` field via case-insensitive lookup. No auto-provisioning — user must exist in database.
+- **Login page**: SSO button as primary login, password-based login collapsed as fallback option. SSO error messages displayed via URL parameters.
+- **SSO callback page**: `/sso-callback` route handles post-SSO redirect, fetches user data via `/api/auth/sso-user`, stores in localStorage.
+- **Logout**: Destroys local session cookie and redirects to IdP SLO URL with RelayState back to login page.
+- **Config**: `server/saml-config.ts` — IdP cert, SSO/SLO URLs, SP entity ID. Base URL auto-detected from Replit environment. Override with `SAML_BASE_URL` env var for production.
+- **Files**: `server/saml-config.ts`, `client/src/pages/sso-callback.tsx` (new); `server/routes.ts`, `client/src/hooks/use-auth.tsx`, `client/src/pages/login.tsx`, `client/src/App.tsx` (modified).
+
 ## Session Handoff
 
 ### What Was Built Today
-Sprint 17: Permission overrides system, admin access to role permissions, removed Vehicle Assignments page, and security questions-based password reset (replacing email/SendGrid approach due to quota limits).
+Sprint 18: SAML SSO integration with custom IdP, SSO-first login page, SP metadata endpoint, IdP-initiated SLO.
 
 ### Current Blockers
 - SendGrid credits exceeded — email delivery disabled; security questions used as alternative for password reset
+- SAML SSO requires IdP admin to register SP ACS URL and Entity ID (printed in server logs on startup)
 
 ### Pending Decisions
-- None
+- `SAML_BASE_URL` needs to be set for production deployment if auto-detection doesn't match the registered SP URL
 
 ### Recommended Next Steps
-1. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
-2. **Zod validation**: Add input validation to communication API routes (low priority — developer-only feature)
-3. **Alternative email provider**: Consider Resend or Mailgun if email-based features are needed again
+1. **IdP Registration**: Provide SAML SP details (ACS URL, Entity ID, NameID format) to IdP admin for onboarding
+2. **Production `SAML_BASE_URL`**: Set this env var to the production domain after deployment
+3. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
+4. **Alternative email provider**: Consider Resend or Mailgun if email-based features are needed again
