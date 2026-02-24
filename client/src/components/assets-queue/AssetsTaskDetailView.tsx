@@ -595,7 +595,7 @@ export function AssetsTaskDetailView({
               asChild
             >
               <a
-                href="https://tech-tool-audit-checklist-lucabuccilli1.replit.app/"
+                href={`https://tech-tool-audit-checklist-lucabuccilli1.replit.app/?ldap=${item.techData?.enterpriseId || ''}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >

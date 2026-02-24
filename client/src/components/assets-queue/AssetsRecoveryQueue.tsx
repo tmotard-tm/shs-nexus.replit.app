@@ -404,6 +404,64 @@ function InlineNotesSection({ item }: { item: AssetsQueueItemEnriched }) {
   );
 }
 
+function SendToolAuditInlineButton({ itemId, techData }: { itemId: string; techData?: TechData }) {
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/assets-queue/${itemId}/send-tool-audit`);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast({
+          title: "Tool Audit Notification Sent",
+          description: `Sent for ${data.techName || 'technician'} to ${data.actualRecipient}${data.testMode ? ' (simulated)' : ''}`,
+        });
+        queryClient.invalidateQueries({ queryKey: ['/api/assets-queue'] });
+      } else {
+        toast({
+          title: "Failed to Send",
+          description: data.error || "Unknown error",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: any) => {
+      let message = "Failed to send tool audit notification";
+      if (error?.message) {
+        const match = error.message.match(/^\d+:\s*(.+)/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[1]);
+            message = parsed.message || message;
+          } catch {
+            message = match[1];
+          }
+        } else {
+          message = error.message;
+        }
+      }
+      toast({ title: "Error", description: message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Button
+      variant="outline"
+      className="justify-start"
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+    >
+      {mutation.isPending ? (
+        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+      ) : (
+        <Send className="h-4 w-4 mr-2 text-slate-500" />
+      )}
+      {mutation.isPending ? "Sending..." : "Send Tool Audit Notification"}
+    </Button>
+  );
+}
+
 function ExpandedRowDetails({
   item,
   currentUser,
@@ -761,7 +819,7 @@ function ExpandedRowDetails({
 
               <Button variant="outline" className="justify-start" asChild>
                 <a
-                  href="https://tech-tool-audit-checklist-lucabuccilli1.replit.app/"
+                  href={`https://tech-tool-audit-checklist-lucabuccilli1.replit.app/?ldap=${techData?.enterpriseId || ''}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -770,6 +828,7 @@ function ExpandedRowDetails({
                   <ExternalLink className="h-3 w-3 ml-auto" />
                 </a>
               </Button>
+              <SendToolAuditInlineButton itemId={item.id} techData={techData} />
               <Button variant="outline" className="justify-start" disabled>
                 <FileText className="h-4 w-4 mr-2 text-slate-500" />
                 View in Segno
@@ -778,11 +837,6 @@ function ExpandedRowDetails({
               <Button variant="outline" className="justify-start" disabled>
                 <Package className="h-4 w-4 mr-2 text-slate-500" />
                 Generate Return Label
-                <Badge variant="secondary" className="ml-auto text-xs">Coming Soon</Badge>
-              </Button>
-              <Button variant="outline" className="justify-start" disabled>
-                <Send className="h-4 w-4 mr-2 text-slate-500" />
-                Send Reminder Email
                 <Badge variant="secondary" className="ml-auto text-xs">Coming Soon</Badge>
               </Button>
 
