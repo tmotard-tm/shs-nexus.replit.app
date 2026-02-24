@@ -12,13 +12,13 @@ export function getBaseUrl(): string {
   if (process.env.SAML_BASE_URL) {
     return process.env.SAML_BASE_URL;
   }
-  if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
-    return `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+  if (process.env.REPLIT_DOMAINS) {
+    return `https://${process.env.REPLIT_DOMAINS.split(',')[0]}`;
   }
   if (process.env.REPLIT_DEV_DOMAIN) {
     return `https://${process.env.REPLIT_DEV_DOMAIN}`;
   }
-  return `https://${process.env.REPLIT_DOMAINS?.split(',')[0] || 'localhost:5000'}`;
+  return 'https://localhost:5000';
 }
 
 export function getSamlConfig(): SamlConfig {
