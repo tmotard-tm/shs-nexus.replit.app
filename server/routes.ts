@@ -3298,11 +3298,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       outOfService: holmanVehicles.filter(v => v.statusCode === 2).length,
       assigned: activeHolman.filter(v => v.holmanTechAssigned && v.holmanTechAssigned.trim() !== '').length,
       unassigned: activeHolman.filter(v => !v.holmanTechAssigned || v.holmanTechAssigned.trim() === '').length,
-      assignmentMismatches: activeHolman.filter(v =>
-        v.holmanTechAssigned && v.holmanTechAssigned.trim() !== '' &&
-        v.tpmsAssignedTechId && v.tpmsAssignedTechId.trim() !== '' &&
-        v.holmanTechAssigned.trim() !== v.tpmsAssignedTechId.trim()
-      ).length,
+      assignmentMismatches: activeHolman.filter(v => {
+        const h = (v.holmanTechAssigned || '').trim();
+        const t = (v.tpmsAssignedTechId || '').trim();
+        return (h && t && h.toLowerCase() !== t.toLowerCase()) || (h && !t);
+      }).length,
       inRepair: nexusVehicles.filter(v => v.postOffboardedStatus === 'in_repair').length,
       estimateDeclines: nexusVehicles.filter(v => v.postOffboardedStatus === 'declined_repair').length,
       spareAvailable: nexusVehicles.filter(v =>
