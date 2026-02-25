@@ -363,7 +363,12 @@ class TPMSService {
     
     for (const cached of allCached) {
       if (cached.truckNo) {
-        cacheByTruck.set(cached.truckNo, cached);
+        const raw = cached.truckNo;
+        const stripped = raw.replace(/^0+/, '');
+        const padded = stripped.padStart(6, '0');
+        cacheByTruck.set(raw, cached);
+        if (!cacheByTruck.has(stripped)) cacheByTruck.set(stripped, cached);
+        if (!cacheByTruck.has(padded)) cacheByTruck.set(padded, cached);
       }
     }
     
