@@ -3126,7 +3126,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
-    const [ntaoItems, assetsItems, inventoryItems, fleetItems, activityLogs, allUsers, nexusVehicles, holmanVehicles, vehicleAssignments, hires, spots, allTermedTechs] = await Promise.all([
+    const { holmanVehicleSyncService: fleetService } = await import("./holman-vehicle-sync-service");
+
+    const [ntaoItems, assetsItems, inventoryItems, fleetItems, activityLogs, allUsers, nexusVehicles, holmanVehicles, vehicleAssignments, hires, spots, allTermedTechs, liveFleetResult] = await Promise.all([
       storage.getNTAOQueueItems().catch(() => []),
       storage.getAssetsQueueItems().catch(() => []),
       storage.getInventoryQueueItems().catch(() => []),
@@ -3139,6 +3141,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       storage.getOnboardingHires().catch(() => []),
       db.select().from(storageSpots).catch(() => []),
       db.select().from(termedTechs).catch(() => []),
+      fleetService.fetchActiveVehicles().then(async (r) => {
+        if (r.vehicles.length > 0) {
+          r.vehicles = await fleetService.enrichWithTPMSData(r.vehicles);
+        }
+        return r;
+      }).catch(() => ({ vehicles: [] as any[] })),
     ]);
 
     const allQueues = [
@@ -3292,17 +3300,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       status: s.status,
     }));
 
+    const liveFleetVehicles = liveFleetResult.vehicles || [];
     const activeHolman = holmanVehicles.filter(v => v.statusCode === 1);
+    const liveAssigned = liveFleetVehicles.filter((v: any) => v.tpmsAssignedTechId);
+    const liveMismatches = liveFleetVehicles.filter((v: any) => {
+      const h = ((v.holmanTechAssigned || v.clientData2 || '') as string).trim();
+      const t = ((v.tpmsAssignedTechId || '') as string).trim();
+      return (h && t && h.toLowerCase() !== t.toLowerCase()) || (h && !t);
+    });
     const fleetMetrics = {
-      totalActive: activeHolman.length,
+      totalActive: liveFleetVehicles.length || activeHolman.length,
       outOfService: holmanVehicles.filter(v => v.statusCode === 2).length,
-      assigned: activeHolman.filter(v => v.holmanTechAssigned && v.holmanTechAssigned.trim() !== '').length,
-      unassigned: activeHolman.filter(v => !v.holmanTechAssigned || v.holmanTechAssigned.trim() === '').length,
-      assignmentMismatches: activeHolman.filter(v => {
-        const h = (v.holmanTechAssigned || '').trim();
-        const t = (v.tpmsAssignedTechId || '').trim();
-        return (h && t && h.toLowerCase() !== t.toLowerCase()) || (h && !t);
-      }).length,
+      assigned: liveAssigned.length || activeHolman.filter(v => v.holmanTechAssigned && v.holmanTechAssigned.trim() !== '').length,
+      unassigned: (liveFleetVehicles.length - liveAssigned.length) || activeHolman.filter(v => !v.holmanTechAssigned || v.holmanTechAssigned.trim() === '').length,
+      assignmentMismatches: liveMismatches.length,
       inRepair: nexusVehicles.filter(v => v.postOffboardedStatus === 'in_repair').length,
       estimateDeclines: nexusVehicles.filter(v => v.postOffboardedStatus === 'declined_repair').length,
       spareAvailable: nexusVehicles.filter(v =>
