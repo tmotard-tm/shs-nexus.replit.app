@@ -89,6 +89,13 @@ interface PermissionsContextType {
 
 const PermissionsContext = createContext<PermissionsContextType | null>(null);
 
+interface UserOverridesResponse {
+  userId: string;
+  username: string;
+  role: string;
+  permissionOverrides: any;
+}
+
 export function PermissionsProvider({ children }: { children: ReactNode }) {
   const { user, isLoading: isAuthLoading } = useAuth();
   const { previewRole, previewUser } = usePreviewRole();
@@ -105,6 +112,13 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     enabled: !!user && user.role !== 'developer',
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
+  });
+
+  const { data: userOverridesData } = useQuery<UserOverridesResponse>({
+    queryKey: ['/api/users', user?.id, 'permission-overrides'],
+    enabled: !!user,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 5 * 60 * 1000,
   });
 
   const effectiveRole = useMemo(() => {
@@ -160,7 +174,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       rolePerms = deepMergePermissions(defaults, rolePermission.permissions);
     }
 
-    const userOverrides = (user as any).permissionOverrides;
+    const userOverrides = userOverridesData?.permissionOverrides ?? (user as any).permissionOverrides;
     if (userOverrides) {
       return applyUserOverrides(rolePerms, userOverrides);
     }
