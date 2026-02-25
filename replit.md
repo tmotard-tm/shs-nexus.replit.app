@@ -110,8 +110,12 @@ Preferred communication style: Simple, everyday language.
 - **Security Questions Password Reset**: Replaced email-based forgot password flow with security questions. Users set up 2 questions from predefined list on Change Password page. Forgot password dialog on login verifies answers and allows password reset without email. Rate-limited verification endpoint. Admin visibility of security question status (SQ badge) in user management table.
 - **Schema**: `securityQuestions` JSONB column on users table; answers hashed with bcrypt, case-insensitive comparison.
 - **Routes**: `GET /api/auth/security-questions`, `POST .../setup`, `GET .../status`, `POST .../get-questions`, `POST .../verify-and-reset`
-- **Reports Page**: Developer-only reporting dashboard with summary stat cards (total tasks, in progress, completed, completed today), queue breakdown, completion trends, top agents, recent activity charts, activity by type, and user overview. No AI dependencies.
-- **Routes**: `GET /api/reports` (data aggregation)
+- **Reports Page**: Developer-only operations dashboard with four intelligence sections:
+  1. **Operations Overview**: Summary stat cards, queue breakdown, completion trends, top agents, activity charts, user overview.
+  2. **Fleet Intelligence**: Active/assigned/unassigned/out-of-service counts, in-repair, estimate declines, spare available, assignment mismatches (Holman vs TPMS), vehicle disposition breakdown, fleet by make, key recovery status.
+  3. **Onboarding Pipeline**: Total hires, assigned/pending counts, completed this week/month, aged 14+/30+ days, employment status breakdown, pending by state, roadblocks (terminated pending, aged hires, leave pending).
+  4. **Offboarding & Recovery**: Total cases, completed/in-progress/pending, aged 14+/30+ days, task completion rates (6 subtasks with progress bars), vehicle disposition, phone/repair status, termed tech stats (total/tasks created/unprocessed/fully processed), roadblocks (aged cases, missing keys, vehicles not found, unprocessed termed techs).
+- **Routes**: `GET /api/reports` (data aggregation via `generateReportData` function)
 - **Page registry**: Added under "dashboards" category with `reporting` permission key.
 
 ## Sprint 18 — In Progress (2026-02-24)

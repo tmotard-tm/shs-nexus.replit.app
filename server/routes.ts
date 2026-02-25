@@ -17,7 +17,7 @@ import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql, eq, and, gte, lte, inArray, desc, SQL } from "drizzle-orm";
-import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots } from "@shared/schema";
+import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService } from "./ams-api-service";
 const amsApiService = new AmsApiService();
@@ -3124,7 +3124,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const [ntaoItems, assetsItems, inventoryItems, fleetItems, activityLogs, allUsers, nexusVehicles, holmanVehicles, vehicleAssignments, hires, spots] = await Promise.all([
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+    const [ntaoItems, assetsItems, inventoryItems, fleetItems, activityLogs, allUsers, nexusVehicles, holmanVehicles, vehicleAssignments, hires, spots, allTermedTechs] = await Promise.all([
       storage.getNTAOQueueItems().catch(() => []),
       storage.getAssetsQueueItems().catch(() => []),
       storage.getInventoryQueueItems().catch(() => []),
@@ -3136,6 +3138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       db.select().from(techVehicleAssignments).catch(() => []),
       storage.getOnboardingHires().catch(() => []),
       db.select().from(storageSpots).catch(() => []),
+      db.select().from(termedTechs).catch(() => []),
     ]);
 
     const allQueues = [
@@ -3289,6 +3292,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
       status: s.status,
     }));
 
+    const activeHolman = holmanVehicles.filter(v => v.statusCode === 1);
+    const fleetMetrics = {
+      totalActive: activeHolman.length,
+      outOfService: holmanVehicles.filter(v => v.statusCode === 2).length,
+      assigned: activeHolman.filter(v => v.holmanTechAssigned && v.holmanTechAssigned.trim() !== '').length,
+      unassigned: activeHolman.filter(v => !v.holmanTechAssigned || v.holmanTechAssigned.trim() === '').length,
+      assignmentMismatches: activeHolman.filter(v =>
+        v.holmanTechAssigned && v.holmanTechAssigned.trim() !== '' &&
+        v.tpmsAssignedTechId && v.tpmsAssignedTechId.trim() !== '' &&
+        v.holmanTechAssigned.trim() !== v.tpmsAssignedTechId.trim()
+      ).length,
+      inRepair: nexusVehicles.filter(v => v.postOffboardedStatus === 'in_repair').length,
+      estimateDeclines: nexusVehicles.filter(v => v.postOffboardedStatus === 'declined_repair').length,
+      spareAvailable: nexusVehicles.filter(v =>
+        v.postOffboardedStatus === 'available_for_rental_pmf' || v.postOffboardedStatus === 'reserved_for_new_hire'
+      ).length,
+    };
+
+    const pendingHires = hires.filter(h => !h.truckAssigned);
+    const assignedHires = hires.filter(h => h.truckAssigned);
+    const onboardingIntelligence = {
+      totalHires: hires.length,
+      assignedCount: assignedHires.length,
+      pendingCount: pendingHires.length,
+      completedThisWeek: assignedHires.filter(h => h.assignedAt && new Date(h.assignedAt) >= startOfWeek).length,
+      completedThisMonth: assignedHires.filter(h => h.assignedAt && new Date(h.assignedAt) >= startOfMonth).length,
+      aged14Days: pendingHires.filter(h => h.serviceDate && new Date(h.serviceDate) <= fourteenDaysAgo).length,
+      aged30Days: pendingHires.filter(h => h.serviceDate && new Date(h.serviceDate) <= thirtyDaysAgo).length,
+      byEmploymentStatus: onboardingByEmploymentStatus,
+      pendingByState: (() => {
+        const byState: Record<string, number> = {};
+        for (const h of pendingHires) {
+          const st = h.workState || 'unknown';
+          byState[st] = (byState[st] || 0) + 1;
+        }
+        return byState;
+      })(),
+      roadblocks: (() => {
+        const issues: { type: string; severity: string; message: string; count: number }[] = [];
+        const terminatedPending = pendingHires.filter(h => h.employmentStatus === 'T');
+        if (terminatedPending.length > 0) {
+          issues.push({ type: 'terminated_pending', severity: 'critical', message: 'Terminated employees still pending truck assignment', count: terminatedPending.length });
+        }
+        const aged30 = pendingHires.filter(h => h.serviceDate && new Date(h.serviceDate) <= thirtyDaysAgo);
+        if (aged30.length > 0) {
+          issues.push({ type: 'aged_30_days', severity: 'high', message: 'Hires waiting 30+ days for truck assignment', count: aged30.length });
+        }
+        const leavePending = pendingHires.filter(h => h.employmentStatus === 'L');
+        if (leavePending.length > 0) {
+          issues.push({ type: 'leave_pending', severity: 'medium', message: 'Employees on leave still pending assignment', count: leavePending.length });
+        }
+        return issues;
+      })(),
+    };
+
+    const offboardingItems = [...assetsItems, ...ntaoItems, ...fleetItems, ...inventoryItems].filter(i => i.workflowType === 'offboarding');
+    const offboardingCompleted = offboardingItems.filter(i => i.status === 'completed');
+    const offboardingOpen = offboardingItems.filter(i => i.status !== 'completed' && i.status !== 'cancelled');
+    const offboardingIntelligence = {
+      totalCases: offboardingItems.length,
+      completed: offboardingCompleted.length,
+      inProgress: offboardingItems.filter(i => i.status === 'in_progress').length,
+      pending: offboardingItems.filter(i => i.status === 'pending' || i.status === 'new').length,
+      completedThisWeek: offboardingCompleted.filter(i => i.completedAt && new Date(i.completedAt) >= startOfWeek).length,
+      completedThisMonth: offboardingCompleted.filter(i => i.completedAt && new Date(i.completedAt) >= startOfMonth).length,
+      aged14Days: offboardingOpen.filter(i => i.createdAt && new Date(i.createdAt) <= fourteenDaysAgo).length,
+      aged30Days: offboardingOpen.filter(i => i.createdAt && new Date(i.createdAt) <= thirtyDaysAgo).length,
+      taskCompletionRates: (() => {
+        const assetsOffboarding = assetsItems.filter(i => i.workflowType === 'offboarding');
+        const total = assetsOffboarding.length || 1;
+        return {
+          toolsReturn: Math.round((assetsOffboarding.filter(i => i.taskToolsReturn).length / total) * 100),
+          iphoneReturn: Math.round((assetsOffboarding.filter(i => i.taskIphoneReturn).length / total) * 100),
+          phoneDisconnect: Math.round((assetsOffboarding.filter(i => i.taskDisconnectedLine).length / total) * 100),
+          mPaymentDeactivation: Math.round((assetsOffboarding.filter(i => i.taskDisconnectedMPayment).length / total) * 100),
+          segnoOrders: Math.round((assetsOffboarding.filter(i => i.taskCloseSegnoOrders).length / total) * 100),
+          shippingLabel: Math.round((assetsOffboarding.filter(i => i.taskCreateShippingLabel).length / total) * 100),
+        };
+      })(),
+      vehicleDisposition: nexusStatusBreakdown,
+      keyRecovery: nexusKeysBreakdown,
+      phoneRecovery: {
+        initiated: nexusVehicles.filter(v => v.phoneRecoveryInitiated === 'yes').length,
+        notInitiated: nexusVehicles.filter(v => v.phoneRecoveryInitiated !== 'yes').length,
+      },
+      repairStatus: nexusRepairBreakdown,
+      termedTechStats: {
+        total: allTermedTechs.length,
+        tasksCreated: allTermedTechs.filter(t => t.offboardingTaskCreated).length,
+        unprocessed: allTermedTechs.filter(t => !t.offboardingTaskCreated).length,
+        fullyProcessed: allTermedTechs.filter(t => t.processedAt).length,
+      },
+      roadblocks: (() => {
+        const issues: { type: string; severity: string; message: string; count: number }[] = [];
+        const aged30 = offboardingOpen.filter(i => i.createdAt && new Date(i.createdAt) <= thirtyDaysAgo);
+        if (aged30.length > 0) {
+          issues.push({ type: 'aged_30_days', severity: 'critical', message: 'Offboarding cases open 30+ days', count: aged30.length });
+        }
+        const missingKeys = nexusVehicles.filter(v => v.keys === 'not_present' || v.keys === 'Unknown/Would not Check');
+        if (missingKeys.length > 0) {
+          issues.push({ type: 'missing_keys', severity: 'high', message: 'Vehicles with missing or unchecked keys', count: missingKeys.length });
+        }
+        const notFound = nexusVehicles.filter(v => v.postOffboardedStatus === 'not_found');
+        if (notFound.length > 0) {
+          issues.push({ type: 'vehicles_not_found', severity: 'critical', message: 'Vehicles marked as not found', count: notFound.length });
+        }
+        const unableToReach = nexusVehicles.filter(v => v.postOffboardedStatus === 'unable_to_reach');
+        if (unableToReach.length > 0) {
+          issues.push({ type: 'unable_to_reach', severity: 'high', message: 'Techs unable to reach for vehicle recovery', count: unableToReach.length });
+        }
+        const noTask = allTermedTechs.filter(t => !t.offboardingTaskCreated);
+        if (noTask.length > 0) {
+          issues.push({ type: 'no_offboarding_task', severity: 'high', message: 'Termed techs without offboarding tasks created', count: noTask.length });
+        }
+        return issues;
+      })(),
+    };
+
     return {
       generatedAt: now.toISOString(),
       queueSummary,
@@ -3319,6 +3440,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           byState: holmanByState,
           byFuelType: holmanByFuel,
         },
+        fleetMetrics,
         assignments: {
           activeAssignments: vehicleAssignments.filter(a => a.assignmentStatus === 'active').length,
           totalAssignments: vehicleAssignments.length,
@@ -3341,6 +3463,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         storageLocations: storageUtilization,
       },
+      onboardingIntelligence,
+      offboardingIntelligence,
     };
   }
 
