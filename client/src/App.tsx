@@ -60,6 +60,16 @@ import { RoleProtectedRoute } from "@/components/role-protected-route";
 import { RoleBasedHome } from "@/components/role-based-home";
 import { SecurityQuestionsGate } from "@/components/security-questions-gate";
 
+function AmsGate() {
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
+  if (user?.username !== 'tmotard') {
+    navigate('/integrations');
+    return null;
+  }
+  return <MainContent><AmsIntegration /></MainContent>;
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <RoleProtectedRoute>
@@ -282,9 +292,7 @@ function Router() {
 
       <Route path="/ams-integration">
         <ProtectedRoute>
-          <MainContent>
-            <AmsIntegration />
-          </MainContent>
+          <AmsGate />
         </ProtectedRoute>
       </Route>
 

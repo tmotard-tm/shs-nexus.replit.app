@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { Link } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 
 function formatPhoneNumber(phone: string | null | undefined): string {
   if (!phone) return '-';
@@ -47,6 +48,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export default function Integrations() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [snowflakeExpanded, setSnowflakeExpanded] = useState(false);
   const [tpmsExpanded, setTpmsExpanded] = useState(false);
@@ -646,7 +648,8 @@ export default function Integrations() {
               </div>
             </div>
             
-            {/* AMS API Integration */}
+            {/* AMS API Integration - restricted to tmotard during development */}
+            {user?.username === 'tmotard' && (
             <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
               <Link href="/ams-integration" data-testid="link-ams-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
                 <div className="w-12 h-12 bg-amber-500/10 rounded-lg flex items-center justify-center">
@@ -699,6 +702,7 @@ export default function Integrations() {
                 />
               </div>
             </div>
+            )}
 
             {/* Snowflake Integration - Expandable inline */}
             <Collapsible open={snowflakeExpanded} onOpenChange={setSnowflakeExpanded}>
