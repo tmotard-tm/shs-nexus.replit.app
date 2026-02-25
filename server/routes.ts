@@ -3362,6 +3362,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // AI Reporting Chat endpoint (developer only)
   // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+  // the newest Gemini model series is "gemini-2.5-flash" or "gemini-2.5-pro"
   app.post("/api/reports/chat", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
@@ -3369,17 +3370,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. Reports require developer role." });
       }
 
-      const { message, conversationHistory } = req.body;
+      const { message, conversationHistory, provider } = req.body;
+      const aiProvider = provider || 'openai';
+
       if (!message) {
         return res.status(400).json({ message: "Message is required" });
       }
-
-      if (!process.env.OPENAI_API_KEY) {
-        return res.status(500).json({ message: "OpenAI API key is not configured. Please add it in Secrets." });
-      }
-
-      const OpenAI = (await import("openai")).default;
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
       const reportData = await generateReportData();
 
@@ -3430,31 +3426,90 @@ Guidelines:
 - Keep responses concise but thorough.
 - Use markdown formatting for readability.`;
 
-      const messages: any[] = [
-        { role: "system", content: systemPrompt },
-      ];
+      let reply: string;
 
-      if (conversationHistory && Array.isArray(conversationHistory)) {
-        for (const msg of conversationHistory.slice(-10)) {
-          messages.push({ role: msg.role, content: msg.content });
+      if (aiProvider === 'gemini') {
+        if (!process.env.GEMINI_API_KEY) {
+          return res.status(500).json({ message: "Gemini API key is not configured. Please add GEMINI_API_KEY in Secrets." });
         }
+
+        const geminiMessages: any[] = [];
+
+        geminiMessages.push({ role: "user", parts: [{ text: systemPrompt }] });
+        geminiMessages.push({ role: "model", parts: [{ text: "Understood. I'm Nexus AI, ready to analyze the platform data. How can I help?" }] });
+
+        if (conversationHistory && Array.isArray(conversationHistory)) {
+          for (const msg of conversationHistory.slice(-10)) {
+            geminiMessages.push({
+              role: msg.role === "assistant" ? "model" : "user",
+              parts: [{ text: msg.content }],
+            });
+          }
+        }
+
+        geminiMessages.push({ role: "user", parts: [{ text: message }] });
+
+        const geminiRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: geminiMessages,
+              generationConfig: {
+                maxOutputTokens: 4096,
+                temperature: 0.7,
+              },
+            }),
+          }
+        );
+
+        if (!geminiRes.ok) {
+          const errBody = await geminiRes.text();
+          console.error('Gemini API error:', geminiRes.status, errBody);
+          if (geminiRes.status === 400 && errBody.includes('API_KEY_INVALID')) {
+            return res.status(500).json({ message: "Invalid Gemini API key. Please check your configuration." });
+          }
+          return res.status(500).json({ message: "Gemini API request failed. Please try again." });
+        }
+
+        const geminiData = await geminiRes.json();
+        reply = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text
+          || "I couldn't generate a response. Please try again.";
+      } else {
+        if (!process.env.OPENAI_API_KEY) {
+          return res.status(500).json({ message: "OpenAI API key is not configured. Please add it in Secrets." });
+        }
+
+        const OpenAI = (await import("openai")).default;
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+        const openaiMessages: any[] = [
+          { role: "system", content: systemPrompt },
+        ];
+
+        if (conversationHistory && Array.isArray(conversationHistory)) {
+          for (const msg of conversationHistory.slice(-10)) {
+            openaiMessages.push({ role: msg.role, content: msg.content });
+          }
+        }
+
+        openaiMessages.push({ role: "user", content: message });
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-5",
+          messages: openaiMessages,
+          max_completion_tokens: 4096,
+        });
+
+        reply = response.choices[0].message.content || "I couldn't generate a response. Please try again.";
       }
 
-      messages.push({ role: "user", content: message });
-
-      const response = await openai.chat.completions.create({
-        model: "gpt-5",
-        messages,
-        max_completion_tokens: 4096,
-      });
-
-      const reply = response.choices[0].message.content || "I couldn't generate a response. Please try again.";
-
-      res.json({ reply, dataTimestamp: reportData.generatedAt });
+      res.json({ reply, provider: aiProvider, dataTimestamp: reportData.generatedAt });
     } catch (error: any) {
       console.error('AI Reports chat error:', error);
       if (error?.status === 401 || error?.code === 'invalid_api_key') {
-        return res.status(500).json({ message: "Invalid OpenAI API key. Please check your configuration." });
+        return res.status(500).json({ message: "Invalid API key. Please check your configuration." });
       }
       res.status(500).json({ message: "Failed to generate AI response. Please try again." });
     }

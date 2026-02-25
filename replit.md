@@ -110,7 +110,7 @@ Preferred communication style: Simple, everyday language.
 - **Security Questions Password Reset**: Replaced email-based forgot password flow with security questions. Users set up 2 questions from predefined list on Change Password page. Forgot password dialog on login verifies answers and allows password reset without email. Rate-limited verification endpoint. Admin visibility of security question status (SQ badge) in user management table.
 - **Schema**: `securityQuestions` JSONB column on users table; answers hashed with bcrypt, case-insensitive comparison.
 - **Routes**: `GET /api/auth/security-questions`, `POST .../setup`, `GET .../status`, `POST .../get-questions`, `POST .../verify-and-reset`
-- **AI Reports Page**: Developer-only reporting page with AI chat interface powered by OpenAI GPT-5. Features summary stat cards (total tasks, in progress, completed, completed today), suggested questions, markdown-rendered AI responses, and conversation history. Backend aggregates data from all 4 queue modules, activity logs, and user stats.
+- **AI Reports Page**: Developer-only reporting page with AI chat interface supporting both OpenAI GPT-5 and Google Gemini 2.5 Flash (selectable via dropdown). Features summary stat cards (total tasks, in progress, completed, completed today), suggested questions, markdown-rendered AI responses, and conversation history. Backend aggregates data from all 4 queue modules, activity logs, and user stats. Gemini uses REST API directly (no SDK) due to dependency conflicts; requires `GEMINI_API_KEY` env var.
 - **Routes**: `GET /api/reports` (data aggregation), `POST /api/reports/chat` (AI analysis)
 - **Page registry**: Added under "dashboards" category with `reporting` permission key.
 

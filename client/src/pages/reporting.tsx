@@ -9,6 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Brain,
   Send,
   Loader2,
@@ -206,6 +213,7 @@ export default function Reporting() {
   const { toast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
+  const [aiProvider, setAiProvider] = useState<"openai" | "gemini">("openai");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -219,6 +227,7 @@ export default function Reporting() {
     mutationFn: async (message: string) => {
       const res = await apiRequest("POST", "/api/reports/chat", {
         message,
+        provider: aiProvider,
         conversationHistory: messages.map(m => ({ role: m.role, content: m.content })),
       });
       return res.json();
@@ -322,6 +331,15 @@ export default function Reporting() {
                 Data as of {new Date(data.generatedAt).toLocaleTimeString()}
               </Badge>
             )}
+            <Select value={aiProvider} onValueChange={(v) => setAiProvider(v as "openai" | "gemini")}>
+              <SelectTrigger className="w-[160px] h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="openai">OpenAI GPT-5</SelectItem>
+                <SelectItem value="gemini">Gemini 2.5 Flash</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               variant="outline"
               size="sm"
@@ -482,7 +500,7 @@ export default function Reporting() {
           </Button>
         </form>
         <p className="text-center text-xs text-muted-foreground mt-2">
-          Powered by AI. Responses are based on current application data.
+          Powered by {aiProvider === 'openai' ? 'OpenAI GPT-5' : 'Google Gemini 2.5 Flash'}. Responses are based on current application data.
         </p>
       </div>
     </div>
