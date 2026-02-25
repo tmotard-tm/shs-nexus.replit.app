@@ -29,6 +29,7 @@ import ActiveVehicles from "@/pages/active-vehicles";
 import Dashboard from "@/pages/dashboard";
 import Integrations from "@/pages/integrations";
 import HolmanIntegration from "@/pages/holman-integration";
+import AmsIntegration from "@/pages/ams-integration";
 import QueueManagement from "@/pages/queue-management";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
@@ -275,6 +276,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <HolmanIntegration />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/ams-integration">
+        <ProtectedRoute>
+          <MainContent>
+            <AmsIntegration />
           </MainContent>
         </ProtectedRoute>
       </Route>

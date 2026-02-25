@@ -54,6 +54,7 @@ export default function Integrations() {
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
   const [tpmsTestId, setTpmsTestId] = useState("");
   const [holmanEnabled, setHolmanEnabled] = useState(true);
+  const [amsEnabled, setAmsEnabled] = useState(true);
   const [snowflakeEnabled, setSnowflakeEnabled] = useState(true);
   const [tpmsEnabled, setTpmsEnabled] = useState(true);
   
@@ -78,6 +79,10 @@ export default function Integrations() {
 
   const { data: tpmsStatus, isLoading: tpmsStatusLoading } = useQuery<{ configured: boolean; message: string }>({
     queryKey: ["/api/tpms/status"],
+  });
+
+  const { data: amsStatus, isLoading: amsStatusLoading } = useQuery<{ configured: boolean }>({
+    queryKey: ["/api/ams/status"],
   });
 
   // Employee Roster queries
@@ -472,10 +477,10 @@ export default function Integrations() {
   };
 
   const integrationStats = {
-    total: 3,
-    active: [holmanEnabled, snowflakeEnabled, tpmsEnabled].filter(Boolean).length,
-    healthy: [true, snowflakeStatus?.configured, tpmsStatus?.configured].filter(Boolean).length,
-    errors: [false, !snowflakeStatus?.configured, !tpmsStatus?.configured].filter(Boolean).length,
+    total: 4,
+    active: [holmanEnabled, amsEnabled, snowflakeEnabled, tpmsEnabled].filter(Boolean).length,
+    healthy: [true, amsStatus?.configured, snowflakeStatus?.configured, tpmsStatus?.configured].filter(Boolean).length,
+    errors: [false, !amsStatus?.configured, !snowflakeStatus?.configured, !tpmsStatus?.configured].filter(Boolean).length,
   };
 
   return (
@@ -641,6 +646,60 @@ export default function Integrations() {
               </div>
             </div>
             
+            {/* AMS API Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/ams-integration" data-testid="link-ams-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-amber-500/10 rounded-lg flex items-center justify-center">
+                  <Truck className="h-6 w-6 text-amber-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-amber-500 transition-colors">
+                      AMS API
+                    </h3>
+                    {amsStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : amsStatus?.configured ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    In-Home Asset Management System - vehicles, techs, repairs, and lookups
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${amsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {amsStatus?.configured ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={amsEnabled ? "default" : "secondary"} className="text-xs">
+                  {amsEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toast({ title: "AMS Test", description: "Use the AMS integration page to test the connection" })}
+                  data-testid="button-test-ams"
+                >
+                  <TestTube className="h-4 w-4 mr-1" />
+                  Test
+                </Button>
+                <Switch
+                  checked={amsEnabled}
+                  onCheckedChange={setAmsEnabled}
+                  data-testid="switch-ams-enabled"
+                />
+              </div>
+            </div>
+
             {/* Snowflake Integration - Expandable inline */}
             <Collapsible open={snowflakeExpanded} onOpenChange={setSnowflakeExpanded}>
               <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">

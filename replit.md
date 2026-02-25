@@ -84,6 +84,7 @@ Preferred communication style: Simple, everyday language.
 ## Integrations
 -   **Snowflake**: Data warehouse for technician rosters, TPMS data, and HR separation data.
 -   **Holman**: Vehicle fleet details and assignment updates.
+-   **AMS (Asset Management System)**: In-Home vehicle management API - vehicle search, tech assignments, repairs, comments, and lookup data. Env vars: `AMS_API_BASE_URL`, `AMS_API_KEY`.
 -   **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments and mobile phone numbers.
 -   **PMF/PARQ AI**: Fleet vehicle availability API.
 -   **Fleet Scope**: External API for posting vehicle spare status updates.

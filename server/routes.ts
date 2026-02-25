@@ -19,6 +19,8 @@ import { db } from "./db";
 import { sql, eq, and, gte, lte, inArray, desc, SQL } from "drizzle-orm";
 import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
+import { AmsApiService } from "./ams-api-service";
+const amsApiService = new AmsApiService();
 import { pmfApiService } from "./pmf-api-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
 // SAML SSO INTEGRATION
@@ -10215,6 +10217,141 @@ Guidelines:
     } catch (error: any) {
       console.error("Error syncing weekly offboarding:", error);
       res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // AMS API Integration Routes
+  console.log("Registering AMS API routes...");
+
+  app.get("/api/ams/test", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.testConnection();
+      res.json(result);
+    } catch (error) {
+      console.error("Error testing AMS connection:", error);
+      res.status(500).json({ success: false, message: "Failed to test connection" });
+    }
+  });
+
+  app.get("/api/ams/status", requireAuth, async (req: any, res) => {
+    res.json({ configured: amsApiService.isConfigured() });
+  });
+
+  app.get("/api/ams/vehicles", requireAuth, async (req: any, res) => {
+    try {
+      const { vin, plate, vehicleId, region, district, tech, limit, offset } = req.query;
+      const result = await amsApiService.searchVehicles({
+        vin, plate, vehicleId, region, district, tech,
+        limit: limit ? parseInt(limit) : 100,
+        offset: offset ? parseInt(offset) : 0,
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error searching AMS vehicles:", error);
+      res.status(500).json({ message: error.message || "Failed to search vehicles" });
+    }
+  });
+
+  app.get("/api/ams/vehicles/:vin", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.getVehicleByVin(req.params.vin);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error fetching AMS vehicle:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch vehicle" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/user-updates", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.updateUserFields(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error updating AMS vehicle fields:", error);
+      res.status(500).json({ message: error.message || "Failed to update vehicle fields" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/tech-update", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.updateTechAssignment(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error updating AMS tech assignment:", error);
+      res.status(500).json({ message: error.message || "Failed to update tech assignment" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/comments", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.addComment(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error adding AMS comment:", error);
+      res.status(500).json({ message: error.message || "Failed to add comment" });
+    }
+  });
+
+  app.get("/api/ams/vehicles/:vin/comments", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.getComments(req.params.vin);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error fetching AMS comments:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch comments" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/repair-updates", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.updateRepairStatus(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error updating AMS repair status:", error);
+      res.status(500).json({ message: error.message || "Failed to update repair status" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/repair-disposition", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.completeRepair(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error completing AMS repair:", error);
+      res.status(500).json({ message: error.message || "Failed to complete repair" });
+    }
+  });
+
+  app.get("/api/ams/techs", requireAuth, async (req: any, res) => {
+    try {
+      const { techName, ldapId, lastUpdateAfter, lastUpdateBefore, limit, offset } = req.query;
+      const result = await amsApiService.searchTechs({
+        techName, ldapId, lastUpdateAfter, lastUpdateBefore,
+        limit: limit ? parseInt(limit) : 100,
+        offset: offset ? parseInt(offset) : 0,
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error searching AMS techs:", error);
+      res.status(500).json({ message: error.message || "Failed to search technicians" });
+    }
+  });
+
+  app.get("/api/ams/lookups/:type", requireAuth, async (req: any, res) => {
+    try {
+      const validTypes = [
+        'colors', 'branding', 'interior', 'sct-tune', 'grades',
+        'vehicle-runs', 'vehicle-looks', 'service-reasons',
+        'repair-status', 'repair-disposition', 'disposition-reasons', 'rental-car'
+      ];
+      if (!validTypes.includes(req.params.type)) {
+        return res.status(400).json({ message: `Invalid lookup type. Valid types: ${validTypes.join(', ')}` });
+      }
+      const result = await amsApiService.getLookup(req.params.type);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error fetching AMS lookup:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch lookup data" });
     }
   });
 
