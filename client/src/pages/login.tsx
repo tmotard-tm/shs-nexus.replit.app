@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { Settings, Shield, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Link } from "wouter";
 
 function getSsoErrorMessage(error: string | null): string | null {
   if (!error) return null;
@@ -56,6 +57,14 @@ export default function Login() {
             <Shield className="mr-2 h-4 w-4" />
             Sign In with Enterprise SSO
           </Button>
+
+          {window.location.hostname.includes('.replit.dev') && (
+            <div className="text-center pt-2">
+              <Link href="/manual-login" className="text-sm text-muted-foreground hover:text-primary underline">
+                SSO Login Dev Bypass Page
+              </Link>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
