@@ -17,7 +17,6 @@ import {
   UserMinus,
   Info,
   Mail,
-  Brain,
   type LucideIcon
 } from "lucide-react";
 
@@ -314,10 +313,10 @@ export const PAGES: PageDefinition[] = [
   },
   {
     key: "reporting",
-    label: "AI Reports",
-    description: "AI-powered reporting and data analysis",
+    label: "Reports",
+    description: "Operations dashboard and metrics",
     path: "/reporting",
-    icon: Brain,
+    icon: BarChart3,
     category: "dashboards",
     permissionKey: "reporting",
   },
