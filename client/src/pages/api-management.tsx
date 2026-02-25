@@ -226,7 +226,7 @@ export default function ApiManagement() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
-                      Holman Fleet Integration
+                      Holman API
                     </h3>
                     <p className="text-sm text-muted-foreground">
                       Manage vehicles, contacts, maintenance records, and odometer data

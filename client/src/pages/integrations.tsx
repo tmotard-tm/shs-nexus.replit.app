@@ -612,7 +612,7 @@ export default function Integrations() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
-                      Holman Fleet Integration
+                      Holman API
                     </h3>
                     <Badge variant="default" className="flex items-center gap-1 text-xs">
                       <CheckCircle className="h-3 w-3" />
@@ -1189,7 +1189,7 @@ export default function Integrations() {
               </CollapsibleContent>
             </Collapsible>
 
-            {/* TPMS Integration - Expandable inline */}
+            {/* TPMS API - Expandable inline */}
             <Collapsible open={tpmsExpanded} onOpenChange={setTpmsExpanded}>
               <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
                 <CollapsibleTrigger asChild>
@@ -1200,7 +1200,7 @@ export default function Integrations() {
                     <div>
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-lg group-hover:text-orange-500 transition-colors">
-                          TPMS Integration
+                          TPMS API
                         </h3>
                         {tpmsStatusLoading ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
