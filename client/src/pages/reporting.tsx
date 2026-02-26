@@ -826,6 +826,33 @@ export default function Reporting() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Key className="h-4 w-4 text-amber-500" />
+                    Key Recovery
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {offb.keyRecovery && Object.entries(offb.keyRecovery)
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([status, count]) => (
+                      <div key={status} className="flex items-center justify-between py-1.5 border-b last:border-0">
+                        <span className="text-sm text-muted-foreground">{formatDisposition(status)}</span>
+                        <Badge
+                          variant={status === 'present' ? 'default' : status === 'not_present' ? 'destructive' : 'outline'}
+                          className="text-xs"
+                        >
+                          {count}
+                        </Badge>
+                      </div>
+                    ))}
+                  {(!offb.keyRecovery || Object.keys(offb.keyRecovery).length === 0) && (
+                    <p className="text-sm text-muted-foreground text-center py-4">No data</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <Smartphone className="h-4 w-4 text-purple-500" />
                     Phone & Repair Status
                   </CardTitle>
@@ -857,9 +884,9 @@ export default function Reporting() {
                   </div>
                 </CardContent>
               </Card>
-
-              <RoadblocksCard roadblocks={offb.roadblocks} />
             </div>
+
+            <RoadblocksCard roadblocks={offb.roadblocks} />
           </>
         )}
       </div>
