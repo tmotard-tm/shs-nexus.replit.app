@@ -100,13 +100,21 @@ Preferred communication style: Simple, everyday language.
 - **Lazy-loaded expanded row details**: `ExpandedRowDetails` in `AssetsRecoveryQueue.tsx` fetches enrichment data on row expand with loading state; task checkboxes and quick actions render immediately
 - **Design decision**: List endpoint serves from Postgres only; enrichment deferred to row expand (trade-off: brief loading spinner vs instant list load)
 
+## Sprint 17 — Completed
+- **Notification Backfill Scanner**: Automated cron job that scans the last 7 days of Assets Queue items and cross-references communication_logs to identify missed tool audit notifications. Sends any missing notifications with deduplication, rate limiting (max 20 per run, 2s pause between sends), and mode awareness (respects simulated/whitelisted/live template modes).
+- **Files**: `server/notification-backfill.ts` (scanner service), `server/sync-scheduler.ts` (wired into 6-hour scheduler), `server/storage.ts` (new query helpers), `server/routes.ts` (manual trigger + status endpoints)
+- **API Endpoints**: `POST /api/notification-backfill/run` (manual trigger, developer-only), `GET /api/notification-backfill/status` (status check, developer-only)
+- **Communication Hub UI**: Added "Notification Backfill Scanner" status card in the History tab showing last run time, results summary (checked/sent/skipped/failed), and a "Run Now" button for on-demand execution
+- **SendGrid error details**: Enhanced `sendEmail` to return detailed error messages; Communication Hub Status column now shows failure reasons in a prominent red box with "Reason:" prefix
+- **Error message display**: `ResizableHistoryTable` Status column widened to 280px to accommodate error details
+
 ## Session Handoff
 
 ### What Was Built Today
-Sprint 16 focused on performance — the Assets Queue list endpoint was decoupled from Snowflake, with enrichment moved to a lazy-loaded batch endpoint called on row expand. This reduced initial page load from ~60s (196+ sequential Snowflake queries) to under 2s (Postgres-only).
+Sprint 17 focused on notification reliability — a backfill scanner was built to automatically detect and re-send missed tool audit notifications. The scanner runs every 6 hours via the existing scheduler and can also be triggered manually from the Communication Hub. Deduplication is handled by checking communication_logs for existing successful sends per technician LDAP ID.
 
 ### Current Blockers
-- None
+- The Snowflake sync process sometimes causes the server to crash due to memory usage during the 13k+ record all-techs sync (pre-existing issue, not related to Sprint 17 changes)
 
 ### Pending Decisions
 - None

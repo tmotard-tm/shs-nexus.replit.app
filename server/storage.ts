@@ -393,6 +393,8 @@ export interface IStorage {
   getCommunicationLogsByTemplate(templateId: string): Promise<CommunicationLog[]>;
   getCommunicationLogsByRecipient(recipient: string): Promise<CommunicationLog[]>;
   createCommunicationLog(log: InsertCommunicationLog): Promise<CommunicationLog>;
+  getAssetsQueueItemsForNotificationBackfill(sinceDays: number): Promise<QueueItem[]>;
+  getToolAuditNotificationStatus(ldapId: string, sinceDays: number): Promise<{ sent: boolean; lastStatus: string | null; lastSentAt: Date | null }>;
 
   // Vehicle Nexus Data Module (Nexus-specific vehicle data)
   getVehicleNexusData(vehicleNumber: string): Promise<VehicleNexusData | undefined>;
@@ -3396,6 +3398,12 @@ export class MemStorage implements IStorage {
   async createCommunicationLog(_log: InsertCommunicationLog): Promise<CommunicationLog> {
     throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
   }
+  async getAssetsQueueItemsForNotificationBackfill(_sinceDays: number): Promise<QueueItem[]> {
+    throw new Error("MemStorage does not support notification backfill. Use DatabaseStorage.");
+  }
+  async getToolAuditNotificationStatus(_ldapId: string, _sinceDays: number): Promise<{ sent: boolean; lastStatus: string | null; lastSentAt: Date | null }> {
+    throw new Error("MemStorage does not support notification backfill. Use DatabaseStorage.");
+  }
 
   // Vehicle Nexus Data Module (MemStorage stubs)
   async getVehicleNexusData(_vehicleNumber: string): Promise<VehicleNexusData | undefined> {
@@ -5972,6 +5980,43 @@ export class DatabaseStorage implements IStorage {
   async createCommunicationLog(log: InsertCommunicationLog): Promise<CommunicationLog> {
     const result = await db.insert(communicationLogs).values(log).returning();
     return result[0];
+  }
+
+  async getAssetsQueueItemsForNotificationBackfill(sinceDays: number): Promise<QueueItem[]> {
+    const sinceDate = new Date();
+    sinceDate.setDate(sinceDate.getDate() - sinceDays);
+    return await db.select().from(queueItems)
+      .where(and(
+        eq(queueItems.department, 'Assets Management'),
+        sql`${queueItems.createdAt} >= ${sinceDate}`,
+        sql`(${queueItems.toolAuditNotificationSent} = false OR ${queueItems.toolAuditNotificationSent} IS NULL)`
+      ))
+      .orderBy(desc(queueItems.createdAt));
+  }
+
+  async getToolAuditNotificationStatus(ldapId: string, sinceDays: number): Promise<{ sent: boolean; lastStatus: string | null; lastSentAt: Date | null }> {
+    const sinceDate = new Date();
+    sinceDate.setDate(sinceDate.getDate() - sinceDays);
+    const logs = await db.select().from(communicationLogs)
+      .where(and(
+        eq(communicationLogs.templateName, 'tool-audit-notification'),
+        sql`${communicationLogs.sentAt} >= ${sinceDate}`,
+        sql`(${communicationLogs.metadata}->>'ldapId' = ${ldapId} OR ${communicationLogs.variables}->>'ldapId' = ${ldapId})`
+      ))
+      .orderBy(desc(communicationLogs.sentAt))
+      .limit(1);
+
+    if (logs.length === 0) {
+      return { sent: false, lastStatus: null, lastSentAt: null };
+    }
+
+    const log = logs[0];
+    const successStatuses = ['sent', 'simulated'];
+    return {
+      sent: successStatuses.includes(log.status),
+      lastStatus: log.status,
+      lastSentAt: log.sentAt,
+    };
   }
 
   // Vehicle Nexus Data Module

@@ -10,10 +10,12 @@ const SYNC_HOUR_EST = 5; // 5am EST
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
 const ENRICH_INTERVAL_HOURS = 12; // Enrich every 12 hours
 const SEPARATION_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes for separation sync
+const NOTIFICATION_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 let lastSyncDate: string | null = null;
 let lastEnrichTime: number | null = null; // Timestamp of last enrichment
 let lastSeparationPollTime: number | null = null; // Sprint 0: Track separation polls
+let lastNotificationBackfillTime: number | null = null;
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -70,6 +72,8 @@ async function checkAndRunSync(): Promise<void> {
     
     // Sprint 0: Check if we need to poll for new separation records (every 5 minutes)
     await checkAndRunSeparationPoll();
+
+    await checkAndRunNotificationBackfill();
   } catch (error) {
     console.error('[Scheduler] Error during scheduled sync:', error);
   }
@@ -128,6 +132,25 @@ async function checkAndRunSeparationPoll(): Promise<void> {
     }
   } catch (error) {
     console.error('[Scheduler] Error during separation poll:', error);
+  }
+}
+
+async function checkAndRunNotificationBackfill(): Promise<void> {
+  try {
+    const now = Date.now();
+
+    if (lastNotificationBackfillTime === null || (now - lastNotificationBackfillTime) >= NOTIFICATION_BACKFILL_INTERVAL_MS) {
+      console.log('[Scheduler] Running notification backfill scan (every 6 hours)');
+
+      const { runToolAuditBackfill } = await import('./notification-backfill');
+      const result = await runToolAuditBackfill();
+
+      lastNotificationBackfillTime = now;
+
+      console.log(`[Scheduler] Notification backfill complete: ${result.totalChecked} checked, ${result.newlySent} sent, ${result.alreadySent} already sent, ${result.skippedNoEmail} skipped, ${result.failed} failed`);
+    }
+  } catch (error) {
+    console.error('[Scheduler] Error during notification backfill:', error);
   }
 }
 
@@ -296,12 +319,13 @@ export function getSchedulerStatus(): {
   nextSyncTime: string;
   lastSeparationPoll: string | null;
   separationPollIntervalMs: number;
+  lastNotificationBackfill: string | null;
+  notificationBackfillIntervalMs: number;
 } {
   const estNow = getESTDate();
   const nextSync = new Date(estNow);
   
   if (estNow.getHours() >= SYNC_HOUR_EST) {
-    // Next sync is tomorrow at 5am
     nextSync.setDate(nextSync.getDate() + 1);
   }
   nextSync.setHours(SYNC_HOUR_EST, 0, 0, 0);
@@ -312,6 +336,8 @@ export function getSchedulerStatus(): {
     nextSyncTime: nextSync.toISOString(),
     lastSeparationPoll: lastSeparationPollTime ? new Date(lastSeparationPollTime).toISOString() : null,
     separationPollIntervalMs: SEPARATION_POLL_INTERVAL_MS,
+    lastNotificationBackfill: lastNotificationBackfillTime ? new Date(lastNotificationBackfillTime).toISOString() : null,
+    notificationBackfillIntervalMs: NOTIFICATION_BACKFILL_INTERVAL_MS,
   };
 }
 

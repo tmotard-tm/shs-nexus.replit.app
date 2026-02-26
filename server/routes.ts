@@ -9200,6 +9200,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/notification-backfill/run", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
+    try {
+      const { runToolAuditBackfill } = await import("./notification-backfill");
+      const result = await runToolAuditBackfill();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to run notification backfill", error: error.message });
+    }
+  });
+
+  app.get("/api/notification-backfill/status", async (req, res) => {
+    if (!await requireDeveloperRole(req, res)) return;
+    try {
+      const { getBackfillStatus } = await import("./notification-backfill");
+      res.json(getBackfillStatus());
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to get backfill status", error: error.message });
+    }
+  });
+
   // Vehicle Nexus Data - Nexus-specific vehicle data for offboarding/relocation tracking
   app.post("/api/vehicle-nexus-data/batch", requireAuth, async (req: any, res) => {
     try {

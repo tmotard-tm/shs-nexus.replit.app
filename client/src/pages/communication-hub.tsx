@@ -28,7 +28,9 @@ import {
   X,
   AlertTriangle,
   Radio,
-  Phone
+  Phone,
+  Clock,
+  Play
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -229,6 +231,35 @@ export default function CommunicationHub() {
 
   const { data: logs = [], isLoading: logsLoading, refetch: refetchLogs } = useQuery<CommunicationLog[]>({
     queryKey: ['/api/communication/logs'],
+  });
+
+  const { data: backfillStatus, refetch: refetchBackfillStatus } = useQuery<{
+    isRunning: boolean;
+    lastResult: {
+      ranAt: string;
+      totalChecked: number;
+      alreadySent: number;
+      newlySent: number;
+      skippedNoEmail: number;
+      skippedNoLdap: number;
+      skippedBlocked: number;
+      failed: number;
+    } | null;
+  }>({
+    queryKey: ['/api/notification-backfill/status'],
+    refetchInterval: 30000,
+  });
+
+  const runBackfillMutation = useMutation({
+    mutationFn: () => apiRequest('POST', '/api/notification-backfill/run'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/notification-backfill/status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/communication/logs'] });
+      toast({ title: "Notification backfill completed" });
+    },
+    onError: () => {
+      toast({ title: "Backfill failed", variant: "destructive" });
+    },
   });
 
   const seedTemplatesMutation = useMutation({
@@ -531,6 +562,61 @@ export default function CommunicationHub() {
               <RefreshCw className="h-4 w-4 mr-2" /> Refresh
             </Button>
           </div>
+
+          <Card className="border-blue-200 bg-blue-50/50">
+            <CardContent className="py-4 px-5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Clock className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <h4 className="font-semibold text-sm">Notification Backfill Scanner</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Automatically checks for missed tool audit notifications every 6 hours
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {backfillStatus?.lastResult && (
+                    <div className="text-xs text-right space-y-0.5">
+                      <div className="text-muted-foreground">
+                        Last run: {format(new Date(backfillStatus.lastResult.ranAt), 'MMM d, h:mm a')}
+                      </div>
+                      <div className="flex gap-2">
+                        <span title="Checked">{backfillStatus.lastResult.totalChecked} checked</span>
+                        {backfillStatus.lastResult.newlySent > 0 && (
+                          <span className="text-green-600 font-medium">{backfillStatus.lastResult.newlySent} sent</span>
+                        )}
+                        {backfillStatus.lastResult.alreadySent > 0 && (
+                          <span className="text-blue-600">{backfillStatus.lastResult.alreadySent} already sent</span>
+                        )}
+                        {(backfillStatus.lastResult.skippedNoEmail + (backfillStatus.lastResult.skippedNoLdap || 0)) > 0 && (
+                          <span className="text-amber-600">{backfillStatus.lastResult.skippedNoEmail + (backfillStatus.lastResult.skippedNoLdap || 0)} skipped</span>
+                        )}
+                        {backfillStatus.lastResult.failed > 0 && (
+                          <span className="text-red-600">{backfillStatus.lastResult.failed} failed</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {!backfillStatus?.lastResult && (
+                    <span className="text-xs text-muted-foreground">No runs yet</span>
+                  )}
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => runBackfillMutation.mutate()}
+                    disabled={runBackfillMutation.isPending || backfillStatus?.isRunning}
+                  >
+                    {runBackfillMutation.isPending || backfillStatus?.isRunning ? (
+                      <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Running...</>
+                    ) : (
+                      <><Play className="h-3.5 w-3.5 mr-1.5" /> Run Now</>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {logsLoading ? (
             <Card><CardContent className="py-8 text-center text-muted-foreground">Loading history...</CardContent></Card>
