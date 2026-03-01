@@ -23,6 +23,7 @@ import { AmsApiService } from "./ams-api-service";
 const amsApiService = new AmsApiService();
 import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
+import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
 // SAML SSO INTEGRATION
 import passport from "passport";
@@ -7602,9 +7603,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/samsara/vehicle/:vehicleName", requireAuth, async (req: any, res) => {
     try {
       const { vehicleName } = req.params;
-      const syncService = getSnowflakeSyncService();
-      const result = await syncService.getSamsaraVehicleLocation(vehicleName);
-      res.json(result);
+      const stalenessHours = req.query.stalenessHours ? parseInt(req.query.stalenessHours as string) : 4;
+      const samsaraService = getSamsaraService();
+      const result = await samsaraService.getVehicleLocation(vehicleName, stalenessHours);
+      
+      if (result) {
+        res.setHeader('X-Data-Source', result.source);
+        res.json(result);
+      } else {
+        res.status(404).json({ found: false, message: "Vehicle location not found" });
+      }
     } catch (error: any) {
       console.error("Error looking up Samsara vehicle location:", error);
       res.status(500).json({ found: false, message: error.message });
@@ -7618,16 +7626,271 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!Array.isArray(vehicleNames)) {
         return res.status(400).json({ error: "vehicleNames must be an array" });
       }
-      const syncService = getSnowflakeSyncService();
-      const resultsMap = await syncService.getSamsaraVehicleLocationsBatch(vehicleNames);
-      const results: Record<string, { vehicleName: string; address: string; lastUpdated: string }> = {};
-      resultsMap.forEach((value, key) => {
-        results[key] = value;
-      });
+      const samsaraService = getSamsaraService();
+      const results = await samsaraService.getVehicleLocationsBatch(vehicleNames);
+      
+      // Determine if any came from live API for header (simplification)
+      const hasLive = results.some(r => r.source === 'live');
+      res.setHeader('X-Data-Source', hasLive ? 'mixed' : 'snowflake');
+      
       res.json(results);
     } catch (error: any) {
       console.error("Error batch looking up Samsara vehicle locations:", error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Dedicated Samsara Integration Routes
+  console.log("Registering Samsara integration routes...");
+  
+  app.get("/api/samsara/status", requireAuth, async (_req, res) => {
+    const samsaraService = getSamsaraService();
+    const snowflake = samsaraService.isSnowflakeAvailable();
+    const liveApi = samsaraService.isLiveApiConfigured();
+    res.json({
+      snowflake,
+      liveApi,
+      message: snowflake ? "Samsara integration active (Snowflake-first)" : "Snowflake not configured for Samsara"
+    });
+  });
+
+  app.get("/api/samsara/test", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const vehicles = await samsaraService.getVehicles();
+      let livePing = false;
+      if (samsaraService.isLiveApiConfigured()) {
+        livePing = await samsaraService.testLiveApi();
+      }
+      res.json({
+        snowflakeVehicleCount: vehicles.length,
+        liveApiPing: livePing,
+        status: "ok"
+      });
+    } catch (error: any) {
+      res.status(500).json({ status: "error", message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/vehicles", requireAuth, async (req, res) => {
+    try {
+      const filters = {
+        truckNumber: req.query.truckNumber as string,
+        driverId: req.query.driverId as string
+      };
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getVehicles(filters);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/vehicles/:vehicleId", requireAuth, async (req, res) => {
+    try {
+      const { vehicleId } = req.params;
+      const samsaraService = getSamsaraService();
+      // We don't have a getVehicle method in T001, so we filter the list
+      const data = await samsaraService.getVehicles();
+      const vehicle = data.find(v => v.VEHICLE_ID === vehicleId);
+      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+      res.json(vehicle);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/drivers", requireAuth, async (req, res) => {
+    try {
+      const filters = {
+        ldap: req.query.ldap as string,
+        status: req.query.status as string
+      };
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getDrivers(filters);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/drivers/:driverId", requireAuth, async (req, res) => {
+    try {
+      const { driverId } = req.params;
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getDrivers();
+      const driver = data.find(d => d.DRIVER_ID === driverId);
+      if (!driver) return res.status(404).json({ message: "Driver not found" });
+      res.json(driver);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/assignments", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getAssignments(
+        req.query.date as string,
+        req.query.vehicleId as string,
+        req.query.driverId as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/safety-scores", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getSafetyScores(
+        req.query.driverId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/odometer", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getOdometer(req.query.vehicleId as string);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/trips", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getTrips(
+        req.query.vehicleId as string,
+        req.query.driverId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/maintenance", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getMaintenance();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/fuel", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getFuelEnergy(
+        req.query.vehicleId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/safety-events", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getSafetyEvents(
+        req.query.vehicleId as string,
+        req.query.driverId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/speeding", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getSpeedingEvents(
+        req.query.vehicleId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/idling", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getIdlingEvents(
+        req.query.vehicleId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/devices", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getDevices();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/gateways", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getGateways();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/samsara/drivers", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveCreateDriver(req.body);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/samsara/drivers/:driverId", requireAuth, async (req, res) => {
+    try {
+      const { driverId } = req.params;
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveUpdateDriver(driverId, req.body);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
     }
   });
 

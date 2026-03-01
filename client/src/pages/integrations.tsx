@@ -59,6 +59,7 @@ export default function Integrations() {
   const [amsEnabled, setAmsEnabled] = useState(true);
   const [snowflakeEnabled, setSnowflakeEnabled] = useState(true);
   const [tpmsEnabled, setTpmsEnabled] = useState(true);
+  const [samsaraEnabled, setSamsaraEnabled] = useState(true);
   const [parqEnabled, setParqEnabled] = useState(true);
   const [segnoEnabled, setSegnoEnabled] = useState(true);
   
@@ -95,6 +96,10 @@ export default function Integrations() {
 
   const { data: segnoStatus, isLoading: segnoStatusLoading } = useQuery<{ configured: boolean; message: string }>({
     queryKey: ["/api/segno/status"],
+  });
+
+  const { data: samsaraStatus, isLoading: samsaraStatusLoading } = useQuery<{ snowflake: boolean; liveApi: boolean; message: string }>({
+    queryKey: ["/api/samsara/status"],
   });
 
   // Employee Roster queries
@@ -489,10 +494,10 @@ export default function Integrations() {
   };
 
   const integrationStats = {
-    total: 6,
-    active: [holmanEnabled, amsEnabled, snowflakeEnabled, tpmsEnabled, parqEnabled, segnoEnabled].filter(Boolean).length,
-    healthy: [true, amsStatus?.configured, snowflakeStatus?.configured, tpmsStatus?.configured, parqStatus?.configured, segnoStatus?.configured].filter(Boolean).length,
-    errors: [false, !amsStatus?.configured, !snowflakeStatus?.configured, !tpmsStatus?.configured, !parqStatus?.configured, !segnoStatus?.configured].filter(Boolean).length,
+    total: 7,
+    active: [holmanEnabled, amsEnabled, snowflakeEnabled, tpmsEnabled, parqEnabled, segnoEnabled, samsaraEnabled].filter(Boolean).length,
+    healthy: [true, amsStatus?.configured, snowflakeStatus?.configured, tpmsStatus?.configured, parqStatus?.configured, segnoStatus?.configured, samsaraStatus?.snowflake].filter(Boolean).length,
+    errors: [false, !amsStatus?.configured, !snowflakeStatus?.configured, !tpmsStatus?.configured, !parqStatus?.configured, !segnoStatus?.configured, !samsaraStatus?.snowflake].filter(Boolean).length,
   };
 
   return (
@@ -1202,6 +1207,60 @@ export default function Integrations() {
                 )}
               </CollapsibleContent>
             </Collapsible>
+
+            {/* Samsara Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/samsara-integration" data-testid="link-samsara-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-blue-600/10 rounded-lg flex items-center justify-center text-blue-600 font-bold text-xl">
+                  S
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-blue-600 transition-colors">
+                      Samsara Fleet
+                    </h3>
+                    {samsaraStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : samsaraStatus?.snowflake ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Real-time telematics, GPS, and driver safety data via Snowflake
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${samsaraStatus?.snowflake ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {samsaraStatus?.snowflake ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={samsaraEnabled ? "default" : "secondary"} className="text-xs">
+                  {samsaraEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/samsara/status"] })}
+                  data-testid="button-test-samsara"
+                >
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Refresh
+                </Button>
+                <Switch
+                  checked={samsaraEnabled}
+                  onCheckedChange={setSamsaraEnabled}
+                  data-testid="switch-samsara-enabled"
+                />
+              </div>
+            </div>
 
             {/* TPMS API - Expandable inline */}
             <Collapsible open={tpmsExpanded} onOpenChange={setTpmsExpanded}>

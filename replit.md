@@ -134,17 +134,36 @@ Preferred communication style: Simple, everyday language.
 - **8 new PMF backend routes**: `GET /api/pmf/status`, `/api/pmf/lots`, `/api/pmf/lot-types`, `/api/pmf/vehicle-types`, `/api/pmf/vehicle-statuses`, `/api/pmf/vehicle/:id`, `/api/pmf/vehicle/:id/activitylog`, `/api/pmf/workorder/:id`.
 - **Integrations page updated**: PARQ My Fleet card added (total: 5 integrations), live connection status badge via `/api/pmf/status`, links to `/parq-integration`.
 
+## Sprint 20 — Completed (2026-03-01)
+- **Samsara integration — Snowflake-first architecture**: `server/samsara-service.ts` (518 lines) — full service covering all 14 `bi_analytics.app_samsara` Snowflake tables as primary read source; live Samsara API only for GPS staleness fallback and write operations.
+- **19 new Samsara backend routes** registered under `Registering Samsara integration routes...`:
+  - Status/test: `GET /api/samsara/status`, `GET /api/samsara/test`
+  - Vehicles: `GET /api/samsara/vehicles`, `GET /api/samsara/vehicles/:vehicleId`
+  - Drivers: `GET /api/samsara/drivers`, `GET /api/samsara/drivers/:driverId`, `POST /api/samsara/drivers`, `PATCH /api/samsara/drivers/:driverId`
+  - Data: `GET /api/samsara/assignments`, `/api/samsara/safety-scores`, `/api/samsara/odometer`, `/api/samsara/trips`, `/api/samsara/maintenance`, `/api/samsara/fuel`, `/api/samsara/safety-events`, `/api/samsara/speeding`, `/api/samsara/idling`, `/api/samsara/devices`, `/api/samsara/gateways`
+  - Existing location routes upgraded to use new service: `GET /api/samsara/vehicle/:vehicleName`, `POST /api/samsara/vehicles/batch` — both now support `?stalenessHours=` and return `X-Data-Source: snowflake|live` header
+- **Write routes graceful degradation**: `POST /api/samsara/drivers` and `PATCH /api/samsara/drivers/:driverId` return 503 if `SAMSARA_API_TOKEN` not set
+- **Samsara integration frontend page**: `client/src/pages/samsara-integration.tsx` — 7-tab page at `/samsara-integration`: Overview (stat cards + architecture legend), Fleet (searchable vehicle table), Drivers (searchable driver table with status badges), Assignments (date-picker + daily pairing table), Safety (scores + events), Operations (Fuel/Energy, Speeding, Idling cards), API Reference (all routes with source badges)
+- **Integrations dashboard updated**: Samsara Fleet card added (total: 7 integrations), status badge queries `/api/samsara/status` for Snowflake + Live API availability
+
+### Snowflake Schema — `bi_analytics.app_samsara`
+14 tables consumed by Samsara service:
+`SAMSARA_STREAM` (GPS), `SAMSARA_VEHICLES`, `SAMSARA_DRIVERS`, `SAMSARA_VEHICLE_ASSIGN`, `SAMSARA_DRIVER_SAFETY_SCORES`, `SAMSARA_ODOMETER`, `SAMSARA_TRIPS`, `SAMSARA_MAINTENANCE`, `SAMSARA_FUEL_ENERGY_DAILY`, `SAMSARA_SAFETY`, `SAMSARA_SPEEDING`, `SAMSARA_IDLING`, `SAMSARA_DEVICES`, `SAMSARA_GATEWAYS`
+
 ## Session Handoff
 
 ### Current Blockers
 - SendGrid credits exceeded — email delivery disabled; security questions used as alternative for password reset
 - SAML SSO requires IdP admin to register SP ACS URL and Entity ID (printed in server logs on startup)
+- Segno: QA host `hscmt.nonprod.mt.oh.transformco.com:2443` is internal Transformco DNS, unreachable from Replit
+- `SAMSARA_API_TOKEN` not yet provided — integration runs in Snowflake-only mode; write routes return 503
 
 ### Pending Decisions
 - `SAML_BASE_URL` needs to be set for production deployment if auto-detection doesn't match the registered SP URL
 
 ### Recommended Next Steps
-1. **IdP Registration**: Provide SAML SP details (ACS URL, Entity ID, NameID format) to IdP admin for onboarding
-2. **Production `SAML_BASE_URL`**: Set this env var to the production domain after deployment
-3. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
+1. **Samsara live API**: Provide `SAMSARA_API_TOKEN` secret to enable GPS staleness fallback and driver write operations
+2. **IdP Registration**: Provide SAML SP details (ACS URL, Entity ID, NameID format) to IdP admin for onboarding
+3. **Production `SAML_BASE_URL`**: Set this env var to the production domain after deployment
+4. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
 4. **Alternative email provider**: Consider Resend or Mailgun if email-based features are needed again
