@@ -180,7 +180,8 @@ export class SamsaraService {
   private buildLiveParams(extra: Record<string, string | number | undefined> = {}): string {
     const params = new URLSearchParams();
     const groupId = this.groupId || process.env.SAMSARA_GROUP_ID;
-    if (groupId) params.set('tagIds', groupId);
+    // SAMSARA_GROUP_ID is a parent tag ID — use parentTagIds to include all child tags
+    if (groupId) params.set('parentTagIds', groupId);
     for (const [k, v] of Object.entries(extra)) {
       if (v !== undefined) params.set(k, String(v));
     }
