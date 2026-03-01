@@ -8885,6 +8885,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get all techs updated after a given timestamp (ISO 8601, e.g. 2026-02-27T00:00:00)
+  app.get("/api/tpms/techs-updated-after/:timestamp", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const data = await tpmsService.getTechsUpdatedAfter(req.params.timestamp);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error("Error fetching techs updated after timestamp:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Update a tech info record (mirrors PUT /techinfo on the TPMS API)
+  app.put("/api/tpms/techinfo", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      if (!req.body || typeof req.body !== 'object') {
+        return res.status(400).json({ success: false, message: "Request body is required" });
+      }
+      const data = await tpmsService.updateTechInfo(req.body);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error("Error updating tech info:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Temporary truck assignment
+  app.post("/api/tpms/temp-truck-assign", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const { ldapId, distNo, truckNo } = req.body || {};
+      if (!ldapId || !distNo || !truckNo) {
+        return res.status(400).json({ success: false, message: "ldapId, distNo, and truckNo are required" });
+      }
+      const data = await tpmsService.tempTruckAssign(ldapId, distNo, truckNo);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error("Error performing temp truck assign:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Check if TPMS is configured
   app.get("/api/tpms/status", requireAuth, async (req: any, res) => {
     try {

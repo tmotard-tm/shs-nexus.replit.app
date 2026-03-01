@@ -399,6 +399,86 @@ class TPMSService {
     return results;
   }
 
+  // Get all techs updated after a given timestamp (ISO 8601 format)
+  async getTechsUpdatedAfter(timestamp: string): Promise<any> {
+    const token = await this.getToken();
+    const baseUrl = this.apiEndpoint.endsWith('/') ? this.apiEndpoint.slice(0, -1) : this.apiEndpoint;
+    const encoded = encodeURIComponent(timestamp);
+    const url = `${baseUrl}/techsupdatedafter/${encoded}`;
+    console.log(`[TPMS] Fetching techs updated after: ${timestamp}`);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`techsupdatedafter request failed: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`[TPMS] techsupdatedafter returned successfully`);
+    return data;
+  }
+
+  // Update a tech info record (PUT /techinfo)
+  async updateTechInfo(body: Record<string, any>): Promise<any> {
+    const token = await this.getToken();
+    const baseUrl = this.apiEndpoint.endsWith('/') ? this.apiEndpoint.slice(0, -1) : this.apiEndpoint;
+    const url = `${baseUrl}/techinfo`;
+    console.log(`[TPMS] Updating tech info for: ${body.ldapId || 'unknown'}`);
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Tech update request failed: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`[TPMS] Tech info updated successfully for ${body.ldapId || 'unknown'}`);
+    return data;
+  }
+
+  // Temporary truck assignment (POST /temptruckassign)
+  async tempTruckAssign(ldapId: string, distNo: string, truckNo: string): Promise<any> {
+    const token = await this.getToken();
+    const baseUrl = this.apiEndpoint.endsWith('/') ? this.apiEndpoint.slice(0, -1) : this.apiEndpoint;
+    const url = `${baseUrl}/temptruckassign`;
+    console.log(`[TPMS] Temp truck assign: ldapId=${ldapId}, distNo=${distNo}, truckNo=${truckNo}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ ldapId, distNo, truckNo }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Temp truck assign request failed: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`[TPMS] Temp truck assign successful: ${ldapId} → truck ${truckNo}`);
+    return data;
+  }
+
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
       if (!this.authEndpoint || !this.basicAuthCredential || !this.apiEndpoint) {
