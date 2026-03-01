@@ -22,6 +22,7 @@ import { holmanApiService } from "./holman-api-service";
 import { AmsApiService } from "./ams-api-service";
 const amsApiService = new AmsApiService();
 import { pmfApiService } from "./pmf-api-service";
+import { segnoApiService } from "./segno-api-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
 // SAML SSO INTEGRATION
 import passport from "passport";
@@ -10572,6 +10573,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error fetching AMS lookup:", error);
       res.status(500).json({ message: error.message || "Failed to fetch lookup data" });
+    }
+  });
+
+  // ============================================
+  // Segno (SugarCRM) API Routes
+  // ============================================
+  console.log("Registering Segno API routes...");
+
+  app.get("/api/segno/status", requireAuth, async (req: any, res) => {
+    try {
+      const status = await segnoApiService.getStatus();
+      res.json(status);
+    } catch (error: any) {
+      res.json({ configured: false, message: error.message });
+    }
+  });
+
+  app.post("/api/segno/test", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.testConnection();
+      res.json(result);
+    } catch (error: any) {
+      res.json({ success: false, message: error.message });
+    }
+  });
+
+  app.get("/api/segno/onboarding", requireAuth, async (req: any, res) => {
+    try {
+      const offset = parseInt(req.query.offset as string) || 0;
+      const maxResults = parseInt(req.query.max as string) || 100;
+      const result = await segnoApiService.getOnboardingList({ offset, maxResults });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error fetching Segno onboarding list:", error);
+      res.status(500).json({ success: false, message: error.message, records: [], totalCount: 0, nextOffset: 0 });
+    }
+  });
+
+  app.get("/api/segno/onboarding/search", requireAuth, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string) || "";
+      if (!q.trim()) return res.json({ success: true, records: [] });
+      const records = await segnoApiService.searchOnboarding(q.trim());
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error searching Segno onboarding:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/onboarding/by-employee/:employeeId", requireAuth, async (req: any, res) => {
+    try {
+      const records = await segnoApiService.searchOnboardingByEmployeeId(req.params.employeeId);
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error looking up Segno onboarding by employee ID:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/onboarding/by-enterprise/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      const records = await segnoApiService.searchOnboardingByEnterpriseId(req.params.enterpriseId);
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error looking up Segno onboarding by enterprise ID:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/onboarding/:id", requireAuth, async (req: any, res) => {
+    try {
+      const record = await segnoApiService.getOnboardingById(req.params.id);
+      if (!record) return res.status(404).json({ success: false, message: "Record not found" });
+      res.json({ success: true, record });
+    } catch (error: any) {
+      console.error("Error fetching Segno onboarding record:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/segno/onboarding", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.createOnboardingRecord(req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error creating Segno onboarding record:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.patch("/api/segno/onboarding/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.updateOnboardingRecord(req.params.id, req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error updating Segno onboarding record:", error);
+      res.status(500).json({ success: false, message: error.message });
     }
   });
 

@@ -60,6 +60,7 @@ export default function Integrations() {
   const [snowflakeEnabled, setSnowflakeEnabled] = useState(true);
   const [tpmsEnabled, setTpmsEnabled] = useState(true);
   const [parqEnabled, setParqEnabled] = useState(true);
+  const [segnoEnabled, setSegnoEnabled] = useState(true);
   
   // Employee Roster state
   const [rosterSearch, setRosterSearch] = useState("");
@@ -90,6 +91,10 @@ export default function Integrations() {
 
   const { data: parqStatus, isLoading: parqStatusLoading } = useQuery<{ configured: boolean; message: string }>({
     queryKey: ["/api/pmf/status"],
+  });
+
+  const { data: segnoStatus, isLoading: segnoStatusLoading } = useQuery<{ configured: boolean; message: string }>({
+    queryKey: ["/api/segno/status"],
   });
 
   // Employee Roster queries
@@ -484,10 +489,10 @@ export default function Integrations() {
   };
 
   const integrationStats = {
-    total: 5,
-    active: [holmanEnabled, amsEnabled, snowflakeEnabled, tpmsEnabled, parqEnabled].filter(Boolean).length,
-    healthy: [true, amsStatus?.configured, snowflakeStatus?.configured, tpmsStatus?.configured, parqStatus?.configured].filter(Boolean).length,
-    errors: [false, !amsStatus?.configured, !snowflakeStatus?.configured, !tpmsStatus?.configured, !parqStatus?.configured].filter(Boolean).length,
+    total: 6,
+    active: [holmanEnabled, amsEnabled, snowflakeEnabled, tpmsEnabled, parqEnabled, segnoEnabled].filter(Boolean).length,
+    healthy: [true, amsStatus?.configured, snowflakeStatus?.configured, tpmsStatus?.configured, parqStatus?.configured, segnoStatus?.configured].filter(Boolean).length,
+    errors: [false, !amsStatus?.configured, !snowflakeStatus?.configured, !tpmsStatus?.configured, !parqStatus?.configured, !segnoStatus?.configured].filter(Boolean).length,
   };
 
   return (
@@ -1355,6 +1360,57 @@ export default function Integrations() {
                 <Switch
                   checked={parqEnabled}
                   onCheckedChange={setParqEnabled}
+                />
+              </div>
+            </div>
+            {/* Segno Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/segno-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-violet-500/10 rounded-lg flex items-center justify-center">
+                  <Users className="h-6 w-6 text-violet-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-violet-500 transition-colors">
+                      Segno
+                    </h3>
+                    {segnoStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : segnoStatus?.configured ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    SugarCRM-based OnBoarding workflow management for technician hires
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${segnoStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {segnoStatus?.configured ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={segnoEnabled ? "default" : "secondary"} className="text-xs">
+                  {segnoEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toast({ title: "Segno Test", description: "Use the Segno integration page to test the connection" })}
+                >
+                  <TestTube className="h-4 w-4 mr-1" />
+                  Test
+                </Button>
+                <Switch
+                  checked={segnoEnabled}
+                  onCheckedChange={setSegnoEnabled}
                 />
               </div>
             </div>

@@ -31,6 +31,7 @@ import Integrations from "@/pages/integrations";
 import HolmanIntegration from "@/pages/holman-integration";
 import AmsIntegration from "@/pages/ams-integration";
 import ParqIntegration from "@/pages/parq-integration";
+import SegnoIntegration from "@/pages/segno-integration";
 import QueueManagement from "@/pages/queue-management";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
@@ -300,6 +301,12 @@ function Router() {
       <Route path="/parq-integration">
         <ProtectedRoute>
           <ParqIntegration />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/segno-integration">
+        <ProtectedRoute>
+          <SegnoIntegration />
         </ProtectedRoute>
       </Route>
 
