@@ -8731,6 +8731,105 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get all work orders from PMF
+  app.get("/api/pmf/workorders", requireAuth, async (req: any, res) => {
+    try {
+      const workorders = await pmfApiService.getWorkOrders();
+      res.json({ success: true, workorders });
+    } catch (error: any) {
+      console.error("Error fetching PMF work orders:", error);
+      res.status(500).json({ success: false, message: error.message, workorders: [] });
+    }
+  });
+
+  // Get work order pricing from PMF
+  app.get("/api/pmf/workorder/:id/pricing", requireAuth, async (req: any, res) => {
+    try {
+      const pricing = await pmfApiService.getWorkOrderPricing(req.params.id);
+      res.json({ success: true, pricing });
+    } catch (error: any) {
+      console.error("Error fetching PMF work order pricing:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get vehicle condition report from PMF
+  app.get("/api/pmf/vehicle/:id/conditionreport", requireAuth, async (req: any, res) => {
+    try {
+      const report = await pmfApiService.getVehicleConditionReport(req.params.id);
+      res.json({ success: true, report });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle condition report:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get vehicle checkin form from PMF
+  app.get("/api/pmf/vehicle/:id/checkin", requireAuth, async (req: any, res) => {
+    try {
+      const checkin = await pmfApiService.getVehicleCheckin(req.params.id);
+      res.json({ success: true, checkin });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle checkin:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get vehicle datapoint types from PMF
+  app.get("/api/pmf/vehicle-datapoint-types", requireAuth, async (req: any, res) => {
+    try {
+      const types = await pmfApiService.getVehicleDatapointTypes();
+      res.json({ success: true, types });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle datapoint types:", error);
+      res.status(500).json({ success: false, message: error.message, types: [] });
+    }
+  });
+
+  // Get lot timezones from PMF
+  app.get("/api/pmf/lot-timezones", requireAuth, async (req: any, res) => {
+    try {
+      const timezones = await pmfApiService.getLotTimezones();
+      res.json({ success: true, timezones });
+    } catch (error: any) {
+      console.error("Error fetching PMF lot timezones:", error);
+      res.status(500).json({ success: false, message: error.message, timezones: [] });
+    }
+  });
+
+  // Get ticket categories from PMF
+  app.get("/api/pmf/ticket-categories", requireAuth, async (req: any, res) => {
+    try {
+      const categories = await pmfApiService.getTicketCategories();
+      res.json({ success: true, categories });
+    } catch (error: any) {
+      console.error("Error fetching PMF ticket categories:", error);
+      res.status(500).json({ success: false, message: error.message, categories: [] });
+    }
+  });
+
+  // Get ticket priorities from PMF
+  app.get("/api/pmf/ticket-priorities", requireAuth, async (req: any, res) => {
+    try {
+      const priorities = await pmfApiService.getTicketPriorities();
+      res.json({ success: true, priorities });
+    } catch (error: any) {
+      console.error("Error fetching PMF ticket priorities:", error);
+      res.status(500).json({ success: false, message: error.message, priorities: [] });
+    }
+  });
+
+  // Get ticket statuses from PMF
+  app.get("/api/pmf/ticket-statuses", requireAuth, async (req: any, res) => {
+    try {
+      const statuses = await pmfApiService.getTicketStatuses();
+      res.json({ success: true, statuses });
+    } catch (error: any) {
+      console.error("Error fetching PMF ticket statuses:", error);
+      res.status(500).json({ success: false, message: error.message, statuses: [] });
+    }
+  });
+
   // ============================================
   // TPMS API Routes
   // ============================================

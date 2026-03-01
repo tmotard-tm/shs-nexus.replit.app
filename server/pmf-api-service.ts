@@ -549,6 +549,93 @@ export class PMFApiService {
       throw error;
     }
   }
+
+  async getWorkOrders(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any>('/api/public/v1/workorder');
+      return Array.isArray(result) ? result : (result ? [result] : []);
+    } catch (error) {
+      console.error('[PMF] Error fetching work orders:', error);
+      throw error;
+    }
+  }
+
+  async getWorkOrderPricing(id: string): Promise<any> {
+    try {
+      return await this.makeRequest<any>(`/api/public/v1/workorder/${id}/pricing`);
+    } catch (error) {
+      console.error('[PMF] Error fetching work order pricing:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleConditionReport(id: string): Promise<any> {
+    try {
+      return await this.makeRequest<any>(`/api/public/v1/vehicle/${id}/conditionreport`);
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle condition report:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleCheckin(id: string): Promise<any> {
+    try {
+      return await this.makeRequest<any>(`/api/public/v1/vehicle/${id}/checkin`);
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle checkin:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleDatapointTypes(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/vehicle/datapointtypes');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle datapoint types:', error);
+      throw error;
+    }
+  }
+
+  async getLotTimezones(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/lot/timezones');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching lot timezones:', error);
+      throw error;
+    }
+  }
+
+  async getTicketCategories(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/ticket/categories');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching ticket categories:', error);
+      throw error;
+    }
+  }
+
+  async getTicketPriorities(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/ticket/priorities');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching ticket priorities:', error);
+      throw error;
+    }
+  }
+
+  async getTicketStatuses(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/ticket/statuses');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching ticket statuses:', error);
+      throw error;
+    }
+  }
 }
 
 export const pmfApiService = new PMFApiService();
