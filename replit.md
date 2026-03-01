@@ -150,20 +150,40 @@ Preferred communication style: Simple, everyday language.
 14 tables consumed by Samsara service:
 `SAMSARA_STREAM` (GPS), `SAMSARA_VEHICLES`, `SAMSARA_DRIVERS`, `SAMSARA_VEHICLE_ASSIGN`, `SAMSARA_DRIVER_SAFETY_SCORES`, `SAMSARA_ODOMETER`, `SAMSARA_TRIPS`, `SAMSARA_MAINTENANCE`, `SAMSARA_FUEL_ENERGY_DAILY`, `SAMSARA_SAFETY`, `SAMSARA_SPEEDING`, `SAMSARA_IDLING`, `SAMSARA_DEVICES`, `SAMSARA_GATEWAYS`
 
+## Sprint 21 — Completed (2026-03-01)
+- **`SAMSARA_API_TOKEN` confirmed live**: Real fleet data confirmed (Chevy Express trucks, district tags, active drivers from Samsara API)
+- **Service hardening (`server/samsara-service.ts`)**:
+  - Added `SAMSARA_GROUP_ID` and `SAMSARA_ORG_ID` support; `buildLiveParams()` adds `tagIds` filter to all live API calls when Group ID is set
+  - `isLiveApiConfigured()` now re-reads env at call time (no restart needed if token set post-boot)
+  - `getLiveToken()` helper centralises token resolution
+  - `fetchAllLivePages()` auto-paginates all live API endpoints (cursor-based, limit 512 per page)
+  - Fixed `getVehicleLocation()`: previously passed truck name as `vehicleIds` (wrong); now resolves Samsara internal ID from `SAMSARA_VEHICLES` via Snowflake first, then calls live API by ID; falls back to name-match scan if Snowflake unavailable
+  - New public methods: `liveGetVehicles()`, `liveGetVehicleLocations()`, `liveGetAllDrivers()` — each fetches all pages
+- **3 new live pass-through routes** (total Samsara routes now 22):
+  - `GET /api/samsara/live/vehicles` — full fleet direct from Samsara (all pages, tag-filtered by Group ID)
+  - `GET /api/samsara/live/locations` — real-time GPS all vehicles (all pages); returns `X-Data-Source: live`
+  - `GET /api/samsara/live/drivers` — all drivers direct from Samsara (all pages)
+- **Status route enhanced**: `GET /api/samsara/status` now returns `groupId` and `orgId` flags alongside `snowflake` and `liveApi`
+- **Frontend updates** (`client/src/pages/samsara-integration.tsx`):
+  - Status type updated to include `groupId` / `orgId`
+  - Group ID badge added to page header status strip
+  - API Reference tab expanded to 24 routes (added all Snowflake, live, and status endpoints); new "Status" badge colour
+  - Live API badge wording updated to "Active" when token present
+
 ## Session Handoff
 
 ### Current Blockers
 - SendGrid credits exceeded — email delivery disabled; security questions used as alternative for password reset
 - SAML SSO requires IdP admin to register SP ACS URL and Entity ID (printed in server logs on startup)
 - Segno: QA host `hscmt.nonprod.mt.oh.transformco.com:2443` is internal Transformco DNS, unreachable from Replit
-- `SAMSARA_API_TOKEN` not yet provided — integration runs in Snowflake-only mode; write routes return 503
+- `SAMSARA_GROUP_ID` and `SAMSARA_ORG_ID` not yet set — live API works across all groups; set Group ID to filter to specific fleet tag
 
 ### Pending Decisions
 - `SAML_BASE_URL` needs to be set for production deployment if auto-detection doesn't match the registered SP URL
 
 ### Recommended Next Steps
-1. **Samsara live API**: Provide `SAMSARA_API_TOKEN` secret to enable GPS staleness fallback and driver write operations
+1. **Samsara Group ID**: Provide `SAMSARA_GROUP_ID` secret (Samsara tag ID) to scope live API calls to a specific fleet group
 2. **IdP Registration**: Provide SAML SP details (ACS URL, Entity ID, NameID format) to IdP admin for onboarding
 3. **Production `SAML_BASE_URL`**: Set this env var to the production domain after deployment
 4. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
-4. **Alternative email provider**: Consider Resend or Mailgun if email-based features are needed again
+5. **Alternative email provider**: Consider Resend or Mailgun if email-based features are needed again

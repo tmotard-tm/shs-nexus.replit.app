@@ -7650,7 +7650,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({
       snowflake,
       liveApi,
-      message: snowflake ? "Samsara integration active (Snowflake-first)" : "Snowflake not configured for Samsara"
+      groupId: process.env.SAMSARA_GROUP_ID ? 'configured' : null,
+      orgId: process.env.SAMSARA_ORG_ID ? 'configured' : null,
+      message: snowflake
+        ? `Samsara integration active (Snowflake-first${liveApi ? ' + Live API' : ''})`
+        : "Snowflake not configured for Samsara"
     });
   });
 
@@ -7888,6 +7892,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(503).json({ message: "Samsara Live API not configured" });
       }
       const data = await samsaraService.liveUpdateDriver(driverId, req.body);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Live API passthrough routes — fetch directly from Samsara (all pages)
+  app.get("/api/samsara/live/vehicles", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveGetVehicles();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/live/locations", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveGetVehicleLocations();
+      res.set('X-Data-Source', 'live');
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/live/drivers", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveGetAllDrivers();
       res.json(data);
     } catch (error: any) {
       res.status(500).json({ message: error.message });

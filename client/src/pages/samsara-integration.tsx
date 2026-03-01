@@ -21,13 +21,30 @@ import {
 import { format } from "date-fns";
 
 const API_ROUTES = [
-  { method: "GET",    source: "Snowflake", path: "/api/samsara/vehicles",           desc: "List vehicles from SAMSARA_VEHICLES" },
-  { method: "GET",    source: "Snowflake", path: "/api/samsara/drivers",            desc: "List drivers from SAMSARA_DRIVERS" },
-  { method: "GET",    source: "Snowflake", path: "/api/samsara/assignments",        desc: "Daily assignments from SAMSARA_VEHICLE_ASSIGN" },
-  { method: "GET",    source: "Snowflake", path: "/api/samsara/safety-scores",      desc: "Driver safety scores from Snowflake" },
-  { method: "GET",    source: "Both",      path: "/api/samsara/vehicle/:name",      desc: "Location with staleness fallback" },
-  { method: "POST",   source: "Live API",  path: "/api/samsara/drivers",            desc: "Create driver in Samsara" },
-  { method: "PATCH",  source: "Live API",  path: "/api/samsara/drivers/:id",        desc: "Update driver in Samsara" },
+  { method: "GET",    source: "Status",    path: "/api/samsara/status",              desc: "Integration status (Snowflake + Live API flags)" },
+  { method: "GET",    source: "Status",    path: "/api/samsara/test",                desc: "Count Snowflake vehicles + live API ping" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/vehicles",            desc: "List vehicles from SAMSARA_VEHICLES" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/vehicles/:vehicleId", desc: "Single vehicle by Samsara ID" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/drivers",             desc: "List drivers from SAMSARA_DRIVERS" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/drivers/:driverId",   desc: "Single driver by Samsara driver ID" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/assignments",         desc: "Daily assignments from SAMSARA_VEHICLE_ASSIGN" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/safety-scores",       desc: "Driver safety scores" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/odometer",            desc: "Vehicle odometer readings" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/trips",               desc: "Trip history" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/maintenance",         desc: "DTC / maintenance alerts" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/fuel",                desc: "Fuel & energy daily summaries" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/safety-events",       desc: "Harsh driving events" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/speeding",            desc: "Speeding events by severity" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/idling",              desc: "Idling events with fuel waste" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/devices",             desc: "Device health from SAMSARA_DEVICES" },
+  { method: "GET",    source: "Snowflake", path: "/api/samsara/gateways",            desc: "Gateway connectivity from SAMSARA_GATEWAYS" },
+  { method: "GET",    source: "Both",      path: "/api/samsara/vehicle/:vehicleName","desc": "Single vehicle GPS (Snowflake + live staleness fallback)" },
+  { method: "POST",   source: "Both",      path: "/api/samsara/vehicles/batch",      desc: "Batch GPS lookup for multiple vehicles" },
+  { method: "GET",    source: "Live API",  path: "/api/samsara/live/vehicles",       desc: "Full fleet from Samsara API (all pages, tag-filtered)" },
+  { method: "GET",    source: "Live API",  path: "/api/samsara/live/locations",      desc: "Real-time GPS for all vehicles (all pages)" },
+  { method: "GET",    source: "Live API",  path: "/api/samsara/live/drivers",        desc: "All drivers direct from Samsara API (all pages)" },
+  { method: "POST",   source: "Live API",  path: "/api/samsara/drivers",             desc: "Create driver in Samsara (live write)" },
+  { method: "PATCH",  source: "Live API",  path: "/api/samsara/drivers/:driverId",   desc: "Update driver in Samsara (live write)" },
 ];
 
 function SourceBadge({ source }: { source: string }) {
@@ -35,6 +52,7 @@ function SourceBadge({ source }: { source: string }) {
     Snowflake: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
     "Live API": "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
     Both: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+    Status: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
   };
   return <Badge className={`${colors[source] || ""} border-none`}>{source}</Badge>;
 }
@@ -45,7 +63,13 @@ export default function SamsaraIntegration() {
   const [vehicleSearch, setVehicleSearch] = useState("");
   const [driverSearch, setDriverSearch] = useState("");
 
-  const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useQuery<{ snowflake: boolean; liveApi: boolean; message: string }>({
+  const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useQuery<{
+    snowflake: boolean;
+    liveApi: boolean;
+    groupId: string | null;
+    orgId: string | null;
+    message: string;
+  }>({
     queryKey: ["/api/samsara/status"],
   });
 
@@ -93,7 +117,11 @@ export default function SamsaraIntegration() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Live API:</span>
-                {status?.liveApi ? <Badge variant="default" className="bg-green-500">Configured</Badge> : <Badge variant="secondary">Not Configured</Badge>}
+                {status?.liveApi ? <Badge variant="default" className="bg-green-500">Active</Badge> : <Badge variant="secondary">Not Configured</Badge>}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Group ID:</span>
+                {status?.groupId ? <Badge variant="outline" className="text-xs border-blue-300 text-blue-700 dark:text-blue-400">Set</Badge> : <Badge variant="secondary" className="text-xs">Not Set</Badge>}
               </div>
             </div>
             <Button variant="outline" size="sm" onClick={() => refetchStatus()}>

@@ -124,9 +124,13 @@ export interface SamsaraLocation {
 
 export class SamsaraService {
   private apiToken: string | null;
+  private groupId: string | null;
+  private orgId: string | null;
 
   constructor() {
     this.apiToken = process.env.SAMSARA_API_TOKEN || null;
+    this.groupId = process.env.SAMSARA_GROUP_ID || null;
+    this.orgId = process.env.SAMSARA_ORG_ID || null;
   }
 
   isSnowflakeAvailable(): boolean {
@@ -134,7 +138,14 @@ export class SamsaraService {
   }
 
   isLiveApiConfigured(): boolean {
-    return !!this.apiToken;
+    // Re-read env at call time so newly-set tokens are picked up without restart
+    return !!(this.apiToken || process.env.SAMSARA_API_TOKEN);
+  }
+
+  private getLiveToken(): string {
+    const token = this.apiToken || process.env.SAMSARA_API_TOKEN;
+    if (!token) throw new Error('Samsara live API token not configured');
+    return token;
   }
 
   private async fetchFromSnowflake<T>(query: string, binds: any[] = []): Promise<T[]> {
@@ -146,30 +157,65 @@ export class SamsaraService {
   }
 
   private async callLiveApi(endpoint: string, method: string = 'GET', body: any = null): Promise<any> {
-    if (!this.apiToken) {
-      throw new Error('Samsara live API token not configured');
-    }
-
+    const token = this.getLiveToken();
     const url = `https://api.samsara.com${endpoint}`;
     const options: RequestInit = {
       method,
       headers: {
-        'Authorization': `Bearer ${this.apiToken}`,
+        'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
     };
-
-    if (body) {
-      options.body = JSON.stringify(body);
-    }
+    if (body) options.body = JSON.stringify(body);
 
     const response = await fetch(url, options);
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Samsara API error: ${response.status} - ${errorText}`);
     }
-
     return await response.json();
+  }
+
+  // Build query string with optional tagIds filter from SAMSARA_GROUP_ID
+  private buildLiveParams(extra: Record<string, string | number | undefined> = {}): string {
+    const params = new URLSearchParams();
+    const groupId = this.groupId || process.env.SAMSARA_GROUP_ID;
+    if (groupId) params.set('tagIds', groupId);
+    for (const [k, v] of Object.entries(extra)) {
+      if (v !== undefined) params.set(k, String(v));
+    }
+    const str = params.toString();
+    return str ? `?${str}` : '';
+  }
+
+  // Paginate through all pages of a live API endpoint
+  private async fetchAllLivePages(basePath: string, baseParams: Record<string, string | number | undefined> = {}): Promise<any[]> {
+    const all: any[] = [];
+    let cursor: string | undefined;
+    do {
+      const params: Record<string, string | number | undefined> = { ...baseParams, limit: 512 };
+      if (cursor) params.after = cursor;
+      const qs = this.buildLiveParams(params);
+      const result = await this.callLiveApi(`${basePath}${qs}`);
+      if (result.data) all.push(...result.data);
+      cursor = result.pagination?.hasNextPage ? result.pagination.endCursor : undefined;
+    } while (cursor);
+    return all;
+  }
+
+  // Expose live vehicle list (all pages, filtered by group if SAMSARA_GROUP_ID set)
+  async liveGetVehicles(): Promise<any[]> {
+    return this.fetchAllLivePages('/fleet/vehicles');
+  }
+
+  // Expose live vehicle locations (all pages)
+  async liveGetVehicleLocations(): Promise<any[]> {
+    return this.fetchAllLivePages('/fleet/vehicles/locations');
+  }
+
+  // Expose live driver list (all pages)
+  async liveGetAllDrivers(): Promise<any[]> {
+    return this.fetchAllLivePages('/fleet/drivers');
   }
 
   async getVehicles(filters?: { truckNumber?: string; driverId?: string }): Promise<SamsaraVehicle[]> {
@@ -454,22 +500,43 @@ export class SamsaraService {
 
     if (this.isLiveApiConfigured()) {
       try {
-        const liveData = await this.callLiveApi(`/fleet/vehicles/locations?vehicleIds=${vehicleName}`);
-        if (liveData && liveData.data && liveData.data.length > 0) {
-          const liveLoc = liveData.data[0];
+        // Resolve truck name → Samsara vehicle ID via Snowflake, then call live API
+        let samsaraVehicleId: string | null = null;
+        if (this.isSnowflakeAvailable()) {
+          const idLookup = await this.fetchFromSnowflake<{ VEHICLE_ID: string }>(
+            `SELECT VEHICLE_ID FROM bi_analytics.app_samsara.SAMSARA_VEHICLES WHERE TRUCK_NUMBER = ? LIMIT 1`,
+            [vehicleName]
+          );
+          if (idLookup.length > 0) samsaraVehicleId = idLookup[0].VEHICLE_ID;
+        }
+
+        // Fetch live location: by Samsara ID if resolved, otherwise search by name
+        let liveVehicles: any[] = [];
+        if (samsaraVehicleId) {
+          const liveData = await this.callLiveApi(`/fleet/vehicles/locations?vehicleIds=${encodeURIComponent(samsaraVehicleId)}`);
+          liveVehicles = liveData?.data || [];
+        } else {
+          // Fall back: get first page and match by name
+          const qs = this.buildLiveParams({ limit: 512 });
+          const liveData = await this.callLiveApi(`/fleet/vehicles/locations${qs}`);
+          liveVehicles = (liveData?.data || []).filter((v: any) => v.name === vehicleName);
+        }
+
+        if (liveVehicles.length > 0) {
+          const liveLoc = liveVehicles[0];
           return {
             VEHICLE_NAME: liveLoc.name,
-            LAT: liveLoc.location.latitude,
-            LNG: liveLoc.location.longitude,
-            HEADING: liveLoc.location.heading,
-            SPEED_MPH: liveLoc.location.speedMilesPerHour,
-            TIME: liveLoc.location.time,
-            REVERSE_GEO_FULL: liveLoc.location.reverseGeo?.formattedLocation || null,
+            LAT: liveLoc.location?.latitude ?? 0,
+            LNG: liveLoc.location?.longitude ?? 0,
+            HEADING: liveLoc.location?.heading ?? null,
+            SPEED_MPH: liveLoc.location?.speed ?? null,
+            TIME: liveLoc.location?.time ?? new Date().toISOString(),
+            REVERSE_GEO_FULL: liveLoc.location?.reverseGeo?.formattedLocation ?? null,
             source: 'live'
           };
         }
       } catch (error) {
-        console.error('Error fetching live location:', error);
+        console.error('[Samsara] Error fetching live location for', vehicleName, error);
       }
     }
 
@@ -486,8 +553,8 @@ export class SamsaraService {
   }
 
   async liveGetDrivers(updatedAfterTime?: string): Promise<any> {
-    const endpoint = updatedAfterTime ? `/fleet/drivers?updatedAfterTime=${encodeURIComponent(updatedAfterTime)}` : '/fleet/drivers';
-    return await this.callLiveApi(endpoint);
+    const params = updatedAfterTime ? `?updatedAfterTime=${encodeURIComponent(updatedAfterTime)}` : this.buildLiveParams();
+    return await this.callLiveApi(`/fleet/drivers${params}`);
   }
 
   async liveCreateDriver(body: any): Promise<any> {
