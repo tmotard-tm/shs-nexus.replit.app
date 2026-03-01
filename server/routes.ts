@@ -8644,6 +8644,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PMF connection status
+  app.get("/api/pmf/status", requireAuth, async (req: any, res) => {
+    try {
+      const result = await pmfApiService.getStatus();
+      res.json(result);
+    } catch (error: any) {
+      res.json({ configured: false, message: error.message });
+    }
+  });
+
+  // Get all lots from PMF
+  app.get("/api/pmf/lots", requireAuth, async (req: any, res) => {
+    try {
+      const lots = await pmfApiService.getLots();
+      res.json({ success: true, lots });
+    } catch (error: any) {
+      console.error("Error fetching PMF lots:", error);
+      res.status(500).json({ success: false, message: error.message, lots: [] });
+    }
+  });
+
+  // Get lot types from PMF
+  app.get("/api/pmf/lot-types", requireAuth, async (req: any, res) => {
+    try {
+      const types = await pmfApiService.getLotTypes();
+      res.json({ success: true, types });
+    } catch (error: any) {
+      console.error("Error fetching PMF lot types:", error);
+      res.status(500).json({ success: false, message: error.message, types: [] });
+    }
+  });
+
+  // Get vehicle types from PMF
+  app.get("/api/pmf/vehicle-types", requireAuth, async (req: any, res) => {
+    try {
+      const types = await pmfApiService.getVehicleTypes();
+      res.json({ success: true, types });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle types:", error);
+      res.status(500).json({ success: false, message: error.message, types: [] });
+    }
+  });
+
+  // Get vehicle statuses from PMF
+  app.get("/api/pmf/vehicle-statuses", requireAuth, async (req: any, res) => {
+    try {
+      const statuses = await pmfApiService.getVehicleStatuses();
+      res.json({ success: true, statuses });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle statuses:", error);
+      res.status(500).json({ success: false, message: error.message, statuses: [] });
+    }
+  });
+
+  // Get vehicle by ID from PMF
+  app.get("/api/pmf/vehicle/:id", requireAuth, async (req: any, res) => {
+    try {
+      const vehicle = await pmfApiService.getVehicleById(req.params.id);
+      res.json({ success: true, vehicle });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle by id:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get vehicle activity log from PMF
+  app.get("/api/pmf/vehicle/:id/activitylog", requireAuth, async (req: any, res) => {
+    try {
+      const log = await pmfApiService.getVehicleActivityLog(req.params.id);
+      res.json({ success: true, log });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle activity log:", error);
+      res.status(500).json({ success: false, message: error.message, log: [] });
+    }
+  });
+
+  // Get work order by ID from PMF
+  app.get("/api/pmf/workorder/:id", requireAuth, async (req: any, res) => {
+    try {
+      const workorder = await pmfApiService.getWorkOrderById(req.params.id);
+      res.json({ success: true, workorder });
+    } catch (error: any) {
+      console.error("Error fetching PMF work order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // ============================================
   // TPMS API Routes
   // ============================================

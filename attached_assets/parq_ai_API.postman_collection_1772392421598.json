@@ -1,0 +1,1402 @@
+{
+  "info": {
+    "_postman_id": "382cb8ca-77aa-40ab-ac56-c166f69049dc",
+    "name": "parq ai API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "50583680"
+  },
+  "item": [
+    {
+      "name": "/api/public/v1/vehicle/{id}/checkin",
+      "item": [
+        {
+          "name": "v1",
+          "item": [
+            {
+              "name": "loadpricingconfig",
+              "item": [
+                {
+                  "name": "params",
+                  "item": [
+                    {
+                      "name": "/api/v1/loadpricingconfig/params",
+                      "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                          "raw": "{{baseUrl}}/api/v1/loadpricingconfig/params?clientId=87&miles=3458.0063616699385&assetClass=string",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "api",
+                            "v1",
+                            "loadpricingconfig",
+                            "params"
+                          ],
+                          "query": [
+                            {
+                              "key": "clientId",
+                              "value": "87"
+                            },
+                            {
+                              "key": "miles",
+                              "value": "3458.0063616699385"
+                            },
+                            {
+                              "key": "assetClass",
+                              "value": "string"
+                            }
+                          ]
+                        }
+                      },
+                      "response": [
+                        {
+                          "name": "Success",
+                          "originalRequest": {
+                            "method": "GET",
+                            "header": [
+                              {
+                                "description": "Added as a part of security scheme: bearer",
+                                "key": "Authorization",
+                                "value": "Bearer <token>"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/v1/loadpricingconfig/params?clientId=87&miles=3458.0063616699385&assetClass=string",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "v1",
+                                "loadpricingconfig",
+                                "params"
+                              ],
+                              "query": [
+                                {
+                                  "key": "clientId",
+                                  "value": "87"
+                                },
+                                {
+                                  "key": "miles",
+                                  "value": "3458.0063616699385"
+                                },
+                                {
+                                  "key": "assetClass",
+                                  "value": "string"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "OK",
+                          "code": 200,
+                          "_postman_previewlanguage": "text",
+                          "header": [],
+                          "cookie": [],
+                          "body": ""
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "/api/v1/loadpricingconfig",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{baseUrl}}/api/v1/loadpricingconfig?clientId=87",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "v1",
+                        "loadpricingconfig"
+                      ],
+                      "query": [
+                        {
+                          "key": "clientId",
+                          "value": "87"
+                        }
+                      ]
+                    }
+                  },
+                  "response": [
+                    {
+                      "name": "Success",
+                      "originalRequest": {
+                        "method": "GET",
+                        "header": [
+                          {
+                            "description": "Added as a part of security scheme: bearer",
+                            "key": "Authorization",
+                            "value": "Bearer <token>"
+                          }
+                        ],
+                        "url": {
+                          "raw": "{{baseUrl}}/api/v1/loadpricingconfig?clientId=87",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "api",
+                            "v1",
+                            "loadpricingconfig"
+                          ],
+                          "query": [
+                            {
+                              "key": "clientId",
+                              "value": "87"
+                            }
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                },
+                {
+                  "name": "/api/v1/loadpricingconfig",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"ranges\": [\n    {\n      \"createdDate\": \"1978-07-25T17:09:04.495Z\",\n      \"createdBy\": \"string\",\n      \"modifiedDate\": \"1965-02-19T05:01:41.519Z\",\n      \"modifiedBy\": \"string\",\n      \"deletedDate\": \"1984-07-06T02:45:05.252Z\",\n      \"deletedBy\": \"string\",\n      \"id\": 4482,\n      \"clientId\": 3650,\n      \"clientAccountId\": 3213,\n      \"assetClass\": \"string\",\n      \"minMiles\": 6027,\n      \"maxMiles\": 8729,\n      \"pricePerMile\": 3828.5139473891827,\n      \"tenantId\": 8159\n    },\n    {\n      \"createdDate\": \"1992-02-17T06:25:44.747Z\",\n      \"createdBy\": \"string\",\n      \"modifiedDate\": \"1973-07-13T03:07:02.613Z\",\n      \"modifiedBy\": \"string\",\n      \"deletedDate\": \"2002-01-31T03:01:27.292Z\",\n      \"deletedBy\": \"string\",\n      \"id\": 177,\n      \"clientId\": 9637,\n      \"clientAccountId\": 3659,\n      \"assetClass\": \"string\",\n      \"minMiles\": 3288,\n      \"maxMiles\": 1881,\n      \"pricePerMile\": 5173.340165699849,\n      \"tenantId\": 5652\n    }\n  ],\n  \"assetClass\": \"string\",\n  \"clientId\": 4464\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/api/v1/loadpricingconfig",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "v1",
+                        "loadpricingconfig"
+                      ]
+                    }
+                  },
+                  "response": [
+                    {
+                      "name": "Success",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "description": "Added as a part of security scheme: bearer",
+                            "key": "Authorization",
+                            "value": "Bearer <token>"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"ranges\": [\n    {\n      \"createdDate\": \"1978-07-25T17:09:04.495Z\",\n      \"createdBy\": \"string\",\n      \"modifiedDate\": \"1965-02-19T05:01:41.519Z\",\n      \"modifiedBy\": \"string\",\n      \"deletedDate\": \"1984-07-06T02:45:05.252Z\",\n      \"deletedBy\": \"string\",\n      \"id\": 4482,\n      \"clientId\": 3650,\n      \"clientAccountId\": 3213,\n      \"assetClass\": \"string\",\n      \"minMiles\": 6027,\n      \"maxMiles\": 8729,\n      \"pricePerMile\": 3828.5139473891827,\n      \"tenantId\": 8159\n    },\n    {\n      \"createdDate\": \"1992-02-17T06:25:44.747Z\",\n      \"createdBy\": \"string\",\n      \"modifiedDate\": \"1973-07-13T03:07:02.613Z\",\n      \"modifiedBy\": \"string\",\n      \"deletedDate\": \"2002-01-31T03:01:27.292Z\",\n      \"deletedBy\": \"string\",\n      \"id\": 177,\n      \"clientId\": 9637,\n      \"clientAccountId\": 3659,\n      \"assetClass\": \"string\",\n      \"minMiles\": 3288,\n      \"maxMiles\": 1881,\n      \"pricePerMile\": 5173.340165699849,\n      \"tenantId\": 5652\n    }\n  ],\n  \"assetClass\": \"string\",\n  \"clientId\": 4464\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/api/v1/loadpricingconfig",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "api",
+                            "v1",
+                            "loadpricingconfig"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "public",
+          "item": [
+            {
+              "name": "v1",
+              "item": [
+                {
+                  "name": "lot",
+                  "item": [
+                    {
+                      "name": "types",
+                      "item": [
+                        {
+                          "name": "Get Lot Types",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/lot/types",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "lot",
+                                "types"
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/lot/types",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "lot",
+                                    "types"
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "timezones",
+                      "item": [
+                        {
+                          "name": "Get Time Zones",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/lot/timezones",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "lot",
+                                "timezones"
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/lot/timezones",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "lot",
+                                    "timezones"
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "List all Lots",
+                      "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                          "raw": "{{baseUrl}}/api/public/v1/lot",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "api",
+                            "public",
+                            "v1",
+                            "lot"
+                          ]
+                        }
+                      },
+                      "response": [
+                        {
+                          "name": "Success",
+                          "originalRequest": {
+                            "method": "GET",
+                            "header": [
+                              {
+                                "description": "Added as a part of security scheme: bearer",
+                                "key": "Authorization",
+                                "value": "Bearer <token>"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/lot",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "lot"
+                              ]
+                            }
+                          },
+                          "status": "OK",
+                          "code": 200,
+                          "_postman_previewlanguage": "text",
+                          "header": [],
+                          "cookie": [],
+                          "body": ""
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "ticket",
+                  "item": [
+                    {
+                      "name": "categories",
+                      "item": [
+                        {
+                          "name": "Get Ticket Categories",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/ticket/categories",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "ticket",
+                                "categories"
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/ticket/categories",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "ticket",
+                                    "categories"
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "priorities",
+                      "item": [
+                        {
+                          "name": "Get Ticket Priorities",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/ticket/priorities",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "ticket",
+                                "priorities"
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/ticket/priorities",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "ticket",
+                                    "priorities"
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "statuses",
+                      "item": [
+                        {
+                          "name": "Get Ticket Statuses",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/ticket/statuses",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "ticket",
+                                "statuses"
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/ticket/statuses",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "ticket",
+                                    "statuses"
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "vehicle",
+                  "item": [
+                    {
+                      "name": "{id}",
+                      "item": [
+                        {
+                          "name": "activitylog",
+                          "item": [
+                            {
+                              "name": "Get Vehicle Activity Log",
+                              "request": {
+                                "method": "GET",
+                                "header": [],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/vehicle/:id/activitylog",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "vehicle",
+                                    ":id",
+                                    "activitylog"
+                                  ],
+                                  "variable": [
+                                    {
+                                      "key": "id",
+                                      "value": "87"
+                                    }
+                                  ]
+                                }
+                              },
+                              "response": [
+                                {
+                                  "name": "Success",
+                                  "originalRequest": {
+                                    "method": "GET",
+                                    "header": [
+                                      {
+                                        "description": "Added as a part of security scheme: bearer",
+                                        "key": "Authorization",
+                                        "value": "Bearer <token>"
+                                      }
+                                    ],
+                                    "url": {
+                                      "raw": "{{baseUrl}}/api/public/v1/vehicle/:id/activitylog",
+                                      "host": [
+                                        "{{baseUrl}}"
+                                      ],
+                                      "path": [
+                                        "api",
+                                        "public",
+                                        "v1",
+                                        "vehicle",
+                                        ":id",
+                                        "activitylog"
+                                      ],
+                                      "variable": [
+                                        {
+                                          "key": "id",
+                                          "value": "87"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "status": "OK",
+                                  "code": 200,
+                                  "_postman_previewlanguage": "text",
+                                  "header": [],
+                                  "cookie": [],
+                                  "body": ""
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "conditionreport",
+                          "item": [
+                            {
+                              "name": "Get condition reports for vehicle",
+                              "request": {
+                                "method": "GET",
+                                "header": [],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/vehicle/:id/conditionreport",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "vehicle",
+                                    ":id",
+                                    "conditionreport"
+                                  ],
+                                  "variable": [
+                                    {
+                                      "key": "id",
+                                      "value": "87"
+                                    }
+                                  ]
+                                }
+                              },
+                              "response": [
+                                {
+                                  "name": "Success",
+                                  "originalRequest": {
+                                    "method": "GET",
+                                    "header": [
+                                      {
+                                        "description": "Added as a part of security scheme: bearer",
+                                        "key": "Authorization",
+                                        "value": "Bearer <token>"
+                                      }
+                                    ],
+                                    "url": {
+                                      "raw": "{{baseUrl}}/api/public/v1/vehicle/:id/conditionreport",
+                                      "host": [
+                                        "{{baseUrl}}"
+                                      ],
+                                      "path": [
+                                        "api",
+                                        "public",
+                                        "v1",
+                                        "vehicle",
+                                        ":id",
+                                        "conditionreport"
+                                      ],
+                                      "variable": [
+                                        {
+                                          "key": "id",
+                                          "value": "87"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "status": "OK",
+                                  "code": 200,
+                                  "_postman_previewlanguage": "text",
+                                  "header": [],
+                                  "cookie": [],
+                                  "body": ""
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "checkin",
+                          "item": [
+                            {
+                              "name": "Get check in form for vehicle",
+                              "request": {
+                                "method": "GET",
+                                "header": [],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/vehicle/:id/checkin",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "vehicle",
+                                    ":id",
+                                    "checkin"
+                                  ],
+                                  "variable": [
+                                    {
+                                      "key": "id",
+                                      "value": "87"
+                                    }
+                                  ]
+                                }
+                              },
+                              "response": [
+                                {
+                                  "name": "Success",
+                                  "originalRequest": {
+                                    "method": "GET",
+                                    "header": [
+                                      {
+                                        "description": "Added as a part of security scheme: bearer",
+                                        "key": "Authorization",
+                                        "value": "Bearer <token>"
+                                      }
+                                    ],
+                                    "url": {
+                                      "raw": "{{baseUrl}}/api/public/v1/vehicle/:id/checkin",
+                                      "host": [
+                                        "{{baseUrl}}"
+                                      ],
+                                      "path": [
+                                        "api",
+                                        "public",
+                                        "v1",
+                                        "vehicle",
+                                        ":id",
+                                        "checkin"
+                                      ],
+                                      "variable": [
+                                        {
+                                          "key": "id",
+                                          "value": "87"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "status": "OK",
+                                  "code": 200,
+                                  "_postman_previewlanguage": "text",
+                                  "header": [],
+                                  "cookie": [],
+                                  "body": ""
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "Get Vehicle By Id",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/vehicle/:id",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "vehicle",
+                                ":id"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "id",
+                                  "value": "87"
+                                }
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/vehicle/:id",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "vehicle",
+                                    ":id"
+                                  ],
+                                  "variable": [
+                                    {
+                                      "key": "id",
+                                      "value": "87"
+                                    }
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "types",
+                      "item": [
+                        {
+                          "name": "Get Vehicle Types",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/vehicle/types",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "vehicle",
+                                "types"
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/vehicle/types",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "vehicle",
+                                    "types"
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "statuses",
+                      "item": [
+                        {
+                          "name": "Get Vehicle Statuses",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/vehicle/statuses",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "vehicle",
+                                "statuses"
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/vehicle/statuses",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "vehicle",
+                                    "statuses"
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "datapointtypes",
+                      "item": [
+                        {
+                          "name": "Get Vehicle Extended Data Points Types",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/vehicle/datapointtypes",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "vehicle",
+                                "datapointtypes"
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/vehicle/datapointtypes",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "vehicle",
+                                    "datapointtypes"
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "Get All",
+                      "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                          "raw": "{{baseUrl}}/api/public/v1/vehicle",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "api",
+                            "public",
+                            "v1",
+                            "vehicle"
+                          ]
+                        }
+                      },
+                      "response": [
+                        {
+                          "name": "Success",
+                          "originalRequest": {
+                            "method": "GET",
+                            "header": [
+                              {
+                                "description": "Added as a part of security scheme: bearer",
+                                "key": "Authorization",
+                                "value": "Bearer <token>"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/vehicle",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "vehicle"
+                              ]
+                            }
+                          },
+                          "status": "OK",
+                          "code": 200,
+                          "_postman_previewlanguage": "text",
+                          "header": [],
+                          "cookie": [],
+                          "body": ""
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "workorder",
+                  "item": [
+                    {
+                      "name": "{id}",
+                      "item": [
+                        {
+                          "name": "Get Vehicle By Id",
+                          "request": {
+                            "method": "GET",
+                            "header": [],
+                            "url": {
+                              "raw": "{{baseUrl}}/api/public/v1/workorder/:id",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "api",
+                                "public",
+                                "v1",
+                                "workorder",
+                                ":id"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "id",
+                                  "value": "87"
+                                }
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Success",
+                              "originalRequest": {
+                                "method": "GET",
+                                "header": [
+                                  {
+                                    "description": "Added as a part of security scheme: bearer",
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "url": {
+                                  "raw": "{{baseUrl}}/api/public/v1/workorder/:id",
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "path": [
+                                    "api",
+                                    "public",
+                                    "v1",
+                                    "workorder",
+                                    ":id"
+                                  ],
+                                  "variable": [
+                                    {
+                                      "key": "id",
+                                      "value": "87"
+                                    }
+                                  ]
+                                }
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "_postman_previewlanguage": "text",
+                              "header": [],
+                              "cookie": [],
+                              "body": ""
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{token}}",
+                "type": "string"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {},
+                "exec": [
+                  ""
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {},
+                "exec": [
+                  ""
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "let response = pm.response.json();\r",
+              "pm.collectionVariables.set('token', response.access_token);"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "oauth2",
+          "oauth2": [
+            {
+              "key": "accessTokenUrl",
+              "value": "https://auth.parq.ai/connect/token",
+              "type": "string"
+            },
+            {
+              "key": "refreshTokenUrl",
+              "value": "https://auth.parq.ai/connect/token",
+              "type": "string"
+            },
+            {
+              "key": "clientSecret",
+              "value": "{{client_secret}}",
+              "type": "string"
+            },
+            {
+              "key": "clientId",
+              "value": "{{client_id}}",
+              "type": "string"
+            },
+            {
+              "key": "grant_type",
+              "value": "client_credentials",
+              "type": "string"
+            },
+            {
+              "key": "tokenName",
+              "value": "token",
+              "type": "string"
+            },
+            {
+              "key": "addTokenTo",
+              "value": "header",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded",
+            "type": "text"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "no-cahce",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "client_credentials",
+              "type": "text",
+              "uuid": "1f08dc95-739f-40fc-9952-6b8af96d40ec"
+            },
+            {
+              "key": "client_id",
+              "value": "{{client_id}}",
+              "type": "text",
+              "uuid": "8aec3698-fa9c-4dd8-b251-6b1365ffc721"
+            },
+            {
+              "key": "client_secret",
+              "value": "{{client_secret}}",
+              "type": "text",
+              "uuid": "8fac956f-c5ca-414c-bad9-313a818ace6d"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{auth_endpoint}}/connect/token",
+          "host": [
+            "{{auth_endpoint}}"
+          ],
+          "path": [
+            "connect",
+            "token"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "vehicleStatuses",
+      "value": ""
+    }
+  ]
+}

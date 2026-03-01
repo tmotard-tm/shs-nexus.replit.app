@@ -128,10 +128,13 @@ Preferred communication style: Simple, everyday language.
 - **Config**: `server/saml-config.ts` — IdP cert, SSO/SLO URLs, SP entity ID. Base URL auto-detected from Replit environment. Override with `SAML_BASE_URL` env var for production.
 - **Files**: `server/saml-config.ts`, `client/src/pages/sso-callback.tsx` (new); `server/routes.ts`, `client/src/hooks/use-auth.tsx`, `client/src/pages/login.tsx`, `client/src/App.tsx` (modified).
 
-## Session Handoff
+## Sprint 19 — Completed (2026-03-01)
+- **PARQ My Fleet dedicated integration page**: `client/src/pages/parq-integration.tsx` — full-featured page at `/parq-integration` with Overview, Vehicles, Lots, Lookup, and API Reference tabs.
+- **PMF service methods expanded**: Added `getStatus()`, `getLots()`, `getLotTypes()`, `getVehicleTypes()`, `getVehicleStatuses()`, `getVehicleById()`, `getVehicleActivityLog()`, `getWorkOrderById()` to `server/pmf-api-service.ts`.
+- **8 new PMF backend routes**: `GET /api/pmf/status`, `/api/pmf/lots`, `/api/pmf/lot-types`, `/api/pmf/vehicle-types`, `/api/pmf/vehicle-statuses`, `/api/pmf/vehicle/:id`, `/api/pmf/vehicle/:id/activitylog`, `/api/pmf/workorder/:id`.
+- **Integrations page updated**: PARQ My Fleet card added (total: 5 integrations), live connection status badge via `/api/pmf/status`, links to `/parq-integration`.
 
-### What Was Built Today
-Sprint 18: SAML SSO integration with custom IdP, SSO-first login page, SP metadata endpoint, IdP-initiated SLO.
+## Session Handoff
 
 ### Current Blockers
 - SendGrid credits exceeded — email delivery disabled; security questions used as alternative for password reset
