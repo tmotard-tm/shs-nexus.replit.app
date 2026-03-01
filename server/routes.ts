@@ -10674,6 +10674,194 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/segno/onboarding/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.deleteOnboardingRecord(req.params.id);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error deleting Segno onboarding record:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // FP_events routes
+  app.get("/api/segno/events", requireAuth, async (req: any, res) => {
+    try {
+      const offset = parseInt(req.query.offset as string) || 0;
+      const maxResults = parseInt(req.query.max as string) || 50;
+      const result = await segnoApiService.getEventsList({ offset, maxResults });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error fetching Segno events:", error);
+      res.status(500).json({ success: false, message: error.message, records: [], totalCount: 0, nextOffset: 0 });
+    }
+  });
+
+  app.get("/api/segno/events/search", requireAuth, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string) || "";
+      const status = req.query.status as string | undefined;
+      const records = await segnoApiService.searchEvents(q, status);
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error searching Segno events:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/events/by-status/:status", requireAuth, async (req: any, res) => {
+    try {
+      const records = await segnoApiService.getEventsByStatus(req.params.status);
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error fetching Segno events by status:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/events/:id", requireAuth, async (req: any, res) => {
+    try {
+      const record = await segnoApiService.getEventsById(req.params.id);
+      if (!record) return res.status(404).json({ success: false, message: "Event not found" });
+      res.json({ success: true, record });
+    } catch (error: any) {
+      console.error("Error fetching Segno event:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/segno/events", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.createEvent(req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error creating Segno event:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.patch("/api/segno/events/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.updateEvent(req.params.id, req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error updating Segno event:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.delete("/api/segno/events/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.deleteEvent(req.params.id);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error deleting Segno event:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Asset_Order routes
+  app.get("/api/segno/asset-orders", requireAuth, async (req: any, res) => {
+    try {
+      const offset = parseInt(req.query.offset as string) || 0;
+      const maxResults = parseInt(req.query.max as string) || 50;
+      const result = await segnoApiService.getAssetOrdersList({ offset, maxResults });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error fetching Segno asset orders:", error);
+      res.status(500).json({ success: false, message: error.message, records: [], totalCount: 0, nextOffset: 0 });
+    }
+  });
+
+  app.get("/api/segno/asset-orders/search", requireAuth, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string) || "";
+      if (!q.trim()) return res.json({ success: true, records: [] });
+      const records = await segnoApiService.searchAssetOrders(q.trim());
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error searching Segno asset orders:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/asset-orders/:id", requireAuth, async (req: any, res) => {
+    try {
+      const record = await segnoApiService.getAssetOrderById(req.params.id);
+      if (!record) return res.status(404).json({ success: false, message: "Asset order not found" });
+      res.json({ success: true, record });
+    } catch (error: any) {
+      console.error("Error fetching Segno asset order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/segno/asset-orders", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.createAssetOrder(req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error creating Segno asset order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.patch("/api/segno/asset-orders/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.updateAssetOrder(req.params.id, req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error updating Segno asset order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.delete("/api/segno/asset-orders/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.deleteAssetOrder(req.params.id);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error deleting Segno asset order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Users routes
+  app.get("/api/segno/users", requireAuth, async (req: any, res) => {
+    try {
+      const offset = parseInt(req.query.offset as string) || 0;
+      const maxResults = parseInt(req.query.max as string) || 50;
+      const result = await segnoApiService.getUsersList({ offset, maxResults });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error fetching Segno users:", error);
+      res.status(500).json({ success: false, message: error.message, records: [], totalCount: 0, nextOffset: 0 });
+    }
+  });
+
+  app.get("/api/segno/users/search", requireAuth, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string) || "";
+      if (!q.trim()) return res.json({ success: true, records: [] });
+      const records = await segnoApiService.searchUsers(q.trim());
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error searching Segno users:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/users/:id", requireAuth, async (req: any, res) => {
+    try {
+      const record = await segnoApiService.getUserById(req.params.id);
+      if (!record) return res.status(404).json({ success: false, message: "User not found" });
+      res.json({ success: true, record });
+    } catch (error: any) {
+      console.error("Error fetching Segno user:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack
