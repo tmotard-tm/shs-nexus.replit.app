@@ -1,0 +1,66 @@
+Goal: Add phone recovery data fields and create recovery tasks when offboarding triggers
+
+What You're Building
+When a technician separation syncs from Snowflake (or is manually offboarded), create a phone recovery task alongside the existing Fleet/Tools/Inventory tasks. This task will hold all phone recovery tracking data across both stages of the workflow.
+
+Schema Changes
+Add columns to queue_items table in shared/schema.ts:
+
+// Phone Recovery fields - add to existing queueItems table
+phoneNumber: text('phone_number'),
+phoneContactHistory: jsonb('phone_contact_history').default([]),
+phoneContactMethod: text('phone_contact_method'),
+phoneShippingLabelSent: boolean('phone_shipping_label_sent').default(false),
+phoneTrackingNumber: text('phone_tracking_number'),
+phoneDateReceived: timestamp('phone_date_received'),
+phonePhysicalCondition: text('phone_physical_condition'),
+phoneDataWipeCompleted: boolean('phone_data_wipe_completed').default(false),
+phoneWipeMethod: text('phone_wipe_method'),
+phoneReprovisionCompleted: boolean('phone_reprovision_completed').default(false),
+phoneServiceReinstated: boolean('phone_service_reinstated').default(false),
+phoneDateReady: timestamp('phone_date_ready'),
+phoneAssignedToNewHire: text('phone_assigned_to_new_hire'),
+phoneNewHireDepartment: text('phone_new_hire_department'),
+phoneRecoveryStage: text('phone_recovery_stage').default('initiation'),
+phoneWrittenOff: boolean('phone_written_off').default(false),
+phoneContactHistory is a JSONB array. Each entry has the shape:
+
+{
+  date: string,       // ISO date string
+  method: string,     // "Phone" | "Email" | "Text"
+  outcome: string,    // "Reached" | "Voicemail" | "No Response" | "Declined" | "Wrong Number"
+  notes: string       // free-form
+}
+Contact attempt count = phoneContactHistory.length. Latest outcome = most recent entry's outcome. Escalation = count of entries where outcome is "No Response" or "Declined" >= 3.
+
+Task Creation (Snowflake Sync)
+In server/snowflake-sync-service.ts, where other Day 0 tasks are created after sync, add:
+
+// Phone Recovery task
+{
+  queue: "phone_recovery",
+  workflowStep: "phone_recover_device_day0",
+  isDay0Task: true,
+  phoneNumber: separation.contactNumber,
+  phoneRecoveryStage: "initiation",
+  phoneContactHistory: [],
+  // Copy pattern from other Day 0 tasks for remaining fields
+}
+Task Creation (Manual Form)
+In client/src/pages/offboard-technician.tsx, where other Day 0 tasks are created, add the same phone recovery task.
+
+Constraints
+ONLY add schema columns and task creation
+Do NOT build any UI for the recovery workflow yet
+Do NOT implement contact logging or reprovisioning logic yet
+Use the existing queue_items table, do NOT create a new table
+Acceptance Criteria
+ New phone recovery columns exist in queueItems schema
+ Manual offboarding form creates phone recovery task
+ Snowflake sync creates phone recovery task
+ Phone number from separation data populates the task
+ phoneRecoveryStage defaults to "initiation"
+ phoneContactHistory defaults to empty array
+When Done
+Report: files changed, what works, any issues, questions for PM.
+
