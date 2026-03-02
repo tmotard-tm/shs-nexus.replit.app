@@ -51,10 +51,8 @@ export default function Integrations() {
   const { user } = useAuth();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [snowflakeExpanded, setSnowflakeExpanded] = useState(false);
-  const [tpmsExpanded, setTpmsExpanded] = useState(false);
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
-  const [tpmsTestId, setTpmsTestId] = useState("");
   const [holmanEnabled, setHolmanEnabled] = useState(true);
   const [amsEnabled, setAmsEnabled] = useState(true);
   const [snowflakeEnabled, setSnowflakeEnabled] = useState(true);
@@ -336,58 +334,6 @@ export default function Integrations() {
       toast({
         title: "Query Execution Failed",
         description: error.message || "Failed to execute query",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const testTpmsMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch("/api/tpms/test", { credentials: "include" });
-      return response.json();
-    },
-    onSuccess: (data: any) => {
-      toast({
-        title: data.success ? "TPMS Connection Successful" : "TPMS Connection Failed",
-        description: data.message,
-        variant: data.success ? "default" : "destructive",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "TPMS Test Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const lookupTpmsTechMutation = useMutation({
-    mutationFn: async ({ id, type }: { id: string; type: 'enterprise' | 'truck' }) => {
-      const endpoint = type === 'enterprise' 
-        ? `/api/tpms/techinfo/${id}` 
-        : `/api/tpms/lookup/truck/${id}`;
-      const response = await fetch(endpoint, { credentials: "include" });
-      return response.json();
-    },
-    onSuccess: (data: any) => {
-      if (data.success) {
-        toast({
-          title: "Tech Found",
-          description: `${data.data.firstName} ${data.data.lastName} - Truck: ${data.data.truckNo || 'N/A'}`,
-        });
-      } else {
-        toast({
-          title: "Lookup Failed",
-          description: data.message,
-          variant: "destructive",
-        });
-      }
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "TPMS Lookup Failed",
-        description: error.message,
         variant: "destructive",
       });
     },
@@ -1262,114 +1208,50 @@ export default function Integrations() {
               </div>
             </div>
 
-            {/* TPMS API - Expandable inline */}
-            <Collapsible open={tpmsExpanded} onOpenChange={setTpmsExpanded}>
-              <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
-                <CollapsibleTrigger asChild>
-                  <div className="flex items-center gap-4 flex-1 cursor-pointer group">
-                    <div className="w-12 h-12 bg-orange-500/10 rounded-lg flex items-center justify-center">
-                      <Truck className="h-6 w-6 text-orange-500" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-lg group-hover:text-orange-500 transition-colors">
-                          TPMS API
-                        </h3>
-                        {tpmsStatusLoading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : tpmsStatus?.configured ? (
-                          <Badge variant="default" className="flex items-center gap-1 text-xs">
-                            <CheckCircle className="h-3 w-3" />
-                            Connected
-                          </Badge>
-                        ) : (
-                          <Badge variant="destructive" className="flex items-center gap-1 text-xs">
-                            <XCircle className="h-3 w-3" />
-                            Not Configured
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Employee and truck lookup for offboarding workflow
-                      </p>
-                    </div>
-                  </div>
-                </CollapsibleTrigger>
-                <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
-                  <span className={`text-sm font-medium ${tpmsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
-                    {tpmsStatus?.configured ? 'healthy' : 'not configured'}
-                  </span>
-                  <Badge variant={tpmsEnabled ? "default" : "secondary"} className="text-xs">
-                    {tpmsEnabled ? "Active" : "Inactive"}
-                  </Badge>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => testTpmsMutation.mutate()}
-                    disabled={!tpmsStatus?.configured || testTpmsMutation.isPending}
-                    data-testid="button-test-tpms-inline"
-                  >
-                    {testTpmsMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                    ) : (
-                      <TestTube className="h-4 w-4 mr-1" />
-                    )}
-                    Test
-                  </Button>
-                  <Switch
-                    checked={tpmsEnabled}
-                    onCheckedChange={setTpmsEnabled}
-                    data-testid="switch-tpms-enabled"
-                  />
+            {/* TPMS API Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/tpms-integration" data-testid="link-tpms-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-orange-500/10 rounded-lg flex items-center justify-center">
+                  <Truck className="h-6 w-6 text-orange-500" />
                 </div>
-              </div>
-              <CollapsibleContent className="mt-2 ml-4 border-l-2 border-orange-500/20 pl-4 space-y-4">
-
-                {/* TPMS Lookup */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">TPMS Lookup</CardTitle>
-                    <CardDescription>Look up Employee info by Enterprise ID or Truck Number</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Enter Enterprise ID or Truck Number"
-                        value={tpmsTestId}
-                        onChange={(e) => setTpmsTestId(e.target.value.toUpperCase())}
-                        className="flex-1"
-                        data-testid="input-tpms-test-id"
-                      />
-                      <Button
-                        onClick={() => {
-                          const trimmedId = tpmsTestId.trim();
-                          const isNumeric = /^\d+$/.test(trimmedId);
-                          const lookupId = isNumeric ? trimmedId.padStart(6, '0') : trimmedId;
-                          lookupTpmsTechMutation.mutate({ id: lookupId, type: isNumeric ? 'truck' : 'enterprise' });
-                        }}
-                        disabled={!tpmsStatus?.configured || !tpmsTestId || lookupTpmsTechMutation.isPending}
-                        data-testid="button-lookup-tech"
-                      >
-                        {lookupTpmsTechMutation.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          "Lookup"
-                        )}
-                      </Button>
-                    </div>
-                    {lookupTpmsTechMutation.data?.success && (
-                      <div className="p-3 bg-muted rounded-lg text-sm space-y-1">
-                        <p><strong>Name:</strong> {lookupTpmsTechMutation.data.data.firstName} {lookupTpmsTechMutation.data.data.lastName}</p>
-                        <p><strong>Employee ID:</strong> {lookupTpmsTechMutation.data.data.techId}</p>
-                        <p><strong>Enterprise ID:</strong> {lookupTpmsTechMutation.data.data.ldapId || 'N/A'}</p>
-                        <p><strong>District:</strong> {lookupTpmsTechMutation.data.data.districtNo}</p>
-                        <p><strong>Truck:</strong> {lookupTpmsTechMutation.data.data.truckNo || 'N/A'}</p>
-                      </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-orange-500 transition-colors">
+                      TPMS API
+                    </h3>
+                    {tpmsStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : tpmsStatus?.configured ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
                     )}
-                  </CardContent>
-                </Card>
-              </CollapsibleContent>
-            </Collapsible>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Technician and truck lookup — tech info, assignments, cache management
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${tpmsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {tpmsStatus?.configured ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={tpmsEnabled ? "default" : "secondary"} className="text-xs">
+                  {tpmsEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Switch
+                  checked={tpmsEnabled}
+                  onCheckedChange={setTpmsEnabled}
+                  data-testid="switch-tpms-enabled"
+                />
+              </div>
+            </div>
 
             {/* PARQ My Fleet Integration */}
             <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">

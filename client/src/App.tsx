@@ -33,6 +33,7 @@ import AmsIntegration from "@/pages/ams-integration";
 import ParqIntegration from "@/pages/parq-integration";
 import SegnoIntegration from "@/pages/segno-integration";
 import SamsaraIntegration from "@/pages/samsara-integration";
+import TpmsIntegration from "@/pages/tpms-integration";
 import QueueManagement from "@/pages/queue-management";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
@@ -310,6 +311,12 @@ function Router() {
           <MainContent>
             <SamsaraIntegration />
           </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/tpms-integration">
+        <ProtectedRoute>
+          <TpmsIntegration />
         </ProtectedRoute>
       </Route>
 
