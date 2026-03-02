@@ -31,8 +31,8 @@ const API_ROUTES = [
   { method: "GET",  path: "/api/tpms/test",                          desc: "Live connectivity test against TPMS auth + API endpoint" },
   { method: "GET",  path: "/api/tpms/techinfo/:enterpriseId",        desc: "Look up tech by Enterprise/LDAP ID (live or cache)" },
   { method: "GET",  path: "/api/tpms/truck/:enterpriseId",           desc: "Get truck assignment for a given enterprise ID" },
-  { method: "GET",  path: "/api/tpms/lookup/truck/:truckNumber",     desc: "Reverse-lookup: find tech assigned to a truck number" },
-  { method: "GET",  path: "/api/tpms/techs-updated-after/:timestamp","desc": "List all techs updated after a given Unix timestamp" },
+  { method: "GET",  path: "/api/tpms/lookup/truck/:truckNumber",     desc: "Reverse-lookup by truck number (cache-only — TPMS API has no truck-number endpoint)" },
+  { method: "GET",  path: "/api/tpms/techs-updated-after/:timestamp","desc": "Calls TPMS /techsupdatedafter/:tstamp — ISO 8601 format e.g. 2026-02-27T00:00:00" },
   { method: "PUT",  path: "/api/tpms/techinfo",                      desc: "Update a tech info record in TPMS (live write)" },
   { method: "POST", path: "/api/tpms/temp-truck-assign",             desc: "Create a temporary truck assignment for a tech" },
   { method: "POST", path: "/api/tpms/cache/sync",                    desc: "Trigger full TPMS cache sync (developer only)" },
@@ -351,8 +351,8 @@ export default function TpmsIntegration() {
                 <CardContent>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {[
-                      { icon: <Users className="h-4 w-4" />, label: "Tech Lookup", desc: "By Enterprise ID or LDAP" },
-                      { icon: <Truck className="h-4 w-4" />, label: "Truck Lookup", desc: "Reverse-lookup by truck number" },
+                      { icon: <Users className="h-4 w-4" />, label: "Tech Lookup", desc: "Live TPMS API by Enterprise/LDAP ID" },
+                      { icon: <Truck className="h-4 w-4" />, label: "Truck Lookup", desc: "Cache-only — TPMS API has no truck-number endpoint" },
                       { icon: <Database className="h-4 w-4" />, label: "Cache Sync", desc: "Sync all tech assignments from API" },
                       { icon: <Activity className="h-4 w-4" />, label: "Fleet Sync", desc: "Initial sync from Holman fleet cache" },
                       { icon: <Hash className="h-4 w-4" />, label: "Update Tech", desc: "PUT tech info back to TPMS" },
@@ -380,7 +380,7 @@ export default function TpmsIntegration() {
                     Tech &amp; Truck Lookup
                   </CardTitle>
                   <CardDescription>
-                    Enter an Enterprise ID (e.g. <code className="text-xs bg-muted px-1 rounded">ABC1234</code>) to look up a tech, or a numeric Truck Number (e.g. <code className="text-xs bg-muted px-1 rounded">123456</code>) to find who is assigned to that truck.
+                    Enter an <strong>Enterprise/LDAP ID</strong> (e.g. <code className="text-xs bg-muted px-1 rounded">ABC1234</code>) to call the TPMS live API, or a numeric <strong>Truck Number</strong> (e.g. <code className="text-xs bg-muted px-1 rounded">123456</code>) for a cache-only lookup. The TPMS API only accepts LDAP IDs — truck number lookups resolve from the local cache populated during cache sync.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -738,10 +738,11 @@ export default function TpmsIntegration() {
             </TabsContent>
 
             {/* API Reference Tab */}
-            <TabsContent value="api" className="mt-4">
+            <TabsContent value="api" className="mt-4 space-y-4">
+              {/* Nexus Routes */}
               <Card>
                 <CardHeader>
-                  <CardTitle>API Reference</CardTitle>
+                  <CardTitle>Nexus API Reference</CardTitle>
                   <CardDescription>
                     All TPMS-related routes exposed through the Nexus backend
                   </CardDescription>
@@ -773,6 +774,52 @@ export default function TpmsIntegration() {
                       ))}
                     </TableBody>
                   </Table>
+                </CardContent>
+              </Card>
+
+              {/* Upstream TPMS API */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Upstream TPMS API</CardTitle>
+                  <CardDescription>
+                    Actual TPMS API endpoints that Nexus proxies — from the official Postman collection
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-20">Method</TableHead>
+                        <TableHead>Endpoint</TableHead>
+                        <TableHead>Notes</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {[
+                        { method: "GET",  path: "{{auth_endpoint}}/token",       notes: "Auth — Basic Authorization header, returns XML with <ns2:token>" },
+                        { method: "GET",  path: "/techinfo/:ldapId",              notes: "Tech lookup by LDAP/Enterprise ID only (e.g. JELMORE). Bearer token required." },
+                        { method: "GET",  path: "/techsupdatedafter/:tstamp",     notes: "List techs updated after timestamp (ISO 8601, e.g. 2026-02-27T00:00:00). Bearer token required." },
+                        { method: "PUT",  path: "/techinfo",                      notes: "Update tech info record. JSON body. Bearer token required." },
+                        { method: "POST", path: "/temptruckassign",               notes: "Temp truck assignment. Body: {ldapId, distNo, truckNo}. Bearer token required." },
+                      ].map((r, i) => (
+                        <TableRow key={i}>
+                          <TableCell>
+                            <Badge className={`${METHOD_COLORS[r.method]} border-none text-xs font-mono`}>{r.method}</Badge>
+                          </TableCell>
+                          <TableCell><code className="text-xs bg-muted px-1.5 py-0.5 rounded">{r.path}</code></TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{r.notes}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded-lg flex items-start gap-2 text-sm">
+                    <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span className="text-amber-700 dark:text-amber-400">
+                      The TPMS API has <strong>no truck-number lookup endpoint</strong>. All truck → tech reverse lookups must use the local Nexus cache,
+                      which is populated by calling <code className="text-xs bg-amber-100 dark:bg-amber-900/30 px-1 rounded">/techinfo/:ldapId</code> for each tech
+                      during cache sync or the <code className="text-xs bg-amber-100 dark:bg-amber-900/30 px-1 rounded">/techsupdatedafter</code> poll.
+                    </span>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>

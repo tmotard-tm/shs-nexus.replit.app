@@ -315,42 +315,27 @@ class TPMSService {
     };
   }
 
+  // NOTE: The TPMS API has no truck-number lookup endpoint — /techinfo/{id} only accepts
+  // an LDAP/Enterprise ID. Truck number lookups are cache-only (populated via Enterprise ID
+  // lookups and the fleet sync that calls techsupdatedafter).
   async lookupByTruckNumber(truckNumber: string): Promise<{ success: boolean; data?: TechInfoResponse; message?: string; source?: 'live' | 'cached' }> {
     const cleanTruckNo = truckNumber.trim();
-    console.log(`[TPMS] Looking up tech by truck number: ${cleanTruckNo}`);
+    console.log(`[TPMS] Looking up tech by truck number (cache-only): ${cleanTruckNo}`);
     
-    try {
-      // Try live API first
-      const techInfo = await this.getTechInfo(cleanTruckNo);
-      
-      // Cache the successful response
-      await this.cacheTPMSResponse(cleanTruckNo, 'truck_number', techInfo);
-      
-      console.log(`[TPMS] Tech found for truck ${cleanTruckNo}: ${techInfo.firstName} ${techInfo.lastName}`);
+    const cached = await this.getCachedByTruckNo(cleanTruckNo);
+    if (cached) {
+      console.log(`[TPMS-Cache] Returning cached data for truck ${cleanTruckNo}`);
       return {
         success: true,
-        data: techInfo,
-        source: 'live',
-      };
-    } catch (error: any) {
-      console.warn(`[TPMS-Cache] API failed for truck ${cleanTruckNo}, checking cache...`);
-      
-      // Try cached data
-      const cached = await this.getCachedByTruckNo(cleanTruckNo);
-      if (cached) {
-        console.log(`[TPMS-Cache] Returning cached data for truck ${cleanTruckNo}`);
-        return {
-          success: true,
-          data: cached.techInfo,
-          source: 'cached',
-        };
-      }
-      
-      return {
-        success: false,
-        message: `No Employee found for ${cleanTruckNo}`,
+        data: cached.techInfo,
+        source: 'cached',
       };
     }
+    
+    return {
+      success: false,
+      message: `No cached assignment found for truck ${cleanTruckNo}. The TPMS API does not support truck number lookup — populate cache via Enterprise ID first.`,
+    };
   }
 
   // Batch lookup for multiple truck numbers - uses cache primarily to avoid rate limiting
