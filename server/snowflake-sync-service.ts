@@ -337,11 +337,27 @@ export class SnowflakeSyncService {
                 "Complete Day 0 task - detailed Inventory work will follow in Phase 2"
               ],
             },
+            {
+              title: `Day 0: Phone Recovery - ${tech.techName}`,
+              description: `IMMEDIATE TASK: Initiate phone recovery for terminated Employee ${tech.techName} (${tech.techRacfid}). Contact Employee to arrange return of company phone. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+              department: 'Inventory Control',
+              step: 'phone_recover_device_day0',
+              subtask: 'Phone Recovery',
+              workflowStep: 5,
+              instructions: [
+                "Contact Employee to arrange phone return",
+                "Verify phone number and carrier information",
+                "Send shipping label if Employee cannot return in person",
+                "Track phone return status",
+                "Complete Day 0 task - phone processing will follow upon receipt"
+              ],
+            },
           ];
 
           let firstCreatedItemId: string | null = null;
 
           for (const task of day0Tasks) {
+            const isPhoneRecoveryTask = task.step === 'phone_recover_device_day0';
             const queueItem: InsertQueueItem = {
               workflowType: 'offboarding',
               title: task.title,
@@ -352,6 +368,11 @@ export class SnowflakeSyncService {
               department: task.department,
               workflowId: workflowId,
               workflowStep: task.workflowStep,
+              ...(isPhoneRecoveryTask ? {
+                phoneNumber: tech.cellPhone || tech.mainPhone || null,
+                phoneRecoveryStage: 'initiation',
+                phoneContactHistory: [],
+              } : {}),
               data: JSON.stringify({
                 workflowType: 'offboarding_sequence',
                 step: task.step,
@@ -1418,9 +1439,18 @@ export class SnowflakeSyncService {
               subtask: 'Inventory',
               workflowStep: 3,
             },
+            {
+              title: `Day 0: Phone Recovery - ${techName}`,
+              description: `IMMEDIATE: Initiate phone recovery for ${techName} (${separation.ldapId}). Contact Employee to arrange return of company phone. Source: HR Separation Sync.`,
+              department: 'Inventory Control',
+              step: 'phone_recover_device_day0',
+              subtask: 'Phone Recovery',
+              workflowStep: 4,
+            },
           ];
 
           for (const task of day0Tasks) {
+            const isPhoneRecoveryTask = task.step === 'phone_recover_device_day0';
             const queueItem: InsertQueueItem = {
               workflowType: 'offboarding',
               title: task.title,
@@ -1431,6 +1461,11 @@ export class SnowflakeSyncService {
               department: task.department,
               workflowId: workflowId,
               workflowStep: task.workflowStep,
+              ...(isPhoneRecoveryTask ? {
+                phoneNumber: separation.contactNumber || null,
+                phoneRecoveryStage: 'initiation',
+                phoneContactHistory: [],
+              } : {}),
               data: JSON.stringify({
                 workflowType: 'offboarding_sequence',
                 step: task.step,

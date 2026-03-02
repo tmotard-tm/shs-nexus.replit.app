@@ -108,6 +108,15 @@ Preferred communication style: Simple, everyday language.
 - **SendGrid error details**: Enhanced `sendEmail` to return detailed error messages; Communication Hub Status column now shows failure reasons in a prominent red box with "Reason:" prefix
 - **Error message display**: `ResizableHistoryTable` Status column widened to 280px to accommodate error details
 
+## Phone Recovery Feature (2026-03-02)
+- **Schema**: Added 16 phone recovery columns to `queue_items` table (`phoneNumber`, `phoneContactHistory` (jsonb), `phoneContactMethod`, `phoneShippingLabelSent`, `phoneTrackingNumber`, `phoneDateReceived`, `phonePhysicalCondition`, `phoneDataWipeCompleted`, `phoneWipeMethod`, `phoneReprovisionCompleted`, `phoneServiceReinstated`, `phoneDateReady`, `phoneAssignedToNewHire`, `phoneNewHireDepartment`, `phoneRecoveryStage` (default 'initiation'), `phoneWrittenOff`)
+- **Task Creation**: Phone recovery Day 0 tasks are created under the **Inventory Control** queue in three places:
+  1. Snowflake `syncTermedTechs` — step `phone_recover_device_day0`, phone from `tech.cellPhone || tech.mainPhone`
+  2. Snowflake separation sync — step `phone_recover_device_day0`, phone from `separation.contactNumber`
+  3. Manual offboarding form — posts to `/api/inventory-queue` with phone recovery fields
+- **Validation**: `anonymousQueueItemSchema` updated to accept `phoneNumber`, `phoneRecoveryStage`, and `phoneContactHistory` fields
+- **No UI yet**: Phone recovery workflow UI, contact logging, and reprovisioning logic are deferred to a future sprint
+
 ## Session Handoff
 
 ### What Was Built Today

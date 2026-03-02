@@ -254,6 +254,22 @@ export const queueItems = pgTable("queue_items", {
   // Sprint 1: Tool Audit Notification tracking
   toolAuditNotificationSent: boolean("tool_audit_notification_sent").default(false),
   toolAuditNotificationSentAt: timestamp("tool_audit_notification_sent_at"),
+  phoneNumber: text("phone_number"),
+  phoneContactHistory: jsonb("phone_contact_history").default([]),
+  phoneContactMethod: text("phone_contact_method"),
+  phoneShippingLabelSent: boolean("phone_shipping_label_sent").default(false),
+  phoneTrackingNumber: text("phone_tracking_number"),
+  phoneDateReceived: timestamp("phone_date_received"),
+  phonePhysicalCondition: text("phone_physical_condition"),
+  phoneDataWipeCompleted: boolean("phone_data_wipe_completed").default(false),
+  phoneWipeMethod: text("phone_wipe_method"),
+  phoneReprovisionCompleted: boolean("phone_reprovision_completed").default(false),
+  phoneServiceReinstated: boolean("phone_service_reinstated").default(false),
+  phoneDateReady: timestamp("phone_date_ready"),
+  phoneAssignedToNewHire: text("phone_assigned_to_new_hire"),
+  phoneNewHireDepartment: text("phone_new_hire_department"),
+  phoneRecoveryStage: text("phone_recovery_stage").default("initiation"),
+  phoneWrittenOff: boolean("phone_written_off").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {
@@ -817,6 +833,14 @@ export const anonymousQueueItemSchema = z.object({
   data: z.string().max(10000, "Data must be 10000 characters or less").optional(), // JSON string
   scheduledFor: z.string().datetime().optional(),
   workflowId: z.string().max(100, "Workflow ID must be 100 characters or less").optional(), // Groups related tasks in a workflow sequence
+  phoneNumber: z.string().max(30).optional(),
+  phoneRecoveryStage: z.string().max(50).optional(),
+  phoneContactHistory: z.array(z.object({
+    date: z.string(),
+    method: z.string(),
+    outcome: z.string(),
+    notes: z.string(),
+  })).optional(),
   // Note: requesterId, department, status, attempts are added by server, not submitted by client
 }).strict(); // .strict() ensures only allowed fields are accepted
 

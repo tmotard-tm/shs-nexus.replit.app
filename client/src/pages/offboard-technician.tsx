@@ -491,6 +491,40 @@ export default function OffboardTechnician() {
         })
       });
 
+      await apiRequest("POST", "/api/inventory-queue", {
+        workflowType: "offboarding",
+        title: `Day 0: Phone Recovery - ${technicianOffboard.techName}`,
+        description: `IMMEDIATE TASK: Initiate phone recovery for terminated Employee ${technicianOffboard.techName} (${technicianOffboard.techRacfId}). Contact Employee to arrange return of company phone. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
+        priority: "high",
+        workflowId: workflowId,
+        phoneRecoveryStage: "initiation",
+        phoneContactHistory: [],
+        data: JSON.stringify({
+          workflowType: "offboarding_sequence",
+          step: "phone_recover_device_day0",
+          workflowStep: 6,
+          phase: "day0",
+          isDay0Task: true,
+          submitterInfo: user ? {
+            id: user.id,
+            name: user.username || user.email,
+            email: user.email
+          } : {
+            id: "anonymous",
+            name: "Anonymous User",
+            email: null
+          },
+          ...sharedTriggerData,
+          instructions: [
+            "Contact Employee to arrange phone return",
+            "Verify phone number and carrier information",
+            "Send shipping label if Employee cannot return in person",
+            "Track phone return status",
+            "Complete Day 0 task - phone processing will follow upon receipt"
+          ]
+        })
+      });
+
       try {
         await apiRequest("POST", "/api/send-deactivation-email", {
           employeeName: technicianOffboard.techName,
