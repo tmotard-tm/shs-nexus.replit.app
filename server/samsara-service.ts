@@ -236,6 +236,7 @@ export class SamsaraService {
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
+    query += ' LIMIT 1000';
 
     return await this.fetchFromSnowflake<SamsaraVehicle>(query, binds);
   }
@@ -257,6 +258,7 @@ export class SamsaraService {
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
+    query += ' LIMIT 1000';
 
     return await this.fetchFromSnowflake<SamsaraDriver>(query, binds);
   }
@@ -292,18 +294,16 @@ export class SamsaraService {
       conditions.push('DRIVER_ID = ?');
       binds.push(driverId);
     }
-    if (startDate) {
-      conditions.push('CAST(RUN_DATE_UTC AS DATE) >= ?');
-      binds.push(startDate);
-    }
-    if (endDate) {
-      conditions.push('CAST(RUN_DATE_UTC AS DATE) <= ?');
-      binds.push(endDate);
-    }
+    // Default to last 30 days when no date range specified
+    const effectiveStart = startDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+    const effectiveEnd = endDate || new Date().toISOString().split('T')[0];
+    conditions.push('CAST(RUN_DATE_UTC AS DATE) >= ?');
+    binds.push(effectiveStart);
+    conditions.push('CAST(RUN_DATE_UTC AS DATE) <= ?');
+    binds.push(effectiveEnd);
 
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
+    query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY RUN_DATE_UTC DESC LIMIT 500';
 
     return await this.fetchFromSnowflake<SamsaraSafetyScore>(query, binds);
   }
@@ -344,24 +344,22 @@ export class SamsaraService {
       conditions.push('DRIVER_ID = ?');
       binds.push(driverId);
     }
-    if (startDate) {
-      conditions.push('CAST(TRIP_DATE_UTC AS DATE) >= ?');
-      binds.push(startDate);
-    }
-    if (endDate) {
-      conditions.push('CAST(TRIP_DATE_UTC AS DATE) <= ?');
-      binds.push(endDate);
-    }
+    // Default to last 30 days when no date range specified
+    const tripsStart = startDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+    const tripsEnd = endDate || new Date().toISOString().split('T')[0];
+    conditions.push('CAST(TRIP_DATE_UTC AS DATE) >= ?');
+    binds.push(tripsStart);
+    conditions.push('CAST(TRIP_DATE_UTC AS DATE) <= ?');
+    binds.push(tripsEnd);
 
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
+    query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY TRIP_DATE_UTC DESC LIMIT 500';
 
     return await this.fetchFromSnowflake<SamsaraTrip>(query, binds);
   }
 
   async getMaintenance(): Promise<SamsaraMaintenance[]> {
-    const query = 'SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE';
+    const query = 'SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE LIMIT 500';
     return await this.fetchFromSnowflake<SamsaraMaintenance>(query);
   }
 
@@ -374,18 +372,16 @@ export class SamsaraService {
       conditions.push('VEHICLE_ID = ?');
       binds.push(vehicleId);
     }
-    if (startDate) {
-      conditions.push('CAST(RUN_DATE_UTC AS DATE) >= ?');
-      binds.push(startDate);
-    }
-    if (endDate) {
-      conditions.push('CAST(RUN_DATE_UTC AS DATE) <= ?');
-      binds.push(endDate);
-    }
+    // Default to last 30 days when no date range specified
+    const fuelStart = startDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+    const fuelEnd = endDate || new Date().toISOString().split('T')[0];
+    conditions.push('CAST(RUN_DATE_UTC AS DATE) >= ?');
+    binds.push(fuelStart);
+    conditions.push('CAST(RUN_DATE_UTC AS DATE) <= ?');
+    binds.push(fuelEnd);
 
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
+    query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY RUN_DATE_UTC DESC LIMIT 500';
 
     return await this.fetchFromSnowflake<SamsaraFuelEnergy>(query, binds);
   }
@@ -403,18 +399,16 @@ export class SamsaraService {
       conditions.push('DRIVER_ID = ?');
       binds.push(driverId);
     }
-    if (startDate) {
-      conditions.push('CAST(TIME_UTC AS DATE) >= ?');
-      binds.push(startDate);
-    }
-    if (endDate) {
-      conditions.push('CAST(TIME_UTC AS DATE) <= ?');
-      binds.push(endDate);
-    }
+    // Default to last 30 days when no date range specified
+    const safetyStart = startDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+    const safetyEnd = endDate || new Date().toISOString().split('T')[0];
+    conditions.push('CAST(TIME_UTC AS DATE) >= ?');
+    binds.push(safetyStart);
+    conditions.push('CAST(TIME_UTC AS DATE) <= ?');
+    binds.push(safetyEnd);
 
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
+    query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY TIME_UTC DESC LIMIT 500';
 
     return await this.fetchFromSnowflake<SamsaraSafetyEvent>(query, binds);
   }
@@ -428,18 +422,16 @@ export class SamsaraService {
       conditions.push('ASSETID = ?');
       binds.push(vehicleId);
     }
-    if (startDate) {
-      conditions.push('CAST(STARTTIME AS DATE) >= ?');
-      binds.push(startDate);
-    }
-    if (endDate) {
-      conditions.push('CAST(STARTTIME AS DATE) <= ?');
-      binds.push(endDate);
-    }
+    // Default to last 30 days when no date range specified
+    const speedStart = startDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+    const speedEnd = endDate || new Date().toISOString().split('T')[0];
+    conditions.push('CAST(STARTTIME AS DATE) >= ?');
+    binds.push(speedStart);
+    conditions.push('CAST(STARTTIME AS DATE) <= ?');
+    binds.push(speedEnd);
 
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
+    query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY STARTTIME DESC LIMIT 500';
 
     return await this.fetchFromSnowflake<SamsaraSpeedingEvent>(query, binds);
   }
@@ -453,29 +445,27 @@ export class SamsaraService {
       conditions.push('VEHICLE_ID = ?');
       binds.push(vehicleId);
     }
-    if (startDate) {
-      conditions.push('CAST(START_TIME_UTC AS DATE) >= ?');
-      binds.push(startDate);
-    }
-    if (endDate) {
-      conditions.push('CAST(START_TIME_UTC AS DATE) <= ?');
-      binds.push(endDate);
-    }
+    // Default to last 30 days when no date range specified
+    const idleStart = startDate || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+    const idleEnd = endDate || new Date().toISOString().split('T')[0];
+    conditions.push('CAST(START_TIME_UTC AS DATE) >= ?');
+    binds.push(idleStart);
+    conditions.push('CAST(START_TIME_UTC AS DATE) <= ?');
+    binds.push(idleEnd);
 
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
+    query += ' WHERE ' + conditions.join(' AND ');
+    query += ' ORDER BY START_TIME_UTC DESC LIMIT 500';
 
     return await this.fetchFromSnowflake<SamsaraIdlingEvent>(query, binds);
   }
 
   async getDevices(): Promise<SamsaraDevice[]> {
-    const query = 'SELECT * FROM bi_analytics.app_samsara.SAMSARA_DEVICES';
+    const query = 'SELECT * FROM bi_analytics.app_samsara.SAMSARA_DEVICES LIMIT 1000';
     return await this.fetchFromSnowflake<SamsaraDevice>(query);
   }
 
   async getGateways(): Promise<SamsaraGateway[]> {
-    const query = 'SELECT * FROM bi_analytics.app_samsara.SAMSARA_GATEWAYS';
+    const query = 'SELECT * FROM bi_analytics.app_samsara.SAMSARA_GATEWAYS LIMIT 1000';
     return await this.fetchFromSnowflake<SamsaraGateway>(query);
   }
 
