@@ -37,3 +37,30 @@ export function isEscalated(task: QueueItem): boolean {
   ).length;
   return failedCount >= 3;
 }
+
+export type ReprovisioningStatus =
+  | "Received"
+  | "Inspecting"
+  | "Wiping"
+  | "Reprovisioning"
+  | "Ready for Deployment"
+  | "Assigned";
+
+export function deriveReprovisioningStatus(task: QueueItem): ReprovisioningStatus {
+  if (task.phoneAssignedToNewHire) {
+    return "Assigned";
+  }
+  if (task.phoneServiceReinstated) {
+    return "Ready for Deployment";
+  }
+  if (task.phoneReprovisionCompleted) {
+    return "Reprovisioning";
+  }
+  if (task.phoneDataWipeCompleted) {
+    return "Wiping";
+  }
+  if (task.phonePhysicalCondition) {
+    return "Inspecting";
+  }
+  return "Received";
+}

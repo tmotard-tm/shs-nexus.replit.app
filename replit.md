@@ -126,6 +126,22 @@ Preferred communication style: Simple, everyday language.
     - `PATCH /api/phone-recovery/:id/shipping` — update shipping label and tracking number
     - `PATCH /api/phone-recovery/:id/received` — mark phone received, transition to reprovisioning stage
   - All routes use `requireAuth` middleware and Zod validation
+- **Sprint 2 — Reprovisioning Checklist** (2026-03-03):
+  - **Schema additions**: `phoneConditionNotes` (text), `phoneCarrierLineDetails` (text) added to `queueItems`
+  - **Components**: `client/src/components/phone-recovery/`
+    - `ReprovisioningChecklist` — 5-step vertical progress tracker with purple accent:
+      1. Receive & Inspect (condition dropdown, notes, write-off button)
+      2. Data Wipe (checkbox + method dropdown)
+      3. Reprovision (checkbox + carrier/line details)
+      4. Reinstate Service (checkbox)
+      5. Assign to New Hire (name/ID + department)
+    - Progress line fills proportionally, each step persists independently
+    - `deriveReprovisioningStatus(task)` — Received → Inspecting → Wiping → Reprovisioning → Ready for Deployment → Assigned
+  - **API Routes** (in `server/routes.ts`):
+    - `PATCH /api/phone-recovery/:id/inspect` — set physical condition and notes
+    - `PATCH /api/phone-recovery/:id/reprovisioning` — update wipe/reprovision/service/assignment fields, auto-sets `phoneDateReady`
+    - `PATCH /api/phone-recovery/:id/write-off` — mark device as written off
+  - Written-off devices are blocked from further reprovisioning updates
 
 ## Session Handoff
 

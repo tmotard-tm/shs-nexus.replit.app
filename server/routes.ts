@@ -2308,6 +2308,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/phone-recovery/:id/inspect", requireAuth, async (req: any, res) => {
+    try {
+      const inspectSchema = z.object({
+        physicalCondition: z.enum(["Good", "Damaged", "Non-functional"]),
+        conditionNotes: z.string().max(2000).optional(),
+      });
+
+      const validated = inspectSchema.parse(req.body);
+      const item = await storage.getInventoryQueueItem(req.params.id);
+      if (!item) {
+        return res.status(404).json({ message: "Phone recovery task not found" });
+      }
+
+      const updated = await storage.updateInventoryQueueItem(req.params.id, {
+        phonePhysicalCondition: validated.physicalCondition,
+        phoneConditionNotes: validated.conditionNotes || null,
+      });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      console.error("Phone recovery inspect error:", error);
+      res.status(500).json({ message: "Failed to update inspection" });
+    }
+  });
+
+  app.patch("/api/phone-recovery/:id/reprovisioning", requireAuth, async (req: any, res) => {
+    try {
+      const reprovisionSchema = z.object({
+        phoneDataWipeCompleted: z.boolean().optional(),
+        phoneWipeMethod: z.enum(["Factory Reset", "Secure Erase", "MDM Remote Wipe"]).optional(),
+        phoneReprovisionCompleted: z.boolean().optional(),
+        phoneCarrierLineDetails: z.string().max(500).optional(),
+        phoneServiceReinstated: z.boolean().optional(),
+        phoneAssignedToNewHire: z.string().max(200).optional(),
+        phoneNewHireDepartment: z.string().max(200).optional(),
+      });
+
+      const validated = reprovisionSchema.parse(req.body);
+      const item = await storage.getInventoryQueueItem(req.params.id);
+      if (!item) {
+        return res.status(404).json({ message: "Phone recovery task not found" });
+      }
+      if (item.phoneWrittenOff) {
+        return res.status(400).json({ message: "Cannot update a written-off device" });
+      }
+
+      const updates: any = {};
+      if (validated.phoneDataWipeCompleted !== undefined) updates.phoneDataWipeCompleted = validated.phoneDataWipeCompleted;
+      if (validated.phoneWipeMethod !== undefined) updates.phoneWipeMethod = validated.phoneWipeMethod;
+      if (validated.phoneReprovisionCompleted !== undefined) updates.phoneReprovisionCompleted = validated.phoneReprovisionCompleted;
+      if (validated.phoneCarrierLineDetails !== undefined) updates.phoneCarrierLineDetails = validated.phoneCarrierLineDetails;
+      if (validated.phoneServiceReinstated !== undefined) updates.phoneServiceReinstated = validated.phoneServiceReinstated;
+      if (validated.phoneAssignedToNewHire !== undefined) updates.phoneAssignedToNewHire = validated.phoneAssignedToNewHire;
+      if (validated.phoneNewHireDepartment !== undefined) updates.phoneNewHireDepartment = validated.phoneNewHireDepartment;
+
+      const wipe = validated.phoneDataWipeCompleted ?? item.phoneDataWipeCompleted;
+      const reprov = validated.phoneReprovisionCompleted ?? item.phoneReprovisionCompleted;
+      const service = validated.phoneServiceReinstated ?? item.phoneServiceReinstated;
+      if (wipe && reprov && service && !item.phoneDateReady) {
+        updates.phoneDateReady = new Date();
+      }
+
+      const updated = await storage.updateInventoryQueueItem(req.params.id, updates);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      console.error("Phone recovery reprovisioning error:", error);
+      res.status(500).json({ message: "Failed to update reprovisioning" });
+    }
+  });
+
+  app.patch("/api/phone-recovery/:id/write-off", requireAuth, async (req: any, res) => {
+    try {
+      const item = await storage.getInventoryQueueItem(req.params.id);
+      if (!item) {
+        return res.status(404).json({ message: "Phone recovery task not found" });
+      }
+
+      const updated = await storage.updateInventoryQueueItem(req.params.id, {
+        phoneWrittenOff: true,
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error("Phone recovery write-off error:", error);
+      res.status(500).json({ message: "Failed to write off device" });
+    }
+  });
+
   // Fleet Queue Module routes
   app.get("/api/fleet-queue", requireAuth, async (req: any, res) => {
     try {
