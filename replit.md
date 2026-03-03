@@ -143,14 +143,20 @@ Preferred communication style: Simple, everyday language.
     - `PATCH /api/phone-recovery/:id/write-off` — mark device as written off
   - Written-off devices are blocked from further reprovisioning updates
 
+## Phone Recovery Integration
+- `PhoneRecoveryDashboard` is an exported reusable component from `client/src/pages/phone-recovery.tsx`
+- Embedded inside the Inventory Control Queue section of `/queue-management` via a tab bar ("All Tasks" | "Phone Recovery")
+- No standalone `/phone-recovery` route — redirects to `/queue-management?dept=inventory`
+- No separate sidebar nav entry — accessed through the Inventory Control Queue
+
 ## Session Handoff
 
 ### What Was Built Today
-Sprint 3 bug fixes for Phone Recovery dashboard:
-- Fixed `selectedTask` not refreshing after mutations — added `useEffect` synced to `tasks` array
-- Fixed TypeScript errors: `technicianName` and `separationDate` don't exist as direct QueueItem columns; added `getTechName()` (parses title + data JSON fallback) and `getSeparationDate()` (parses data JSON `technician.lastDayWorked`) helpers
-- Fixed seed data route to store tech name in `title` field ("Day 0: Phone Recovery - {name}") and separation date in `data` JSON, matching Snowflake sync format
-- Fixed `GET /api/phone-recovery` filter to parse `data` JSON for `step` field instead of referencing non-existent `item.step`
+- Integrated Phone Recovery dashboard into the Inventory Control Queue (no longer standalone)
+- Extracted `PhoneRecoveryDashboard` as a reusable component
+- Added tab bar in queue-management.tsx Inventory section: "All Tasks" | "📱 Phone Recovery"
+- Removed phoneRecovery from page-registry (no separate sidebar item)
+- `/phone-recovery` now redirects to `/queue-management?dept=inventory`
 
 ### Current Blockers
 - The Snowflake sync process sometimes causes the server to crash due to memory usage during the 13k+ record all-techs sync (pre-existing issue)
@@ -160,5 +166,5 @@ Sprint 3 bug fixes for Phone Recovery dashboard:
 - None
 
 ### Recommended Next Steps
-1. Smoke-test phone recovery: seed data, open detail panel, perform mutations, verify panel refreshes
+1. Smoke-test: expand Inventory Queue → Phone Recovery tab → seed data → open detail panel → log contact → verify refresh
 2. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined

@@ -43,6 +43,7 @@ import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
 import { AssetsRecoveryQueue } from "@/components/assets-queue/AssetsRecoveryQueue";
+import { PhoneRecoveryDashboard } from "@/pages/phone-recovery";
 import { TechCombobox, TechRosterEntry } from "@/components/ui/tech-combobox";
 import { usePreviewRole } from "@/hooks/use-preview-role";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
@@ -115,6 +116,7 @@ export default function UnifiedQueueManagement() {
   const [sortField, setSortField] = useState<"dateAdded" | "lastDayWorking">("dateAdded");
   const [sortDirection, setSortDirection] = useState<"newest" | "oldest">("oldest");
   const [expandedQueues, setExpandedQueues] = useState<Record<QueueModule, boolean>>({} as Record<QueueModule, boolean>);
+  const [inventoryTab, setInventoryTab] = useState<"tasks" | "phoneRecovery">("tasks");
   const [expandedStatusSections, setExpandedStatusSections] = useState<Record<string, boolean>>({});
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -1184,7 +1186,33 @@ export default function UnifiedQueueManagement() {
                     
                     {isExpanded && (
                       <CardContent className="p-6">
-                        {moduleItems.length === 0 ? (
+                        {module === 'inventory' && (
+                          <div className="flex border-b border-gray-200 dark:border-gray-700 mb-6">
+                            <button
+                              onClick={() => setInventoryTab("tasks")}
+                              className={`px-4 py-2.5 text-sm font-medium transition-colors ${
+                                inventoryTab === "tasks"
+                                  ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                                  : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                              }`}
+                            >
+                              All Tasks
+                            </button>
+                            <button
+                              onClick={() => setInventoryTab("phoneRecovery")}
+                              className={`px-4 py-2.5 text-sm font-medium transition-colors ${
+                                inventoryTab === "phoneRecovery"
+                                  ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                                  : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                              }`}
+                            >
+                              📱 Phone Recovery
+                            </button>
+                          </div>
+                        )}
+                        {module === 'inventory' && inventoryTab === 'phoneRecovery' ? (
+                          <PhoneRecoveryDashboard />
+                        ) : moduleItems.length === 0 ? (
                           <div className="text-center py-8">
                             <p className="text-muted-foreground">
                               No items in {moduleLabels[module]} queue matching your criteria

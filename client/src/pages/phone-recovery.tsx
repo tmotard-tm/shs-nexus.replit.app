@@ -151,7 +151,7 @@ const ALL_STATUSES = [
   "Ready for Deployment", "Assigned",
 ];
 
-export default function PhoneRecovery() {
+export function PhoneRecoveryDashboard() {
   const { toast } = useToast();
   const [selectedCard, setSelectedCard] = useState<PipelineCard | null>(null);
   const [stageFilter, setStageFilter] = useState("all");
@@ -314,19 +314,14 @@ export default function PhoneRecovery() {
 
   if (isLoading) {
     return (
-      <MainContent>
-        <TopBar title="Phone Recovery" breadcrumbs={["Home", "Phone Recovery"]} />
-        <main className="p-6 flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-        </main>
-      </MainContent>
+      <div className="p-6 flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      </div>
     );
   }
 
   return (
-    <MainContent>
-      <TopBar title="Phone Recovery" breadcrumbs={["Home", "Queues", "Phone Recovery"]} />
-      <main className="p-6 bg-gray-100 dark:bg-gray-950 min-h-screen space-y-6">
+    <div className="space-y-6">
 
         {tasks.length === 0 && (
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-8 text-center">
@@ -764,6 +759,16 @@ export default function PhoneRecovery() {
             )}
           </SheetContent>
         </Sheet>
+    </div>
+  );
+}
+
+export default function PhoneRecovery() {
+  return (
+    <MainContent>
+      <TopBar title="Phone Recovery" breadcrumbs={["Home", "Queues", "Phone Recovery"]} />
+      <main className="p-6 bg-gray-100 dark:bg-gray-950 min-h-screen">
+        <PhoneRecoveryDashboard />
       </main>
     </MainContent>
   );

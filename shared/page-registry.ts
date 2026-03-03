@@ -16,7 +16,6 @@ import {
   UserPlus,
   Info,
   Mail,
-  Phone,
   type LucideIcon
 } from "lucide-react";
 
@@ -190,15 +189,6 @@ export const PAGES: PageDefinition[] = [
         ],
       },
     ],
-  },
-  {
-    key: "phoneRecovery",
-    label: "Phone Recovery",
-    description: "Phone recovery queue and reprovisioning tracker",
-    path: "/phone-recovery",
-    icon: Phone,
-    category: "queues",
-    permissionKey: "phoneRecovery",
   },
   {
     key: "storageSpots",
