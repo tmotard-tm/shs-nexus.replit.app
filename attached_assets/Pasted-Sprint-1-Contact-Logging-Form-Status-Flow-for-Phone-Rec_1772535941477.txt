@@ -1,0 +1,94 @@
+Sprint 1: Contact Logging Form + Status Flow for Phone Recovery
+I'm the PM for the Technician Offboarding Process Redesign. This is Sprint 1 of the Phone Recovery Queue feature. Sprint 0 (schema + task creation) is complete.
+
+Context
+We now have phone recovery tasks being created when technicians are offboarded. This sprint builds the UI components for Stage 1: Recovery. Any team member should be able to contact a departing tech, provide a shipping label, and track the phone until it arrives at the corporate office.
+
+The key insight driving this design: timeliness is critical. Most contact info becomes stale within days of separation.
+
+Important architectural note: The Phone Recovery Queue uses a single dashboard page with a slide-out detail panel (built in Sprint 3). This sprint builds reusable form components that Sprint 3 will import into that detail panel. Do NOT create a separate page or route for these components.
+
+What You're Building
+Two reusable React components plus the API routes to support them:
+
+ContactLogForm - Form to log a new contact attempt
+ContactHistoryTimeline - Timeline view of all past contact attempts
+ContactLogForm Component
+Location: Create in a components directory that Sprint 3 can import from (e.g., client/src/components/phone-recovery/).
+
+Fields:
+
+Contact method (multi-select buttons with icons): Phone, Email, Text
+Contact outcome (dropdown): Reached, Voicemail, No Response, Declined, Wrong Number
+Shipping label sent (checkbox)
+Tracking number (text, shown conditionally when label sent = true)
+Notes (textarea)
+"Log Contact" submit button
+On save: Append a new entry to the task's phoneContactHistory JSON array:
+
+{
+  date: new Date().toISOString(),
+  method: selectedMethod,
+  outcome: selectedOutcome,
+  notes: notesText
+}
+Also update phoneContactMethod (latest method used), phoneShippingLabelSent, and phoneTrackingNumber if applicable.
+
+"Mark Received" button: A separate action button (not part of the contact form) that:
+
+Sets phoneDateReceived to current timestamp
+Changes phoneRecoveryStage from "initiation" to "reprovisioning"
+ContactHistoryTimeline Component
+Renders the phoneContactHistory array as a vertical timeline:
+
+Each entry shows: method icon (Phone/Mail/MessageSquare from lucide-react), method name, date (formatted), outcome with color-coding (green = Reached, amber = Voicemail, red = No Response/Declined/Wrong Number), and notes
+Below the timeline: shipping label status with tracking number if sent
+Sorted newest first (most recent attempt at top)
+Status Flow
+Derive display status from the data (do not store status as a separate column):
+
+New (phoneContactHistory is empty)
+  -> Contact Attempted (phoneContactHistory has entries, phoneShippingLabelSent = false)
+    -> Label Sent (phoneShippingLabelSent = true, phoneTrackingNumber is empty)
+      -> In Transit (phoneTrackingNumber is present)
+        -> Received (phoneDateReceived is set)
+Create a utility function deriveRecoveryStatus(task) that Sprint 3 can import.
+
+Escalation Logic
+Create a utility function isEscalated(task):
+
+Count entries in phoneContactHistory where outcome is "No Response" or "Declined"
+Return true if count >= 3
+This is separate from aging. Both can apply to the same task.
+
+API Routes
+Add to server/routes.ts:
+
+POST /api/phone-recovery/:id/contact - Append a contact attempt to phoneContactHistory
+PATCH /api/phone-recovery/:id/shipping - Update shipping label and tracking number
+PATCH /api/phone-recovery/:id/received - Mark phone as received, transition to reprovisioning stage
+Constraints
+Build as reusable components in client/src/components/phone-recovery/
+Do NOT create a new page or route
+Do NOT build Stage 2 reprovisioning UI yet
+Do NOT build the dashboard page yet
+Export a deriveRecoveryStatus() and isEscalated() utility function
+Keep the UI pattern consistent with existing Nexus queue views
+Acceptance Criteria
+ ContactLogForm component renders with all fields and saves correctly
+ Each save appends a new entry to phoneContactHistory array
+ ContactHistoryTimeline renders all past attempts with correct color coding
+ Shipping label sent and tracking number fields work (tracking shows conditionally)
+ deriveRecoveryStatus() correctly derives status from task state
+ "Mark Received" button transitions task to reprovisioning stage
+ isEscalated() correctly triggers after 3+ failed contact attempts
+ Components are importable from client/src/components/phone-recovery/
+ API routes work and validate input
+When You're Done
+Please report back with:
+
+Files changed - List all files you created or modified
+What works - Confirm which acceptance criteria are passing
+What doesn't work - Any issues or partial implementations
+Questions for PM - Anything unclear or decisions you need from me
+Screenshots - ContactLogForm and ContactHistoryTimeline components rendered
