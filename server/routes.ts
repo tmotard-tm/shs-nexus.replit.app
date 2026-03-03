@@ -2215,6 +2215,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Phone Recovery routes (operate on Inventory Control queue items)
+  app.post("/api/phone-recovery/:id/contact", requireAuth, async (req: any, res) => {
+    try {
+      const contactSchema = z.object({
+        method: z.enum(["Phone", "Email", "Text"]),
+        outcome: z.enum(["Reached", "Voicemail", "No Response", "Declined", "Wrong Number"]),
+        notes: z.string().max(2000).default(""),
+        shippingLabelSent: z.boolean().optional(),
+        trackingNumber: z.string().max(100).optional(),
+      });
+
+      const validated = contactSchema.parse(req.body);
+      const item = await storage.getInventoryQueueItem(req.params.id);
+      if (!item) {
+        return res.status(404).json({ message: "Phone recovery task not found" });
+      }
+
+      const existingHistory = (item.phoneContactHistory ?? []) as any[];
+      const newEntry = {
+        date: new Date().toISOString(),
+        method: validated.method,
+        outcome: validated.outcome,
+        notes: validated.notes,
+      };
+
+      const updates: any = {
+        phoneContactHistory: [...existingHistory, newEntry],
+        phoneContactMethod: validated.method,
+      };
+
+      if (validated.shippingLabelSent !== undefined) {
+        updates.phoneShippingLabelSent = validated.shippingLabelSent;
+      }
+      if (validated.trackingNumber) {
+        updates.phoneTrackingNumber = validated.trackingNumber;
+      }
+
+      const updated = await storage.updateInventoryQueueItem(req.params.id, updates);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      console.error("Phone recovery contact error:", error);
+      res.status(500).json({ message: "Failed to log contact attempt" });
+    }
+  });
+
+  app.patch("/api/phone-recovery/:id/shipping", requireAuth, async (req: any, res) => {
+    try {
+      const shippingSchema = z.object({
+        shippingLabelSent: z.boolean(),
+        trackingNumber: z.string().max(100).optional(),
+      });
+
+      const validated = shippingSchema.parse(req.body);
+      const item = await storage.getInventoryQueueItem(req.params.id);
+      if (!item) {
+        return res.status(404).json({ message: "Phone recovery task not found" });
+      }
+
+      const updated = await storage.updateInventoryQueueItem(req.params.id, {
+        phoneShippingLabelSent: validated.shippingLabelSent,
+        phoneTrackingNumber: validated.trackingNumber || null,
+      });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      console.error("Phone recovery shipping error:", error);
+      res.status(500).json({ message: "Failed to update shipping info" });
+    }
+  });
+
+  app.patch("/api/phone-recovery/:id/received", requireAuth, async (req: any, res) => {
+    try {
+      const item = await storage.getInventoryQueueItem(req.params.id);
+      if (!item) {
+        return res.status(404).json({ message: "Phone recovery task not found" });
+      }
+
+      const updated = await storage.updateInventoryQueueItem(req.params.id, {
+        phoneDateReceived: new Date(),
+        phoneRecoveryStage: "reprovisioning",
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error("Phone recovery received error:", error);
+      res.status(500).json({ message: "Failed to mark phone as received" });
+    }
+  });
+
   // Fleet Queue Module routes
   app.get("/api/fleet-queue", requireAuth, async (req: any, res) => {
     try {

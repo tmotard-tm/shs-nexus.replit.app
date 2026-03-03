@@ -115,7 +115,17 @@ Preferred communication style: Simple, everyday language.
   2. Snowflake separation sync — step `phone_recover_device_day0`, phone from `separation.contactNumber`
   3. Manual offboarding form — posts to `/api/inventory-queue` with phone recovery fields
 - **Validation**: `anonymousQueueItemSchema` updated to accept `phoneNumber`, `phoneRecoveryStage`, and `phoneContactHistory` fields
-- **No UI yet**: Phone recovery workflow UI, contact logging, and reprovisioning logic are deferred to a future sprint
+- **Sprint 1 — Contact Logging + Status Flow** (2026-03-03):
+  - **Components**: `client/src/components/phone-recovery/` — reusable components for Sprint 3's detail panel
+    - `ContactLogForm` — logs contact attempts (method, outcome, shipping label, tracking, notes), appends to `phoneContactHistory` JSONB array, includes "Mark Received" button
+    - `ContactHistoryTimeline` — vertical timeline of contact history with method icons, color-coded outcomes, shipping status
+    - `utils.ts` — `deriveRecoveryStatus(task)` derives status from task state (New → Contact Attempted → Label Sent → In Transit → Received), `isEscalated(task)` returns true if 3+ failed attempts
+    - `index.ts` — barrel export for all components and utilities
+  - **API Routes** (in `server/routes.ts`):
+    - `POST /api/phone-recovery/:id/contact` — append contact attempt to history
+    - `PATCH /api/phone-recovery/:id/shipping` — update shipping label and tracking number
+    - `PATCH /api/phone-recovery/:id/received` — mark phone received, transition to reprovisioning stage
+  - All routes use `requireAuth` middleware and Zod validation
 
 ## Session Handoff
 
