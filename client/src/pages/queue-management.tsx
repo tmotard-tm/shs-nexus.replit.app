@@ -117,6 +117,7 @@ export default function UnifiedQueueManagement() {
   const [sortDirection, setSortDirection] = useState<"newest" | "oldest">("oldest");
   const [expandedQueues, setExpandedQueues] = useState<Record<QueueModule, boolean>>({} as Record<QueueModule, boolean>);
   const [inventoryTab, setInventoryTab] = useState<"tasks" | "phoneRecovery">("tasks");
+  const [expandedTechGroups, setExpandedTechGroups] = useState<Record<string, boolean>>({});
   const [expandedStatusSections, setExpandedStatusSections] = useState<Record<string, boolean>>({});
   const [viewQueueItem, setViewQueueItem] = useState<CombinedQueueItem | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -554,9 +555,76 @@ export default function UnifiedQueueManagement() {
     return grouped;
   };
 
-  // Helper function to calculate status counts per module
+  const isPhoneRecoveryTask = (item: CombinedQueueItem): boolean => {
+    try {
+      const d = JSON.parse(item.data || "{}");
+      return d.step === "phone_recover_device_day0";
+    } catch { return false; }
+  };
+
+  const getTechGroupKey = (item: CombinedQueueItem): string => {
+    try {
+      const d = JSON.parse(item.data || "{}");
+      if (d.technician?.employeeId) return d.technician.employeeId;
+      if (d.technician?.techRacfid) return d.technician.techRacfid;
+      if (d.technician?.enterpriseId) return d.technician.enterpriseId;
+    } catch {}
+    if (item.workflowId) return item.workflowId;
+    return `ungrouped-${item.id}`;
+  };
+
+  const getTechGroupName = (item: CombinedQueueItem): string => {
+    try {
+      const d = JSON.parse(item.data || "{}");
+      if (d.technician?.techName) return d.technician.techName;
+    } catch {}
+    const match = item.title?.match(/[-–—]\s*(.+)/);
+    if (match) return match[1].trim();
+    return "Unknown Technician";
+  };
+
+  const getTechGroupInfo = (item: CombinedQueueItem): { racfid: string; lastDay: string | null; district: string | null } => {
+    try {
+      const d = JSON.parse(item.data || "{}");
+      const tech = d.technician || {};
+      return {
+        racfid: tech.techRacfid || tech.enterpriseId || "",
+        lastDay: tech.lastDayWorked || tech.effectiveDate || d.separationDate || null,
+        district: tech.districtNo || tech.district || null,
+      };
+    } catch {
+      return { racfid: "", lastDay: null, district: null };
+    }
+  };
+
+  const groupByTechnician = (items: CombinedQueueItem[]) => {
+    const groups: Record<string, { name: string; racfid: string; lastDay: string | null; district: string | null; items: CombinedQueueItem[] }> = {};
+    for (const item of items) {
+      const key = getTechGroupKey(item);
+      if (!groups[key]) {
+        const info = getTechGroupInfo(item);
+        groups[key] = {
+          name: getTechGroupName(item),
+          racfid: info.racfid,
+          lastDay: info.lastDay,
+          district: info.district,
+          items: [],
+        };
+      }
+      groups[key].items.push(item);
+    }
+    return Object.entries(groups).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  };
+
+  const toggleTechGroup = (key: string) => {
+    setExpandedTechGroups(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const getModuleStatusCounts = (items: CombinedQueueItem[], module: QueueModule) => {
-    const moduleItems = items.filter(item => item.module === module);
+    let moduleItems = items.filter(item => item.module === module);
+    if (module === 'inventory') {
+      moduleItems = moduleItems.filter(item => !isPhoneRecoveryTask(item));
+    }
     return {
       pending: moduleItems.filter(item => item.status === "pending").length,
       in_progress: moduleItems.filter(item => item.status === "in_progress").length,
@@ -1134,9 +1202,12 @@ export default function UnifiedQueueManagement() {
                   );
                 }
                 
-                const moduleItems = filteredItems.filter(item => item.module === module);
+                let moduleItems = filteredItems.filter(item => item.module === module);
+                if (module === 'inventory') {
+                  moduleItems = moduleItems.filter(item => !isPhoneRecoveryTask(item));
+                }
                 const statusCounts = getModuleStatusCounts(filteredItems, module);
-                const isExpanded = expandedQueues[module] === true; // Default to collapsed
+                const isExpanded = expandedQueues[module] === true;
                 
                 return (
                   <Card key={module} className="overflow-hidden">
@@ -1232,6 +1303,7 @@ export default function UnifiedQueueManagement() {
                               if (statusItems.length === 0) return null;
 
                               const isSectionExpanded = isStatusSectionExpanded(module, status);
+                              const techGroupCount = module === 'inventory' ? groupByTechnician(statusItems).length : 0;
                               
                               return (
                                 <div key={status} className="space-y-3">
@@ -1243,12 +1315,126 @@ export default function UnifiedQueueManagement() {
                                     <Icon className="h-5 w-5" />
                                     <h4 className="font-semibold">{label}</h4>
                                     <Badge variant="secondary" className="bg-white/20 text-white ml-auto">
-                                      {statusItems.length} items
+                                      {module === 'inventory' 
+                                        ? `${techGroupCount} ${techGroupCount === 1 ? 'technician' : 'technicians'}`
+                                        : `${statusItems.length} items`
+                                      }
                                     </Badge>
                                     <span className="ml-2">{isSectionExpanded ? "▼" : "▶"}</span>
                                   </div>
                                   
-                                  {isSectionExpanded && (
+                                  {isSectionExpanded && module === 'inventory' && (
+                                  <div className="grid grid-cols-1 gap-3">
+                                    {groupByTechnician(statusItems).map(([techKey, group]) => {
+                                      const techGroupStateKey = `${status}-${techKey}`;
+                                      const isOpen = techGroupStateKey in expandedTechGroups ? expandedTechGroups[techGroupStateKey] : true;
+                                      return (
+                                        <div key={techKey} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                                          <div
+                                            className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors"
+                                            onClick={() => toggleTechGroup(`${status}-${techKey}`)}
+                                          >
+                                            <div className="flex items-center gap-3 flex-1">
+                                              <User className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                                              <div>
+                                                <span className="font-semibold text-foreground">{group.name}</span>
+                                                {group.racfid && <span className="text-sm text-muted-foreground ml-2">({group.racfid})</span>}
+                                              </div>
+                                              {group.lastDay && (
+                                                <div className="flex items-center gap-1 text-orange-600 dark:text-orange-400 text-sm font-medium">
+                                                  <Clock className="h-3.5 w-3.5" />
+                                                  <span>Last Day: {new Date(group.lastDay).toLocaleDateString()}</span>
+                                                </div>
+                                              )}
+                                              {group.district && (
+                                                <span className="text-sm text-muted-foreground">District {group.district}</span>
+                                              )}
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                              <Badge variant="secondary" className="text-xs">
+                                                {group.items.length} {group.items.length === 1 ? 'task' : 'tasks'}
+                                              </Badge>
+                                              <span className="text-muted-foreground text-sm">{isOpen ? "▼" : "▶"}</span>
+                                            </div>
+                                          </div>
+                                          {isOpen && (
+                                            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                                              {group.items.map((item) => (
+                                                <div key={`${item.module}-${item.id}`} className="p-4 hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors">
+                                                  <div className="flex items-start justify-between">
+                                                    <div className="space-y-1.5 flex-1">
+                                                      <div className="flex items-center gap-2">
+                                                        <h4 className="font-medium text-foreground" data-testid={`text-item-title-${item.id}`}>
+                                                          {item.title}
+                                                        </h4>
+                                                        <Badge className={`${getPriorityColor(item.priority)} text-white px-2 py-0.5 text-xs`}>
+                                                          {item.priority}
+                                                        </Badge>
+                                                        {item.workflowType && (
+                                                          <Badge variant="outline" className="text-xs">
+                                                            {item.workflowType.replace('_', ' ')}
+                                                          </Badge>
+                                                        )}
+                                                      </div>
+                                                      <p className="text-muted-foreground text-sm">{item.description}</p>
+                                                      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                                                        <div className="flex items-center gap-1">
+                                                          <Calendar className="h-3.5 w-3.5" />
+                                                          <span>Added: {new Date(item.createdAt).toLocaleDateString()}</span>
+                                                        </div>
+                                                        {item.assignedTo && (
+                                                          <div className="flex items-center gap-1">
+                                                            <User className="h-3.5 w-3.5" />
+                                                            <span>{users.find((u: UserType) => u.id === item.assignedTo)?.username || 'Unknown'}</span>
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex flex-col gap-2 ml-4 min-w-fit">
+                                                      <div className="flex items-center gap-2">
+                                                        {(taskPerms?.viewTask !== false) && (
+                                                        <Button variant="outline" size="sm" onClick={() => setViewQueueItem(item)} data-testid={`button-view-${item.id}`}>
+                                                          <Eye className="h-4 w-4 mr-1" />View
+                                                        </Button>
+                                                        )}
+                                                        {(taskPerms?.startWork !== false) && item.status === "pending" && item.assignedTo === user?.id && (
+                                                          <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white font-medium shadow-md" onClick={() => handleStartWork(item)} disabled={startWorkMutation.isPending} data-testid={`button-start-work-${item.id}`}>
+                                                            <Play className="h-4 w-4 mr-1" />Start Work
+                                                          </Button>
+                                                        )}
+                                                        {(taskPerms?.continueWork !== false) && item.status === "in_progress" && item.assignedTo === user?.id && (
+                                                          <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md" onClick={() => handleStartWork(item)} disabled={completeMutation.isPending} data-testid={`button-continue-work-${item.id}`}>
+                                                            <Play className="h-4 w-4 mr-1" />Continue Work
+                                                          </Button>
+                                                        )}
+                                                      </div>
+                                                      {item.status === "pending" && !item.assignedTo && (
+                                                        <div className="flex gap-2">
+                                                          {(taskPerms?.pickUpForMe !== false) && (
+                                                          <Button variant="default" size="sm" onClick={() => { if (user?.id) { setWorkModuleItem(item); setIsWorkModuleOpen(true); assignMutation.mutate({ module: item.module, id: item.id, assigneeId: user.id }); } }} disabled={assignMutation.isPending} data-testid={`button-pick-up-self-${item.id}`}>
+                                                            <User className="h-4 w-4 mr-1" />Pick Up for Me
+                                                          </Button>
+                                                          )}
+                                                          {(taskPerms?.assignToOther !== false) && (
+                                                          <Button variant="outline" size="sm" onClick={() => setPickUpItem(item)} disabled={assignMutation.isPending} data-testid={`button-assign-other-${item.id}`}>
+                                                            <Users className="h-4 w-4 mr-1" />Assign to Other
+                                                          </Button>
+                                                          )}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  )}
+
+                                  {isSectionExpanded && module !== 'inventory' && (
                                   <div className="grid grid-cols-1 gap-4">
                                     {statusItems.map((item) => (
                                       <Card key={`${item.module}-${item.id}`} className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-transparent hover:border-l-blue-500">
