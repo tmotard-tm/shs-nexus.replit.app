@@ -2619,6 +2619,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/phone-recovery/backfill", requireAuth, async (req: any, res) => {
+    try {
+      const assetsItems = await storage.getAssetsQueueItems();
+      const inventoryItems = await storage.getInventoryQueueItems();
+
+      const existingWorkflowIds = new Set<string>();
+      const existingEmployeeIds = new Set<string>();
+      for (const item of inventoryItems) {
+        try {
+          const d = JSON.parse(item.data || "{}");
+          if (d.step === "phone_recover_device_day0") {
+            if (item.workflowId) existingWorkflowIds.add(item.workflowId);
+            const eid = d.technician?.employeeId;
+            if (eid) existingEmployeeIds.add(eid);
+          }
+        } catch {}
+      }
+
+      let created = 0;
+      let skipped = 0;
+
+      for (const assetsItem of assetsItems) {
+        let techData: any = {};
+        try {
+          techData = JSON.parse(assetsItem.data || "{}");
+        } catch {}
+
+        const tech = techData.technician || {};
+        const employeeId = tech.employeeId || "";
+
+        if (assetsItem.workflowId && existingWorkflowIds.has(assetsItem.workflowId)) {
+          skipped++;
+          continue;
+        }
+        if (employeeId && existingEmployeeIds.has(employeeId)) {
+          skipped++;
+          continue;
+        }
+
+        const techName = tech.techName || tech.enterpriseId || "Unknown";
+        const techRacfid = tech.techRacfid || tech.enterpriseId || "";
+        const separationDate = tech.lastDayWorked || tech.effectiveDate || techData.separationDate || null;
+
+        let phoneNumber: string | null = null;
+        try {
+          let allTechRecord;
+          if (employeeId) {
+            allTechRecord = await storage.getAllTechByEmployeeId(employeeId);
+          }
+          if (!allTechRecord && techRacfid) {
+            allTechRecord = await storage.getAllTechByTechRacfid(techRacfid);
+          }
+          if (allTechRecord) {
+            phoneNumber = allTechRecord.cellPhone || allTechRecord.mainPhone || null;
+          }
+        } catch {}
+
+        const queueItem = {
+          workflowType: "offboarding" as const,
+          title: `Day 0: Phone Recovery - ${techName}`,
+          description: `Initiate phone recovery for terminated Employee ${techName} (${techRacfid}).`,
+          status: "pending",
+          priority: "high",
+          requesterId: "system",
+          department: "Inventory Control",
+          workflowId: assetsItem.workflowId || null,
+          workflowStep: 5,
+          phoneRecoveryStage: "initiation",
+          phoneContactHistory: [] as any[],
+          phoneNumber,
+          createdAt: assetsItem.createdAt,
+          data: JSON.stringify({
+            step: "phone_recover_device_day0",
+            subtask: "Phone Recovery",
+            phase: "day0",
+            isDay0Task: true,
+            source: "backfill_from_assets",
+            separationDate,
+            technician: tech,
+            vehicle: techData.vehicle || {},
+            workflowId: assetsItem.workflowId,
+          }),
+          metadata: JSON.stringify({
+            createdVia: "phone_recovery_backfill",
+            sourceAssetsItemId: assetsItem.id,
+          }),
+        };
+
+        await storage.createInventoryQueueItem(queueItem as any);
+        if (employeeId) existingEmployeeIds.add(employeeId);
+        if (assetsItem.workflowId) existingWorkflowIds.add(assetsItem.workflowId);
+        created++;
+      }
+
+      res.json({
+        message: `Phone recovery backfill complete: ${created} created, ${skipped} skipped (already existed)`,
+        created,
+        skipped,
+        total: created + skipped,
+      });
+    } catch (error) {
+      console.error("Phone recovery backfill error:", error);
+      res.status(500).json({ message: "Failed to backfill phone recovery tasks" });
+    }
+  });
+
   // Fleet Queue Module routes
   app.get("/api/fleet-queue", requireAuth, async (req: any, res) => {
     try {

@@ -182,6 +182,20 @@ export function PhoneRecoveryDashboard() {
     },
   });
 
+  const backfillMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/phone-recovery/backfill");
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/phone-recovery"] });
+      toast({ title: "Backfill complete", description: data.message });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
   const pipelineCounts = useMemo(() => {
     const counts: Record<PipelineCard, number> = { new: 0, inContact: 0, inTransit: 0, reprovisioning: 0, ready: 0, assigned: 0 };
     tasks.forEach((t) => {
@@ -327,14 +341,23 @@ export function PhoneRecoveryDashboard() {
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-8 text-center">
             <Smartphone className="h-12 w-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">No Phone Recovery Tasks</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">There are no phone recovery tasks yet. You can seed sample data for testing.</p>
-            <Button
-              onClick={() => seedMutation.mutate()}
-              disabled={seedMutation.isPending}
-              className="bg-[#003366] hover:bg-[#002244] text-white"
-            >
-              {seedMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Creating...</> : "Seed Sample Data"}
-            </Button>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Populate phone recovery tasks from existing offboarding data, or seed sample data for testing.</p>
+            <div className="flex items-center justify-center gap-3">
+              <Button
+                onClick={() => backfillMutation.mutate()}
+                disabled={backfillMutation.isPending}
+                className="bg-[#003366] hover:bg-[#002244] text-white"
+              >
+                {backfillMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Populating...</> : "Populate from Offboarding Data"}
+              </Button>
+              <Button
+                onClick={() => seedMutation.mutate()}
+                disabled={seedMutation.isPending}
+                variant="outline"
+              >
+                {seedMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Creating...</> : "Seed Sample Data"}
+              </Button>
+            </div>
           </div>
         )}
 
