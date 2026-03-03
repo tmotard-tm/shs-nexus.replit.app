@@ -146,14 +146,19 @@ Preferred communication style: Simple, everyday language.
 ## Session Handoff
 
 ### What Was Built Today
-Sprint 17 focused on notification reliability — a backfill scanner was built to automatically detect and re-send missed tool audit notifications. The scanner runs every 6 hours via the existing scheduler and can also be triggered manually from the Communication Hub. Deduplication is handled by checking communication_logs for existing successful sends per technician LDAP ID.
+Sprint 3 bug fixes for Phone Recovery dashboard:
+- Fixed `selectedTask` not refreshing after mutations — added `useEffect` synced to `tasks` array
+- Fixed TypeScript errors: `technicianName` and `separationDate` don't exist as direct QueueItem columns; added `getTechName()` (parses title + data JSON fallback) and `getSeparationDate()` (parses data JSON `technician.lastDayWorked`) helpers
+- Fixed seed data route to store tech name in `title` field ("Day 0: Phone Recovery - {name}") and separation date in `data` JSON, matching Snowflake sync format
+- Fixed `GET /api/phone-recovery` filter to parse `data` JSON for `step` field instead of referencing non-existent `item.step`
 
 ### Current Blockers
-- The Snowflake sync process sometimes causes the server to crash due to memory usage during the 13k+ record all-techs sync (pre-existing issue, not related to Sprint 17 changes)
+- The Snowflake sync process sometimes causes the server to crash due to memory usage during the 13k+ record all-techs sync (pre-existing issue)
+- SendGrid 401 errors (credits exceeded) — pre-existing, unrelated to phone recovery
 
 ### Pending Decisions
 - None
 
 ### Recommended Next Steps
-1. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
-2. **Zod validation**: Add input validation to communication API routes (low priority — developer-only feature)
+1. Smoke-test phone recovery: seed data, open detail panel, perform mutations, verify panel refreshes
+2. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined

@@ -2400,6 +2400,225 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Phone Recovery Queue list endpoint
+  app.get("/api/phone-recovery", requireAuth, async (req: any, res) => {
+    try {
+      const allItems = await storage.getInventoryQueueItems();
+      const phoneRecoveryItems = allItems.filter((item) => {
+        try {
+          const d = JSON.parse(item.data || "{}");
+          return d.step === "phone_recover_device_day0";
+        } catch {
+          return false;
+        }
+      });
+      res.json(phoneRecoveryItems);
+    } catch (error) {
+      console.error("Phone recovery list error:", error);
+      res.status(500).json({ message: "Failed to fetch phone recovery tasks" });
+    }
+  });
+
+  app.post("/api/phone-recovery/seed", requireAuth, async (req: any, res) => {
+    try {
+      const seedTasks = [
+        {
+          technicianName: "Sarah Chen",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0001",
+          phoneContactHistory: [],
+          phoneRecoveryStage: "initiation",
+          separationDate: new Date("2026-03-10"),
+          createdAt: new Date("2026-03-10"),
+        },
+        {
+          technicianName: "Marcus Johnson",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0002",
+          phoneContactHistory: [
+            { date: "2026-03-06T10:00:00Z", method: "Phone", outcome: "Voicemail", notes: "Left voicemail" },
+            { date: "2026-03-07T14:00:00Z", method: "Phone", outcome: "No Response", notes: "" },
+          ],
+          phoneContactMethod: "Phone",
+          phoneRecoveryStage: "initiation",
+          separationDate: new Date("2026-03-05"),
+          createdAt: new Date("2026-03-05"),
+        },
+        {
+          technicianName: "Emily Rodriguez",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0003",
+          phoneContactHistory: [
+            { date: "2026-02-26T09:00:00Z", method: "Phone", outcome: "No Response", notes: "" },
+            { date: "2026-02-27T11:00:00Z", method: "Email", outcome: "No Response", notes: "" },
+            { date: "2026-02-28T10:00:00Z", method: "Phone", outcome: "No Response", notes: "" },
+            { date: "2026-03-01T15:00:00Z", method: "Phone", outcome: "No Response", notes: "4th attempt, no answer" },
+          ],
+          phoneContactMethod: "Phone",
+          phoneRecoveryStage: "initiation",
+          separationDate: new Date("2026-02-25"),
+          createdAt: new Date("2026-02-25"),
+        },
+        {
+          technicianName: "David Kim",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0004",
+          phoneContactHistory: [
+            { date: "2026-03-09T10:00:00Z", method: "Phone", outcome: "Reached", notes: "Agreed to return" },
+          ],
+          phoneContactMethod: "Phone",
+          phoneShippingLabelSent: true,
+          phoneTrackingNumber: "TRK-001",
+          phoneRecoveryStage: "initiation",
+          separationDate: new Date("2026-03-08"),
+          createdAt: new Date("2026-03-08"),
+        },
+        {
+          technicianName: "Priya Patel",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0005",
+          phoneContactHistory: [
+            { date: "2026-03-02T09:00:00Z", method: "Phone", outcome: "Reached", notes: "Shipping phone back" },
+          ],
+          phoneContactMethod: "Phone",
+          phoneShippingLabelSent: true,
+          phoneTrackingNumber: "1Z999AA10123456784",
+          phoneRecoveryStage: "initiation",
+          separationDate: new Date("2026-03-01"),
+          createdAt: new Date("2026-03-01"),
+        },
+        {
+          technicianName: "James Wilson",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0006",
+          phoneContactHistory: [
+            { date: "2026-02-22T10:00:00Z", method: "Phone", outcome: "Reached", notes: "Phone returned" },
+          ],
+          phoneContactMethod: "Phone",
+          phoneDateReceived: new Date("2026-02-25"),
+          phoneRecoveryStage: "reprovisioning",
+          separationDate: new Date("2026-02-20"),
+          createdAt: new Date("2026-02-20"),
+        },
+        {
+          technicianName: "Lisa Thompson",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0007",
+          phoneContactHistory: [
+            { date: "2026-02-16T10:00:00Z", method: "Phone", outcome: "Reached", notes: "Phone received" },
+          ],
+          phoneContactMethod: "Phone",
+          phoneDateReceived: new Date("2026-02-18"),
+          phonePhysicalCondition: "Damaged",
+          phoneConditionNotes: "Minor scratches on screen",
+          phoneRecoveryStage: "reprovisioning",
+          separationDate: new Date("2026-02-15"),
+          createdAt: new Date("2026-02-15"),
+        },
+        {
+          technicianName: "Robert Garcia",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0008",
+          phoneContactHistory: [
+            { date: "2026-02-11T10:00:00Z", method: "Phone", outcome: "Reached", notes: "Phone returned" },
+          ],
+          phoneContactMethod: "Phone",
+          phoneDateReceived: new Date("2026-02-13"),
+          phonePhysicalCondition: "Good",
+          phoneDataWipeCompleted: true,
+          phoneWipeMethod: "Factory Reset",
+          phoneRecoveryStage: "reprovisioning",
+          separationDate: new Date("2026-02-10"),
+          createdAt: new Date("2026-02-10"),
+        },
+        {
+          technicianName: "Amanda Foster",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0009",
+          phoneContactHistory: [
+            { date: "2026-02-19T10:00:00Z", method: "Phone", outcome: "Reached", notes: "Initial contact" },
+            { date: "2026-02-20T11:00:00Z", method: "Phone", outcome: "Declined", notes: "Refused to return" },
+            { date: "2026-02-21T09:00:00Z", method: "Email", outcome: "Declined", notes: "Sent formal request" },
+          ],
+          phoneContactMethod: "Email",
+          phoneRecoveryStage: "initiation",
+          separationDate: new Date("2026-02-18"),
+          createdAt: new Date("2026-02-18"),
+        },
+        {
+          technicianName: "Michael Brown",
+          step: "phone_recover_device_day0",
+          department: "Inventory Control",
+          status: "pending",
+          phoneNumber: "(555) 100-0010",
+          phoneContactHistory: [
+            { date: "2026-01-30T10:00:00Z", method: "Phone", outcome: "Reached", notes: "Phone returned" },
+          ],
+          phoneContactMethod: "Phone",
+          phoneDateReceived: new Date("2026-02-01"),
+          phonePhysicalCondition: "Good",
+          phoneDataWipeCompleted: true,
+          phoneWipeMethod: "Secure Erase",
+          phoneReprovisionCompleted: true,
+          phoneServiceReinstated: true,
+          phoneDateReady: new Date("2026-02-05"),
+          phoneRecoveryStage: "reprovisioning",
+          separationDate: new Date("2026-01-28"),
+          createdAt: new Date("2026-01-28"),
+        },
+      ];
+
+      const created = [];
+      for (const task of seedTasks) {
+        const { technicianName, separationDate, step, ...rest } = task as any;
+        const queueItem = {
+          ...rest,
+          workflowType: "offboarding",
+          title: `Day 0: Phone Recovery - ${technicianName}`,
+          description: `Initiate phone recovery for terminated Employee ${technicianName}.`,
+          requesterId: "system",
+          data: JSON.stringify({
+            step,
+            subtask: "Phone Recovery",
+            phase: "day0",
+            isDay0Task: true,
+            source: "seed",
+            separationDate: separationDate?.toISOString(),
+            technician: {
+              techName: technicianName,
+              lastDayWorked: separationDate?.toISOString(),
+            },
+          }),
+        };
+        const item = await storage.createInventoryQueueItem(queueItem as any);
+        created.push(item);
+      }
+
+      res.json({ message: `Created ${created.length} seed phone recovery tasks`, count: created.length });
+    } catch (error) {
+      console.error("Phone recovery seed error:", error);
+      res.status(500).json({ message: "Failed to seed phone recovery tasks" });
+    }
+  });
+
   // Fleet Queue Module routes
   app.get("/api/fleet-queue", requireAuth, async (req: any, res) => {
     try {

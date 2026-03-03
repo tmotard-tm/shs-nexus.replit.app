@@ -48,6 +48,7 @@ import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import CommunicationHub from "@/pages/communication-hub";
 import TestRepairResults from "@/pages/test-repair-results";
+import PhoneRecovery from "@/pages/phone-recovery";
 import About from "@/pages/about";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
@@ -255,6 +256,12 @@ function Router() {
       <Route path="/decommissions-queue">
         <ProtectedRoute>
           <DecommissionsQueuePage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/phone-recovery">
+        <ProtectedRoute>
+          <PhoneRecovery />
         </ProtectedRoute>
       </Route>
 
