@@ -100,13 +100,78 @@ Preferred communication style: Simple, everyday language.
 - **Lazy-loaded expanded row details**: `ExpandedRowDetails` in `AssetsRecoveryQueue.tsx` fetches enrichment data on row expand with loading state; task checkboxes and quick actions render immediately
 - **Design decision**: List endpoint serves from Postgres only; enrichment deferred to row expand (trade-off: brief loading spinner vs instant list load)
 
-## Sprint 17 — Completed
+## Sprint 17 — Completed (2026-02-18)
 - **Notification Backfill Scanner**: Automated cron job that scans the last 7 days of Assets Queue items and cross-references communication_logs to identify missed tool audit notifications. Sends any missing notifications with deduplication, rate limiting (max 20 per run, 2s pause between sends), and mode awareness (respects simulated/whitelisted/live template modes).
 - **Files**: `server/notification-backfill.ts` (scanner service), `server/sync-scheduler.ts` (wired into 6-hour scheduler), `server/storage.ts` (new query helpers), `server/routes.ts` (manual trigger + status endpoints)
 - **API Endpoints**: `POST /api/notification-backfill/run` (manual trigger, developer-only), `GET /api/notification-backfill/status` (status check, developer-only)
 - **Communication Hub UI**: Added "Notification Backfill Scanner" status card in the History tab showing last run time, results summary (checked/sent/skipped/failed), and a "Run Now" button for on-demand execution
 - **SendGrid error details**: Enhanced `sendEmail` to return detailed error messages; Communication Hub Status column now shows failure reasons in a prominent red box with "Reason:" prefix
 - **Error message display**: `ResizableHistoryTable` Status column widened to 280px to accommodate error details
+- **User-level Permission Overrides**: Three-state toggle system (Default/Granted/Denied) with hierarchical permission tree, stored as sparse JSONB in users table. Visual indicators in user management table.
+- **Admin Role Permissions Access**: Admins can view Role Permissions page (view-only for developer/admin roles, editable for agent and custom roles).
+- **Vehicle Assignments page removed**: Navigation and routing removed; API endpoints retained for Fleet Management dependencies.
+- **Security Questions Password Reset**: Replaced email-based forgot password flow with security questions. Users set up 2 questions from predefined list on Change Password page. Forgot password dialog on login verifies answers and allows password reset without email. Rate-limited verification endpoint. Admin visibility of security question status (SQ badge) in user management table.
+- **Schema**: `securityQuestions` JSONB column on users table; answers hashed with bcrypt, case-insensitive comparison.
+- **Routes**: `GET /api/auth/security-questions`, `POST .../setup`, `GET .../status`, `POST .../get-questions`, `POST .../verify-and-reset`
+- **Reports Page**: Developer-only operations dashboard with four intelligence sections:
+  1. **Operations Overview**: Summary stat cards, queue breakdown, completion trends, top agents, activity charts, user overview.
+  2. **Fleet Intelligence**: Active/assigned/unassigned/out-of-service counts, in-repair, estimate declines, spare available, assignment mismatches (Holman vs TPMS), vehicle disposition breakdown, fleet by make, key recovery status.
+  3. **Onboarding Pipeline**: Total hires, assigned/pending counts, completed this week/month, aged 14+/30+ days, employment status breakdown, pending by state, roadblocks (terminated pending, aged hires, leave pending).
+  4. **Offboarding & Recovery**: Total cases, completed/in-progress/pending, aged 14+/30+ days, task completion rates (6 subtasks with progress bars), vehicle disposition, phone/repair status, termed tech stats (total/tasks created/unprocessed/fully processed), roadblocks (aged cases, missing keys, vehicles not found, unprocessed termed techs).
+- **Routes**: `GET /api/reports` (data aggregation via `generateReportData` function)
+- **Page registry**: Added under "dashboards" category with `reporting` permission key.
+
+## Sprint 18 — Completed (2026-02-24)
+- **SAML SSO Integration**: Implemented SAML 2.0 Service Provider using `@node-saml/passport-saml` with custom IdP at `sso.searshc.com/nexus`.
+- **SSO Flow**: `GET /auth/login` initiates SAML AuthnRequest, `POST /auth/saml/acs` handles assertion callback with session creation, `GET /auth/saml/metadata` serves SP metadata XML, `GET /auth/logout` destroys session and redirects to IdP SLO.
+- **User mapping**: NameID (enterprise ID) maps to `username` field via case-insensitive lookup. No auto-provisioning — user must exist in database.
+- **Login page**: SSO button as primary login, password-based login collapsed as fallback option. SSO error messages displayed via URL parameters.
+- **SSO callback page**: `/sso-callback` route handles post-SSO redirect, fetches user data via `/api/auth/sso-user`, stores in localStorage.
+- **Logout**: Destroys local session cookie and redirects to IdP SLO URL with RelayState back to login page.
+- **Config**: `server/saml-config.ts` — IdP cert, SSO/SLO URLs, SP entity ID. Base URL auto-detected from Replit environment. Override with `SAML_BASE_URL` env var for production.
+- **Files**: `server/saml-config.ts`, `client/src/pages/sso-callback.tsx` (new); `server/routes.ts`, `client/src/hooks/use-auth.tsx`, `client/src/pages/login.tsx`, `client/src/App.tsx` (modified).
+
+## Sprint 19 — Completed (2026-03-01)
+- **PARQ My Fleet dedicated integration page**: `client/src/pages/parq-integration.tsx` — full-featured page at `/parq-integration` with Overview, Vehicles, Lots, Lookup, and API Reference tabs.
+- **PMF service methods expanded**: Added `getStatus()`, `getLots()`, `getLotTypes()`, `getVehicleTypes()`, `getVehicleStatuses()`, `getVehicleById()`, `getVehicleActivityLog()`, `getWorkOrderById()` to `server/pmf-api-service.ts`.
+- **8 new PMF backend routes**: `GET /api/pmf/status`, `/api/pmf/lots`, `/api/pmf/lot-types`, `/api/pmf/vehicle-types`, `/api/pmf/vehicle-statuses`, `/api/pmf/vehicle/:id`, `/api/pmf/vehicle/:id/activitylog`, `/api/pmf/workorder/:id`.
+- **Integrations page updated**: PARQ My Fleet card added (total: 5 integrations), live connection status badge via `/api/pmf/status`, links to `/parq-integration`.
+
+## Sprint 20 — Completed (2026-03-01)
+- **Samsara integration — Snowflake-first architecture**: `server/samsara-service.ts` (518 lines) — full service covering all 14 `bi_analytics.app_samsara` Snowflake tables as primary read source; live Samsara API only for GPS staleness fallback and write operations.
+- **19 new Samsara backend routes** registered under `Registering Samsara integration routes...`:
+  - Status/test: `GET /api/samsara/status`, `GET /api/samsara/test`
+  - Vehicles: `GET /api/samsara/vehicles`, `GET /api/samsara/vehicles/:vehicleId`
+  - Drivers: `GET /api/samsara/drivers`, `GET /api/samsara/drivers/:driverId`, `POST /api/samsara/drivers`, `PATCH /api/samsara/drivers/:driverId`
+  - Data: `GET /api/samsara/assignments`, `/api/samsara/safety-scores`, `/api/samsara/odometer`, `/api/samsara/trips`, `/api/samsara/maintenance`, `/api/samsara/fuel`, `/api/samsara/safety-events`, `/api/samsara/speeding`, `/api/samsara/idling`, `/api/samsara/devices`, `/api/samsara/gateways`
+  - Existing location routes upgraded to use new service: `GET /api/samsara/vehicle/:vehicleName`, `POST /api/samsara/vehicles/batch` — both now support `?stalenessHours=` and return `X-Data-Source: snowflake|live` header
+- **Write routes graceful degradation**: `POST /api/samsara/drivers` and `PATCH /api/samsara/drivers/:driverId` return 503 if `SAMSARA_API_TOKEN` not set
+- **Samsara integration frontend page**: `client/src/pages/samsara-integration.tsx` — 7-tab page at `/samsara-integration`: Overview (stat cards + architecture legend), Fleet (searchable vehicle table), Drivers (searchable driver table with status badges), Assignments (date-picker + daily pairing table), Safety (scores + events), Operations (Fuel/Energy, Speeding, Idling cards), API Reference (all routes with source badges)
+- **Integrations dashboard updated**: Samsara Fleet card added (total: 7 integrations), status badge queries `/api/samsara/status` for Snowflake + Live API availability
+
+### Snowflake Schema — `bi_analytics.app_samsara`
+14 tables consumed by Samsara service:
+`SAMSARA_STREAM` (GPS), `SAMSARA_VEHICLES`, `SAMSARA_DRIVERS`, `SAMSARA_VEHICLE_ASSIGN`, `SAMSARA_DRIVER_SAFETY_SCORES`, `SAMSARA_ODOMETER`, `SAMSARA_TRIPS`, `SAMSARA_MAINTENANCE`, `SAMSARA_FUEL_ENERGY_DAILY`, `SAMSARA_SAFETY`, `SAMSARA_SPEEDING`, `SAMSARA_IDLING`, `SAMSARA_DEVICES`, `SAMSARA_GATEWAYS`
+
+## Sprint 21 — Completed (2026-03-01)
+- **`SAMSARA_API_TOKEN` confirmed live**: Real fleet data confirmed (Chevy Express trucks, district tags, active drivers from Samsara API)
+- **Service hardening (`server/samsara-service.ts`)**:
+  - Added `SAMSARA_GROUP_ID` and `SAMSARA_ORG_ID` support; `buildLiveParams()` adds `tagIds` filter to all live API calls when Group ID is set
+  - `isLiveApiConfigured()` now re-reads env at call time (no restart needed if token set post-boot)
+  - `getLiveToken()` helper centralises token resolution
+  - `fetchAllLivePages()` auto-paginates all live API endpoints (cursor-based, limit 512 per page)
+  - Fixed `getVehicleLocation()`: previously passed truck name as `vehicleIds` (wrong); now resolves Samsara internal ID from `SAMSARA_VEHICLES` via Snowflake first, then calls live API by ID; falls back to name-match scan if Snowflake unavailable
+  - New public methods: `liveGetVehicles()`, `liveGetVehicleLocations()`, `liveGetAllDrivers()` — each fetches all pages
+- **3 new live pass-through routes** (total Samsara routes now 22):
+  - `GET /api/samsara/live/vehicles` — full fleet direct from Samsara (all pages, tag-filtered by Group ID)
+  - `GET /api/samsara/live/locations` — real-time GPS all vehicles (all pages); returns `X-Data-Source: live`
+  - `GET /api/samsara/live/drivers` — all drivers direct from Samsara (all pages)
+- **Status route enhanced**: `GET /api/samsara/status` now returns `groupId` and `orgId` flags alongside `snowflake` and `liveApi`
+- **Frontend updates** (`client/src/pages/samsara-integration.tsx`):
+  - Status type updated to include `groupId` / `orgId`
+  - Group ID badge added to page header status strip
+  - API Reference tab expanded to 24 routes (added all Snowflake, live, and status endpoints); new "Status" badge colour
+  - Live API badge wording updated to "Active" when token present
 
 ## Phone Recovery Feature (2026-03-02)
 - **Schema**: Added 16 phone recovery columns to `queue_items` table (`phoneNumber`, `phoneContactHistory` (jsonb), `phoneContactMethod`, `phoneShippingLabelSent`, `phoneTrackingNumber`, `phoneDateReceived`, `phonePhysicalCondition`, `phoneDataWipeCompleted`, `phoneWipeMethod`, `phoneReprovisionCompleted`, `phoneServiceReinstated`, `phoneDateReady`, `phoneAssignedToNewHire`, `phoneNewHireDepartment`, `phoneRecoveryStage` (default 'initiation'), `phoneWrittenOff`)
@@ -143,28 +208,29 @@ Preferred communication style: Simple, everyday language.
     - `PATCH /api/phone-recovery/:id/write-off` — mark device as written off
   - Written-off devices are blocked from further reprovisioning updates
 
-## Phone Recovery Integration
+## Phone Recovery Integration (2026-03-04)
 - `PhoneRecoveryDashboard` is an exported reusable component from `client/src/pages/phone-recovery.tsx`
 - Embedded inside the Inventory Control Queue section of `/queue-management` via a tab bar ("All Tasks" | "Phone Recovery")
 - No standalone `/phone-recovery` route — redirects to `/queue-management?dept=inventory`
 - No separate sidebar nav entry — accessed through the Inventory Control Queue
+- **Backfill endpoint**: `POST /api/phone-recovery/backfill` creates phone recovery tasks for all existing Assets Management technicians who are missing them. Deduplicates by workflowId and employeeId. Looks up phone numbers from `all_techs` table via employeeId with techRacfid fallback.
+- **Inventory "All Tasks" view**: Phone recovery tasks filtered out (only visible in Phone Recovery tab). Remaining inventory tasks grouped by technician — each group shows tech name, RACFID, last day worked, district, and expandable list of their individual tasks.
+- **Technician grouping**: Groups by employeeId > techRacfid > enterpriseId > workflowId. Each status bucket (New, In Progress, etc.) shows technician count instead of task count.
 
 ## Session Handoff
 
-### What Was Built Today
-- Integrated Phone Recovery dashboard into the Inventory Control Queue (no longer standalone)
-- Extracted `PhoneRecoveryDashboard` as a reusable component
-- Added tab bar in queue-management.tsx Inventory section: "All Tasks" | "📱 Phone Recovery"
-- Removed phoneRecovery from page-registry (no separate sidebar item)
-- `/phone-recovery` now redirects to `/queue-management?dept=inventory`
-
 ### Current Blockers
-- The Snowflake sync process sometimes causes the server to crash due to memory usage during the 13k+ record all-techs sync (pre-existing issue)
-- SendGrid 401 errors (credits exceeded) — pre-existing, unrelated to phone recovery
+- SendGrid credits exceeded — email delivery disabled; security questions used as alternative for password reset
+- SAML SSO requires IdP admin to register SP ACS URL and Entity ID (printed in server logs on startup)
+- `SAMSARA_GROUP_ID` and `SAMSARA_ORG_ID` not yet set — live API works across all groups; set Group ID to filter to specific fleet tag
 
 ### Pending Decisions
-- None
+- `SAML_BASE_URL` needs to be set for production deployment if auto-detection doesn't match the registered SP URL
 
 ### Recommended Next Steps
-1. Smoke-test: expand Inventory Queue → Phone Recovery tab → seed data → open detail panel → log contact → verify refresh
-2. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
+1. Smoke-test: expand Inventory Queue → Phone Recovery tab → click "Populate from Offboarding Data" → verify technician data populates dashboard
+2. **Samsara Group ID**: Provide `SAMSARA_GROUP_ID` secret (Samsara tag ID) to scope live API calls to a specific fleet group
+3. **IdP Registration**: Provide SAML SP details (ACS URL, Entity ID, NameID format) to IdP admin for onboarding
+4. **Production `SAML_BASE_URL`**: Set this env var to the production domain after deployment
+5. **SMS integration** (Phase 2): Implement Twilio-based SMS sending in Communication Hub when a use case is defined
+6. **Alternative email provider**: Consider Resend or Mailgun if email-based features are needed again
