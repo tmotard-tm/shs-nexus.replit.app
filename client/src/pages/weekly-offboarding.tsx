@@ -407,6 +407,21 @@ export default function WeeklyOffboarding() {
                 <Button
                   size="sm"
                   variant="outline"
+                  onClick={() => {
+                    const a = document.createElement('a');
+                    a.href = '/api/weekly-offboarding/export.xlsx';
+                    a.download = '';
+                    a.click();
+                  }}
+                  disabled={isLoading}
+                  data-testid="button-export-offboarding"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  Export XLSX
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={() => syncMutation.mutate()}
                   disabled={syncMutation.isPending || isRefetching}
                   data-testid="button-sync-offboarding"

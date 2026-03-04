@@ -11248,6 +11248,187 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Weekly Offboarding - Get term roster from Snowflake view with contact info
+  // Weekly Offboarding - XLSX Export
+  app.get("/api/weekly-offboarding/export.xlsx", requireAuth, async (req: any, res) => {
+    try {
+      const { getSnowflakeService } = await import("./snowflake-service");
+      const snowflakeService = getSnowflakeService();
+
+      const query = `
+        SELECT 
+          t.EMPL_NAME,
+          t.ENTERPRISE_ID,
+          t.EMPLID,
+          t.EMPL_STATUS,
+          t.EFFDT,
+          t.LAST_DATE_WORKED,
+          t.PLANNING_AREA,
+          t.TECH_SPECIALTY,
+          c.SNSTV_HOME_ADDR1,
+          c.SNSTV_HOME_ADDR2,
+          c.SNSTV_HOME_CITY,
+          c.SNSTV_HOME_STATE,
+          c.SNSTV_HOME_POSTAL,
+          c.SNSTV_MAIN_PHONE,
+          c.SNSTV_CELL_PHONE,
+          c.SNSTV_HOME_PHONE,
+          tpms.TRUCK_LU
+        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
+        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+          ON t.EMPLID = c.EMPLID
+        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
+          ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
+        WHERE t.LAST_DATE_WORKED >= '2026-01-01'
+          AND (
+            tpms.TRUCK_LU IS NULL 
+            OR NOT EXISTS (
+              SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT active
+              WHERE active.TRUCK_LU = tpms.TRUCK_LU
+            )
+          )
+        ORDER BY t.LAST_DATE_WORKED DESC
+      `;
+
+      const rows = await snowflakeService.executeQuery(query) as Array<{
+        EMPL_NAME: string; ENTERPRISE_ID: string; EMPLID: string; EMPL_STATUS: string;
+        EFFDT: string; LAST_DATE_WORKED: string; PLANNING_AREA: string; TECH_SPECIALTY: string;
+        SNSTV_HOME_ADDR1: string; SNSTV_HOME_ADDR2: string; SNSTV_HOME_CITY: string;
+        SNSTV_HOME_STATE: string; SNSTV_HOME_POSTAL: string; SNSTV_MAIN_PHONE: string;
+        SNSTV_CELL_PHONE: string; SNSTV_HOME_PHONE: string; TRUCK_LU: string;
+      }>;
+
+      const formatPhone = (phone: string | null | undefined): string | null => {
+        if (!phone) return null;
+        const digits = phone.replace(/\D/g, '');
+        if (digits.length === 10) return `(${digits.slice(0,3)})${digits.slice(3,6)}-${digits.slice(6)}`;
+        if (digits.length === 11 && digits[0] === '1') return `(${digits.slice(1,4)})${digits.slice(4,7)}-${digits.slice(7)}`;
+        return phone;
+      };
+
+      const planningAreaOwnerMap: Record<string, string> = {
+        '3132': 'Rob & Andrea', '3580': 'Monica, Cheryl & Machell', '4766': 'Rob & Andrea',
+        '6141': 'Monica, Cheryl & Machell', '7084': 'Rob & Andrea', '7088': 'Carol & Tasha',
+        '7108': 'Carol & Tasha', '7323': 'Monica, Cheryl & Machell', '7435': 'Rob & Andrea',
+        '7670': 'Rob & Andrea', '7744': 'Rob & Andrea', '7983': 'Rob & Andrea',
+        '7995': 'Carol & Tasha', '8035': 'Rob & Andrea', '8096': 'Monica, Cheryl & Machell',
+        '8107': 'Carol & Tasha', '8147': 'Carol & Tasha', '8158': 'Carol & Tasha',
+        '8162': 'Monica, Cheryl & Machell', '8169': 'Carol & Tasha', '8175': 'Rob & Andrea',
+        '8184': 'Carol & Tasha', '8206': 'Monica, Cheryl & Machell', '8220': 'Monica, Cheryl & Machell',
+        '8228': 'Carol & Tasha', '8309': 'Monica, Cheryl & Machell', '8366': 'Carol & Tasha',
+        '8380': 'Rob & Andrea', '8420': 'Monica, Cheryl & Machell', '8555': 'Monica, Cheryl & Machell',
+        '8935': 'Monica, Cheryl & Machell',
+      };
+      const getOwner = (pa: string | null | undefined) => {
+        if (!pa) return 'Unknown';
+        return planningAreaOwnerMap[pa.replace(/\D/g, '').slice(0, 4)] || 'Unknown';
+      };
+
+      // Fetch truck overrides and nexus data from DB
+      const allOverrides = await db.select().from(offboardingTruckOverrides);
+      const overrideMap = Object.fromEntries(allOverrides.map(o => [o.enterpriseId, o.truckNumber]));
+
+      const truckNumbers = Array.from(new Set(
+        rows.flatMap(r => {
+          const t = r.TRUCK_LU || overrideMap[(r.ENTERPRISE_ID || '').toUpperCase()];
+          return t ? [t] : [];
+        })
+      ));
+
+      let nexusMap = new Map<string, { postOffboardedStatus: string | null; comments: string | null; nexusNewLocation: string | null; updatedBy: string | null }>();
+      if (truckNumbers.length > 0) {
+        const nexusRows = await db.select().from(vehicleNexusData)
+          .where(inArray(vehicleNexusData.vehicleNumber, truckNumbers));
+        nexusRows.forEach(n => nexusMap.set(n.vehicleNumber, {
+          postOffboardedStatus: n.postOffboardedStatus ?? null,
+          comments: n.comments ?? null,
+          nexusNewLocation: n.nexusNewLocation ?? null,
+          updatedBy: n.updatedBy ?? null,
+        }));
+      }
+
+      const manualStatusLabels: Record<string, string> = {
+        'reserved_for_new_hire': 'Reserved for new hire', 'in_repair': 'In repair',
+        'declined_repair': 'Declined repair', 'available_for_rental_pmf': 'Available to assign or send to PMF',
+        'sent_to_pmf': 'Sent to PMF', 'assigned_to_tech_in_rental': 'Assigned to rental',
+        'assigned_to_tech': 'Assigned to tech', 'not_found': 'Not found',
+        'sent_to_auction': 'Sent to auction', 'already_picked_up': 'Already picked up',
+        'unable_to_reach': 'Unable to reach',
+      };
+
+      const ExcelJS = (await import("exceljs")).default;
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Nexus';
+      workbook.created = new Date();
+      const sheet = workbook.addWorksheet('Weekly Offboarding', { views: [{ state: 'frozen', ySplit: 1 }] });
+
+      sheet.columns = [
+        { header: 'Employee Name',   key: 'emplName',       width: 28 },
+        { header: 'Enterprise ID',   key: 'enterpriseId',   width: 16 },
+        { header: 'Employee ID',     key: 'emplId',         width: 14 },
+        { header: 'Status',          key: 'emplStatus',     width: 14 },
+        { header: 'Effective Date',  key: 'effdt',          width: 16 },
+        { header: 'Last Date Worked',key: 'lastDateWorked', width: 18 },
+        { header: 'Planning Area',   key: 'planningArea',   width: 16 },
+        { header: 'Owner',           key: 'owner',          width: 26 },
+        { header: 'Tech Specialty',  key: 'techSpecialty',  width: 20 },
+        { header: 'Truck #',         key: 'truck',          width: 10 },
+        { header: 'Manual Status',   key: 'manualStatus',   width: 36 },
+        { header: 'Nexus Location',  key: 'nexusLocation',  width: 24 },
+        { header: 'Nexus Comments',  key: 'nexusComments',  width: 40 },
+        { header: 'Updated By',      key: 'updatedBy',      width: 18 },
+        { header: 'Address',         key: 'address',        width: 40 },
+        { header: 'Contact Phone',   key: 'contactPhone',   width: 30 },
+      ];
+
+      // Style header row
+      const headerRow = sheet.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB91C1C' } };
+      headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      headerRow.height = 20;
+
+      for (const row of rows) {
+        const addressParts = [row.SNSTV_HOME_ADDR1, row.SNSTV_HOME_ADDR2, row.SNSTV_HOME_CITY, row.SNSTV_HOME_STATE, row.SNSTV_HOME_POSTAL].filter(Boolean);
+        const phoneParts = [formatPhone(row.SNSTV_MAIN_PHONE), formatPhone(row.SNSTV_CELL_PHONE), formatPhone(row.SNSTV_HOME_PHONE)].filter(Boolean);
+        const truck = row.TRUCK_LU || overrideMap[(row.ENTERPRISE_ID || '').toUpperCase()] || '';
+        const nexus = truck ? nexusMap.get(truck) : null;
+        const rawStatus = nexus?.postOffboardedStatus || '';
+
+        const dataRow = sheet.addRow({
+          emplName: row.EMPL_NAME || '',
+          enterpriseId: (row.ENTERPRISE_ID || '').toUpperCase(),
+          emplId: row.EMPLID || '',
+          emplStatus: row.EMPL_STATUS || '',
+          effdt: row.EFFDT ? row.EFFDT.split('T')[0] : '',
+          lastDateWorked: row.LAST_DATE_WORKED ? row.LAST_DATE_WORKED.split('T')[0] : '',
+          planningArea: row.PLANNING_AREA || '',
+          owner: getOwner(row.PLANNING_AREA),
+          techSpecialty: row.TECH_SPECIALTY || '',
+          truck,
+          manualStatus: rawStatus ? (manualStatusLabels[rawStatus] || rawStatus) : '',
+          nexusLocation: nexus?.nexusNewLocation || '',
+          nexusComments: nexus?.comments || '',
+          updatedBy: nexus?.updatedBy || '',
+          address: addressParts.join(', '),
+          contactPhone: phoneParts.join(' / '),
+        });
+        dataRow.alignment = { vertical: 'top', wrapText: false };
+      }
+
+      // Freeze + auto-filter
+      sheet.autoFilter = { from: 'A1', to: 'P1' };
+
+      const timestamp = new Date().toISOString().split('T')[0];
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="weekly_offboarding_${timestamp}.xlsx"`);
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (error: any) {
+      console.error("Error exporting weekly offboarding XLSX:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/weekly-offboarding", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService } = await import("./snowflake-service");
