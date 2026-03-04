@@ -12012,6 +12012,571 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =====================================================================
+  // Rental Operations (T002) — reads from Snowflake pipeline tables
+  // =====================================================================
+  // Snowflake table name constants (swap once pipeline schema confirmed)
+  const RENTAL_OPEN_TABLE = "PARTS_SUPPLYCHAIN.FLEET.RENTAL_OPEN";
+  const RENTAL_CLOSED_TABLE = "PARTS_SUPPLYCHAIN.FLEET.RENTAL_CLOSED";
+  const RENTAL_TICKET_TABLE = "PARTS_SUPPLYCHAIN.FLEET.RENTAL_TICKET_DETAIL";
+
+  function calcDaysOpen(startDate: string | null): number {
+    if (!startDate) return 0;
+    const start = new Date(startDate);
+    if (isNaN(start.getTime())) return 0;
+    return Math.floor((Date.now() - start.getTime()) / 86400000);
+  }
+
+  function handleSnowflakeError(err: any, res: any, table?: string) {
+    const isTableMissing = err.message?.includes("does not exist") || err.message?.includes("SQL compilation error") || err.code === "002003";
+    if (isTableMissing) {
+      return res.status(503).json({ message: `Snowflake pipeline table not yet available${table ? `: ${table}` : ""}. Data will appear once the table is provisioned.`, data: [], total: 0 });
+    }
+    return res.status(500).json({ message: err.message });
+  }
+
+  app.get("/api/rental-ops/open", requireAuth, async (_req, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+      const sf = getSnowflakeService();
+      await sf.connect();
+      const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 2000`) as any[];
+      const data = rows.map((r: any) => ({
+        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || "",
+        division: r.DIVISION || r.RENTAL_TYPE || "",
+        renterName: (r.RENTER_NAME || r.DRIVER_NAME || "").trim(),
+        poNumber: (r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim(),
+        rentalStartDate: r.RENTAL_START_DATE || r.START_DATE || null,
+        rentalEndDate: r.RENTAL_END_DATE || r.END_DATE || null,
+        originalStartDate: r.ORIGINAL_START_DATE || null,
+        rentalDays: r.RENTAL_DAYS || null,
+        rewriteFlag: r.REWRITE_FLAG || r.EXTENSION_FLAG || null,
+        daysOpen: calcDaysOpen(r.RENTAL_START_DATE || r.START_DATE),
+        raw: r,
+      }));
+      res.json({ data, total: data.length, source: RENTAL_OPEN_TABLE });
+    } catch (err: any) {
+      return handleSnowflakeError(err, res, RENTAL_OPEN_TABLE);
+    }
+  });
+
+  app.get("/api/rental-ops/closed", requireAuth, async (_req, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+      const sf = getSnowflakeService();
+      await sf.connect();
+      const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_CLOSED_TABLE} LIMIT 5000`) as any[];
+      const seen = new Map<string, any>();
+      for (const r of rows) {
+        const key = `${r.VEHICLE_NUMBER || r.UNIT_NUMBER || ""}|${(r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim()}`;
+        if (!seen.has(key)) seen.set(key, r);
+      }
+      const data = Array.from(seen.values()).map((r: any) => ({
+        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
+        division: r.DIVISION || "",
+        renterName: (r.RENTER_NAME || "").trim(),
+        poNumber: (r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim(),
+        rentalStartDate: r.RENTAL_START_DATE || r.START_DATE || null,
+        rentalEndDate: r.RENTAL_END_DATE || r.END_DATE || null,
+        originalStartDate: r.ORIGINAL_START_DATE || null,
+        rentalDays: r.RENTAL_DAYS || null,
+        rewriteFlag: r.REWRITE_FLAG || null,
+        raw: r,
+      }));
+      res.json({ data, total: data.length, source: RENTAL_CLOSED_TABLE });
+    } catch (err: any) {
+      return handleSnowflakeError(err, res, RENTAL_CLOSED_TABLE);
+    }
+  });
+
+  app.get("/api/rental-ops/tickets", requireAuth, async (_req, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+      const sf = getSnowflakeService();
+      await sf.connect();
+      const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} LIMIT 2000`) as any[];
+      const data = rows.map((r: any) => ({
+        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.ASSET_NUMBER || "",
+        ticketNumber: r.TICKET_NUMBER || r.WORK_ORDER || r.PO_NUMBER || "",
+        openDate: r.OPEN_DATE || r.START_DATE || r.CREATED_DATE || null,
+        closeDate: r.CLOSE_DATE || r.END_DATE || null,
+        description: r.DESCRIPTION || r.SERVICE_TYPE || "",
+        vendor: r.VENDOR || r.SUPPLIER || "",
+        status: r.STATUS || r.TICKET_STATUS || "",
+        daysOpen: calcDaysOpen(r.OPEN_DATE || r.START_DATE || r.CREATED_DATE),
+        raw: r,
+      }));
+      res.json({ data, total: data.length, source: RENTAL_TICKET_TABLE });
+    } catch (err: any) {
+      return handleSnowflakeError(err, res, RENTAL_TICKET_TABLE);
+    }
+  });
+
+  app.get("/api/rental-ops/summary", requireAuth, async (_req, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+      const sf = getSnowflakeService();
+      await sf.connect();
+      const [openRows, closedRows] = await Promise.all([
+        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 2000`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT * FROM ${RENTAL_CLOSED_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
+      ]);
+      const openData = openRows.map((r: any) => ({
+        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
+        division: r.DIVISION || "",
+        rewriteFlag: r.REWRITE_FLAG || null,
+        daysOpen: calcDaysOpen(r.RENTAL_START_DATE || r.START_DATE),
+      }));
+      const maintCount = openData.filter(r => (r.division || "").toUpperCase().includes("MAINT")).length;
+      const interimCount = openData.filter(r => (r.division || "").toUpperCase().includes("INTERIM")).length;
+      const avgDaysOpen = openData.length > 0
+        ? Math.round(openData.reduce((s, r) => s + r.daysOpen, 0) / openData.length)
+        : 0;
+      const top10Longest = [...openData].sort((a, b) => b.daysOpen - a.daysOpen).slice(0, 10);
+      const closedDeduped = new Set<string>();
+      let closedCount = 0;
+      let extensionCount = 0;
+      for (const r of closedRows) {
+        const key = `${r.VEHICLE_NUMBER || ""}|${(r.PO_NUMBER || "").replace(/^'/, "")}`;
+        if (!closedDeduped.has(key)) {
+          closedDeduped.add(key);
+          closedCount++;
+          if (r.REWRITE_FLAG === "Y") extensionCount++;
+        }
+      }
+      res.json({
+        totalOpen: openData.length,
+        totalClosed: closedCount,
+        extensions: extensionCount,
+        maintCount,
+        interimCount,
+        avgDaysOpen,
+        top10Longest,
+      });
+    } catch (err: any) {
+      return handleSnowflakeError(err, res);
+    }
+  });
+
+  app.post("/api/rental-ops/qualify", requireAuth, async (req: any, res) => {
+    const source = req.body?.source || "all";
+    const triggeredBy = req.user?.username || "unknown";
+    const results: any[] = [];
+
+    async function qualifyTable(tableName: string, sourceKey: string, sf: any) {
+      try {
+        const rows = await sf.executeQuery(`SELECT * FROM ${tableName} LIMIT 5000`) as any[];
+        const issues: any[] = [];
+        let passRows = 0, warnRows = 0, failRows = 0;
+        const duplicateMap = new Map<string, number>();
+        const nullCounts: Record<string, number> = {};
+
+        const knownVehicles = new Set<string>();
+        try {
+          const vcRows = await db.select({ num: holmanVehiclesCache.holmanVehicleNumber }).from(holmanVehiclesCache).limit(5000);
+          for (const v of vcRows) if (v.num) knownVehicles.add(v.num);
+        } catch {}
+
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i];
+          const rowNum = i + 1;
+          let rowSeverity = "pass";
+          const vNum = r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || r.ASSET_NUMBER || "";
+          const dupKey = `${vNum}|${(r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim()}`;
+
+          const requiredFields = sourceKey === "rental_open"
+            ? ["VEHICLE_NUMBER", "RENTAL_START_DATE", "RENTER_NAME"]
+            : sourceKey === "rental_closed"
+            ? ["VEHICLE_NUMBER", "PO_NUMBER", "RENTAL_END_DATE"]
+            : ["VEHICLE_NUMBER", "TICKET_NUMBER", "OPEN_DATE"];
+
+          for (const field of requiredFields) {
+            const val = r[field];
+            if (val === null || val === undefined || String(val).trim() === "") {
+              nullCounts[field] = (nullCounts[field] || 0) + 1;
+              issues.push({ row: rowNum, field, issue: `Required field ${field} is null/empty`, severity: "fail" });
+              rowSeverity = "fail";
+            }
+          }
+
+          if (sourceKey === "rental_closed") {
+            const start = new Date(r.RENTAL_START_DATE || r.START_DATE || "");
+            const end = new Date(r.RENTAL_END_DATE || r.END_DATE || "");
+            if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end < start) {
+              issues.push({ row: rowNum, field: "RENTAL_END_DATE", issue: "End date before start date", severity: "fail" });
+              rowSeverity = "fail";
+            }
+            const rf = r.REWRITE_FLAG;
+            if (rf && !["Y", "N", ""].includes(String(rf).trim())) {
+              issues.push({ row: rowNum, field: "REWRITE_FLAG", issue: `Invalid rewrite flag: ${rf}`, severity: "warn" });
+              if (rowSeverity === "pass") rowSeverity = "warn";
+            }
+          }
+
+          if (sourceKey === "rental_open") {
+            const startDate = new Date(r.RENTAL_START_DATE || r.START_DATE || "");
+            if (!isNaN(startDate.getTime()) && startDate > new Date()) {
+              issues.push({ row: rowNum, field: "RENTAL_START_DATE", issue: "Future start date", severity: "warn" });
+              if (rowSeverity === "pass") rowSeverity = "warn";
+            }
+          }
+
+          if (sourceKey === "rental_ticket_detail") {
+            const daysOpen = calcDaysOpen(r.OPEN_DATE || r.START_DATE || r.CREATED_DATE);
+            if (daysOpen > 90) {
+              issues.push({ row: rowNum, field: "OPEN_DATE", issue: `Ticket open ${daysOpen} days (>90)`, severity: "warn" });
+              if (rowSeverity === "pass") rowSeverity = "warn";
+            }
+          }
+
+          if (vNum && knownVehicles.size > 0 && !knownVehicles.has(vNum)) {
+            issues.push({ row: rowNum, field: "VEHICLE_NUMBER", issue: `Vehicle ${vNum} not in Holman fleet cache`, severity: "warn" });
+            if (rowSeverity === "pass") rowSeverity = "warn";
+          }
+
+          duplicateMap.set(dupKey, (duplicateMap.get(dupKey) || 0) + 1);
+
+          if (rowSeverity === "fail") failRows++;
+          else if (rowSeverity === "warn") warnRows++;
+          else passRows++;
+        }
+
+        const duplicateCount = Array.from(duplicateMap.values()).filter(c => c > 1).reduce((s, c) => s + (c - 1), 0);
+        if (duplicateCount > 0) {
+          issues.push({ row: null, field: "VEHICLE_NUMBER+PO_NUMBER", issue: `${duplicateCount} duplicate records detected`, severity: "warn" });
+        }
+
+        const total = rows.length;
+        const nullRateJson: Record<string, number> = {};
+        for (const [field, count] of Object.entries(nullCounts)) {
+          nullRateJson[field] = total > 0 ? Math.round((count / total) * 1000) / 10 : 0;
+        }
+        const unmatchedVehicleCount = issues.filter(i => i.issue.includes("not in Holman fleet cache")).length;
+        const invalidDateCount = issues.filter(i => i.issue.includes("date")).length;
+
+        const logEntry = await storage.createQualificationLog({
+          sourceTable: sourceKey,
+          totalRows: total,
+          passRows,
+          warnRows,
+          failRows,
+          nullRateJson,
+          duplicateCount,
+          unmatchedVehicleCount,
+          invalidDateCount,
+          mismatchedTechCount: 0,
+          issuesJson: issues.slice(0, 500),
+          triggeredBy,
+        });
+
+        results.push({ source: sourceKey, ...logEntry, issues: issues.slice(0, 100) });
+      } catch (tableErr: any) {
+        results.push({ source: sourceKey, error: tableErr.message });
+      }
+    }
+
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+      const sf = getSnowflakeService();
+      await sf.connect();
+      if (source === "all" || source === "rental_open") await qualifyTable(RENTAL_OPEN_TABLE, "rental_open", sf);
+      if (source === "all" || source === "rental_closed") await qualifyTable(RENTAL_CLOSED_TABLE, "rental_closed", sf);
+      if (source === "all" || source === "rental_ticket_detail") await qualifyTable(RENTAL_TICKET_TABLE, "rental_ticket_detail", sf);
+      res.json({ results, ranAt: new Date().toISOString() });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/rental-ops/qualify/history", requireAuth, async (req, res) => {
+    try {
+      const sourceTable = req.query.source as string | undefined;
+      const logs = await storage.getQualificationLogs(sourceTable, 30);
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/rental-ops/qualify/latest", requireAuth, async (_req, res) => {
+    try {
+      const sources = ["rental_open", "rental_closed", "rental_ticket_detail"];
+      const results = await Promise.all(sources.map(s => storage.getLatestQualificationLog(s)));
+      res.json(results.filter(Boolean));
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/rental-ops/export.xlsx", requireAuth, async (_req, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+      const sf = getSnowflakeService();
+      await sf.connect();
+      const [openRows, closedRows] = await Promise.all([
+        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 2000`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT * FROM ${RENTAL_CLOSED_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
+      ]);
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Nexus Fleet Operations";
+      workbook.created = new Date();
+
+      const headerStyle: Partial<ExcelJS.Style> = {
+        font: { bold: true, color: { argb: "FFFFFFFF" } },
+        fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3864" } },
+        border: {
+          bottom: { style: "thin", color: { argb: "FFAAAAAA" } },
+        },
+      };
+
+      function addSheet(name: string, cols: { header: string; key: string; width: number }[], rowData: any[]) {
+        const ws = workbook.addWorksheet(name);
+        ws.columns = cols;
+        const headerRow = ws.getRow(1);
+        cols.forEach((_, i) => { Object.assign(headerRow.getCell(i + 1), headerStyle); });
+        headerRow.commit();
+        for (const row of rowData) ws.addRow(row);
+        ws.autoFilter = { from: "A1", to: `${String.fromCharCode(64 + cols.length)}1` };
+      }
+
+      const openData = openRows.map((r: any) => ({
+        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
+        division: r.DIVISION || "",
+        renterName: (r.RENTER_NAME || "").trim(),
+        poNumber: (r.PO_NUMBER || "").replace(/^'/, "").trim(),
+        rentalStartDate: r.RENTAL_START_DATE || "",
+        daysOpen: calcDaysOpen(r.RENTAL_START_DATE || r.START_DATE),
+        rewriteFlag: r.REWRITE_FLAG || "",
+      }));
+
+      addSheet("Position Report", [
+        { header: "Vehicle #", key: "vehicleNumber", width: 14 },
+        { header: "Division", key: "division", width: 16 },
+        { header: "Tech / Renter", key: "renterName", width: 28 },
+        { header: "PO Number", key: "poNumber", width: 20 },
+        { header: "Start Date", key: "rentalStartDate", width: 16 },
+        { header: "Days Open", key: "daysOpen", width: 12 },
+        { header: "Extension", key: "rewriteFlag", width: 12 },
+      ], [...openData].sort((a, b) => a.renterName.localeCompare(b.renterName)));
+
+      addSheet("Active Rentals", [
+        { header: "Vehicle #", key: "vehicleNumber", width: 14 },
+        { header: "Division", key: "division", width: 16 },
+        { header: "Tech / Renter", key: "renterName", width: 28 },
+        { header: "PO Number", key: "poNumber", width: 20 },
+        { header: "Start Date", key: "rentalStartDate", width: 16 },
+        { header: "Days Open", key: "daysOpen", width: 12 },
+        { header: "Extension", key: "rewriteFlag", width: 12 },
+      ], [...openData].sort((a, b) => b.daysOpen - a.daysOpen));
+
+      const closedDeduped = new Map<string, any>();
+      for (const r of closedRows) {
+        const po = (r.PO_NUMBER || "").replace(/^'/, "").trim();
+        const key = `${r.VEHICLE_NUMBER || ""}|${po}`;
+        if (!closedDeduped.has(key)) {
+          closedDeduped.set(key, {
+            vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
+            division: r.DIVISION || "",
+            renterName: (r.RENTER_NAME || "").trim(),
+            poNumber: po,
+            rentalStartDate: r.RENTAL_START_DATE || "",
+            originalStartDate: r.ORIGINAL_START_DATE || "",
+            rentalEndDate: r.RENTAL_END_DATE || "",
+            rentalDays: r.RENTAL_DAYS || "",
+            rewriteFlag: r.REWRITE_FLAG || "",
+          });
+        }
+      }
+      const extensionData = Array.from(closedDeduped.values()).filter(r => r.rewriteFlag === "Y");
+
+      addSheet("Extensions", [
+        { header: "Vehicle #", key: "vehicleNumber", width: 14 },
+        { header: "Division", key: "division", width: 16 },
+        { header: "Tech / Renter", key: "renterName", width: 28 },
+        { header: "PO Number", key: "poNumber", width: 20 },
+        { header: "Original Start", key: "originalStartDate", width: 16 },
+        { header: "Start Date", key: "rentalStartDate", width: 16 },
+        { header: "End Date", key: "rentalEndDate", width: 16 },
+        { header: "Days", key: "rentalDays", width: 10 },
+      ], extensionData);
+
+      res.setHeader("Content-Disposition", `attachment; filename="Rental-Operations-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // =====================================================================
+  // Holman PO Tracking (T003) — reads from HOLMAN_PO_DETAILS_CDC
+  // =====================================================================
+  const HOLMAN_PO_CDC_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_PO_DETAILS_CDC";
+
+  app.post("/api/holman/pos/sync", requireAuth, async (req: any, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+      const sf = getSnowflakeService();
+      await sf.connect();
+      const rows = await sf.executeQuery(
+        `SELECT * FROM ${HOLMAN_PO_CDC_TABLE} ORDER BY CHANGE_TIMESTAMP DESC LIMIT 5000`
+      ) as any[];
+
+      const records = rows.map((r: any) => {
+        const divDesc = (r.DIVISION || r.DIVISION_DESCRIPTION || r.SERVICE_TYPE || "").toLowerCase();
+        let poType: string;
+        if (divDesc.includes("rental") || divDesc.includes("interim")) poType = "rental";
+        else if (divDesc.includes("maint") || divDesc.includes("repair") || divDesc.includes("service")) poType = "maintenance";
+        else poType = "other";
+
+        return {
+          poNumber: String(r.PO_NUMBER || r.ORDER_NUMBER || "").replace(/^'/, "").trim(),
+          vehicleNumber: String(r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.CLIENT_VEHICLE_NUMBER || "").trim(),
+          vin: String(r.VIN || "").trim() || null,
+          poType,
+          poStatus: String(r.PO_STATUS || r.STATUS || r.ORDER_STATUS || "").trim() || null,
+          poDate: r.PO_DATE || r.ORDER_DATE || r.CHANGE_TIMESTAMP || null,
+          amount: r.AMOUNT || r.TOTAL_AMOUNT || r.COST || null,
+          description: String(r.DESCRIPTION || r.SERVICE_DESCRIPTION || r.DIVISION_DESCRIPTION || "").trim() || null,
+          vendor: String(r.VENDOR || r.VENDOR_NAME || r.SUPPLIER || "").trim() || null,
+          rawData: r,
+        };
+      }).filter(r => r.poNumber);
+
+      const synced = await storage.upsertHolmanPoCache(records);
+      res.json({ synced, lastSyncedAt: new Date().toISOString() });
+    } catch (err: any) {
+      const isTableMissing = err.message?.includes("does not exist") || err.message?.includes("SQL compilation error") || err.code === "002003";
+      const status = isTableMissing ? 503 : 500;
+      const message = isTableMissing
+        ? `Snowflake pipeline table not yet available: ${HOLMAN_PO_CDC_TABLE}. Sync will work once the table is provisioned.`
+        : err.message;
+      res.status(status).json({ message });
+    }
+  });
+
+  app.get("/api/holman/pos/sync/status", requireAuth, async (_req, res) => {
+    try {
+      const [count, lastSync] = await Promise.all([
+        storage.getHolmanPoCacheCount(),
+        storage.getHolmanPoCacheLastSync(),
+      ]);
+      res.json({ cachedRows: count, lastSyncedAt: lastSync });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/holman/pos", requireAuth, async (req, res) => {
+    try {
+      const filters: any = {};
+      if (req.query.vehicleNumber) filters.vehicleNumber = req.query.vehicleNumber as string;
+      if (req.query.poType) filters.poType = req.query.poType as string;
+      if (req.query.poStatus) filters.poStatus = req.query.poStatus as string;
+      if (req.query.search) filters.search = req.query.search as string;
+      const data = await storage.getHolmanPosAll(filters);
+      res.json({ data, total: data.length });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/holman/pos/:vehicleNumber", requireAuth, async (req, res) => {
+    try {
+      const data = await storage.getHolmanPosByVehicle(req.params.vehicleNumber);
+      res.json({ data, total: data.length });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // =====================================================================
+  // Fleet Operations (T004) — cross-system assign/unassign/transfer/address
+  // =====================================================================
+  const { fleetOpsService } = await import("./fleet-operations-service");
+
+  app.post("/api/fleet-ops/assign", requireAuth, async (req: any, res) => {
+    try {
+      const { truckNumber, ldapId, districtNo, techName, notes } = req.body;
+      if (!truckNumber || !ldapId || !districtNo) {
+        return res.status(400).json({ message: "truckNumber, ldapId, and districtNo are required" });
+      }
+      const requestedBy = req.user?.username || "unknown";
+      const result = await fleetOpsService.assignTech({ truckNumber, ldapId, districtNo, techName: techName || ldapId, requestedBy, notes });
+      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
+      res.status(statusCode).json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/fleet-ops/unassign", requireAuth, async (req: any, res) => {
+    try {
+      const { truckNumber, ldapId, notes } = req.body;
+      if (!truckNumber || !ldapId) {
+        return res.status(400).json({ message: "truckNumber and ldapId are required" });
+      }
+      const requestedBy = req.user?.username || "unknown";
+      const result = await fleetOpsService.unassignTech({ truckNumber, ldapId, requestedBy, notes });
+      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
+      res.status(statusCode).json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/fleet-ops/transfer", requireAuth, async (req: any, res) => {
+    try {
+      const { truckNumber, fromLdap, toLdap, districtNo, newTechName, notes } = req.body;
+      if (!truckNumber || !fromLdap || !toLdap || !districtNo) {
+        return res.status(400).json({ message: "truckNumber, fromLdap, toLdap, and districtNo are required" });
+      }
+      const requestedBy = req.user?.username || "unknown";
+      const result = await fleetOpsService.transferTech({ truckNumber, fromLdap, toLdap, districtNo, newTechName: newTechName || toLdap, requestedBy, notes });
+      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
+      res.status(statusCode).json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/fleet-ops/update-address", requireAuth, async (req: any, res) => {
+    try {
+      const { truckNumber, ldapId, address, city, state, zip } = req.body;
+      if (!truckNumber || !ldapId || !address || !city || !state || !zip) {
+        return res.status(400).json({ message: "truckNumber, ldapId, address, city, state, zip are required" });
+      }
+      const requestedBy = req.user?.username || "unknown";
+      const result = await fleetOpsService.updateAddress({ truckNumber, ldapId, address, city, state, zip, requestedBy });
+      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
+      res.status(statusCode).json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/fleet-ops/logs", requireAuth, async (req, res) => {
+    try {
+      const filters: any = {};
+      if (req.query.operationType) filters.operationType = req.query.operationType as string;
+      if (req.query.truckNumber) filters.truckNumber = req.query.truckNumber as string;
+      if (req.query.ldap) filters.ldap = req.query.ldap as string;
+      const logs = await storage.getFleetOperationLogs(filters);
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack
