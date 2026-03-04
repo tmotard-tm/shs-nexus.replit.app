@@ -127,6 +127,7 @@ export default function WeeklyOffboarding() {
     'sent_to_auction': 'Sent to auction',
     'already_picked_up': 'Already picked up',
     'unable_to_reach': 'Unable to reach',
+    'byov': 'BYOV',
   };
 
   // Get unique manual statuses from nexus data
@@ -364,6 +365,7 @@ export default function WeeklyOffboarding() {
     { key: 'sent_to_auction', label: 'Sent to auction', icon: Truck, color: 'text-rose-600', bg: 'bg-rose-50 dark:bg-rose-950' },
     { key: 'already_picked_up', label: 'Already picked up', icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950' },
     { key: 'unable_to_reach', label: 'Unable to reach', icon: AlertCircle, color: 'text-yellow-600', bg: 'bg-yellow-50 dark:bg-yellow-950' },
+    { key: 'byov', label: 'BYOV', icon: CarFront, color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950' },
   ];
 
   const getStatusBadgeVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
@@ -540,7 +542,7 @@ export default function WeeklyOffboarding() {
                     <SelectContent>
                       <SelectItem value="all">All Manual Statuses</SelectItem>
                       <SelectItem value="__none__">-- No Status Set --</SelectItem>
-                      {Array.from(new Set([...uniqueManualStatuses, 'reserved_for_new_hire', 'in_repair', 'declined_repair', 'available_for_rental_pmf', 'sent_to_pmf', 'assigned_to_tech_in_rental', 'assigned_to_tech', 'not_found', 'sent_to_auction', 'already_picked_up', 'unable_to_reach'])).sort().map((status) => (
+                      {Array.from(new Set([...uniqueManualStatuses, 'reserved_for_new_hire', 'in_repair', 'declined_repair', 'available_for_rental_pmf', 'sent_to_pmf', 'assigned_to_tech_in_rental', 'assigned_to_tech', 'not_found', 'sent_to_auction', 'already_picked_up', 'unable_to_reach', 'byov'])).sort().map((status) => (
                         <SelectItem key={status} value={status}>
                           {manualStatusLabels[status] || status}
                         </SelectItem>
@@ -816,6 +818,7 @@ export default function WeeklyOffboarding() {
                               <SelectItem value="sent_to_auction">Sent to auction</SelectItem>
                               <SelectItem value="already_picked_up">Already picked up</SelectItem>
                               <SelectItem value="unable_to_reach">Unable to reach</SelectItem>
+                              <SelectItem value="byov">BYOV</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

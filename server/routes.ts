@@ -11352,7 +11352,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'sent_to_pmf': 'Sent to PMF', 'assigned_to_tech_in_rental': 'Assigned to rental',
         'assigned_to_tech': 'Assigned to tech', 'not_found': 'Not found',
         'sent_to_auction': 'Sent to auction', 'already_picked_up': 'Already picked up',
-        'unable_to_reach': 'Unable to reach',
+        'unable_to_reach': 'Unable to reach', 'byov': 'BYOV',
       };
 
       const ExcelJS = (await import("exceljs")).default;
