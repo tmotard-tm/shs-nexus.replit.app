@@ -6,8 +6,8 @@ import { z } from "zod";
 // Queue module types for unified queue access
 export type QueueModule = 'ntao' | 'assets' | 'inventory' | 'fleet';
 
-// Role types - Developer, Admin, and Agent
-export type UserRole = 'developer' | 'admin' | 'agent';
+// Role types - Developer, Admin, Agent, and Assets
+export type UserRole = 'developer' | 'admin' | 'agent' | 'assets';
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

@@ -88,6 +88,27 @@ export default function WeeklyOffboarding() {
     queryKey: ['/api/weekly-offboarding'],
   });
 
+  interface QueueStatusInfo {
+    total: number;
+    completed: number;
+    pending: number;
+    inProgress: number;
+    departments: Record<string, string>;
+  }
+
+  const employeeIds = termRoster.map(entry => entry.emplId).filter(Boolean);
+
+  const { data: queueStatusMap = {} } = useQuery<Record<string, QueueStatusInfo>>({
+    queryKey: ['/api/weekly-offboarding/queue-status', employeeIds],
+    queryFn: async () => {
+      if (employeeIds.length === 0) return {};
+      const response = await apiRequest('POST', '/api/weekly-offboarding/queue-status', { employeeIds });
+      return response.json();
+    },
+    enabled: employeeIds.length > 0,
+    staleTime: 2 * 60 * 1000,
+  });
+
   // Collect all truck numbers from termRoster for batch fetch (including manual overrides)
   const truckNumbers = Array.from(new Set([
     ...termRoster.map(entry => entry.truck).filter((truck): truck is string => !!truck),
@@ -601,6 +622,7 @@ export default function WeeklyOffboarding() {
                         <TableHead className="bg-background sticky top-0">Planning Area</TableHead>
                         <TableHead className="bg-background sticky top-0">Owner</TableHead>
                         <TableHead className="bg-background sticky top-0">Tech Specialty</TableHead>
+                        <TableHead className="w-[120px] bg-background sticky top-0">Queue Tasks</TableHead>
                         <TableHead className="min-w-[150px] bg-background sticky top-0">Manual Status</TableHead>
                         <TableHead className="min-w-[200px] bg-background sticky top-0">Address</TableHead>
                         <TableHead className="min-w-[180px] bg-background sticky top-0">Contact Phone</TableHead>
@@ -655,6 +677,25 @@ export default function WeeklyOffboarding() {
                           <TableCell className="text-sm">{entry.planningArea || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.owner || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.techSpecialty || '-'}</TableCell>
+                          <TableCell className="text-sm">
+                            {(() => {
+                              const qs = entry.emplId ? queueStatusMap[entry.emplId] : null;
+                              if (!qs) {
+                                return <Badge variant="outline" className="text-xs text-muted-foreground">No tasks</Badge>;
+                              }
+                              const allDone = qs.completed === qs.total;
+                              return (
+                                <div className="flex flex-col gap-0.5">
+                                  <Badge variant={allDone ? "default" : "secondary"} className={`text-xs ${allDone ? "bg-green-600" : ""}`}>
+                                    {qs.completed}/{qs.total} done
+                                  </Badge>
+                                  {qs.inProgress > 0 && (
+                                    <span className="text-xs text-blue-600">{qs.inProgress} active</span>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </TableCell>
                           <TableCell className="text-sm">
                             {(() => {
                               const nexusInfo = rowTruck ? nexusDataMap.get(rowTruck) : null;

@@ -41,7 +41,7 @@ Preferred communication style: Simple, everyday language.
 ## Authentication & Authorization
 -   **Authentication**: SAML SSO via custom IdP (sso.searshc.com) as primary login, username/password as fallback. Session management via httpOnly cookies.
 -   **SAML SSO**: IdP Entity ID `sso.searshc.com/nexus`, NameID maps to `username` field (enterprise ID). Routes: `GET /auth/login` (initiate), `POST /auth/saml/acs` (callback), `GET /auth/saml/metadata` (SP metadata), `GET /auth/logout` (SLO). Config in `server/saml-config.ts`.
--   **Authorization**: Role-based access control (Developer, Admin, Agent) with department assignments.
+-   **Authorization**: Role-based access control (Developer, Admin, Agent, Assets) with department assignments.
 -   **Role Permissions System**: Granular UI visibility control for pages, sections, features, and actions, managed via a hierarchical checkbox tree and stored in a `role_permissions` JSONB column.
 
 ## Key Features
@@ -51,7 +51,7 @@ Preferred communication style: Simple, everyday language.
 -   **Template Management**: CRUD operations for workflow templates.
 -   **Activity Logging**: Comprehensive audit trail of system actions.
 -   **Task Queue**: A unified interface for all department-specific queues, including specialized task cards for tools management based on routing status. Features a table-based layout with sortable columns, expandable inline rows, and enhanced filtering.
--   **Snowflake Sync System**: Automated daily synchronization for `all_techs` (employee roster), `termed_techs` (for offboarding), and TPMS data, including enriched employee contact and truck assignment information.
+-   **Snowflake Sync System**: Automated daily synchronization for `all_techs` (employee roster), `termed_techs` (for offboarding), and TPMS data. The offboarding queue creation (`syncTermedTechs`) uses the same Snowflake data source as the Weekly Offboarding page (`ORA_TECH_TERM_ROSTER_VW_VIEW` + `SEPARATION_FLEET_DETAILS`) as the definitive source of truth for determining which employees need queue items.
 -   **TPMS Integration**: Syncs technician-vehicle assignments from Snowflake daily snapshots and retrieves mobile phone numbers.
 -   **Vehicle Assignment System**: Aggregates data from Snowflake, TPMS, and Holman.
 -   **Fleet Management Page**: Consolidated interface for managing vehicles, including stats, search, filters, actions, and a "Nexus Tracking" section for post-offboarding vehicle information.

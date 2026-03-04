@@ -8855,6 +8855,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/weekly-offboarding/queue-status", requireAuth, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        employeeIds: z.array(z.string().min(1)).max(500),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.json({});
+      }
+      const { employeeIds } = parsed.data;
+
+      const statusMap: Record<string, { total: number; completed: number; pending: number; inProgress: number; departments: Record<string, string> }> = {};
+
+      const results = await Promise.all(
+        employeeIds.map(emplId => 
+          storage.findExistingOffboardingTasks(emplId, emplId, 365)
+            .then(tasks => ({ emplId, tasks }))
+            .catch(() => ({ emplId, tasks: { hasExisting: false, existingTasks: [] as any[] } }))
+        )
+      );
+
+      for (const { emplId, tasks } of results) {
+        if (tasks.hasExisting && tasks.existingTasks.length > 0) {
+          const completed = tasks.existingTasks.filter((t: any) => t.status === 'completed').length;
+          const pending = tasks.existingTasks.filter((t: any) => t.status === 'pending').length;
+          const inProgress = tasks.existingTasks.filter((t: any) => t.status === 'in_progress').length;
+
+          const departments: Record<string, string> = {};
+          for (const t of tasks.existingTasks) {
+            if (t.department) {
+              departments[t.department] = t.status || 'unknown';
+            }
+          }
+
+          statusMap[emplId] = {
+            total: tasks.existingTasks.length,
+            completed,
+            pending,
+            inProgress,
+            departments,
+          };
+        }
+      }
+
+      res.json(statusMap);
+    } catch (error: any) {
+      console.error("Error fetching queue status for offboarding:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Weekly Offboarding - Sync/Refresh (same as GET but for POST compatibility)
   app.post("/api/snowflake/sync/weekly-offboarding", requireAuth, async (req: any, res) => {
     try {
