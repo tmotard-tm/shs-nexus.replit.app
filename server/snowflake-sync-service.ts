@@ -9,6 +9,38 @@ import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCa
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
 import { sendToolAuditNotification } from './notification-service';
 
+let woRosterCache: { emplIds: Set<string>; enterpriseIds: Set<string> } | null = null;
+
+export function updateWORosterCache(emplIds: Set<string>, enterpriseIds: Set<string>) {
+  const normalizedEmplIds = new Set<string>();
+  const normalizedEntIds = new Set<string>();
+  for (const id of emplIds) normalizedEmplIds.add(id.trim().toUpperCase());
+  for (const id of enterpriseIds) normalizedEntIds.add(id.trim().toUpperCase());
+  woRosterCache = { emplIds: normalizedEmplIds, enterpriseIds: normalizedEntIds };
+  console.log(`[WO Cache] Updated: ${normalizedEmplIds.size} emplIds, ${normalizedEntIds.size} enterpriseIds`);
+}
+
+export function getCurrentWORosterIds(): { emplIds: Set<string>; enterpriseIds: Set<string> } | null {
+  return woRosterCache;
+}
+
+export function filterQueueItemsByWORoster(items: any[], showAll: boolean = false): any[] {
+  if (showAll || !woRosterCache) return items;
+  const { emplIds, enterpriseIds } = woRosterCache;
+  return items.filter(item => {
+    let data = item.data;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch { return true; }
+    }
+    if (!data) return true;
+    const empId = (data.employeeId || '').trim().toUpperCase();
+    const racfid = (data.techRacfid || '').trim().toUpperCase();
+    if (empId && emplIds.has(empId)) return true;
+    if (racfid && enterpriseIds.has(racfid)) return true;
+    return false;
+  });
+}
+
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
   ENTERPRISE_ID: string;
@@ -334,6 +366,14 @@ export class SnowflakeSyncService {
 
       result.recordsProcessed = candidates.length;
       console.log(`[Sync] Total offboarding candidates from definitive source: ${candidates.length}`);
+
+      const cacheEmplIds = new Set<string>();
+      const cacheEntIds = new Set<string>();
+      for (const c of candidates) {
+        if (c.employeeId) cacheEmplIds.add(c.employeeId);
+        if (c.techRacfid) cacheEntIds.add(c.techRacfid);
+      }
+      updateWORosterCache(cacheEmplIds, cacheEntIds);
 
       // Initialize TPMS service for truck lookups
       const tpmsService = getTPMSService();
