@@ -268,7 +268,7 @@ export interface IStorage {
   getAllTechs(): Promise<AllTech[]>;
   getTermedEmployeesFromRoster(daysBack?: number): Promise<AllTech[]>;
   getEmployeesNeedingOffboarding(daysBack?: number): Promise<AllTech[]>;
-  markEmployeeOffboardingCreated(employeeId: string, taskId: string): Promise<AllTech | undefined>;
+  markEmployeeOffboardingCreated(employeeId: string, techRacfid: string, taskId: string): Promise<AllTech | undefined>;
   upsertAllTech(tech: InsertAllTech): Promise<AllTech>;
   bulkUpsertAllTechs(techs: InsertAllTech[]): Promise<number>;
   updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined>;
@@ -1337,7 +1337,7 @@ export class MemStorage implements IStorage {
     return []; // Not implemented in memory storage
   }
 
-  async markEmployeeOffboardingCreated(_employeeId: string, _taskId: string): Promise<AllTech | undefined> {
+  async markEmployeeOffboardingCreated(_employeeId: string, _techRacfid: string, _taskId: string): Promise<AllTech | undefined> {
     return undefined; // Not implemented in memory storage
   }
 
@@ -3642,17 +3642,35 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(allTechs.effectiveDate));
   }
 
-  async markEmployeeOffboardingCreated(employeeId: string, taskId: string): Promise<AllTech | undefined> {
-    const result = await db.update(allTechs)
-      .set({
-        offboardingTaskCreated: true,
-        offboardingTaskId: taskId,
-        processedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(allTechs.employeeId, employeeId))
-      .returning();
-    return result[0];
+  async markEmployeeOffboardingCreated(employeeId: string, techRacfid: string, taskId: string): Promise<AllTech | undefined> {
+    if (employeeId) {
+      const result = await db.update(allTechs)
+        .set({
+          offboardingTaskCreated: true,
+          offboardingTaskId: taskId,
+          processedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(allTechs.employeeId, employeeId))
+        .returning();
+      if (result[0]) return result[0];
+    }
+
+    if (techRacfid) {
+      const byRacfid = await db.update(allTechs)
+        .set({
+          offboardingTaskCreated: true,
+          offboardingTaskId: taskId,
+          processedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(allTechs.techRacfid, techRacfid))
+        .returning();
+      if (byRacfid[0]) return byRacfid[0];
+    }
+
+    console.log(`[Storage] No all_techs record found for employeeId=${employeeId}, techRacfid=${techRacfid} - separation-only record, skipping mark`);
+    return undefined;
   }
 
   async upsertAllTech(tech: InsertAllTech): Promise<AllTech> {

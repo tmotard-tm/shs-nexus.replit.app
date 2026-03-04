@@ -352,26 +352,58 @@ export class SnowflakeSyncService {
             45
           );
 
+          const existingSteps = new Set<string>();
           if (existingTasksResult.hasExisting) {
-            const openCount = existingTasksResult.existingTasks.filter(
-              t => t.status === 'pending' || t.status === 'in_progress'
-            ).length;
+            for (const t of existingTasksResult.existingTasks) {
+              let taskData: any = t.data;
+              if (typeof taskData === 'string') {
+                try { taskData = JSON.parse(taskData); } catch { taskData = {}; }
+              }
+              const step = taskData?.step;
+              if (step) {
+                existingSteps.add(step);
+              } else {
+                const dept = (t.department || '').toUpperCase();
+                const title = (t.title || '').toLowerCase();
+                if (dept === 'NTAO') existingSteps.add('ntao_stop_replenishment_day0');
+                else if (dept.includes('ASSETS') || dept === 'TOOLS') existingSteps.add('tools_recover_equipment_day0');
+                else if (dept.includes('FLEET')) existingSteps.add('fleet_initial_coordination_day0');
+                else if (dept.includes('INVENTORY') && (title.includes('tpms') || title.includes('stop orders'))) existingSteps.add('inventory_remove_tpms_day0');
+                else if (dept.includes('INVENTORY') && title.includes('phone')) existingSteps.add('phone_recover_device_day0');
+              }
+            }
             
-            console.log(`[Sync] Skipping offboarding tasks for ${tech.techName} (${tech.employeeId}) - ${existingTasksResult.message}`);
+            const allExpectedSteps = [
+              'ntao_stop_replenishment_day0',
+              'tools_recover_equipment_day0',
+              'fleet_initial_coordination_day0',
+              'inventory_remove_tpms_day0',
+              'phone_recover_device_day0',
+            ];
+            const allExist = allExpectedSteps.every(s => existingSteps.has(s));
             
-            result.queueItemsSkipped++;
-            result.skippedEmployees.push({
-              employeeId: tech.employeeId,
-              enterpriseId: tech.techRacfid,
-              name: tech.techName,
-              reason: openCount > 0 
-                ? `${openCount} open task(s) exist for this employee` 
-                : `${existingTasksResult.existingTasks.length} task(s) created within the last 45 days`,
-              existingTaskCount: existingTasksResult.existingTasks.length,
-              openTaskCount: openCount
-            });
+            if (allExist) {
+              const openCount = existingTasksResult.existingTasks.filter(
+                t => t.status === 'pending' || t.status === 'in_progress'
+              ).length;
+              
+              console.log(`[Sync] All 5 tasks exist for ${tech.techName} (${tech.employeeId}) - skipping`);
+              
+              result.queueItemsSkipped++;
+              result.skippedEmployees.push({
+                employeeId: tech.employeeId,
+                enterpriseId: tech.techRacfid,
+                name: tech.techName,
+                reason: `All 5 department tasks already exist (${openCount} open)`,
+                existingTaskCount: existingTasksResult.existingTasks.length,
+                openTaskCount: openCount
+              });
+              
+              continue;
+            }
             
-            continue;
+            const missingSteps = allExpectedSteps.filter(s => !existingSteps.has(s));
+            console.log(`[Sync] Partial tasks for ${tech.techName} (${tech.employeeId}): ${existingTasksResult.existingTasks.length} exist, missing steps: ${missingSteps.join(', ')}`);
           }
 
           let truckInfo: {
@@ -532,8 +564,13 @@ export class SnowflakeSyncService {
           ];
 
           let firstCreatedItemId: string | null = null;
+          let createdCount = 0;
 
           for (const task of day0Tasks) {
+            if (existingSteps.has(task.step)) {
+              continue;
+            }
+            
             const isPhoneRecoveryTask = task.step === 'phone_recover_device_day0';
             const queueItem: InsertQueueItem = {
               workflowType: 'offboarding',
@@ -612,19 +649,25 @@ export class SnowflakeSyncService {
             if (!firstCreatedItemId) {
               firstCreatedItemId = createdItem.id;
             }
+            createdCount++;
             result.queueItemsCreated++;
             console.log(`[Sync] Created Day 0 task: ${task.step} for ${tech.techName} in ${task.department} queue`);
           }
 
-          if (firstCreatedItemId && tech.employeeId) {
+          if (firstCreatedItemId) {
             try {
-              await storage.markEmployeeOffboardingCreated(tech.employeeId, firstCreatedItemId);
+              await storage.markEmployeeOffboardingCreated(
+                tech.employeeId || '',
+                tech.techRacfid || '',
+                firstCreatedItemId
+              );
             } catch (markErr: any) {
-              console.log(`[Sync] Note: Could not mark offboarding created for ${tech.employeeId} in all_techs (may be separation-only record): ${markErr.message}`);
+              console.log(`[Sync] Note: Could not mark offboarding created for employeeId=${tech.employeeId}, racfid=${tech.techRacfid} in all_techs (may be separation-only record): ${markErr.message}`);
             }
           }
           
-          console.log(`[Sync] Created ${day0Tasks.length} Day 0 offboarding tasks for ${tech.techName} (${tech.employeeId})${truckInfo.truckNo ? ` with truck ${truckInfo.truckNo}` : ''}`);
+          const skippedCount = existingSteps.size;
+          console.log(`[Sync] Created ${createdCount} new Day 0 tasks for ${tech.techName} (${tech.employeeId})${skippedCount > 0 ? ` (${skippedCount} already existed)` : ''}${truckInfo.truckNo ? ` with truck ${truckInfo.truckNo}` : ''}`);
         } catch (error: any) {
           console.error(`[Sync] Error creating queue items for ${tech.employeeId}:`, error.message);
           result.errors.push(`Error creating queue items for ${tech.employeeId}: ${error.message}`);
