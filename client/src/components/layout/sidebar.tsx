@@ -128,6 +128,7 @@ export function Sidebar() {
       username: selectedUser.username,
       role: selectedUser.role as UserRole,
       departments: selectedUser.departments || [],
+      permissionOverrides: (selectedUser as any).permissionOverrides || undefined,
     });
     setUserSearch("");
     setIsOpen(false);

@@ -52,6 +52,26 @@ function deepMergePermissions(defaults: any, stored: any, inheritedEnabled?: boo
   return result;
 }
 
+function applyUserOverrides(base: any, overrides: any): any {
+  if (overrides === undefined || overrides === null) return base;
+  if (typeof base === 'boolean') {
+    if (typeof overrides === 'boolean') return overrides;
+    return base;
+  }
+  if (typeof base !== 'object' || base === null) return base;
+  if (typeof overrides === 'boolean') {
+    return setAllBooleans(base, overrides);
+  }
+  if (typeof overrides !== 'object' || overrides === null) return base;
+  const result: any = { ...base };
+  for (const key of Object.keys(overrides)) {
+    if (key in result) {
+      result[key] = applyUserOverrides(result[key], overrides[key]);
+    }
+  }
+  return result;
+}
+
 interface RolePermission {
   id: string;
   role: string;
@@ -69,6 +89,13 @@ interface PermissionsContextType {
 
 const PermissionsContext = createContext<PermissionsContextType | null>(null);
 
+interface UserOverridesResponse {
+  userId: string;
+  username: string;
+  role: string;
+  permissionOverrides: any;
+}
+
 export function PermissionsProvider({ children }: { children: ReactNode }) {
   const { user, isLoading: isAuthLoading } = useAuth();
   const { previewRole, previewUser } = usePreviewRole();
@@ -85,6 +112,13 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     enabled: !!user && user.role !== 'developer',
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
+  });
+
+  const { data: userOverridesData } = useQuery<UserOverridesResponse>({
+    queryKey: ['/api/users', user?.id, 'permission-overrides'],
+    enabled: !!user,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 5 * 60 * 1000,
   });
 
   const effectiveRole = useMemo(() => {
@@ -107,10 +141,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     if (userRole === 'developer' && previewUser && allPermissions) {
       const previewDefaults = getDefaultPermissions(previewUser.role);
       const found = allPermissions.find(p => p.role === previewUser.role);
+      let rolePerms = previewDefaults;
       if (found) {
-        return deepMergePermissions(previewDefaults, found.permissions);
+        rolePerms = deepMergePermissions(previewDefaults, found.permissions);
       }
-      return previewDefaults;
+      if (previewUser.permissionOverrides) {
+        return applyUserOverrides(rolePerms, previewUser.permissionOverrides);
+      }
+      return rolePerms;
     }
     
     if (userRole === 'developer' && previewRole && allPermissions) {
@@ -123,19 +161,25 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }
 
     const defaults = getDefaultPermissions(userRole);
+    let rolePerms = defaults;
 
     if (userRole === 'developer' && allPermissions) {
       const found = allPermissions.find(p => p.role === 'developer');
       if (found) {
-        return deepMergePermissions(defaults, found.permissions);
+        rolePerms = deepMergePermissions(defaults, found.permissions);
       }
     }
 
     if (userRole !== 'developer' && rolePermission) {
-      return deepMergePermissions(defaults, rolePermission.permissions);
+      rolePerms = deepMergePermissions(defaults, rolePermission.permissions);
     }
 
-    return defaults;
+    const userOverrides = userOverridesData?.permissionOverrides ?? (user as any).permissionOverrides;
+    if (userOverrides) {
+      return applyUserOverrides(rolePerms, userOverrides);
+    }
+
+    return rolePerms;
   };
 
   return (

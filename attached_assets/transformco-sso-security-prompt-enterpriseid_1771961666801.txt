@@ -1,0 +1,336 @@
+You are a senior Enterprise Identity, Security, and Full-Stack Engineer.
+
+====================================================
+CONTEXT
+=======
+
+This is an INTERNAL enterprise application hosted on Replit.
+
+Application teams build apps using:
+
+* Node.js backend (Express or similar)
+* React or Angular frontend
+
+The application currently uses DATABASE USERNAME/PASSWORD login.
+
+The organization requires migration to PASSWORDLESS SSO using a CUSTOM
+SAML 2.0 Identity Provider (IdP).
+
+The IdP is NOT Okta, Azure AD, Auth0, Keycloak, Logto, or ADFS.
+It is a custom SAML implementation.
+
+The application must act as a SAML Service Provider (SP).
+
+A SAMPLE IDP METADATA XML file will be uploaded.
+You must use it to configure SAML trust.
+
+Do NOT introduce OAuth or OpenID Connect.
+Use pure SAML 2.0 only.
+
+====================================================
+PRIMARY OBJECTIVE
+=================
+
+Replace existing authentication with SAML SSO while preserving:
+
+✓ existing user database
+✓ existing authorization logic
+✓ existing sessions
+✓ existing RBAC/access checks
+
+ONLY authentication changes.
+
+Authorization remains unchanged.
+
+====================================================
+TECHNICAL REQUIREMENTS
+======================
+
+Backend:
+
+* Node.js
+
+Use a stable SAML SP library:
+
+Preferred:
+passport-saml
+OR
+samlify
+
+Choose whichever best fits the detected framework.
+
+====================================================
+IMPLEMENTATION TASKS
+====================
+
+---
+
+1. ANALYZE CURRENT APPLICATION
+
+---
+
+Automatically inspect codebase and:
+
+* Locate login routes
+* Detect authentication middleware
+* Identify database user lookup logic
+* Identify session mechanism (JWT/cookies/session)
+
+DO NOT refactor unrelated code.
+
+---
+
+2. REMOVE PASSWORD AUTHENTICATION
+
+---
+
+Disable password validation logic but KEEP:
+
+✓ user database
+✓ session creation
+✓ authorization logic
+
+Authentication source becomes SAML only.
+
+---
+
+3. IMPLEMENT SAML SERVICE PROVIDER
+
+---
+
+Create endpoints:
+
+GET  /auth/login
+→ Initiates SAML AuthnRequest
+
+POST /auth/saml/acs
+→ Assertion Consumer Service (ACS)
+
+GET  /auth/logout
+→ Initiates IdP Single Logout
+
+GET  /auth/saml/metadata
+→ Returns SP metadata XML
+
+---
+
+4. USE PROVIDED IDP METADATA
+
+---
+
+Parse uploaded metadata XML and extract:
+
+* IdP EntityID
+* SSO URL
+* Single Logout URL
+* Signing Certificate
+
+IMPORTANT:
+
+* DO NOT generate SP certificates.
+* Validate assertions using IdP certificate only.
+
+---
+
+5. SAML ASSERTION ATTRIBUTES
+
+---
+
+IdP sends attributes:
+
+cn      → common name
+mail    → email address
+uid     → enterprise ID (PRIMARY IDENTITY)
+nsrole  → future roles (IGNORE for now)
+
+---
+
+6. NAMEID REQUIREMENT (CRITICAL)
+
+---
+
+NameID represents ENTERPRISE USER ID.
+
+Example:
+nchilka
+
+NameID Format:
+urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
+
+Treat NameID as the authenticated username.
+
+DO NOT use email as identity.
+
+---
+
+7. USER IDENTIFIER DISCOVERY (VERY IMPORTANT)
+
+---
+
+You MUST automatically determine which database field
+represents the application's login username.
+
+DO NOT assume column name = uid.
+
+Perform discovery:
+
+a) Inspect old login form fields.
+b) Trace authentication queries.
+c) Identify username field used previously.
+d) Locate database column used for identity.
+
+Possible names include:
+username
+userid
+user_id
+login
+enterprise_id
+employeeId
+account
+uid
+
+---
+
+8. USER MAPPING LOGIC
+
+---
+
+After successful SAML authentication:
+
+1. Extract NameID (enterprise ID).
+
+2. Lookup user using discovered identifier field:
+
+   Conceptual example:
+
+   ```
+   SELECT * FROM users
+   WHERE <IDENTIFIER_FIELD> = <NameID>
+   ```
+
+3. Behavior:
+
+IF user exists:
+→ create local session
+→ continue existing authorization logic
+
+IF user does NOT exist:
+→ show error page:
+
+```
+   "User not found in application.
+    Please contact application administrator."
+```
+
+RULES:
+
+* DO NOT auto-create users
+* DO NOT modify database schema
+* DO NOT fallback to email matching
+
+---
+
+9. SESSION HANDLING
+
+---
+
+Reuse existing session mechanism.
+
+Store authenticated enterprise ID as logged-in user.
+
+No passwords stored or validated.
+
+---
+
+10. LOGOUT BEHAVIOR
+
+---
+
+When logout occurs:
+
+* Destroy local session
+* Redirect to IdP Single Logout URL
+* Follow metadata logout configuration
+
+---
+
+11. SECURITY REQUIREMENTS
+
+---
+
+Validate:
+
+✓ Assertion signature
+✓ Issuer validation
+✓ Audience restriction
+✓ Destination validation
+✓ Replay protection
+✓ Time conditions
+
+Allow clock skew ±5 minutes.
+
+Reject unsigned assertions.
+
+---
+
+12. CODE QUALITY RULES
+
+---
+
+* Minimal code changes
+
+* Preserve project structure
+
+* Add comments:
+
+  ```
+  // SAML SSO INTEGRATION
+  ```
+
+* Configuration via environment variables
+
+---
+
+13. OUTPUT REQUIREMENTS (MANDATORY)
+
+---
+
+After implementation PRINT CLEARLY:
+
+================================================
+SAML SERVICE PROVIDER DETAILS
+=============================
+
+1. ACS URL: <value>
+
+2. Entity ID: <value>
+
+3. Relay State URL: <value>
+
+4. NameID:
+   uid (enterprise id)
+
+5. NameID Format:
+   urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified
+
+================================================
+
+Also ensure:
+
+GET /auth/saml/metadata
+returns valid SP metadata XML.
+
+---
+
+## FINAL RESULT
+
+The application must:
+
+✓ Authenticate ONLY via SAML IdP
+✓ Use enterprise UID as identity
+✓ Preserve authorization logic
+✓ Support passwordless login
+✓ Provide SP parameters for IDP onboarding
+
+Implement step-by-step automatically.
+

@@ -14,6 +14,7 @@ import {
   Key,
   Database,
   UserPlus,
+  UserMinus,
   Info,
   Mail,
   type LucideIcon
@@ -293,6 +294,15 @@ export const PAGES: PageDefinition[] = [
     permissionKey: "weeklyOnboarding",
   },
   {
+    key: "weeklyOffboarding",
+    label: "Weekly Offboarding",
+    description: "Track weekly tech separations and offboarding tasks",
+    path: "/weekly-offboarding",
+    icon: UserMinus,
+    category: "management",
+    permissionKey: "weeklyOffboarding",
+  },
+  {
     key: "techRoster",
     label: "Tech Roster",
     description: "View technician roster from Snowflake",
@@ -300,6 +310,15 @@ export const PAGES: PageDefinition[] = [
     icon: Users,
     category: "management",
     permissionKey: "techRoster",
+  },
+  {
+    key: "reporting",
+    label: "Reports",
+    description: "Operations dashboard and metrics",
+    path: "/reporting",
+    icon: BarChart3,
+    category: "dashboards",
+    permissionKey: "reporting",
   },
   {
     key: "activityLogs",
@@ -345,6 +364,7 @@ export const QUICK_ACTIONS: PageFeature[] = [
   { key: "onboarding", label: "Onboarding", description: "Access to Onboarding quick action" },
   { key: "assignVehicle", label: "Assign or Update Vehicle", description: "Access to Vehicle Assignment quick action" },
   { key: "weeklyOnboarding", label: "Weekly Onboarding", description: "Access to Weekly Onboarding Truck Assignment quick action" },
+  { key: "weeklyOffboarding", label: "Weekly Offboarding", description: "Access to Weekly Offboarding quick action" },
   { key: "createVehicle", label: "Create New Vehicle", description: "Access to Create Vehicle quick action" },
 ];
 

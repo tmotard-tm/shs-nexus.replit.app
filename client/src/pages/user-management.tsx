@@ -26,17 +26,205 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Shield, Users, UserCheck, Key, Settings, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Plus, Trash2, Shield, Users, UserCheck, Key, KeyRound, Settings, ArrowLeft, Eye, EyeOff, Filter, ChevronDown, ChevronRight, Search, X, UserCog, RotateCcw } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createInsertSchema } from "drizzle-zod";
 import { users, RolePermission } from "@shared/schema";
+import type { RolePermissionSettings } from "@shared/schema";
 import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
+import { generatePermissionTree, type PermissionNode } from "@shared/page-registry";
+import { getDefaultPermissions } from "@/lib/role-permissions";
+
+const PERMISSION_TREE: PermissionNode[] = generatePermissionTree();
+
+type OverrideState = true | false | undefined;
+
+function getNestedOverride(obj: any, path: string[]): OverrideState {
+  if (!obj) return undefined;
+  let current = obj;
+  for (const key of path) {
+    if (current === undefined || current === null) return undefined;
+    if (typeof current === 'boolean') return current;
+    current = current[key];
+  }
+  if (typeof current === 'boolean') return current;
+  return undefined;
+}
+
+function setNestedOverride(obj: any, path: string[], value: OverrideState): any {
+  if (path.length === 0) {
+    return value;
+  }
+  const result = { ...(obj || {}) };
+  const [first, ...rest] = path;
+  if (value === undefined && rest.length === 0) {
+    delete result[first];
+  } else {
+    result[first] = setNestedOverride(result[first], rest, value);
+    if (typeof result[first] === 'object' && result[first] !== null && Object.keys(result[first]).length === 0) {
+      delete result[first];
+    }
+  }
+  return result;
+}
+
+function getRoleDefault(rolePerms: RolePermissionSettings, path: string[]): boolean {
+  let current: any = rolePerms;
+  for (const key of path) {
+    if (current === undefined || current === null) return false;
+    if (typeof current === 'boolean') return current;
+    current = current[key];
+  }
+  return typeof current === 'boolean' ? current : Boolean(current?.enabled ?? current);
+}
+
+function OverrideTreeNode({
+  node,
+  path,
+  overrides,
+  rolePerms,
+  onChange,
+  level = 0,
+}: {
+  node: PermissionNode;
+  path: string[];
+  overrides: any;
+  rolePerms: RolePermissionSettings;
+  onChange: (path: string[], value: OverrideState) => void;
+  level?: number;
+}) {
+  const [isOpen, setIsOpen] = useState(level < 1);
+  const fullPath = [...path, node.key];
+  const hasChildren = node.children && node.children.length > 0;
+
+  if (hasChildren) {
+    const enabledPath = [...fullPath, 'enabled'];
+    const overrideValue = getNestedOverride(overrides, enabledPath);
+    const roleDefault = getRoleDefault(rolePerms, enabledPath);
+
+    return (
+      <div className={`${level > 0 ? 'ml-4' : ''}`}>
+        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+          <div className="flex items-center gap-2 py-1.5">
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="sm" className="p-0 h-5 w-5">
+                {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </Button>
+            </CollapsibleTrigger>
+            <span className="text-sm font-medium flex-1">{node.label}</span>
+            <OverrideToggle 
+              overrideValue={overrideValue} 
+              roleDefault={roleDefault}
+              onChange={(val) => onChange(enabledPath, val)} 
+            />
+          </div>
+          <CollapsibleContent>
+            {node.children!.map(child => (
+              <OverrideTreeNode
+                key={child.key}
+                node={child}
+                path={fullPath}
+                overrides={overrides}
+                rolePerms={rolePerms}
+                onChange={onChange}
+                level={level + 1}
+              />
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      </div>
+    );
+  }
+
+  const overrideValue = getNestedOverride(overrides, fullPath);
+  const roleDefault = getRoleDefault(rolePerms, fullPath);
+
+  return (
+    <div className={`${level > 0 ? 'ml-4' : ''} flex items-center gap-2 py-1`}>
+      <span className="text-sm flex-1 pl-7">{node.label}</span>
+      <OverrideToggle 
+        overrideValue={overrideValue} 
+        roleDefault={roleDefault}
+        onChange={(val) => onChange(fullPath, val)} 
+      />
+    </div>
+  );
+}
+
+function OverrideToggle({
+  overrideValue,
+  roleDefault,
+  onChange,
+}: {
+  overrideValue: OverrideState;
+  roleDefault: boolean;
+  onChange: (value: OverrideState) => void;
+}) {
+  const states: { value: OverrideState; label: string; className: string; title: string }[] = [
+    { 
+      value: undefined, 
+      label: roleDefault ? "Default (On)" : "Default (Off)", 
+      className: "bg-gray-100 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600",
+      title: "Uses role default"
+    },
+    { 
+      value: true, 
+      label: "Granted", 
+      className: "bg-green-100 text-green-700 border-green-400 dark:bg-green-900 dark:text-green-300 dark:border-green-600",
+      title: "Override: access granted"
+    },
+    { 
+      value: false, 
+      label: "Denied", 
+      className: "bg-red-100 text-red-700 border-red-400 dark:bg-red-900 dark:text-red-300 dark:border-red-600",
+      title: "Override: access denied"
+    },
+  ];
+
+  const currentIndex = overrideValue === undefined ? 0 : overrideValue ? 1 : 2;
+  const current = states[currentIndex];
+
+  const cycle = () => {
+    const nextIndex = (currentIndex + 1) % 3;
+    onChange(states[nextIndex].value);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={cycle}
+      className={`text-xs px-2 py-0.5 rounded border font-medium min-w-[110px] text-center transition-colors ${current.className}`}
+      title={current.title}
+    >
+      {current.label}
+    </button>
+  );
+}
+
+function countOverrides(overrides: any): number {
+  if (!overrides || typeof overrides !== 'object') return 0;
+  let count = 0;
+  for (const key of Object.keys(overrides)) {
+    const val = overrides[key];
+    if (typeof val === 'boolean') {
+      count++;
+    } else if (typeof val === 'object' && val !== null) {
+      count += countOverrides(val);
+    }
+  }
+  return count;
+}
 
 // Form validation schema - simplified for developer/agent roles only
 const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
@@ -55,7 +243,12 @@ export default function UserManagement() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [managingUser, setManagingUser] = useState<User | null>(null);
   const [passwordResetUser, setPasswordResetUser] = useState<User | null>(null);
+  const [overridesUser, setOverridesUser] = useState<User | null>(null);
+  const [pendingOverrides, setPendingOverrides] = useState<any>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [roleFilter, setRoleFilter] = useState<string>("all");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
@@ -190,7 +383,7 @@ export default function UserManagement() {
 
   // Admin role management mutation (for access: role, departments)
   const roleUpdateMutation = useMutation({
-    mutationFn: ({ userId, updates }: { userId: string; updates: { role?: string; departments?: string[] } }) =>
+    mutationFn: ({ userId, updates }: { userId: string; updates: { role?: string; departments?: string[]; isActive?: boolean } }) =>
       apiRequest("POST", `/api/users/${userId}/update-role`, updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
@@ -208,6 +401,69 @@ export default function UserManagement() {
       });
     },
   });
+
+  // Permission overrides mutation
+  const overridesMutation = useMutation({
+    mutationFn: ({ userId, permissionOverrides }: { userId: string; permissionOverrides: any }) =>
+      apiRequest("PATCH", `/api/users/${userId}/permission-overrides`, { permissionOverrides }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setOverridesUser(null);
+      setPendingOverrides(null);
+      toast({
+        title: "Success",
+        description: "Permission overrides saved successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const clearOverridesMutation = useMutation({
+    mutationFn: (userId: string) =>
+      apiRequest("DELETE", `/api/users/${userId}/permission-overrides`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setOverridesUser(null);
+      setPendingOverrides(null);
+      toast({
+        title: "Success",
+        description: "All permission overrides cleared.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleOpenOverrides = (user: User) => {
+    setOverridesUser(user);
+    setPendingOverrides((user as any).permissionOverrides || {});
+  };
+
+  const handleOverrideChange = (path: string[], value: OverrideState) => {
+    setPendingOverrides((prev: any) => setNestedOverride(prev || {}, path, value));
+  };
+
+  const handleSaveOverrides = () => {
+    if (!overridesUser) return;
+    const cleanOverrides = pendingOverrides && Object.keys(pendingOverrides).length > 0 ? pendingOverrides : null;
+    overridesMutation.mutate({ userId: overridesUser.id, permissionOverrides: cleanOverrides });
+  };
+
+  const handleClearOverrides = () => {
+    if (!overridesUser) return;
+    clearOverridesMutation.mutate(overridesUser.id);
+  };
 
   // Form setup - simplified for developer/agent roles only
   const form = useForm<CreateUserFormData>({
@@ -236,10 +492,11 @@ export default function UserManagement() {
     })),
   });
 
-  const roleManagementForm = useForm<{ role: string; departments: string[] }>({
+  const roleManagementForm = useForm<{ role: string; departments: string[]; isActive: boolean }>({
     resolver: zodResolver(z.object({
       role: z.string().min(1, "Role is required"),
-      departments: z.array(z.string())
+      departments: z.array(z.string()),
+      isActive: z.boolean()
     })),
   });
 
@@ -260,7 +517,7 @@ export default function UserManagement() {
     }
   };
 
-  const onRoleManagementSubmit = (data: { role: string; departments: string[] }) => {
+  const onRoleManagementSubmit = (data: { role: string; departments: string[]; isActive: boolean }) => {
     if (managingUser) {
       roleUpdateMutation.mutate({ 
         userId: managingUser.id, 
@@ -279,12 +536,19 @@ export default function UserManagement() {
     roleManagementForm.reset({
       role: user.role,
       departments: user.departments || [],
+      isActive: user.isActive ?? true,
     });
   };
 
-  // Get current user info to check if developer
+  // Get current user info to check role-based permissions
   const { user: currentUser } = useAuth();
   const isSuperAdmin = currentUser?.role === 'developer';
+  const isAdmin = currentUser?.role === 'admin';
+  const canManageAccess = isSuperAdmin || isAdmin;
+
+  const assignableRoles = isSuperAdmin
+    ? availableRoles
+    : availableRoles.filter(r => r.value !== 'developer');
 
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
@@ -324,12 +588,31 @@ export default function UserManagement() {
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
-  // Filter users by department
-  const filteredUsers = departmentFilter === "all" 
-    ? allUsers 
-    : departmentFilter === "no-department"
-    ? allUsers.filter((u: User) => !u.departments || u.departments.length === 0)
-    : allUsers.filter((u: User) => u.departments?.includes(departmentFilter));
+  const activeFilterCount = [
+    searchQuery.length > 0,
+    departmentFilter !== "all",
+    roleFilter !== "all",
+  ].filter(Boolean).length;
+
+  const filteredUsers = allUsers.filter((u: User) => {
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matchesUsername = u.username.toLowerCase().includes(query);
+      const matchesEmail = u.email.toLowerCase().includes(query);
+      if (!matchesUsername && !matchesEmail) return false;
+    }
+    if (departmentFilter !== "all") {
+      if (departmentFilter === "no-department") {
+        if (u.departments && u.departments.length > 0) return false;
+      } else {
+        if (!u.departments?.includes(departmentFilter)) return false;
+      }
+    }
+    if (roleFilter !== "all") {
+      if (u.role !== roleFilter) return false;
+    }
+    return true;
+  });
 
   // Statistics - dynamically count users per role
   const userStats = {
@@ -429,7 +712,7 @@ export default function UserManagement() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableRoles.map(role => (
+                    {assignableRoles.map(role => (
                       <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
                     ))}
                   </SelectContent>
@@ -633,31 +916,133 @@ export default function UserManagement() {
 
       {/* Users Table */}
       <Card>
-        <CardHeader>
+        <CardHeader className="space-y-4">
           <div className="flex justify-between items-center">
             <div>
               <CardTitle>All Users</CardTitle>
-              <CardDescription>Manage user accounts and permissions</CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                <SelectTrigger className="w-48" data-testid="select-department-filter">
-                  <SelectValue placeholder="Filter by department" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Departments</SelectItem>
-                  <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
-                  <SelectItem value="Assets Management">Assets Management</SelectItem>
-                  <SelectItem value="Inventory Control">Inventory Control</SelectItem>
-                  <SelectItem value="Fleet Management">Fleet Management</SelectItem>
-                </SelectContent>
-              </Select>
+              <CardDescription>
+                Manage user accounts and permissions
+                {activeFilterCount > 0 && (
+                  <span className="ml-2 text-blue-600 dark:text-blue-400 font-medium">
+                    ({filteredUsers.length} of {allUsers.length} shown)
+                  </span>
+                )}
+              </CardDescription>
             </div>
           </div>
+
+          <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <div className="flex items-center gap-2">
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" size="sm" data-testid="button-toggle-filters" className="gap-2">
+                  <Filter className="h-4 w-4" />
+                  Filters
+                  {activeFilterCount > 0 && (
+                    <Badge variant="default" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs rounded-full">
+                      {activeFilterCount}
+                    </Badge>
+                  )}
+                  <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${filtersOpen ? 'rotate-180' : ''}`} />
+                </Button>
+              </CollapsibleTrigger>
+              {activeFilterCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setDepartmentFilter("all");
+                    setRoleFilter("all");
+                  }}
+                  data-testid="button-clear-filters"
+                  className="text-muted-foreground hover:text-foreground gap-1"
+                >
+                  <X className="h-3 w-3" />
+                  Clear all
+                </Button>
+              )}
+            </div>
+            <CollapsibleContent className="mt-3">
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by username or email..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 bg-background"
+                    data-testid="input-search-users"
+                  />
+                  {searchQuery && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
+                      onClick={() => setSearchQuery("")}
+                      data-testid="button-clear-search"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground font-medium">Department</Label>
+                    <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                      <SelectTrigger className="w-48" data-testid="select-department-filter">
+                        <SelectValue placeholder="Filter by department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Departments</SelectItem>
+                        <SelectItem value="NTAO" title="NTAO — National Truck Assortment">NTAO</SelectItem>
+                        <SelectItem value="ASSETS">Assets</SelectItem>
+                        <SelectItem value="INVENTORY">Inventory</SelectItem>
+                        <SelectItem value="FLEET">Fleet</SelectItem>
+                        <SelectItem value="no-department">No Department</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground font-medium">Role</Label>
+                    <Select value={roleFilter} onValueChange={setRoleFilter}>
+                      <SelectTrigger className="w-48" data-testid="select-role-filter">
+                        <SelectValue placeholder="Filter by role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Roles</SelectItem>
+                        {availableRoles.map(role => (
+                          <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">Loading users...</div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="text-center py-8">
+              <Search className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+              <p className="text-muted-foreground">No users found matching your filters.</p>
+              {activeFilterCount > 0 && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setDepartmentFilter("all");
+                    setRoleFilter("all");
+                  }}
+                  className="mt-1"
+                >
+                  Clear all filters
+                </Button>
+              )}
+            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -667,6 +1052,7 @@ export default function UserManagement() {
                   <TableHead>Role</TableHead>
                   <TableHead>Departments</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -697,9 +1083,35 @@ export default function UserManagement() {
                     <TableCell data-testid={`text-created-${user.id}`}>
                       {new Date(user.createdAt).toLocaleDateString()}
                     </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {user.isActive === false ? (
+                          <Badge variant="outline" className="text-red-500 border-red-300">Inactive</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-green-600 border-green-300">Active</Badge>
+                        )}
+                        {(user as any).permissionOverrides && Object.keys((user as any).permissionOverrides).length > 0 && (
+                          <Badge variant="outline" className="text-amber-600 border-amber-400 text-xs" title="Has permission overrides">
+                            <UserCog className="h-3 w-3 mr-0.5" />
+                            Overrides
+                          </Badge>
+                        )}
+                        {(user as any).securityQuestions && Array.isArray((user as any).securityQuestions) && (user as any).securityQuestions.length > 0 ? (
+                          <Badge variant="outline" className="text-blue-600 border-blue-300 text-xs" title="Security questions set up">
+                            <KeyRound className="h-3 w-3 mr-0.5" />
+                            SQ
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-gray-400 border-gray-300 text-xs" title="No security questions set up">
+                            <KeyRound className="h-3 w-3 mr-0.5" />
+                            No SQ
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {isSuperAdmin && (
+                        {canManageAccess && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -708,6 +1120,18 @@ export default function UserManagement() {
                             title="Reset Password"
                           >
                             <Key className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {canManageAccess && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleOpenOverrides(user)}
+                            data-testid={`button-overrides-${user.id}`}
+                            title="Permission Overrides"
+                            className={(user as any).permissionOverrides && Object.keys((user as any).permissionOverrides).length > 0 ? "border-amber-400 text-amber-600" : ""}
+                          >
+                            <UserCog className="h-4 w-4" />
                           </Button>
                         )}
                         <Button
@@ -719,15 +1143,17 @@ export default function UserManagement() {
                         >
                           <Settings className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => deleteUserMutation.mutate(user.id)}
-                          className="text-red-600 hover:text-red-700"
-                          data-testid={`button-delete-${user.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {isSuperAdmin && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => deleteUserMutation.mutate(user.id)}
+                            className="text-red-600 hover:text-red-700"
+                            data-testid={`button-delete-${user.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -780,8 +1206,8 @@ export default function UserManagement() {
               </form>
             </div>
 
-            {/* Access Section - Only visible to developers */}
-            {isSuperAdmin && (
+            {/* Access Section - Visible to developers and admins */}
+            {canManageAccess && (
               <>
                 <hr className="border-border" />
                 <div className="space-y-4">
@@ -797,7 +1223,7 @@ export default function UserManagement() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {availableRoles.map(role => (
+                          {assignableRoles.map(role => (
                             <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
                           ))}
                         </SelectContent>
@@ -838,6 +1264,27 @@ export default function UserManagement() {
                         ))}
                       </div>
                     </div>
+                    <div>
+                      <Label>Account Status</Label>
+                      <div className="flex items-center space-x-3 mt-2 p-3 rounded-lg border bg-muted/30">
+                        <input
+                          type="checkbox"
+                          id="manage-isActive"
+                          checked={roleManagementForm.watch("isActive") ?? true}
+                          onChange={(e) => roleManagementForm.setValue("isActive", e.target.checked)}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          data-testid="checkbox-is-active"
+                        />
+                        <div>
+                          <Label htmlFor="manage-isActive" className="text-sm font-medium cursor-pointer">
+                            Active Account
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            Inactive users will not be able to log in
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                     <div className="flex justify-end">
                       <Button type="submit" size="sm" disabled={roleUpdateMutation.isPending} data-testid="button-update-access">
                         {roleUpdateMutation.isPending ? "Saving..." : "Save Access"}
@@ -853,6 +1300,84 @@ export default function UserManagement() {
             <Button variant="outline" onClick={() => setManagingUser(null)} data-testid="button-close-manage-user">
               Close
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Permission Overrides Dialog */}
+      <Dialog open={!!overridesUser} onOpenChange={(open) => { if (!open) { setOverridesUser(null); setPendingOverrides(null); } }}>
+        <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserCog className="h-5 w-5" />
+              Permission Overrides
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Customize permissions for <strong>{overridesUser?.username}</strong> (Role: {overridesUser?.role}).
+              Overrides take effect on top of the role's default permissions.
+            </p>
+            <div className="flex gap-2 text-xs mt-2">
+              <span className="px-2 py-0.5 rounded border bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">Default</span>
+              <span className="text-muted-foreground">= Uses role setting</span>
+              <span className="px-2 py-0.5 rounded border bg-green-100 text-green-700 border-green-400 dark:bg-green-900 dark:text-green-300">Granted</span>
+              <span className="text-muted-foreground">= Force allow</span>
+              <span className="px-2 py-0.5 rounded border bg-red-100 text-red-700 border-red-400 dark:bg-red-900 dark:text-red-300">Denied</span>
+              <span className="text-muted-foreground">= Force deny</span>
+            </div>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto pr-2 space-y-1 min-h-0">
+            {overridesUser && (() => {
+              const defaults = getDefaultPermissions(overridesUser.role as any);
+              const storedRolePerms = rolePermissions.find(rp => rp.role === overridesUser.role);
+              const effectiveRolePerms = storedRolePerms 
+                ? Object.assign({}, defaults, storedRolePerms.permissions as Record<string, any>) as RolePermissionSettings
+                : defaults;
+              return PERMISSION_TREE.map(node => (
+                <OverrideTreeNode
+                  key={node.key}
+                  node={node}
+                  path={[]}
+                  overrides={pendingOverrides || {}}
+                  rolePerms={effectiveRolePerms}
+                  onChange={handleOverrideChange}
+                  level={0}
+                />
+              ));
+            })()}
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t">
+            <div className="flex items-center gap-2">
+              {pendingOverrides && countOverrides(pendingOverrides) > 0 && (
+                <Badge variant="outline" className="text-amber-600 border-amber-400">
+                  {countOverrides(pendingOverrides)} override{countOverrides(pendingOverrides) !== 1 ? 's' : ''}
+                </Badge>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearOverrides}
+                disabled={clearOverridesMutation.isPending || !pendingOverrides || countOverrides(pendingOverrides) === 0}
+                className="text-red-600 hover:text-red-700"
+                data-testid="button-clear-overrides"
+              >
+                <RotateCcw className="h-4 w-4 mr-1" />
+                Clear All
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => { setOverridesUser(null); setPendingOverrides(null); }}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleSaveOverrides}
+                disabled={overridesMutation.isPending}
+                data-testid="button-save-overrides"
+              >
+                {overridesMutation.isPending ? "Saving..." : "Save Overrides"}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

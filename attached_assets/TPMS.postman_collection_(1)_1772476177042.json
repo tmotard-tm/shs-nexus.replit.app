@@ -1,0 +1,324 @@
+{
+  "info": {
+    "_postman_id": "2912a38d-76ce-47eb-b413-ab24776905cb",
+    "name": "TPMS",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "50583680"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Parse XML safely and extract ns2:token value, accounting for namespaces\r",
+              "// Do not use JSON parsing per requirement.\r",
+              "\r",
+              "pm.test(\"Parse XML and set collection token\", function () {\r",
+              "    // Get raw XML as text\r",
+              "    const xml = pm.response.text();\r",
+              "\r",
+              "    // Use DOMParser via Postman sandbox to parse XML\r",
+              "    // Fallback to regex if DOMParser is unavailable (older sandboxes)\r",
+              "    let token = null;\r",
+              "\r",
+              "    try {\r",
+              "        // xml2Json is available in Postman tests; it preserves namespaced keys using ':' in property names\r",
+              "        var jsonObject = xml2Json(xml);\r",
+              "        // Find the token regardless of default namespace prefix by checking typical structures\r",
+              "        // The root is likely ns2:TokenResponse with default namespace aliases\r",
+              "        // xml2Json keeps namespace prefixes in the key names. We'll search recursively for a key ending with ':token'.\r",
+              "        function findToken(obj) {\r",
+              "            if (!obj || typeof obj !== 'object') return null;\r",
+              "            // Direct hit\r",
+              "            if (Object.prototype.hasOwnProperty.call(obj, 'ns2:token')) {\r",
+              "                // xml2Json wraps text nodes as string values\r",
+              "                return obj['ns2:token'];\r",
+              "            }\r",
+              "            // Some XMLs may drop prefix during conversion, try plain 'token'\r",
+              "            if (Object.prototype.hasOwnProperty.call(obj, 'token')) {\r",
+              "                return obj['token'];\r",
+              "            }\r",
+              "            // Recurse\r",
+              "            for (const k of Object.keys(obj)) {\r",
+              "                const v = obj[k];\r",
+              "                const found = findToken(v);\r",
+              "                if (found) return found;\r",
+              "            }\r",
+              "            return null;\r",
+              "        }\r",
+              "\r",
+              "        token = findToken(jsonObject);\r",
+              "    } catch (e) {\r",
+              "        // As a last resort, use a conservative regex to capture <ns2:token>...</ns2:token>\r",
+              "        const m = xml.match(/<ns2:token>([\\s\\S]*?)<\\/ns2:token>/i);\r",
+              "        if (m) token = m[1].trim();\r",
+              "    }\r",
+              "\r",
+              "    pm.expect(token, 'ns2:token should be present in XML').to.be.a('string').and.not.empty;\r",
+              "\r",
+              "    // Save to collection variable\r",
+              "    pm.collectionVariables.set('token', token);\r",
+              "});"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true,
+        "disabledSystemHeaders": {}
+      },
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{Authorization_prod}}",
+            "type": "text"
+          },
+          {
+            "key": "token",
+            "value": "",
+            "type": "text",
+            "disabled": true
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": []
+        },
+        "url": {
+          "raw": "{{auth_endpoint_prod}}/token",
+          "host": [
+            "{{auth_endpoint_prod}}"
+          ],
+          "path": [
+            "token"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "techinfo",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              ""
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/techinfo/JELMORE",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "techinfo",
+            "JELMORE"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "techsupdatedafter",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              ""
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/techsupdatedafter/:tstamp",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "techsupdatedafter",
+            ":tstamp"
+          ],
+          "variable": [
+            {
+              "key": "tstamp",
+              "value": "2026-02-27T00:00:00"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Tech_Update",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "PUT",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{URL}}/techinfo",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "techinfo"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "temptruckassign",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"ldapId\": \"NSHAMS\",\r\n    \"distNo\": \"0008169\",\r\n    \"truckNo\": \"006527\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{URL}}/temptruckassign",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "temptruckassign"
+          ],
+          "query": [
+            {
+              "key": "ldapId",
+              "value": null,
+              "type": "text",
+              "disabled": true
+            },
+            {
+              "key": "distNo",
+              "value": null,
+              "type": "text",
+              "disabled": true
+            },
+            {
+              "key": "truckNo",
+              "value": null,
+              "type": "text",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "basic"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "token",
+      "value": "eyJhbGciOiJSUzUxMiJ9.eyJpc3MiOiJoc3NvbWF1dGhzZXJ2aWNlLmludHJhLnNlYXJzaGMuY29tIiwiaWF0IjoxNzY0MzQ1NTg0LCJzdWIiOiJkcml2ZWxpbmUiLCJhdXRoIjp7ImFkZHJlc3NlcyI6W10sImNvbXBvbmVudHMiOlt7Im5hbWUiOiJIU1BTQ0FQSUdhdGV3YXkiLCJzZXNzaW9uTGlmZSI6NTQwMCwidXJpcyI6W3sidXJpIjoiW0dFVF0gL3YxL2FwaS90ZWNocHJvZmlsZS9hcGkvdGVjaGluZm8vKiIsInJvbGUiOiJST0xFX1VTRVIifSx7InVyaSI6IltQVVRdIC92MS9hcGkvdGVjaHByb2ZpbGUvYXBpL3RlY2hpbmZvLyIsInJvbGUiOiJST0xFX1VTRVIifV0sInVzZXJzIjpbXX1dfSwiZXhwIjoxNzY0MzUwOTg0fQ.e-p8vjdMJEWXXpB4_QScZi7QbcJ6HXuA4qs-8feCFHEpPNg_7Fr2MegJ6KyOMuljSqaN3yMsf0ublf-xuRhMtpi-E55YiTxrk_9DNsS11_O_NtA6XF4Yu8Cp0Oyl1pHXkT3g1un5tFts9Fqjoh6iij47U_d6EvYCGqevCHHtjFasptPN-D56QnbDuiVJQbcWTOZuiPz_hwBbmCXfhwF41srqJNUassF4nRvFijL3Ix2DhOpqW1pZAR6QuV9byvgBx2cNDIvOnygIH6hg9nRSFW7FKyinh1DzT--3gTQCw3Eb1OO2NnsRFc_FBSJ5QNGMjH9rbqFI8LOZQwk5m4TKucqLl-XvB8qCsvL8DZvjgJBSCcErz1UgS0Z2G8sdlck5QQOdUJY5fbB14sGMILRiQpZo9kNL7IowJ4MiXH7N4211LD907J5rB3OoCvUKHUk6ouVEi4YimM5I1LwZ-wza9hNjw0w65o8YzAFyJXR28Zi1kJxp0v0wgEQCTJ2X6_0bTps-nVH3NEsS5V5gkXrJEPfrHWwmqM9xFtCcN2OPtNJl7stiuN2MyewuaGbyk_Uq8Jh7POGsfiyhOHL-NIIuWjOSq_dlBnCCXvKhf97CDtit82FxEdkrnpk40yVanuB2JkXdLqYq6l5RT8p2RH-VxEZySvh9Pfdc1s-C-ccNcAM"
+    }
+  ]
+}

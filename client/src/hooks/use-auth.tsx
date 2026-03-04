@@ -6,6 +6,8 @@ interface AuthContextType {
   login: (enterpriseId: string, password: string) => Promise<boolean>;
   logout: () => void;
   isLoading: boolean;
+  requiresSecurityQuestions: boolean;
+  clearSecurityQuestionsRequirement: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -13,39 +15,61 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [requiresSecurityQuestions, setRequiresSecurityQuestions] = useState(false);
 
   useEffect(() => {
     const verifySession = async () => {
       try {
-        // Check for stored user session
         const storedUser = localStorage.getItem("user");
         if (storedUser) {
           const parsedUser = JSON.parse(storedUser);
           
-          // Fetch fresh user data from server to get updated role/permissions
           const response = await fetch(`/api/users/${parsedUser.id}`, {
             credentials: "include",
           });
           
           if (response.ok) {
-            // Session is valid, use fresh user data from server
             const freshUserData = await response.json();
             setUser(freshUserData);
             localStorage.setItem("user", JSON.stringify(freshUserData));
+
+            try {
+              const sqStatus = await fetch("/api/auth/security-questions/status", { credentials: "include" });
+              if (sqStatus.ok) {
+                const { hasSecurityQuestions } = await sqStatus.json();
+                setRequiresSecurityQuestions(!hasSecurityQuestions);
+              } else {
+                console.warn("Security questions status check failed, prompting setup as fallback");
+                setRequiresSecurityQuestions(true);
+              }
+            } catch (sqError) {
+              console.warn("Security questions status check error, prompting setup as fallback:", sqError);
+              setRequiresSecurityQuestions(true);
+            }
           } else if (response.status === 401) {
-            // Session expired or invalid, clear storage
             console.log("Session expired, clearing stored user");
             localStorage.removeItem("user");
             setUser(null);
           } else {
-            // Other error, still keep stored user but log the issue
             console.warn("Error verifying session:", response.status, response.statusText);
             setUser(parsedUser);
+          }
+        } else {
+          // SAML SSO INTEGRATION - Check if we have a valid session cookie from SSO
+          try {
+            const ssoRes = await fetch("/api/auth/sso-user", { credentials: "include" });
+            if (ssoRes.ok) {
+              const data = await ssoRes.json();
+              setUser(data.user);
+              localStorage.setItem("user", JSON.stringify(data.user));
+              setRequiresSecurityQuestions(!!data.requiresSecurityQuestions);
+            }
+          } catch {
+            // No SSO session - that's fine
           }
         }
       } catch (error) {
         console.error("Session verification error:", error);
-        // On error, keep stored user if it exists (offline tolerance)
         const storedUser = localStorage.getItem("user");
         if (storedUser) {
           setUser(JSON.parse(storedUser));
@@ -64,15 +88,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enterpriseId, password }),
-        credentials: "include", // Include cookies in the request
+        credentials: "include",
       });
 
       if (response.ok) {
         const data = await response.json();
         setUser(data.user);
         localStorage.setItem("user", JSON.stringify(data.user));
+        setRequiresSecurityQuestions(!!data.requiresSecurityQuestions);
         
-        // Brief delay to ensure session consistency
         await new Promise(resolve => setTimeout(resolve, 100));
         
         return true;
@@ -85,13 +109,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch {}
     setUser(null);
+    setRequiresSecurityQuestions(false);
     localStorage.removeItem("user");
+    // SAML SSO INTEGRATION - Redirect to IdP logout
+    window.location.href = "/auth/logout";
+  };
+
+  const clearSecurityQuestionsRequirement = () => {
+    setRequiresSecurityQuestions(false);
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, login, logout, isLoading, requiresSecurityQuestions, clearSecurityQuestionsRequirement }}>
       {children}
     </AuthContext.Provider>
   );

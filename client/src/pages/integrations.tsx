@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { Link } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 
 function formatPhoneNumber(phone: string | null | undefined): string {
   if (!phone) return '-';
@@ -47,15 +48,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export default function Integrations() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [snowflakeExpanded, setSnowflakeExpanded] = useState(false);
-  const [tpmsExpanded, setTpmsExpanded] = useState(false);
   const [sqlQuery, setSqlQuery] = useState("SELECT CURRENT_VERSION() as version, CURRENT_USER() as user, CURRENT_DATABASE() as database");
   const [queryResults, setQueryResults] = useState<any[] | null>(null);
-  const [tpmsTestId, setTpmsTestId] = useState("");
   const [holmanEnabled, setHolmanEnabled] = useState(true);
+  const [amsEnabled, setAmsEnabled] = useState(true);
   const [snowflakeEnabled, setSnowflakeEnabled] = useState(true);
   const [tpmsEnabled, setTpmsEnabled] = useState(true);
+  const [samsaraEnabled, setSamsaraEnabled] = useState(true);
+  const [parqEnabled, setParqEnabled] = useState(true);
+  const [segnoEnabled, setSegnoEnabled] = useState(true);
   
   // Employee Roster state
   const [rosterSearch, setRosterSearch] = useState("");
@@ -78,6 +82,22 @@ export default function Integrations() {
 
   const { data: tpmsStatus, isLoading: tpmsStatusLoading } = useQuery<{ configured: boolean; message: string }>({
     queryKey: ["/api/tpms/status"],
+  });
+
+  const { data: amsStatus, isLoading: amsStatusLoading } = useQuery<{ configured: boolean }>({
+    queryKey: ["/api/ams/status"],
+  });
+
+  const { data: parqStatus, isLoading: parqStatusLoading } = useQuery<{ configured: boolean; message: string }>({
+    queryKey: ["/api/pmf/status"],
+  });
+
+  const { data: segnoStatus, isLoading: segnoStatusLoading } = useQuery<{ configured: boolean; message: string }>({
+    queryKey: ["/api/segno/status"],
+  });
+
+  const { data: samsaraStatus, isLoading: samsaraStatusLoading } = useQuery<{ snowflake: boolean; liveApi: boolean; message: string }>({
+    queryKey: ["/api/samsara/status"],
   });
 
   // Employee Roster queries
@@ -319,58 +339,6 @@ export default function Integrations() {
     },
   });
 
-  const testTpmsMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch("/api/tpms/test", { credentials: "include" });
-      return response.json();
-    },
-    onSuccess: (data: any) => {
-      toast({
-        title: data.success ? "TPMS Connection Successful" : "TPMS Connection Failed",
-        description: data.message,
-        variant: data.success ? "default" : "destructive",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "TPMS Test Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const lookupTpmsTechMutation = useMutation({
-    mutationFn: async ({ id, type }: { id: string; type: 'enterprise' | 'truck' }) => {
-      const endpoint = type === 'enterprise' 
-        ? `/api/tpms/techinfo/${id}` 
-        : `/api/tpms/lookup/truck/${id}`;
-      const response = await fetch(endpoint, { credentials: "include" });
-      return response.json();
-    },
-    onSuccess: (data: any) => {
-      if (data.success) {
-        toast({
-          title: "Tech Found",
-          description: `${data.data.firstName} ${data.data.lastName} - Truck: ${data.data.truckNo || 'N/A'}`,
-        });
-      } else {
-        toast({
-          title: "Lookup Failed",
-          description: data.message,
-          variant: "destructive",
-        });
-      }
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "TPMS Lookup Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
   const syncTpmsFromSnowflakeMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/snowflake/sync/tpms");
@@ -472,10 +440,10 @@ export default function Integrations() {
   };
 
   const integrationStats = {
-    total: 3,
-    active: [holmanEnabled, snowflakeEnabled, tpmsEnabled].filter(Boolean).length,
-    healthy: [true, snowflakeStatus?.configured, tpmsStatus?.configured].filter(Boolean).length,
-    errors: [false, !snowflakeStatus?.configured, !tpmsStatus?.configured].filter(Boolean).length,
+    total: 7,
+    active: [holmanEnabled, amsEnabled, snowflakeEnabled, tpmsEnabled, parqEnabled, segnoEnabled, samsaraEnabled].filter(Boolean).length,
+    healthy: [true, amsStatus?.configured, snowflakeStatus?.configured, tpmsStatus?.configured, parqStatus?.configured, segnoStatus?.configured, samsaraStatus?.snowflake].filter(Boolean).length,
+    errors: [false, !amsStatus?.configured, !snowflakeStatus?.configured, !tpmsStatus?.configured, !parqStatus?.configured, !segnoStatus?.configured, !samsaraStatus?.snowflake].filter(Boolean).length,
   };
 
   return (
@@ -607,7 +575,7 @@ export default function Integrations() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold text-lg group-hover:text-primary transition-colors">
-                      Holman Fleet Integration
+                      Holman API
                     </h3>
                     <Badge variant="default" className="flex items-center gap-1 text-xs">
                       <CheckCircle className="h-3 w-3" />
@@ -641,6 +609,62 @@ export default function Integrations() {
               </div>
             </div>
             
+            {/* AMS API Integration - restricted to tmotard during development */}
+            {user?.username === 'tmotard' && (
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/ams-integration" data-testid="link-ams-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-amber-500/10 rounded-lg flex items-center justify-center">
+                  <Truck className="h-6 w-6 text-amber-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-amber-500 transition-colors">
+                      AMS API
+                    </h3>
+                    {amsStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : amsStatus?.configured ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    In-Home Asset Management System - vehicles, techs, repairs, and lookups
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${amsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {amsStatus?.configured ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={amsEnabled ? "default" : "secondary"} className="text-xs">
+                  {amsEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toast({ title: "AMS Test", description: "Use the AMS integration page to test the connection" })}
+                  data-testid="button-test-ams"
+                >
+                  <TestTube className="h-4 w-4 mr-1" />
+                  Test
+                </Button>
+                <Switch
+                  checked={amsEnabled}
+                  onCheckedChange={setAmsEnabled}
+                  data-testid="switch-ams-enabled"
+                />
+              </div>
+            </div>
+            )}
+
             {/* Snowflake Integration - Expandable inline */}
             <Collapsible open={snowflakeExpanded} onOpenChange={setSnowflakeExpanded}>
               <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
@@ -1130,114 +1154,207 @@ export default function Integrations() {
               </CollapsibleContent>
             </Collapsible>
 
-            {/* TPMS Integration - Expandable inline */}
-            <Collapsible open={tpmsExpanded} onOpenChange={setTpmsExpanded}>
-              <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
-                <CollapsibleTrigger asChild>
-                  <div className="flex items-center gap-4 flex-1 cursor-pointer group">
-                    <div className="w-12 h-12 bg-orange-500/10 rounded-lg flex items-center justify-center">
-                      <Truck className="h-6 w-6 text-orange-500" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-lg group-hover:text-orange-500 transition-colors">
-                          TPMS Integration
-                        </h3>
-                        {tpmsStatusLoading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : tpmsStatus?.configured ? (
-                          <Badge variant="default" className="flex items-center gap-1 text-xs">
-                            <CheckCircle className="h-3 w-3" />
-                            Connected
-                          </Badge>
-                        ) : (
-                          <Badge variant="destructive" className="flex items-center gap-1 text-xs">
-                            <XCircle className="h-3 w-3" />
-                            Not Configured
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Employee and truck lookup for offboarding workflow
-                      </p>
-                    </div>
-                  </div>
-                </CollapsibleTrigger>
-                <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
-                  <span className={`text-sm font-medium ${tpmsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
-                    {tpmsStatus?.configured ? 'healthy' : 'not configured'}
-                  </span>
-                  <Badge variant={tpmsEnabled ? "default" : "secondary"} className="text-xs">
-                    {tpmsEnabled ? "Active" : "Inactive"}
-                  </Badge>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => testTpmsMutation.mutate()}
-                    disabled={!tpmsStatus?.configured || testTpmsMutation.isPending}
-                    data-testid="button-test-tpms-inline"
-                  >
-                    {testTpmsMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                    ) : (
-                      <TestTube className="h-4 w-4 mr-1" />
-                    )}
-                    Test
-                  </Button>
-                  <Switch
-                    checked={tpmsEnabled}
-                    onCheckedChange={setTpmsEnabled}
-                    data-testid="switch-tpms-enabled"
-                  />
+            {/* Samsara Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/samsara-integration" data-testid="link-samsara-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-blue-600/10 rounded-lg flex items-center justify-center text-blue-600 font-bold text-xl">
+                  S
                 </div>
-              </div>
-              <CollapsibleContent className="mt-2 ml-4 border-l-2 border-orange-500/20 pl-4 space-y-4">
-
-                {/* TPMS Lookup */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">TPMS Lookup</CardTitle>
-                    <CardDescription>Look up Employee info by Enterprise ID or Truck Number</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Enter Enterprise ID or Truck Number"
-                        value={tpmsTestId}
-                        onChange={(e) => setTpmsTestId(e.target.value.toUpperCase())}
-                        className="flex-1"
-                        data-testid="input-tpms-test-id"
-                      />
-                      <Button
-                        onClick={() => {
-                          const trimmedId = tpmsTestId.trim();
-                          const isNumeric = /^\d+$/.test(trimmedId);
-                          const lookupId = isNumeric ? trimmedId.padStart(6, '0') : trimmedId;
-                          lookupTpmsTechMutation.mutate({ id: lookupId, type: isNumeric ? 'truck' : 'enterprise' });
-                        }}
-                        disabled={!tpmsStatus?.configured || !tpmsTestId || lookupTpmsTechMutation.isPending}
-                        data-testid="button-lookup-tech"
-                      >
-                        {lookupTpmsTechMutation.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          "Lookup"
-                        )}
-                      </Button>
-                    </div>
-                    {lookupTpmsTechMutation.data?.success && (
-                      <div className="p-3 bg-muted rounded-lg text-sm space-y-1">
-                        <p><strong>Name:</strong> {lookupTpmsTechMutation.data.data.firstName} {lookupTpmsTechMutation.data.data.lastName}</p>
-                        <p><strong>Employee ID:</strong> {lookupTpmsTechMutation.data.data.techId}</p>
-                        <p><strong>Enterprise ID:</strong> {lookupTpmsTechMutation.data.data.ldapId || 'N/A'}</p>
-                        <p><strong>District:</strong> {lookupTpmsTechMutation.data.data.districtNo}</p>
-                        <p><strong>Truck:</strong> {lookupTpmsTechMutation.data.data.truckNo || 'N/A'}</p>
-                      </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-blue-600 transition-colors">
+                      Samsara Fleet
+                    </h3>
+                    {samsaraStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : samsaraStatus?.snowflake ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
                     )}
-                  </CardContent>
-                </Card>
-              </CollapsibleContent>
-            </Collapsible>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Real-time telematics, GPS, and driver safety data via Snowflake
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${samsaraStatus?.snowflake ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {samsaraStatus?.snowflake ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={samsaraEnabled ? "default" : "secondary"} className="text-xs">
+                  {samsaraEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/samsara/status"] })}
+                  data-testid="button-test-samsara"
+                >
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Refresh
+                </Button>
+                <Switch
+                  checked={samsaraEnabled}
+                  onCheckedChange={setSamsaraEnabled}
+                  data-testid="switch-samsara-enabled"
+                />
+              </div>
+            </div>
+
+            {/* TPMS API Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/tpms-integration" data-testid="link-tpms-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-orange-500/10 rounded-lg flex items-center justify-center">
+                  <Truck className="h-6 w-6 text-orange-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-orange-500 transition-colors">
+                      TPMS API
+                    </h3>
+                    {tpmsStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : tpmsStatus?.configured ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Technician and truck lookup — tech info, assignments, cache management
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${tpmsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {tpmsStatus?.configured ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={tpmsEnabled ? "default" : "secondary"} className="text-xs">
+                  {tpmsEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Switch
+                  checked={tpmsEnabled}
+                  onCheckedChange={setTpmsEnabled}
+                  data-testid="switch-tpms-enabled"
+                />
+              </div>
+            </div>
+
+            {/* PARQ My Fleet Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/parq-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-emerald-500/10 rounded-lg flex items-center justify-center">
+                  <Truck className="h-6 w-6 text-emerald-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-emerald-500 transition-colors">
+                      PARQ My Fleet
+                    </h3>
+                    {parqStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : parqStatus?.configured ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Fleet vehicle management, lot assignments, condition reports, and work orders
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${parqStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {parqStatus?.configured ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={parqEnabled ? "default" : "secondary"} className="text-xs">
+                  {parqEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toast({ title: "PARQ Test", description: "Use the PARQ My Fleet integration page to test the connection" })}
+                >
+                  <TestTube className="h-4 w-4 mr-1" />
+                  Test
+                </Button>
+                <Switch
+                  checked={parqEnabled}
+                  onCheckedChange={setParqEnabled}
+                />
+              </div>
+            </div>
+            {/* Segno Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/segno-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-violet-500/10 rounded-lg flex items-center justify-center">
+                  <Users className="h-6 w-6 text-violet-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-violet-500 transition-colors">
+                      Segno
+                    </h3>
+                    {segnoStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : segnoStatus?.configured ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    SugarCRM-based OnBoarding workflow management for technician hires
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${segnoStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {segnoStatus?.configured ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={segnoEnabled ? "default" : "secondary"} className="text-xs">
+                  {segnoEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toast({ title: "Segno Test", description: "Use the Segno integration page to test the connection" })}
+                >
+                  <TestTube className="h-4 w-4 mr-1" />
+                  Test
+                </Button>
+                <Switch
+                  checked={segnoEnabled}
+                  onCheckedChange={setSegnoEnabled}
+                />
+              </div>
+            </div>
           </CardContent>
         </Card>
 

@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import crypto from 'crypto';
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema, securityQuestionSetupSchema, PREDEFINED_SECURITY_QUESTIONS, StoredSecurityQuestion } from "@shared/schema";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
@@ -17,10 +17,17 @@ import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql, eq, and, gte, lte, inArray, desc, SQL } from "drizzle-orm";
-import { queueItems } from "@shared/schema";
+import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
+import { AmsApiService } from "./ams-api-service";
+const amsApiService = new AmsApiService();
 import { pmfApiService } from "./pmf-api-service";
+import { segnoApiService } from "./segno-api-service";
+import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
+// SAML SSO INTEGRATION
+import passport from "passport";
+import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
 
 // Initialize session cleanup on startup
 try {
@@ -437,7 +444,102 @@ const upload = multer({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   console.log("=== STARTING ROUTE REGISTRATION ===");
-  
+
+  // SAML SSO INTEGRATION - Initialize passport and SAML strategy
+  const samlStrategy = createSamlStrategy();
+  passport.use("saml", samlStrategy);
+  passport.serializeUser((user: any, done: any) => done(null, user));
+  passport.deserializeUser((user: any, done: any) => done(null, user));
+  app.use(passport.initialize());
+  printSpDetails();
+
+  // SAML SSO INTEGRATION - Auth endpoints
+  app.get("/auth/login", (req, res, next) => {
+    const relayState = req.query.next as string || "/";
+    passport.authenticate("saml", {
+      failureRedirect: "/login?error=sso_failed",
+      additionalParams: { RelayState: relayState },
+    } as any)(req, res, next);
+  });
+
+  app.post("/auth/saml/acs", passport.authenticate("saml", { session: false, failureRedirect: "/login?error=sso_failed" }), async (req: any, res) => {
+    try {
+      const user = req.user;
+      if (!user || !user.id) {
+        console.error("[SAML SSO] ACS callback - no user in request");
+        return res.redirect("/login?error=user_not_found");
+      }
+
+      const sessionId = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      await storage.createSession({
+        id: sessionId,
+        userId: user.id,
+        username: user.username,
+        expiresAt
+      });
+
+      res.cookie('sessionId', sessionId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        expires: expiresAt,
+        path: '/'
+      });
+
+      console.log(`[SAML SSO] Session created for user: ${user.username}`);
+
+      const relayState = req.body.RelayState || "/";
+      res.redirect(`/sso-callback?relay=${encodeURIComponent(relayState)}`);
+    } catch (error) {
+      console.error("[SAML SSO] Error in ACS callback:", error);
+      res.redirect("/login?error=session_creation_failed");
+    }
+  });
+
+  app.get("/auth/saml/metadata", (_req, res) => {
+    const metadata = generateSpMetadata(samlStrategy);
+    res.type("application/xml");
+    res.send(metadata);
+  });
+
+  app.get("/auth/logout", async (req: any, res) => {
+    const cookieHeader = req.headers.cookie;
+    const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
+    if (sessionId) {
+      try { await storage.deleteSession(sessionId); } catch {}
+    }
+    res.clearCookie('sessionId', { path: '/' });
+
+    const idpSloUrl = "https://sso.searshc.com/idp-nexus/saml2/idp/initSLO.php";
+    const baseUrl = getBaseUrl();
+    const relayState = encodeURIComponent(`${baseUrl}/login`);
+    res.redirect(`${idpSloUrl}?RelayState=${relayState}`);
+  });
+
+  app.get("/api/auth/sso-user", requireAuth, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const sq = user.securityQuestions as StoredSecurityQuestion[] | null;
+      const hasSecurityQuestions = !!(sq && sq.length >= 3);
+      res.json({
+        user: {
+          ...user,
+          password: undefined,
+          securityQuestions: hasSecurityQuestions ? sq!.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+        },
+        requiresSecurityQuestions: !hasSecurityQuestions,
+      });
+    } catch (error) {
+      console.error("[SAML SSO] Error fetching SSO user:", error);
+      res.status(500).json({ message: "Failed to fetch user data" });
+    }
+  });
+
   // Auth routes
   console.log("Registering auth routes...");
   app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
@@ -457,6 +559,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           details: `Failed login attempt for unknown user "${enterpriseId}" from IP: ${ipAddress}`,
         });
         return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      if (!user.isActive) {
+        await storage.createActivityLog({
+          userId: user.id,
+          action: 'login_failed',
+          entityType: 'auth',
+          entityId: user.id,
+          details: `Login denied for deactivated user "${enterpriseId}" from IP: ${ipAddress}`,
+        });
+        return res.status(403).json({ message: "Your account has been deactivated. Please contact an administrator." });
       }
 
       // Use bcrypt to compare the provided password with the hashed password
@@ -504,7 +617,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       console.log(`[LOGIN] User ${user.username} logged in with role: ${user.role}`);
-      res.json({ user: { ...user, password: undefined } });
+      const sq = user.securityQuestions as StoredSecurityQuestion[] | null;
+      const hasSecurityQuestions = !!(sq && sq.length >= 3);
+      res.json({
+        user: {
+          ...user,
+          password: undefined,
+          securityQuestions: hasSecurityQuestions ? sq!.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+        },
+        requiresSecurityQuestions: !hasSecurityQuestions,
+      });
     } catch (error) {
       res.status(500).json({ message: "Login failed" });
     }
@@ -687,8 +809,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/users", requireAuth, async (req: any, res) => {
     try {
       const users = await storage.getUsers();
-      // Remove passwords from response for security
-      const safeUsers = users.map(user => ({ ...user, password: undefined }));
+      const safeUsers = users.map(user => {
+        const sq = user.securityQuestions as StoredSecurityQuestion[] | null;
+        return {
+          ...user,
+          password: undefined,
+          securityQuestions: sq && sq.length >= 3 ? sq.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+        };
+      });
       res.json(safeUsers);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch users" });
@@ -702,7 +830,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
-      res.json({ ...user, password: undefined });
+      const sq = user.securityQuestions as StoredSecurityQuestion[] | null;
+      res.json({
+        ...user,
+        password: undefined,
+        securityQuestions: sq && sq.length >= 3 ? sq.map(q => ({ questionId: q.questionId, questionText: q.questionText })) : null,
+      });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch user" });
     }
@@ -716,6 +849,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const userData = insertUserSchema.parse(req.body);
+
+      if (currentUser.role !== 'developer' && userData.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can create users with the developer role." });
+      }
       
       // Check if user already exists
       const existingUser = await storage.getUserByUsername(userData.username);
@@ -901,13 +1038,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/users/:id/reset-password", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'developer') {
-        return res.status(403).json({ message: "Access denied. Password reset requires developer role." });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Password reset requires developer or admin role." });
       }
       
       const { id } = req.params;
       
-      // Protect seed accounts from password reset by other admins
+      // Protect seed accounts from password reset by other users
       if (id === 'emergency-admin-2025-id' && currentUser.id !== id) {
         return res.status(403).json({ message: "Access denied. Cannot reset password for seed accounts." });
       }
@@ -1025,12 +1162,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin Role Management - Super admins can update user roles and departments
+  // Admin Role Management - Developers and admins can update user roles and departments
   app.post("/api/users/:id/update-role", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!currentUser || currentUser.role !== 'developer') {
-        return res.status(403).json({ message: "Access denied. Role management requires developer role." });
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Role management requires developer or admin role." });
       }
       
       const { id } = req.params;
@@ -1040,13 +1177,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. Cannot modify role for seed accounts." });
       }
       
-      const { role, departments } = req.body;
+      const { role, departments, isActive } = req.body;
       
       // Validate role if provided - check against roles in role_permissions table
       const rolePermissions = await storage.getAllRolePermissions();
       const validRoles = rolePermissions.map((rp: { role: string }) => rp.role);
       if (role && !validRoles.includes(role)) {
         return res.status(400).json({ message: `Invalid role specified. Valid roles are: ${validRoles.join(', ')}` });
+      }
+
+      if (currentUser.role !== 'developer' && role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can assign the developer role." });
       }
 
       // Validate departments if provided
@@ -1064,10 +1205,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
 
+      if (currentUser.role !== 'developer' && targetUser.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can modify other developer accounts." });
+      }
+
       // Prepare updates object
       const updates: any = {};
       if (role !== undefined) updates.role = role;
       if (departments !== undefined) updates.departments = departments;
+      if (isActive !== undefined) updates.isActive = isActive;
 
       // Update user
       const updatedUser = await storage.updateUser(id, updates);
@@ -1091,6 +1237,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Role update error:", error);
       res.status(500).json({ message: "Failed to update user role" });
+    }
+  });
+
+  // Get user permission overrides
+  app.get("/api/users/:id/permission-overrides", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Permission overrides require developer or admin role." });
+      }
+
+      const { id } = req.params;
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (currentUser.role !== 'developer' && targetUser.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can view developer permission overrides." });
+      }
+
+      res.json({ 
+        userId: targetUser.id,
+        username: targetUser.username,
+        role: targetUser.role,
+        permissionOverrides: targetUser.permissionOverrides || null 
+      });
+    } catch (error) {
+      console.error("Error fetching permission overrides:", error);
+      res.status(500).json({ message: "Failed to fetch permission overrides" });
+    }
+  });
+
+  // Set user permission overrides
+  app.patch("/api/users/:id/permission-overrides", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Permission overrides require developer or admin role." });
+      }
+
+      const { id } = req.params;
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (currentUser.role !== 'developer' && targetUser.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can modify developer permission overrides." });
+      }
+
+      if (currentUser.role === 'admin' && targetUser.role === 'admin' && currentUser.id !== targetUser.id) {
+        return res.status(403).json({ message: "Access denied. Admins cannot modify permission overrides for other admins." });
+      }
+
+      const { permissionOverrides } = req.body;
+
+      const updatedUser = await storage.updateUser(id, { permissionOverrides: permissionOverrides || null });
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to update permission overrides" });
+      }
+
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "user_permission_overrides_updated",
+        entityType: "user",
+        entityId: id,
+        details: `${currentUser.username} updated permission overrides for user ${targetUser.username}. Overrides: ${JSON.stringify(permissionOverrides)}`,
+      });
+
+      res.json({ 
+        message: "Permission overrides updated successfully",
+        user: { ...updatedUser, password: undefined }
+      });
+    } catch (error) {
+      console.error("Error updating permission overrides:", error);
+      res.status(500).json({ message: "Failed to update permission overrides" });
+    }
+  });
+
+  // Clear user permission overrides
+  app.delete("/api/users/:id/permission-overrides", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Permission overrides require developer or admin role." });
+      }
+
+      const { id } = req.params;
+      const targetUser = await storage.getUser(id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (currentUser.role !== 'developer' && targetUser.role === 'developer') {
+        return res.status(403).json({ message: "Access denied. Only developers can modify developer permission overrides." });
+      }
+
+      const updatedUser = await storage.updateUser(id, { permissionOverrides: null });
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to clear permission overrides" });
+      }
+
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "user_permission_overrides_cleared",
+        entityType: "user",
+        entityId: id,
+        details: `${currentUser.username} cleared all permission overrides for user ${targetUser.username}`,
+      });
+
+      res.json({ 
+        message: "Permission overrides cleared successfully",
+        user: { ...updatedUser, password: undefined }
+      });
+    } catch (error) {
+      console.error("Error clearing permission overrides:", error);
+      res.status(500).json({ message: "Failed to clear permission overrides" });
     }
   });
 
@@ -1219,6 +1483,172 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Password reset confirmation error:", error);
       res.status(500).json({ message: "Failed to reset password" });
+    }
+  });
+
+  // Security Questions - Get available questions list
+  app.get("/api/auth/security-questions", async (_req, res) => {
+    res.json(PREDEFINED_SECURITY_QUESTIONS);
+  });
+
+  // Security Questions - Setup (requires auth)
+  app.post("/api/auth/security-questions/setup", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+
+      const parsed = securityQuestionSetupSchema.safeParse(req.body.questions);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid security questions" });
+      }
+
+      const questions = parsed.data;
+      const uniqueIds = new Set(questions.map(q => q.questionId));
+      if (uniqueIds.size !== questions.length) {
+        return res.status(400).json({ message: "Each security question must be different" });
+      }
+
+      const storedQuestions: StoredSecurityQuestion[] = await Promise.all(
+        questions.map(async (q) => ({
+          questionId: q.questionId,
+          questionText: q.questionText,
+          answerHash: await bcrypt.hash(q.answer.trim().toLowerCase(), 10),
+        }))
+      );
+
+      await storage.updateUser(currentUser.id, { securityQuestions: storedQuestions });
+
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "security_questions_setup",
+        entityType: "user",
+        entityId: currentUser.id,
+        details: `User ${currentUser.username} set up ${storedQuestions.length} security questions`,
+      });
+
+      res.json({ message: "Security questions saved successfully" });
+    } catch (error) {
+      console.error("Security questions setup error:", error);
+      res.status(500).json({ message: "Failed to save security questions" });
+    }
+  });
+
+  // Security Questions - Check if user has them set up (requires auth)
+  app.get("/api/auth/security-questions/status", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+
+      const questions = currentUser.securityQuestions as StoredSecurityQuestion[] | null;
+      res.json({ hasSecurityQuestions: !!(questions && questions.length >= 3) });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check security questions status" });
+    }
+  });
+
+  // Security Questions - Get questions for a user (anonymous, for forgot password flow)
+  app.post("/api/auth/security-questions/get-questions", async (req, res) => {
+    try {
+      const { username } = req.body;
+      if (!username) return res.status(400).json({ message: "Username is required" });
+
+      const user = await storage.getUserByUsername(username.trim().toLowerCase());
+      if (!user || !user.isActive) {
+        return res.status(404).json({ message: "No account found with that username, or security questions have not been set up. Please contact your admin." });
+      }
+
+      const questions = user.securityQuestions as StoredSecurityQuestion[] | null;
+      if (!questions || questions.length < 3) {
+        return res.status(404).json({ message: "Security questions have not been set up for this account. Please contact your admin." });
+      }
+
+      const shuffled = [...questions].sort(() => Math.random() - 0.5);
+      const challenge = shuffled.slice(0, 2);
+
+      res.json({
+        questions: challenge.map(q => ({ questionId: q.questionId, questionText: q.questionText })),
+      });
+    } catch (error) {
+      console.error("Get security questions error:", error);
+      res.status(500).json({ message: "Failed to retrieve security questions" });
+    }
+  });
+
+  // Security Questions - Verify answers and reset password (anonymous)
+  const securityQuestionVerifyLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: { message: "Too many failed attempts. Please try again in 15 minutes." },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  app.post("/api/auth/security-questions/verify-and-reset", securityQuestionVerifyLimiter, async (req, res) => {
+    try {
+      const { username, answers, newPassword } = req.body;
+
+      if (!username || !answers || !newPassword) {
+        return res.status(400).json({ message: "Username, answers, and new password are required" });
+      }
+
+      if (!validatePasswordRequirements(newPassword)) {
+        return res.status(400).json({ message: "New password must be at least 10 characters long." });
+      }
+
+      const user = await storage.getUserByUsername(username.trim().toLowerCase());
+      if (!user || !user.isActive) {
+        return res.status(400).json({ message: "Verification failed. Please check your answers and try again." });
+      }
+
+      const questions = user.securityQuestions as StoredSecurityQuestion[] | null;
+      if (!questions || questions.length < 3) {
+        return res.status(400).json({ message: "Verification failed. Please check your answers and try again." });
+      }
+
+      const answersArray = answers as Array<{ questionId: string; answer: string }>;
+      if (!Array.isArray(answersArray) || answersArray.length < 2) {
+        return res.status(400).json({ message: "You must answer at least 2 security questions" });
+      }
+
+      let allCorrect = true;
+      for (const submitted of answersArray) {
+        const stored = questions.find(q => q.questionId === submitted.questionId);
+        if (!stored) { allCorrect = false; break; }
+        const match = await bcrypt.compare(submitted.answer.trim().toLowerCase(), stored.answerHash);
+        if (!match) { allCorrect = false; break; }
+      }
+
+      if (!allCorrect) {
+        await storage.createActivityLog({
+          userId: user.id,
+          action: "security_question_verify_failed",
+          entityType: "user",
+          entityId: user.id,
+          details: `Failed security question verification for password reset (user: ${user.username})`,
+        });
+        return res.status(400).json({ message: "One or more answers are incorrect. Please try again." });
+      }
+
+      const screeningResult = await checkPasswordCompromised(newPassword);
+      if (screeningResult.isCompromised) {
+        return res.status(400).json({ message: "This password has been found in data breaches and cannot be used. Please choose a different password." });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await storage.updateUser(user.id, { password: hashedPassword });
+
+      await storage.createActivityLog({
+        userId: user.id,
+        action: "password_reset_via_security_questions",
+        entityType: "user",
+        entityId: user.id,
+        details: `Password reset via security questions for user ${user.username}`,
+      });
+
+      res.json({ message: "Password reset successfully. You can now log in with your new password." });
+    } catch (error) {
+      console.error("Security question verify error:", error);
+      res.status(500).json({ message: "Failed to verify security questions" });
     }
   });
 
@@ -3284,6 +3714,385 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  async function generateReportData() {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+    const { holmanVehicleSyncService: fleetService } = await import("./holman-vehicle-sync-service");
+
+    const [ntaoItems, assetsItems, inventoryItems, fleetItems, activityLogs, allUsers, nexusVehicles, holmanVehicles, vehicleAssignments, hires, spots, allTermedTechs, liveFleetResult] = await Promise.all([
+      storage.getNTAOQueueItems().catch(() => []),
+      storage.getAssetsQueueItems().catch(() => []),
+      storage.getInventoryQueueItems().catch(() => []),
+      storage.getFleetQueueItems().catch(() => []),
+      storage.getActivityLogs().catch(() => []),
+      storage.getUsers().catch(() => []),
+      db.select().from(vehicleNexusData).catch(() => []),
+      db.select().from(holmanVehiclesCache).catch(() => []),
+      db.select().from(techVehicleAssignments).catch(() => []),
+      storage.getOnboardingHires().catch(() => []),
+      db.select().from(storageSpots).catch(() => []),
+      db.select().from(termedTechs).catch(() => []),
+      fleetService.fetchActiveVehicles().then(async (r) => {
+        if (r.vehicles.length > 0) {
+          r.vehicles = await fleetService.enrichWithTPMSData(r.vehicles);
+        }
+        return r;
+      }).catch(() => ({ vehicles: [] as any[] })),
+    ]);
+
+    const allQueues = [
+      { module: 'ntao', label: 'NTAO', items: ntaoItems },
+      { module: 'assets', label: 'Assets', items: assetsItems },
+      { module: 'inventory', label: 'Inventory', items: inventoryItems },
+      { module: 'fleet', label: 'Fleet', items: fleetItems },
+    ];
+
+    const queueSummary = allQueues.map(q => {
+      const total = q.items.length;
+      const statusCounts = { new: 0, in_progress: 0, completed: 0, cancelled: 0 };
+      let completedToday = 0, completedThisWeek = 0, completedThisMonth = 0;
+      const agentWorkload: Record<string, number> = {};
+
+      for (const item of q.items) {
+        const s = (item.status || 'new') as keyof typeof statusCounts;
+        if (s in statusCounts) statusCounts[s]++;
+        if (item.status === 'completed' && item.completedAt) {
+          const d = new Date(item.completedAt);
+          if (d >= startOfToday) completedToday++;
+          if (d >= startOfWeek) completedThisWeek++;
+          if (d >= startOfMonth) completedThisMonth++;
+        }
+        if (item.assignedTo && item.status === 'in_progress') {
+          agentWorkload[item.assignedTo] = (agentWorkload[item.assignedTo] || 0) + 1;
+        }
+      }
+
+      const recentCompleted = q.items.filter(i => i.status === 'completed' && i.completedAt && new Date(i.completedAt) >= thirtyDaysAgo);
+      let avgResolutionHours = 0;
+      if (recentCompleted.length > 0) {
+        const totalMs = recentCompleted.reduce((sum, i) => {
+          return sum + (new Date(i.completedAt!).getTime() - new Date(i.createdAt!).getTime());
+        }, 0);
+        avgResolutionHours = Math.round((totalMs / recentCompleted.length) / (1000 * 60 * 60) * 10) / 10;
+      }
+
+      return {
+        module: q.module, label: q.label, total,
+        ...statusCounts, completedToday, completedThisWeek, completedThisMonth,
+        avgResolutionHours, agentWorkload,
+      };
+    });
+
+    const recentActivity = activityLogs
+      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())
+      .slice(0, 100);
+
+    const activityByDay: Record<string, number> = {};
+    for (const log of activityLogs) {
+      if (log.createdAt && new Date(log.createdAt) >= sevenDaysAgo) {
+        const day = new Date(log.createdAt).toISOString().split('T')[0];
+        activityByDay[day] = (activityByDay[day] || 0) + 1;
+      }
+    }
+
+    const activityByAction: Record<string, number> = {};
+    for (const log of activityLogs) {
+      if (log.createdAt && new Date(log.createdAt) >= thirtyDaysAgo) {
+        activityByAction[log.action] = (activityByAction[log.action] || 0) + 1;
+      }
+    }
+
+    const activeUsers = allUsers.filter(u => u.isActive);
+    const usersByRole: Record<string, number> = {};
+    for (const u of activeUsers) {
+      usersByRole[u.role] = (usersByRole[u.role] || 0) + 1;
+    }
+
+    const topAgents: { username: string; completed: number }[] = [];
+    const agentCompletions: Record<string, number> = {};
+    for (const q of allQueues) {
+      for (const item of q.items) {
+        if (item.status === 'completed' && item.assignedTo && item.completedAt && new Date(item.completedAt) >= thirtyDaysAgo) {
+          agentCompletions[item.assignedTo] = (agentCompletions[item.assignedTo] || 0) + 1;
+        }
+      }
+    }
+    for (const [username, completed] of Object.entries(agentCompletions).sort((a, b) => b[1] - a[1]).slice(0, 10)) {
+      topAgents.push({ username, completed });
+    }
+
+    const nexusStatusBreakdown: Record<string, number> = {};
+    for (const v of nexusVehicles) {
+      const status = v.postOffboardedStatus || 'unset';
+      nexusStatusBreakdown[status] = (nexusStatusBreakdown[status] || 0) + 1;
+    }
+
+    const nexusKeysBreakdown: Record<string, number> = {};
+    for (const v of nexusVehicles) {
+      const key = v.keys || 'unknown';
+      nexusKeysBreakdown[key] = (nexusKeysBreakdown[key] || 0) + 1;
+    }
+
+    const nexusRepairBreakdown: Record<string, number> = {};
+    for (const v of nexusVehicles) {
+      const rep = v.repaired || 'unknown';
+      nexusRepairBreakdown[rep] = (nexusRepairBreakdown[rep] || 0) + 1;
+    }
+
+    const holmanByStatus: Record<string, number> = {};
+    const holmanByMake: Record<string, number> = {};
+    const holmanByState: Record<string, number> = {};
+    const holmanByFuel: Record<string, number> = {};
+    for (const h of holmanVehicles) {
+      const status = h.statusCode === 1 ? 'active' : 'inactive';
+      holmanByStatus[status] = (holmanByStatus[status] || 0) + 1;
+      if (h.makeName) holmanByMake[h.makeName] = (holmanByMake[h.makeName] || 0) + 1;
+      if (h.state) holmanByState[h.state] = (holmanByState[h.state] || 0) + 1;
+      if (h.fuelType) holmanByFuel[h.fuelType] = (holmanByFuel[h.fuelType] || 0) + 1;
+    }
+
+    const fleetQueueByType: Record<string, number> = {};
+    const fleetQueueByStatus: Record<string, number> = {};
+    const fleetQueueByVehicleType: Record<string, number> = {};
+    for (const item of fleetItems) {
+      const wf = item.workflowType || 'unknown';
+      fleetQueueByType[wf] = (fleetQueueByType[wf] || 0) + 1;
+      const s = item.status || 'unknown';
+      fleetQueueByStatus[s] = (fleetQueueByStatus[s] || 0) + 1;
+      const vt = item.vehicleType || 'unknown';
+      fleetQueueByVehicleType[vt] = (fleetQueueByVehicleType[vt] || 0) + 1;
+    }
+
+    const assetsQueueByType: Record<string, number> = {};
+    const assetsQueueByStatus: Record<string, number> = {};
+    for (const item of assetsItems) {
+      const wf = item.workflowType || 'unknown';
+      assetsQueueByType[wf] = (assetsQueueByType[wf] || 0) + 1;
+      const s = item.status || 'unknown';
+      assetsQueueByStatus[s] = (assetsQueueByStatus[s] || 0) + 1;
+    }
+
+    const onboardingByEmploymentStatus: Record<string, number> = {};
+    const onboardingTruckAssigned: { assigned: number; unassigned: number } = { assigned: 0, unassigned: 0 };
+    for (const h of hires) {
+      const s = h.employmentStatus || 'unknown';
+      onboardingByEmploymentStatus[s] = (onboardingByEmploymentStatus[s] || 0) + 1;
+      if (h.truckAssigned) onboardingTruckAssigned.assigned++;
+      else onboardingTruckAssigned.unassigned++;
+    }
+
+    const storageUtilization = spots.map(s => ({
+      name: s.name,
+      city: s.city,
+      state: s.state,
+      available: s.availableSpots,
+      total: s.totalCapacity,
+      utilization: s.totalCapacity > 0 ? Math.round((1 - s.availableSpots / s.totalCapacity) * 100) : 0,
+      status: s.status,
+    }));
+
+    const liveFleetVehicles = liveFleetResult.vehicles || [];
+    const activeHolman = holmanVehicles.filter(v => v.statusCode === 1);
+    const liveAssigned = liveFleetVehicles.filter((v: any) => v.tpmsAssignedTechId);
+    const liveMismatches = liveFleetVehicles.filter((v: any) => {
+      const h = ((v.holmanTechAssigned || v.clientData2 || '') as string).trim();
+      const t = ((v.tpmsAssignedTechId || '') as string).trim();
+      return (h && t && h.toLowerCase() !== t.toLowerCase()) || (h && !t);
+    });
+    const fleetMetrics = {
+      totalActive: liveFleetVehicles.length || activeHolman.length,
+      outOfService: holmanVehicles.filter(v => v.statusCode === 2).length,
+      assigned: liveAssigned.length || activeHolman.filter(v => v.holmanTechAssigned && v.holmanTechAssigned.trim() !== '').length,
+      unassigned: (liveFleetVehicles.length - liveAssigned.length) || activeHolman.filter(v => !v.holmanTechAssigned || v.holmanTechAssigned.trim() === '').length,
+      assignmentMismatches: liveMismatches.length,
+      inRepair: nexusVehicles.filter(v => v.postOffboardedStatus === 'in_repair').length,
+      estimateDeclines: nexusVehicles.filter(v => v.postOffboardedStatus === 'declined_repair').length,
+      spareAvailable: nexusVehicles.filter(v =>
+        v.postOffboardedStatus === 'available_for_rental_pmf' || v.postOffboardedStatus === 'reserved_for_new_hire'
+      ).length,
+    };
+
+    const pendingHires = hires.filter(h => !h.truckAssigned);
+    const assignedHires = hires.filter(h => h.truckAssigned);
+    const onboardingIntelligence = {
+      totalHires: hires.length,
+      assignedCount: assignedHires.length,
+      pendingCount: pendingHires.length,
+      completedThisWeek: assignedHires.filter(h => h.assignedAt && new Date(h.assignedAt) >= startOfWeek).length,
+      completedThisMonth: assignedHires.filter(h => h.assignedAt && new Date(h.assignedAt) >= startOfMonth).length,
+      aged14Days: pendingHires.filter(h => h.serviceDate && new Date(h.serviceDate) <= fourteenDaysAgo).length,
+      aged30Days: pendingHires.filter(h => h.serviceDate && new Date(h.serviceDate) <= thirtyDaysAgo).length,
+      byEmploymentStatus: onboardingByEmploymentStatus,
+      pendingByState: (() => {
+        const byState: Record<string, number> = {};
+        for (const h of pendingHires) {
+          const st = h.workState || 'unknown';
+          byState[st] = (byState[st] || 0) + 1;
+        }
+        return byState;
+      })(),
+      roadblocks: (() => {
+        const issues: { type: string; severity: string; message: string; count: number }[] = [];
+        const terminatedPending = pendingHires.filter(h => h.employmentStatus === 'T');
+        if (terminatedPending.length > 0) {
+          issues.push({ type: 'terminated_pending', severity: 'critical', message: 'Terminated employees still pending truck assignment', count: terminatedPending.length });
+        }
+        const aged30 = pendingHires.filter(h => h.serviceDate && new Date(h.serviceDate) <= thirtyDaysAgo);
+        if (aged30.length > 0) {
+          issues.push({ type: 'aged_30_days', severity: 'high', message: 'Hires waiting 30+ days for truck assignment', count: aged30.length });
+        }
+        const leavePending = pendingHires.filter(h => h.employmentStatus === 'L');
+        if (leavePending.length > 0) {
+          issues.push({ type: 'leave_pending', severity: 'medium', message: 'Employees on leave still pending assignment', count: leavePending.length });
+        }
+        return issues;
+      })(),
+    };
+
+    const offboardingItems = [...assetsItems, ...ntaoItems, ...fleetItems, ...inventoryItems].filter(i => i.workflowType === 'offboarding');
+    const offboardingCompleted = offboardingItems.filter(i => i.status === 'completed');
+    const offboardingOpen = offboardingItems.filter(i => i.status !== 'completed' && i.status !== 'cancelled');
+    const offboardingIntelligence = {
+      totalCases: offboardingItems.length,
+      completed: offboardingCompleted.length,
+      inProgress: offboardingItems.filter(i => i.status === 'in_progress').length,
+      pending: offboardingItems.filter(i => i.status === 'pending' || i.status === 'new').length,
+      completedThisWeek: offboardingCompleted.filter(i => i.completedAt && new Date(i.completedAt) >= startOfWeek).length,
+      completedThisMonth: offboardingCompleted.filter(i => i.completedAt && new Date(i.completedAt) >= startOfMonth).length,
+      aged14Days: offboardingOpen.filter(i => i.createdAt && new Date(i.createdAt) <= fourteenDaysAgo).length,
+      aged30Days: offboardingOpen.filter(i => i.createdAt && new Date(i.createdAt) <= thirtyDaysAgo).length,
+      taskCompletionRates: (() => {
+        const assetsOffboarding = assetsItems.filter(i => i.workflowType === 'offboarding');
+        const total = assetsOffboarding.length || 1;
+        return {
+          toolsReturn: Math.round((assetsOffboarding.filter(i => i.taskToolsReturn).length / total) * 100),
+          iphoneReturn: Math.round((assetsOffboarding.filter(i => i.taskIphoneReturn).length / total) * 100),
+          phoneDisconnect: Math.round((assetsOffboarding.filter(i => i.taskDisconnectedLine).length / total) * 100),
+          mPaymentDeactivation: Math.round((assetsOffboarding.filter(i => i.taskDisconnectedMPayment).length / total) * 100),
+          segnoOrders: Math.round((assetsOffboarding.filter(i => i.taskCloseSegnoOrders).length / total) * 100),
+          shippingLabel: Math.round((assetsOffboarding.filter(i => i.taskCreateShippingLabel).length / total) * 100),
+        };
+      })(),
+      vehicleDisposition: nexusStatusBreakdown,
+      keyRecovery: nexusKeysBreakdown,
+      phoneRecovery: {
+        initiated: nexusVehicles.filter(v => v.phoneRecoveryInitiated === 'yes').length,
+        notInitiated: nexusVehicles.filter(v => v.phoneRecoveryInitiated !== 'yes').length,
+      },
+      repairStatus: nexusRepairBreakdown,
+      termedTechStats: {
+        total: allTermedTechs.length,
+        tasksCreated: allTermedTechs.filter(t => t.offboardingTaskCreated).length,
+        unprocessed: allTermedTechs.filter(t => !t.offboardingTaskCreated).length,
+        fullyProcessed: allTermedTechs.filter(t => t.processedAt).length,
+      },
+      roadblocks: (() => {
+        const issues: { type: string; severity: string; message: string; count: number }[] = [];
+        const aged30 = offboardingOpen.filter(i => i.createdAt && new Date(i.createdAt) <= thirtyDaysAgo);
+        if (aged30.length > 0) {
+          issues.push({ type: 'aged_30_days', severity: 'critical', message: 'Offboarding cases open 30+ days', count: aged30.length });
+        }
+        const missingKeys = nexusVehicles.filter(v => v.keys === 'not_present' || v.keys === 'Unknown/Would not Check');
+        if (missingKeys.length > 0) {
+          issues.push({ type: 'missing_keys', severity: 'high', message: 'Vehicles with missing or unchecked keys', count: missingKeys.length });
+        }
+        const notFound = nexusVehicles.filter(v => v.postOffboardedStatus === 'not_found');
+        if (notFound.length > 0) {
+          issues.push({ type: 'vehicles_not_found', severity: 'critical', message: 'Vehicles marked as not found', count: notFound.length });
+        }
+        const unableToReach = nexusVehicles.filter(v => v.postOffboardedStatus === 'unable_to_reach');
+        if (unableToReach.length > 0) {
+          issues.push({ type: 'unable_to_reach', severity: 'high', message: 'Techs unable to reach for vehicle recovery', count: unableToReach.length });
+        }
+        const noTask = allTermedTechs.filter(t => !t.offboardingTaskCreated);
+        if (noTask.length > 0) {
+          issues.push({ type: 'no_offboarding_task', severity: 'high', message: 'Termed techs without offboarding tasks created', count: noTask.length });
+        }
+        return issues;
+      })(),
+    };
+
+    return {
+      generatedAt: now.toISOString(),
+      queueSummary,
+      activityByDay,
+      activityByAction,
+      recentActivity: recentActivity.map(a => ({
+        id: a.id, action: a.action, userId: a.userId,
+        details: a.details, timestamp: a.createdAt,
+      })),
+      userStats: {
+        totalActive: activeUsers.length,
+        totalInactive: allUsers.length - activeUsers.length,
+        byRole: usersByRole,
+      },
+      topAgents,
+      vehicleIntelligence: {
+        nexusTracking: {
+          totalTracked: nexusVehicles.length,
+          byDisposition: nexusStatusBreakdown,
+          byKeyStatus: nexusKeysBreakdown,
+          byRepairStatus: nexusRepairBreakdown,
+          phoneRecoveryInitiated: nexusVehicles.filter(v => v.phoneRecoveryInitiated === 'yes').length,
+        },
+        holmanFleet: {
+          totalVehicles: holmanVehicles.length,
+          byStatus: holmanByStatus,
+          byMake: holmanByMake,
+          byState: holmanByState,
+          byFuelType: holmanByFuel,
+        },
+        fleetMetrics,
+        assignments: {
+          activeAssignments: vehicleAssignments.filter(a => a.assignmentStatus === 'active').length,
+          totalAssignments: vehicleAssignments.length,
+        },
+        fleetQueue: {
+          total: fleetItems.length,
+          byWorkflowType: fleetQueueByType,
+          byStatus: fleetQueueByStatus,
+          byVehicleType: fleetQueueByVehicleType,
+        },
+        assetsQueue: {
+          total: assetsItems.length,
+          byWorkflowType: assetsQueueByType,
+          byStatus: assetsQueueByStatus,
+        },
+        onboarding: {
+          totalHires: hires.length,
+          byEmploymentStatus: onboardingByEmploymentStatus,
+          truckAssignment: onboardingTruckAssigned,
+        },
+        storageLocations: storageUtilization,
+      },
+      onboardingIntelligence,
+      offboardingIntelligence,
+    };
+  }
+
+  // Reporting API (developer only)
+  app.get("/api/reports", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Access denied. Reports require developer role." });
+      }
+
+      const reportData = await generateReportData();
+      res.json(reportData);
+    } catch (error) {
+      console.error('Error generating reports:', error);
+      res.status(500).json({ message: "Failed to generate reports" });
+    }
+  });
   // Productivity Dashboard Export API (Superadmin only)
   app.get("/api/productivity-export/:department", requireAuth, async (req: any, res) => {
     try {
@@ -7391,9 +8200,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/samsara/vehicle/:vehicleName", requireAuth, async (req: any, res) => {
     try {
       const { vehicleName } = req.params;
-      const syncService = getSnowflakeSyncService();
-      const result = await syncService.getSamsaraVehicleLocation(vehicleName);
-      res.json(result);
+      const stalenessHours = req.query.stalenessHours ? parseInt(req.query.stalenessHours as string) : 4;
+      const samsaraService = getSamsaraService();
+      const result = await samsaraService.getVehicleLocation(vehicleName, stalenessHours);
+      
+      if (result) {
+        res.setHeader('X-Data-Source', result.source);
+        res.json(result);
+      } else {
+        res.status(404).json({ found: false, message: "Vehicle location not found" });
+      }
     } catch (error: any) {
       console.error("Error looking up Samsara vehicle location:", error);
       res.status(500).json({ found: false, message: error.message });
@@ -7407,16 +8223,316 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!Array.isArray(vehicleNames)) {
         return res.status(400).json({ error: "vehicleNames must be an array" });
       }
-      const syncService = getSnowflakeSyncService();
-      const resultsMap = await syncService.getSamsaraVehicleLocationsBatch(vehicleNames);
-      const results: Record<string, { vehicleName: string; address: string; lastUpdated: string }> = {};
-      resultsMap.forEach((value, key) => {
-        results[key] = value;
-      });
+      const samsaraService = getSamsaraService();
+      const results = await samsaraService.getVehicleLocationsBatch(vehicleNames);
+      
+      // Determine if any came from live API for header (simplification)
+      const hasLive = results.some(r => r.source === 'live');
+      res.setHeader('X-Data-Source', hasLive ? 'mixed' : 'snowflake');
+      
       res.json(results);
     } catch (error: any) {
       console.error("Error batch looking up Samsara vehicle locations:", error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Dedicated Samsara Integration Routes
+  console.log("Registering Samsara integration routes...");
+  
+  app.get("/api/samsara/status", requireAuth, async (_req, res) => {
+    const samsaraService = getSamsaraService();
+    const snowflake = samsaraService.isSnowflakeAvailable();
+    const liveApi = samsaraService.isLiveApiConfigured();
+    res.json({
+      snowflake,
+      liveApi,
+      groupId: process.env.SAMSARA_GROUP_ID ? 'configured' : null,
+      orgId: process.env.SAMSARA_ORG_ID ? 'configured' : null,
+      message: snowflake
+        ? `Samsara integration active (Snowflake-first${liveApi ? ' + Live API' : ''})`
+        : "Snowflake not configured for Samsara"
+    });
+  });
+
+  app.get("/api/samsara/test", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const vehicles = await samsaraService.getVehicles();
+      let livePing = false;
+      if (samsaraService.isLiveApiConfigured()) {
+        livePing = await samsaraService.testLiveApi();
+      }
+      res.json({
+        snowflakeVehicleCount: vehicles.length,
+        liveApiPing: livePing,
+        status: "ok"
+      });
+    } catch (error: any) {
+      res.status(500).json({ status: "error", message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/vehicles", requireAuth, async (req, res) => {
+    try {
+      const filters = {
+        truckNumber: req.query.truckNumber as string,
+        driverId: req.query.driverId as string
+      };
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getVehicles(filters);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/vehicles/:vehicleId", requireAuth, async (req, res) => {
+    try {
+      const { vehicleId } = req.params;
+      const samsaraService = getSamsaraService();
+      // We don't have a getVehicle method in T001, so we filter the list
+      const data = await samsaraService.getVehicles();
+      const vehicle = data.find(v => v.VEHICLE_ID === vehicleId);
+      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+      res.json(vehicle);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/drivers", requireAuth, async (req, res) => {
+    try {
+      const filters = {
+        ldap: req.query.ldap as string,
+        status: req.query.status as string
+      };
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getDrivers(filters);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/drivers/:driverId", requireAuth, async (req, res) => {
+    try {
+      const { driverId } = req.params;
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getDrivers();
+      const driver = data.find(d => d.DRIVER_ID === driverId);
+      if (!driver) return res.status(404).json({ message: "Driver not found" });
+      res.json(driver);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/assignments", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getAssignments(
+        req.query.date as string,
+        req.query.vehicleId as string,
+        req.query.driverId as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/safety-scores", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getSafetyScores(
+        req.query.driverId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/odometer", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getOdometer(req.query.vehicleId as string);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/trips", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getTrips(
+        req.query.vehicleId as string,
+        req.query.driverId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/maintenance", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getMaintenance();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/fuel", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getFuelEnergy(
+        req.query.vehicleId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/safety-events", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getSafetyEvents(
+        req.query.vehicleId as string,
+        req.query.driverId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/speeding", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getSpeedingEvents(
+        req.query.vehicleId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/idling", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getIdlingEvents(
+        req.query.vehicleId as string,
+        req.query.startDate as string,
+        req.query.endDate as string
+      );
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/devices", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getDevices();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/gateways", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getGateways();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/samsara/drivers", requireAuth, async (req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveCreateDriver(req.body);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/samsara/drivers/:driverId", requireAuth, async (req, res) => {
+    try {
+      const { driverId } = req.params;
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveUpdateDriver(driverId, req.body);
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Live API passthrough routes — fetch directly from Samsara (all pages)
+  app.get("/api/samsara/live/vehicles", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveGetVehicles();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/live/locations", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveGetVehicleLocations();
+      res.set('X-Data-Source', 'live');
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/samsara/live/drivers", requireAuth, async (_req, res) => {
+    try {
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.status(503).json({ message: "Samsara Live API not configured" });
+      }
+      const data = await samsaraService.liveGetAllDrivers();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
     }
   });
 
@@ -8434,6 +9550,192 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PMF connection status
+  app.get("/api/pmf/status", requireAuth, async (req: any, res) => {
+    try {
+      const result = await pmfApiService.getStatus();
+      res.json(result);
+    } catch (error: any) {
+      res.json({ configured: false, message: error.message });
+    }
+  });
+
+  // Get all lots from PMF
+  app.get("/api/pmf/lots", requireAuth, async (req: any, res) => {
+    try {
+      const lots = await pmfApiService.getLots();
+      res.json({ success: true, lots });
+    } catch (error: any) {
+      console.error("Error fetching PMF lots:", error);
+      res.status(500).json({ success: false, message: error.message, lots: [] });
+    }
+  });
+
+  // Get lot types from PMF
+  app.get("/api/pmf/lot-types", requireAuth, async (req: any, res) => {
+    try {
+      const types = await pmfApiService.getLotTypes();
+      res.json({ success: true, types });
+    } catch (error: any) {
+      console.error("Error fetching PMF lot types:", error);
+      res.status(500).json({ success: false, message: error.message, types: [] });
+    }
+  });
+
+  // Get vehicle types from PMF
+  app.get("/api/pmf/vehicle-types", requireAuth, async (req: any, res) => {
+    try {
+      const types = await pmfApiService.getVehicleTypes();
+      res.json({ success: true, types });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle types:", error);
+      res.status(500).json({ success: false, message: error.message, types: [] });
+    }
+  });
+
+  // Get vehicle statuses from PMF
+  app.get("/api/pmf/vehicle-statuses", requireAuth, async (req: any, res) => {
+    try {
+      const statuses = await pmfApiService.getVehicleStatuses();
+      res.json({ success: true, statuses });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle statuses:", error);
+      res.status(500).json({ success: false, message: error.message, statuses: [] });
+    }
+  });
+
+  // Get vehicle by ID from PMF
+  app.get("/api/pmf/vehicle/:id", requireAuth, async (req: any, res) => {
+    try {
+      const vehicle = await pmfApiService.getVehicleById(req.params.id);
+      res.json({ success: true, vehicle });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle by id:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get vehicle activity log from PMF
+  app.get("/api/pmf/vehicle/:id/activitylog", requireAuth, async (req: any, res) => {
+    try {
+      const log = await pmfApiService.getVehicleActivityLog(req.params.id);
+      res.json({ success: true, log });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle activity log:", error);
+      res.status(500).json({ success: false, message: error.message, log: [] });
+    }
+  });
+
+  // Get work order by ID from PMF
+  app.get("/api/pmf/workorder/:id", requireAuth, async (req: any, res) => {
+    try {
+      const workorder = await pmfApiService.getWorkOrderById(req.params.id);
+      res.json({ success: true, workorder });
+    } catch (error: any) {
+      console.error("Error fetching PMF work order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get all work orders from PMF
+  app.get("/api/pmf/workorders", requireAuth, async (req: any, res) => {
+    try {
+      const workorders = await pmfApiService.getWorkOrders();
+      res.json({ success: true, workorders });
+    } catch (error: any) {
+      console.error("Error fetching PMF work orders:", error);
+      res.status(500).json({ success: false, message: error.message, workorders: [] });
+    }
+  });
+
+  // Get work order pricing from PMF
+  app.get("/api/pmf/workorder/:id/pricing", requireAuth, async (req: any, res) => {
+    try {
+      const pricing = await pmfApiService.getWorkOrderPricing(req.params.id);
+      res.json({ success: true, pricing });
+    } catch (error: any) {
+      console.error("Error fetching PMF work order pricing:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get vehicle condition report from PMF
+  app.get("/api/pmf/vehicle/:id/conditionreport", requireAuth, async (req: any, res) => {
+    try {
+      const report = await pmfApiService.getVehicleConditionReport(req.params.id);
+      res.json({ success: true, report });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle condition report:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get vehicle checkin form from PMF
+  app.get("/api/pmf/vehicle/:id/checkin", requireAuth, async (req: any, res) => {
+    try {
+      const checkin = await pmfApiService.getVehicleCheckin(req.params.id);
+      res.json({ success: true, checkin });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle checkin:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get vehicle datapoint types from PMF
+  app.get("/api/pmf/vehicle-datapoint-types", requireAuth, async (req: any, res) => {
+    try {
+      const types = await pmfApiService.getVehicleDatapointTypes();
+      res.json({ success: true, types });
+    } catch (error: any) {
+      console.error("Error fetching PMF vehicle datapoint types:", error);
+      res.status(500).json({ success: false, message: error.message, types: [] });
+    }
+  });
+
+  // Get lot timezones from PMF
+  app.get("/api/pmf/lot-timezones", requireAuth, async (req: any, res) => {
+    try {
+      const timezones = await pmfApiService.getLotTimezones();
+      res.json({ success: true, timezones });
+    } catch (error: any) {
+      console.error("Error fetching PMF lot timezones:", error);
+      res.status(500).json({ success: false, message: error.message, timezones: [] });
+    }
+  });
+
+  // Get ticket categories from PMF
+  app.get("/api/pmf/ticket-categories", requireAuth, async (req: any, res) => {
+    try {
+      const categories = await pmfApiService.getTicketCategories();
+      res.json({ success: true, categories });
+    } catch (error: any) {
+      console.error("Error fetching PMF ticket categories:", error);
+      res.status(500).json({ success: false, message: error.message, categories: [] });
+    }
+  });
+
+  // Get ticket priorities from PMF
+  app.get("/api/pmf/ticket-priorities", requireAuth, async (req: any, res) => {
+    try {
+      const priorities = await pmfApiService.getTicketPriorities();
+      res.json({ success: true, priorities });
+    } catch (error: any) {
+      console.error("Error fetching PMF ticket priorities:", error);
+      res.status(500).json({ success: false, message: error.message, priorities: [] });
+    }
+  });
+
+  // Get ticket statuses from PMF
+  app.get("/api/pmf/ticket-statuses", requireAuth, async (req: any, res) => {
+    try {
+      const statuses = await pmfApiService.getTicketStatuses();
+      res.json({ success: true, statuses });
+    } catch (error: any) {
+      console.error("Error fetching PMF ticket statuses:", error);
+      res.status(500).json({ success: false, message: error.message, statuses: [] });
+    }
+  });
+
   // ============================================
   // TPMS API Routes
   // ============================================
@@ -8484,6 +9786,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(result);
     } catch (error: any) {
       console.error("Error looking up by truck number:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Get all techs updated after a given timestamp (ISO 8601, e.g. 2026-02-27T00:00:00)
+  app.get("/api/tpms/techs-updated-after/:timestamp", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const data = await tpmsService.getTechsUpdatedAfter(req.params.timestamp);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error("Error fetching techs updated after timestamp:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Update a tech info record (mirrors PUT /techinfo on the TPMS API)
+  app.put("/api/tpms/techinfo", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      if (!req.body || typeof req.body !== 'object') {
+        return res.status(400).json({ success: false, message: "Request body is required" });
+      }
+      const data = await tpmsService.updateTechInfo(req.body);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error("Error updating tech info:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Temporary truck assignment
+  app.post("/api/tpms/temp-truck-assign", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      const { ldapId, distNo, truckNo } = req.body || {};
+      if (!ldapId || !distNo || !truckNo) {
+        return res.status(400).json({ success: false, message: "ldapId, distNo, and truckNo are required" });
+      }
+      const data = await tpmsService.tempTruckAssign(ldapId, distNo, truckNo);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error("Error performing temp truck assign:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   });
@@ -10061,6 +11406,427 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, message: "Term roster refreshed from Snowflake" });
     } catch (error: any) {
       console.error("Error syncing weekly offboarding:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // AMS API Integration Routes
+  console.log("Registering AMS API routes...");
+
+  app.get("/api/ams/test", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.testConnection();
+      res.json(result);
+    } catch (error) {
+      console.error("Error testing AMS connection:", error);
+      res.status(500).json({ success: false, message: "Failed to test connection" });
+    }
+  });
+
+  app.get("/api/ams/status", requireAuth, async (req: any, res) => {
+    res.json({ configured: amsApiService.isConfigured() });
+  });
+
+  app.get("/api/ams/vehicles", requireAuth, async (req: any, res) => {
+    try {
+      const { vin, plate, vehicleId, region, district, tech, limit, offset } = req.query;
+      const result = await amsApiService.searchVehicles({
+        vin, plate, vehicleId, region, district, tech,
+        limit: limit ? parseInt(limit) : 100,
+        offset: offset ? parseInt(offset) : 0,
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error searching AMS vehicles:", error);
+      res.status(500).json({ message: error.message || "Failed to search vehicles" });
+    }
+  });
+
+  app.get("/api/ams/vehicles/:vin", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.getVehicleByVin(req.params.vin);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error fetching AMS vehicle:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch vehicle" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/user-updates", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.updateUserFields(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error updating AMS vehicle fields:", error);
+      res.status(500).json({ message: error.message || "Failed to update vehicle fields" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/tech-update", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.updateTechAssignment(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error updating AMS tech assignment:", error);
+      res.status(500).json({ message: error.message || "Failed to update tech assignment" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/comments", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.addComment(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error adding AMS comment:", error);
+      res.status(500).json({ message: error.message || "Failed to add comment" });
+    }
+  });
+
+  app.get("/api/ams/vehicles/:vin/comments", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.getComments(req.params.vin);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error fetching AMS comments:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch comments" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/repair-updates", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.updateRepairStatus(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error updating AMS repair status:", error);
+      res.status(500).json({ message: error.message || "Failed to update repair status" });
+    }
+  });
+
+  app.post("/api/ams/vehicles/:vin/repair-disposition", requireAuth, async (req: any, res) => {
+    try {
+      const result = await amsApiService.completeRepair(req.params.vin, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error completing AMS repair:", error);
+      res.status(500).json({ message: error.message || "Failed to complete repair" });
+    }
+  });
+
+  app.get("/api/ams/techs", requireAuth, async (req: any, res) => {
+    try {
+      const { techName, ldapId, lastUpdateAfter, lastUpdateBefore, limit, offset } = req.query;
+      const result = await amsApiService.searchTechs({
+        techName, ldapId, lastUpdateAfter, lastUpdateBefore,
+        limit: limit ? parseInt(limit) : 100,
+        offset: offset ? parseInt(offset) : 0,
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error searching AMS techs:", error);
+      res.status(500).json({ message: error.message || "Failed to search technicians" });
+    }
+  });
+
+  app.get("/api/ams/lookups/:type", requireAuth, async (req: any, res) => {
+    try {
+      const validTypes = [
+        'colors', 'branding', 'interior', 'sct-tune', 'grades',
+        'vehicle-runs', 'vehicle-looks', 'service-reasons',
+        'repair-status', 'repair-disposition', 'disposition-reasons', 'rental-car'
+      ];
+      if (!validTypes.includes(req.params.type)) {
+        return res.status(400).json({ message: `Invalid lookup type. Valid types: ${validTypes.join(', ')}` });
+      }
+      const result = await amsApiService.getLookup(req.params.type);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error fetching AMS lookup:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch lookup data" });
+    }
+  });
+
+  // ============================================
+  // Segno (SugarCRM) API Routes
+  // ============================================
+  console.log("Registering Segno API routes...");
+
+  app.get("/api/segno/status", requireAuth, async (req: any, res) => {
+    try {
+      const status = await segnoApiService.getStatus();
+      res.json(status);
+    } catch (error: any) {
+      res.json({ configured: false, message: error.message });
+    }
+  });
+
+  app.post("/api/segno/test", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.testConnection();
+      res.json(result);
+    } catch (error: any) {
+      res.json({ success: false, message: error.message });
+    }
+  });
+
+  app.get("/api/segno/onboarding", requireAuth, async (req: any, res) => {
+    try {
+      const offset = parseInt(req.query.offset as string) || 0;
+      const maxResults = parseInt(req.query.max as string) || 100;
+      const result = await segnoApiService.getOnboardingList({ offset, maxResults });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error fetching Segno onboarding list:", error);
+      res.status(500).json({ success: false, message: error.message, records: [], totalCount: 0, nextOffset: 0 });
+    }
+  });
+
+  app.get("/api/segno/onboarding/search", requireAuth, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string) || "";
+      if (!q.trim()) return res.json({ success: true, records: [] });
+      const records = await segnoApiService.searchOnboarding(q.trim());
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error searching Segno onboarding:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/onboarding/by-employee/:employeeId", requireAuth, async (req: any, res) => {
+    try {
+      const records = await segnoApiService.searchOnboardingByEmployeeId(req.params.employeeId);
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error looking up Segno onboarding by employee ID:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/onboarding/by-enterprise/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      const records = await segnoApiService.searchOnboardingByEnterpriseId(req.params.enterpriseId);
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error looking up Segno onboarding by enterprise ID:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/onboarding/:id", requireAuth, async (req: any, res) => {
+    try {
+      const record = await segnoApiService.getOnboardingById(req.params.id);
+      if (!record) return res.status(404).json({ success: false, message: "Record not found" });
+      res.json({ success: true, record });
+    } catch (error: any) {
+      console.error("Error fetching Segno onboarding record:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/segno/onboarding", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.createOnboardingRecord(req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error creating Segno onboarding record:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.patch("/api/segno/onboarding/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.updateOnboardingRecord(req.params.id, req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error updating Segno onboarding record:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.delete("/api/segno/onboarding/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.deleteOnboardingRecord(req.params.id);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error deleting Segno onboarding record:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // FP_events routes
+  app.get("/api/segno/events", requireAuth, async (req: any, res) => {
+    try {
+      const offset = parseInt(req.query.offset as string) || 0;
+      const maxResults = parseInt(req.query.max as string) || 50;
+      const result = await segnoApiService.getEventsList({ offset, maxResults });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error fetching Segno events:", error);
+      res.status(500).json({ success: false, message: error.message, records: [], totalCount: 0, nextOffset: 0 });
+    }
+  });
+
+  app.get("/api/segno/events/search", requireAuth, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string) || "";
+      const status = req.query.status as string | undefined;
+      const records = await segnoApiService.searchEvents(q, status);
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error searching Segno events:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/events/by-status/:status", requireAuth, async (req: any, res) => {
+    try {
+      const records = await segnoApiService.getEventsByStatus(req.params.status);
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error fetching Segno events by status:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/events/:id", requireAuth, async (req: any, res) => {
+    try {
+      const record = await segnoApiService.getEventsById(req.params.id);
+      if (!record) return res.status(404).json({ success: false, message: "Event not found" });
+      res.json({ success: true, record });
+    } catch (error: any) {
+      console.error("Error fetching Segno event:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/segno/events", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.createEvent(req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error creating Segno event:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.patch("/api/segno/events/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.updateEvent(req.params.id, req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error updating Segno event:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.delete("/api/segno/events/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.deleteEvent(req.params.id);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error deleting Segno event:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Asset_Order routes
+  app.get("/api/segno/asset-orders", requireAuth, async (req: any, res) => {
+    try {
+      const offset = parseInt(req.query.offset as string) || 0;
+      const maxResults = parseInt(req.query.max as string) || 50;
+      const result = await segnoApiService.getAssetOrdersList({ offset, maxResults });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error fetching Segno asset orders:", error);
+      res.status(500).json({ success: false, message: error.message, records: [], totalCount: 0, nextOffset: 0 });
+    }
+  });
+
+  app.get("/api/segno/asset-orders/search", requireAuth, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string) || "";
+      if (!q.trim()) return res.json({ success: true, records: [] });
+      const records = await segnoApiService.searchAssetOrders(q.trim());
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error searching Segno asset orders:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/asset-orders/:id", requireAuth, async (req: any, res) => {
+    try {
+      const record = await segnoApiService.getAssetOrderById(req.params.id);
+      if (!record) return res.status(404).json({ success: false, message: "Asset order not found" });
+      res.json({ success: true, record });
+    } catch (error: any) {
+      console.error("Error fetching Segno asset order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/segno/asset-orders", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.createAssetOrder(req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error creating Segno asset order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.patch("/api/segno/asset-orders/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.updateAssetOrder(req.params.id, req.body);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error updating Segno asset order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.delete("/api/segno/asset-orders/:id", requireAuth, async (req: any, res) => {
+    try {
+      const result = await segnoApiService.deleteAssetOrder(req.params.id);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error deleting Segno asset order:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Users routes
+  app.get("/api/segno/users", requireAuth, async (req: any, res) => {
+    try {
+      const offset = parseInt(req.query.offset as string) || 0;
+      const maxResults = parseInt(req.query.max as string) || 50;
+      const result = await segnoApiService.getUsersList({ offset, maxResults });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error fetching Segno users:", error);
+      res.status(500).json({ success: false, message: error.message, records: [], totalCount: 0, nextOffset: 0 });
+    }
+  });
+
+  app.get("/api/segno/users/search", requireAuth, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string) || "";
+      if (!q.trim()) return res.json({ success: true, records: [] });
+      const records = await segnoApiService.searchUsers(q.trim());
+      res.json({ success: true, records });
+    } catch (error: any) {
+      console.error("Error searching Segno users:", error);
+      res.status(500).json({ success: false, message: error.message, records: [] });
+    }
+  });
+
+  app.get("/api/segno/users/:id", requireAuth, async (req: any, res) => {
+    try {
+      const record = await segnoApiService.getUserById(req.params.id);
+      if (!record) return res.status(404).json({ success: false, message: "User not found" });
+      res.json({ success: true, record });
+    } catch (error: any) {
+      console.error("Error fetching Segno user:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   });

@@ -6,6 +6,7 @@ export interface PreviewUser {
   username: string;
   role: UserRole;
   departments: string[];
+  permissionOverrides?: any;
 }
 
 interface PreviewRoleContextType {

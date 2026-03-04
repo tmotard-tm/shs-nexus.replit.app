@@ -17,6 +17,8 @@ import { OnboardingOverlay } from "@/components/onboarding-overlay";
 import { PreviewModeBanner } from "@/components/preview-mode-banner";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
+import ManualLogin from "@/pages/manual-login";
+import SsoCallback from "@/pages/sso-callback";
 import AssistanceSelection from "@/pages/assistance-selection";
 import CreateVehicle from "@/pages/create-vehicle-location";
 import AssignVehicleLocation from "@/pages/assign-vehicle-location";
@@ -27,6 +29,11 @@ import ActiveVehicles from "@/pages/active-vehicles";
 import Dashboard from "@/pages/dashboard";
 import Integrations from "@/pages/integrations";
 import HolmanIntegration from "@/pages/holman-integration";
+import AmsIntegration from "@/pages/ams-integration";
+import ParqIntegration from "@/pages/parq-integration";
+import SegnoIntegration from "@/pages/segno-integration";
+import SamsaraIntegration from "@/pages/samsara-integration";
+import TpmsIntegration from "@/pages/tpms-integration";
 import QueueManagement from "@/pages/queue-management";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
@@ -40,12 +47,12 @@ import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
-import VehicleAssignments from "@/pages/vehicle-assignments";
 import FleetManagement from "@/pages/fleet-management";
 import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import WeeklyOffboarding from "@/pages/weekly-offboarding";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
+import Reporting from "@/pages/reporting";
 import CommunicationHub from "@/pages/communication-hub";
 import TestRepairResults from "@/pages/test-repair-results";
 import About from "@/pages/about";
@@ -55,6 +62,17 @@ import { PermissionProtectedRoute } from "@/components/permission-protected-rout
 import { PublicFormRoute } from "@/components/public-form-route";
 import { RoleProtectedRoute } from "@/components/role-protected-route";
 import { RoleBasedHome } from "@/components/role-based-home";
+import { SecurityQuestionsGate } from "@/components/security-questions-gate";
+
+function AmsGate() {
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
+  if (user?.username !== 'tmotard') {
+    navigate('/integrations');
+    return null;
+  }
+  return <MainContent><AmsIntegration /></MainContent>;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -77,6 +95,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/login" component={Login} />
+      <Route path="/manual-login" component={ManualLogin} />
+      <Route path="/sso-callback" component={SsoCallback} />
       
       <Route path="/">
         <ProtectedRoute>
@@ -278,15 +298,41 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/tech-roster">
+      <Route path="/ams-integration">
         <ProtectedRoute>
-          <TechRoster />
+          <AmsGate />
         </ProtectedRoute>
       </Route>
 
-      <Route path="/vehicle-assignments">
+      <Route path="/parq-integration">
         <ProtectedRoute>
-          <VehicleAssignments />
+          <ParqIntegration />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/samsara-integration">
+        <ProtectedRoute>
+          <MainContent>
+            <SamsaraIntegration />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/tpms-integration">
+        <ProtectedRoute>
+          <TpmsIntegration />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/segno-integration">
+        <ProtectedRoute>
+          <SegnoIntegration />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/tech-roster">
+        <ProtectedRoute>
+          <TechRoster />
         </ProtectedRoute>
       </Route>
 
@@ -361,6 +407,14 @@ function Router() {
           <AnalyticsBoard />
         </ProtectedRoute>
       </Route>
+
+      <Route path="/reporting">
+        <ProtectedRoute>
+          <MainContent>
+            <Reporting />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
       
       <Route path="/change-password">
         <ProtectedRoute>
@@ -396,6 +450,7 @@ function App() {
                     <OnboardingProvider>
                       <Toaster />
                       <OnboardingOverlay />
+                      <SecurityQuestionsGate />
                       <BackgroundSyncManager />
                       <Router />
                     </OnboardingProvider>

@@ -21,6 +21,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       vehicleAssignmentDash: true,
       operationsDash: true,
       rentalReductionDash: true,
+      reporting: true,
     },
     queues: {
       enabled: true,
@@ -40,7 +41,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       fleetManagement: true,
       weeklyOnboarding: true,
       weeklyOffboarding: true,
-      vehicleAssignments: true,
+      communicationHub: true,
       techRoster: true,
     },
     activities: {
@@ -107,19 +108,18 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       unassignVehicle: true,
       viewHistory: true,
     },
-    vehicleAssignments: {
-      enabled: true,
-      viewAssignments: true,
-      createAssignment: true,
-      editAssignment: true,
-      deleteAssignment: true,
-      syncFromTPMS: true,
-    },
     storageSpots: {
       enabled: true,
       createSpot: true,
       editSpot: true,
       deleteSpot: true,
+    },
+    communicationHub: {
+      enabled: true,
+      editTemplates: true,
+      changeMode: true,
+      manageWhitelist: true,
+      viewLogs: true,
     },
   },
 };
@@ -145,6 +145,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       vehicleAssignmentDash: true,
       operationsDash: true,
       rentalReductionDash: true,
+      reporting: false,
     },
     queues: {
       enabled: true,
@@ -160,16 +161,17 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       integrations: false,
       userManagement: true,
       templateManagement: true,
-      rolePermissions: false,
+      rolePermissions: true,
       fleetManagement: true,
       weeklyOnboarding: true,
       weeklyOffboarding: true,
-      vehicleAssignments: true,
+      communicationHub: true,
       techRoster: true,
     },
     activities: {
       enabled: true,
       activityLogs: true,
+      communicationHub: true,
     },
     account: {
       enabled: true,
@@ -230,19 +232,18 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       unassignVehicle: true,
       viewHistory: true,
     },
-    vehicleAssignments: {
-      enabled: true,
-      viewAssignments: true,
-      createAssignment: true,
-      editAssignment: true,
-      deleteAssignment: false,
-      syncFromTPMS: true,
-    },
     storageSpots: {
       enabled: true,
       createSpot: true,
       editSpot: true,
       deleteSpot: false,
+    },
+    communicationHub: {
+      enabled: true,
+      editTemplates: true,
+      changeMode: false,
+      manageWhitelist: true,
+      viewLogs: true,
     },
   },
 };
@@ -267,6 +268,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       vehicleAssignmentDash: false,
       operationsDash: false,
       rentalReductionDash: false,
+      reporting: false,
     },
     queues: {
       enabled: true,
@@ -286,12 +288,13 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       fleetManagement: false,
       weeklyOnboarding: false,
       weeklyOffboarding: false,
-      vehicleAssignments: false,
+      communicationHub: false,
       techRoster: false,
     },
     activities: {
       enabled: false,
       activityLogs: false,
+      communicationHub: false,
     },
     account: {
       enabled: true,
@@ -352,19 +355,18 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       unassignVehicle: false,
       viewHistory: false,
     },
-    vehicleAssignments: {
-      enabled: false,
-      viewAssignments: false,
-      createAssignment: false,
-      editAssignment: false,
-      deleteAssignment: false,
-      syncFromTPMS: false,
-    },
     storageSpots: {
       enabled: false,
       createSpot: false,
       editSpot: false,
       deleteSpot: false,
+    },
+    communicationHub: {
+      enabled: false,
+      editTemplates: false,
+      changeMode: false,
+      manageWhitelist: false,
+      viewLogs: false,
     },
   },
 };
@@ -402,7 +404,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
   // Admin can access most routes (permissions-based)
   if (userRole === 'admin') {
     // Admin-specific route restrictions
-    const adminRestrictedRoutes = ['/role-permissions', '/integrations'];
+    const adminRestrictedRoutes = ['/integrations'];
     if (adminRestrictedRoutes.includes(route)) {
       return false;
     }
@@ -417,7 +419,6 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/dashboard': () => perms.sidebar.dashboards.dashboard,
     '/analytics': () => perms.sidebar.dashboards.vehicleAssignmentDash,
     '/fleet-management': () => perms.sidebar.management.fleetManagement,
-    '/vehicle-assignments': () => perms.sidebar.management.vehicleAssignments,
     '/operations': () => perms.sidebar.dashboards.operationsDash,
     '/operations-dashboard': () => perms.sidebar.dashboards.operationsDash,
     '/queue-management': () => perms.sidebar.queues.queueManagement,
@@ -434,11 +435,23 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/tech-roster': () => perms.sidebar.management.techRoster,
     '/weekly-onboarding': () => perms.sidebar.management.weeklyOnboarding,
     '/weekly-offboarding': () => perms.sidebar.management.weeklyOffboarding,
+    '/communication-hub': () => perms.sidebar.management.communicationHub,
     '/role-permissions': () => perms.sidebar.management.rolePermissions,
+    '/holman-integration': () => perms.sidebar.management.integrations,
+    '/field-mapping': () => perms.sidebar.management.integrations,
+    '/decommissions-queue': () => perms.sidebar.queues.queueManagement,
+    '/active-vehicles': () => perms.sidebar.management.fleetManagement,
+    '/test-repair-results': () => perms.sidebar.management.integrations,
     '/activity': () => perms.sidebar.activities.activityLogs,
     '/activity-logs': () => perms.sidebar.activities.activityLogs,
     '/change-password': () => perms.sidebar.account.changePassword,
     '/help': () => perms.sidebar.helpAndTutorial.tutorial,
+    '/about': () => perms.sidebar.helpAndTutorial.about,
+    '/tutorial': () => perms.sidebar.helpAndTutorial.tutorial,
+    '/fleet-distribution': () => perms.sidebar.dashboards.vehicleAssignmentDash,
+    '/analytics-board': () => perms.sidebar.dashboards.vehicleAssignmentDash,
+    '/rental-dashboard': () => perms.sidebar.dashboards.rentalReductionDash,
+    '/reporting': () => perms.sidebar.dashboards.reporting,
   };
 
   // Check exact route match
@@ -448,6 +461,24 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
 
   // Handle wildcard patterns for forms - all authenticated users can access forms
   if (route.startsWith('/forms/')) {
+    return true;
+  }
+
+  // Handle task work routes - all authenticated users can access their assigned tasks
+  if (route.startsWith('/tasks/')) {
+    return true;
+  }
+
+  // Legacy form routes - all authenticated users can access these
+  const legacyFormRoutes = [
+    '/create-vehicle-location',
+    '/assign-vehicle-location',
+    '/update-vehicle',
+    '/onboard-hire',
+    '/offboard-technician',
+    '/sears-drive-enrollment',
+  ];
+  if (legacyFormRoutes.includes(route)) {
     return true;
   }
 

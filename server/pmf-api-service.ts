@@ -458,6 +458,15 @@ export class PMFApiService {
     }
   }
 
+  async getStatus(): Promise<{ configured: boolean; message: string }> {
+    try {
+      await this.getAccessToken();
+      return { configured: true, message: 'Connected to PARQ My Fleet API' };
+    } catch (error) {
+      return { configured: false, message: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
       await this.getAccessToken();
@@ -470,6 +479,161 @@ export class PMFApiService {
         success: false,
         message: error instanceof Error ? error.message : 'Unknown error'
       };
+    }
+  }
+
+  async getLots(): Promise<any[]> {
+    try {
+      const lots = await this.makeRequest<any[]>('/api/public/v1/lot');
+      return Array.isArray(lots) ? lots : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching lots:', error);
+      throw error;
+    }
+  }
+
+  async getLotTypes(): Promise<any[]> {
+    try {
+      const types = await this.makeRequest<any[]>('/api/public/v1/lot/types');
+      return Array.isArray(types) ? types : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching lot types:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleTypes(): Promise<any[]> {
+    try {
+      const types = await this.makeRequest<any[]>('/api/public/v1/vehicle/types');
+      return Array.isArray(types) ? types : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle types:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleStatuses(): Promise<any[]> {
+    try {
+      const statuses = await this.makeRequest<any[]>('/api/public/v1/vehicle/statuses');
+      return Array.isArray(statuses) ? statuses : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle statuses:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleById(id: string): Promise<any> {
+    try {
+      return await this.makeRequest<any>(`/api/public/v1/vehicle/${id}`);
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle by id:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleActivityLog(id: string): Promise<any[]> {
+    try {
+      const log = await this.makeRequest<any>(`/api/public/v1/vehicle/${id}/activitylog`);
+      return Array.isArray(log) ? log : (log ? [log] : []);
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle activity log:', error);
+      throw error;
+    }
+  }
+
+  async getWorkOrderById(id: string): Promise<any> {
+    try {
+      return await this.makeRequest<any>(`/api/public/v1/workorder/${id}`);
+    } catch (error) {
+      console.error('[PMF] Error fetching work order:', error);
+      throw error;
+    }
+  }
+
+  async getWorkOrders(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any>('/api/public/v1/workorder');
+      return Array.isArray(result) ? result : (result ? [result] : []);
+    } catch (error) {
+      console.error('[PMF] Error fetching work orders:', error);
+      throw error;
+    }
+  }
+
+  async getWorkOrderPricing(id: string): Promise<any> {
+    try {
+      return await this.makeRequest<any>(`/api/public/v1/workorder/${id}/pricing`);
+    } catch (error) {
+      console.error('[PMF] Error fetching work order pricing:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleConditionReport(id: string): Promise<any> {
+    try {
+      return await this.makeRequest<any>(`/api/public/v1/vehicle/${id}/conditionreport`);
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle condition report:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleCheckin(id: string): Promise<any> {
+    try {
+      return await this.makeRequest<any>(`/api/public/v1/vehicle/${id}/checkin`);
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle checkin:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleDatapointTypes(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/vehicle/datapointtypes');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching vehicle datapoint types:', error);
+      throw error;
+    }
+  }
+
+  async getLotTimezones(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/lot/timezones');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching lot timezones:', error);
+      throw error;
+    }
+  }
+
+  async getTicketCategories(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/ticket/categories');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching ticket categories:', error);
+      throw error;
+    }
+  }
+
+  async getTicketPriorities(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/ticket/priorities');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching ticket priorities:', error);
+      throw error;
+    }
+  }
+
+  async getTicketStatuses(): Promise<any[]> {
+    try {
+      const result = await this.makeRequest<any[]>('/api/public/v1/ticket/statuses');
+      return Array.isArray(result) ? result : [];
+    } catch (error) {
+      console.error('[PMF] Error fetching ticket statuses:', error);
+      throw error;
     }
   }
 }
