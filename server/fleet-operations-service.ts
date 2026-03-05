@@ -109,20 +109,18 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
   try {
     const { holmanAssignmentUpdateService } = await import("./holman-assignment-update-service");
     if (action === "assign") {
-      const result = await holmanAssignmentUpdateService.updateVehicleAssignment({
-        vehicleNumber: params.truckNumber,
-        driverEnterpriseId: params.ldapId,
-        driverName: params.techName || params.ldapId,
-      });
+      const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
+        params.truckNumber,
+        params.ldapId
+      );
       if (result.success) return { status: "success", message: result.message || "Assigned" };
       return { status: "failed", message: result.message || "Holman assign failed" };
     }
     if (action === "unassign") {
-      const result = await holmanAssignmentUpdateService.updateVehicleAssignment({
-        vehicleNumber: params.truckNumber,
-        driverEnterpriseId: "^null^",
-        driverName: "^null^",
-      });
+      const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
+        params.truckNumber,
+        null
+      );
       if (result.success) return { status: "success", message: "Unassigned" };
       return { status: "failed", message: result.message || "Holman unassign failed" };
     }
@@ -151,11 +149,30 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       return { status: "success", message: "Assigned" };
     }
     if (action === "unassign") {
-      await ams.updateTechAssignment(vin, {
-        techEnterpriseId: "",
-        updateUser: params.requestedBy || "nexus",
-      });
-      return { status: "success", message: "Unassigned" };
+      let currentTech: string | null = null;
+      try {
+        const vehicle = await ams.getVehicleByVin(vin);
+        currentTech = vehicle?.Tech ?? null;
+      } catch {
+        // VIN not found in AMS - skip
+        return { status: "skipped", message: "Vehicle not found in AMS" };
+      }
+      if (!currentTech) {
+        return { status: "skipped", message: "No tech assigned in AMS" };
+      }
+      try {
+        await ams.updateTechAssignment(vin, {
+          techEnterpriseId: null as any,
+          updateUser: params.requestedBy || "nexus",
+        });
+        return { status: "success", message: "Unassigned" };
+      } catch (unassignErr: any) {
+        const msg = unassignErr.message || "";
+        if (msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("tech")) {
+          return { status: "skipped", message: "Tech already cleared in AMS" };
+        }
+        throw unassignErr;
+      }
     }
     if (action === "update_address") {
       await ams.updateUserFields(vin, {
@@ -172,16 +189,19 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
 }
 
 function buildResult(log: FleetOperationLog, tpms: SystemResult, holman: SystemResult, ams: SystemResult): OperationResult {
-  const overallSuccess = tpms.status === "success" && holman.status === "success" && ams.status === "success";
-  const anySuccess = tpms.status === "success" || holman.status === "success" || ams.status === "success";
   const anyFailed = tpms.status === "failed" || holman.status === "failed" || ams.status === "failed";
+  const anySuccess = tpms.status === "success" || holman.status === "success" || ams.status === "success";
+  // overallSuccess = nothing failed (success + skipped is a clean outcome)
+  const overallSuccess = !anyFailed;
+  // partialSuccess = some failed AND some succeeded (true mixed outcome)
+  const partialSuccess = anyFailed && anySuccess;
   return {
     log,
     tpms,
     holman,
     ams,
     overallSuccess,
-    partialSuccess: anySuccess && anyFailed,
+    partialSuccess,
   };
 }
 
