@@ -35,7 +35,7 @@ Preferred communication style: Simple, everyday language.
 
 ## Data Storage
 -   **Database**: PostgreSQL with Neon serverless driver
--   **Schema**: Users, requests, API configurations, activity logs, role permissions, `all_techs`, `sync_logs`, `vehicle_nexus_data`, `communication_templates`, `communication_whitelist`, `communication_logs`.
+-   **Schema**: Users, requests, API configurations, activity logs, role permissions, `all_techs`, `sync_logs`, `vehicle_nexus_data`, `communication_templates`, `communication_whitelist`, `communication_logs`, `rental_qualification_log`, `holman_po_cache`, `fleet_operation_log`.
 -   **Migrations**: Drizzle Kit
 
 ## Authentication & Authorization
@@ -54,8 +54,11 @@ Preferred communication style: Simple, everyday language.
 -   **Snowflake Sync System**: Automated daily synchronization for `all_techs` (employee roster), `termed_techs` (for offboarding), and TPMS data. The offboarding queue creation (`syncTermedTechs`) uses the same Snowflake data source as the Weekly Offboarding page (`ORA_TECH_TERM_ROSTER_VW_VIEW` + `SEPARATION_FLEET_DETAILS`) as the definitive source of truth. Uses step-based detection (`data.step` field) to identify which of the 5 Day 0 tasks already exist per tech and only creates missing ones (partial gap-fill). `markEmployeeOffboardingCreated` accepts both `employeeId` and `techRacfid` for deterministic matching across roster and separation-only records.
 -   **TPMS Integration**: Syncs technician-vehicle assignments from Snowflake daily snapshots and retrieves mobile phone numbers.
 -   **Vehicle Assignment System**: Aggregates data from Snowflake, TPMS, and Holman.
--   **Fleet Management Page**: Consolidated interface for managing vehicles, including stats, search, filters, actions, and a "Nexus Tracking" section for post-offboarding vehicle information.
--   **Holman Assignment Sync**: Updates Holman records based on TPMS technician data to resolve assignment discrepancies.
+-   **Fleet Management Page**: Consolidated interface for managing vehicles, including stats, search, filters, actions, OOS toggle/filter, Fleet Operations modals (assign/unassign/transfer/address), PO tracker tab, and a "Nexus Tracking" section for post-offboarding vehicle information.
+-   **Rental Operations**: Rental tracking, data quality qualification, and consolidated reporting from Snowflake pipeline tables (`HOLMAN_OPEN_RENTAL_REPORT`, `HOLMAN_CLOSED_RENTAL_REPORT`, `ENTERPRISE_OPEN_RENTAL_TICKET_REPORT`). Includes XLSX export, integrity checks, and qualification history. Routes: `/api/rental-ops/*`.
+-   **Holman PO Cache**: Cached PO data synced from Holman for vehicle-level lookup. Routes: `/api/holman/pos/*`. Schema: `holman_po_cache` table.
+-   **Fleet Operation Log**: Tracks assign/unassign/transfer/address operations with TPMS/Holman/AMS status. Routes: `/api/fleet-ops/*`. Schema: `fleet_operation_log` table.
+-   **Holman Assignment Sync**: Updates Holman records based on TPMS technician data to resolve assignment discrepancies. Includes `reapplyRecentUnassigns()` for clearing tech assignments after sync.
 -   **Offboarding Workflow Enhancements**: Uses a unified Assets Queue as a Day 0 task with BYOV detection and blocking logic, and a Phase 2 trigger mechanism for creating subsequent fleet tasks based on Day 0 task completion. Features auto-save for task progress, tech data enrichment with HR separation data, date range filtering, incomplete task warnings, and a full-page detail view.
 -   **Communication Hub**: Centralized management for email and SMS templates with `Simulated`, `Whitelisted`, and `Live` modes, developer-only access, and audit logging. Located under Activity section in sidebar. Whitelist mode sends TO all whitelisted addresses with `[TEST - Original recipient: ...]` subject prefix.
 -   **Vehicle Disposition**: Assets Queue displays read-only disposition status from `vehicle_nexus_data.postOffboardedStatus`, set via Weekly Offboarding page. Replaces legacy routing radio buttons.

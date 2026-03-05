@@ -11,12 +11,16 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
-  CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, 
-  UserX, History, AlertTriangle, User, Package, Car, X, Gauge
+  CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
+  UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
+  UserPlus, ArrowLeftRight, FileText, Home, Activity
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
@@ -109,6 +113,7 @@ export default function FleetManagement() {
   const [mismatchFilter, setMismatchFilter] = useState("all");
   
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [showOos, setShowOos] = useState(false);
   
   // Quick lookup state
   const [techLookup, setTechLookup] = useState("");
@@ -237,7 +242,104 @@ export default function FleetManagement() {
     },
   });
 
-  // Generate filter options from data
+  // ─── Cross-System Fleet Operations State ───────────────────────────────────
+  type FleetModal = "assign" | "unassign" | "transfer" | "address" | null;
+  const [activeModal, setActiveModal] = useState<FleetModal>(null);
+
+  // Assign form
+  const [assignLdap, setAssignLdap] = useState("");
+  const [assignTechName, setAssignTechName] = useState("");
+  const [assignDistrict, setAssignDistrict] = useState("");
+  const [assignNotes, setAssignNotes] = useState("");
+
+  // Transfer form
+  const [transferToLdap, setTransferToLdap] = useState("");
+  const [transferToName, setTransferToName] = useState("");
+
+  // Unassign form
+  const [unassignNotes, setUnassignNotes] = useState("");
+
+  // Address form
+  const [addrLine1, setAddrLine1] = useState("");
+  const [addrCity, setAddrCity] = useState("");
+  const [addrState, setAddrState] = useState("");
+  const [addrZip, setAddrZip] = useState("");
+
+  // Operation result (per-system status returned from fleet-ops endpoint)
+  const [opResult, setOpResult] = useState<any>(null);
+
+  // POs for selected vehicle
+  const { data: vehiclePOs, isLoading: posLoading } = useQuery<any[]>({
+    queryKey: ["/api/holman/pos", selectedVehicle?.vehicleNumber],
+    enabled: !!selectedVehicle?.vehicleNumber,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const res = await fetch(`/api/holman/pos/${selectedVehicle!.vehicleNumber}`, { credentials: "include" });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json.data || json || [];
+    },
+  });
+
+  // Fleet op logs for selected vehicle
+  const { data: vehicleOpLogs, isLoading: logsLoading } = useQuery<any[]>({
+    queryKey: ["/api/fleet-ops/logs", selectedVehicle?.vehicleNumber],
+    enabled: !!selectedVehicle?.vehicleNumber,
+    staleTime: 2 * 60 * 1000,
+    queryFn: async () => {
+      const res = await fetch(`/api/fleet-ops/logs?truckNumber=${encodeURIComponent(selectedVehicle!.vehicleNumber)}`, { credentials: "include" });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json.data || json || [];
+    },
+  });
+
+  const fleetOpMutation = useMutation({
+    mutationFn: async ({ endpoint, body }: { endpoint: string; body: any }) => {
+      const res = await apiRequest("POST", endpoint, body);
+      const json = await res.json();
+      return json;
+    },
+    onSuccess: (data: any) => {
+      setOpResult(data);
+      queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/logs", selectedVehicle?.vehicleNumber] });
+      queryClient.invalidateQueries({ queryKey: ["/api/holman/fleet-vehicles"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Operation failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  function openModal(m: FleetModal) {
+    setOpResult(null);
+    // Pre-populate district from selected vehicle when opening assign/transfer
+    if (m === "assign" || m === "transfer") {
+      setAssignDistrict(selectedVehicle?.district || "");
+    }
+    // Pre-populate from tech when opening transfer
+    if (m === "transfer") {
+      setTransferToLdap("");
+      setTransferToName("");
+    }
+    // Pre-populate address from vehicle location
+    if (m === "address") {
+      setAddrLine1(selectedVehicle?.city ? `${selectedVehicle.city}` : "");
+      setAddrCity(selectedVehicle?.city || "");
+      setAddrState(selectedVehicle?.state || "");
+      setAddrZip(selectedVehicle?.zip || "");
+    }
+    setActiveModal(m);
+  }
+
+  function SystemStatusBadge({ status }: { status: string }) {
+    if (status === "success") return <Badge className="bg-green-600 text-white text-xs"><CheckCircle className="h-3 w-3 mr-1 inline" />Success</Badge>;
+    if (status === "failed") return <Badge className="bg-red-600 text-white text-xs"><XCircle className="h-3 w-3 mr-1 inline" />Failed</Badge>;
+    if (status === "skipped") return <Badge variant="secondary" className="text-xs">Skipped</Badge>;
+    if (status === "pending") return <Badge variant="outline" className="text-xs"><Loader2 className="h-3 w-3 mr-1 inline animate-spin" />Pending</Badge>;
+    return <Badge variant="secondary" className="text-xs">{status || "—"}</Badge>;
+  }
+
+  // ─── Generate filter options from data ────────────────────────────────────
   const filterOptions = useMemo(() => {
     const unique = (arr: string[]) => Array.from(new Set(arr.filter(Boolean))).sort();
     const uniqueNum = (arr: number[]) => Array.from(new Set(arr.filter(n => n > 0))).sort((a, b) => b - a);
@@ -270,10 +372,19 @@ export default function FleetManagement() {
     holmanTechFilter, tpmsTechFilter, mismatchFilter
   ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0);
 
-  // Apply filters
+  // OOS pre-filter — exclude out-of-service vehicles unless toggle is on
+  const activeVehicles = useMemo(() =>
+    showOos ? allVehicles : allVehicles.filter(v => !v.outOfServiceDate && v.statusCode !== 2),
+    [allVehicles, showOos]
+  );
+  const oosCount = allVehicles.length - activeVehicles.length;
+
+  // Apply filters — when a search is active, include OOS vehicles so targeted
+  // lookups (e.g. searching by truck number) always return a result
   const filteredVehicles = useMemo(() => {
-    return allVehicles.filter(vehicle => {
-      const searchLower = searchQuery.toLowerCase().trim();
+    const searchLower = searchQuery.toLowerCase().trim();
+    const pool = (searchLower && !showOos) ? allVehicles : activeVehicles;
+    return pool.filter(vehicle => {
       const searchNoLeadingZeros = searchLower.replace(/^0+/, '');
       const vehicleNumNoLeadingZeros = (vehicle.vehicleNumber || '').replace(/^0+/, '').toLowerCase();
       
@@ -340,7 +451,7 @@ export default function FleetManagement() {
              matchesState && matchesCity && matchesLicenseState && matchesRegion && matchesDivision && matchesDistrict &&
              matchesHolmanTech && matchesTpmsTech && matchesMismatch;
     });
-  }, [allVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
+  }, [activeVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
       vehicleProgramFilter, brandingFilter, interiorFilter, tuneStatusFilter,
       assignmentStatusFilter,
       stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
@@ -429,9 +540,10 @@ export default function FleetManagement() {
   };
 
   // Stats - vehicle is assigned if it has a TPMS tech (source of truth for assignments)
-  const assignedCount = allVehicles.filter(v => v.tpmsAssignedTechId).length;
-  const unassignedCount = allVehicles.length - assignedCount;
-  const mismatchCount = allVehicles.filter(v => {
+  // These counts respect the OOS filter so cards always reflect the visible fleet
+  const assignedCount = activeVehicles.filter(v => v.tpmsAssignedTechId).length;
+  const unassignedCount = activeVehicles.length - assignedCount;
+  const mismatchCount = activeVehicles.filter(v => {
     const h = v.holmanTechAssigned?.trim() || '';
     const t = v.tpmsAssignedTechId?.trim() || '';
     return (h && t && h.toLowerCase() !== t.toLowerCase()) || (h && !t);
@@ -456,7 +568,7 @@ export default function FleetManagement() {
                   <CardTitle className="text-sm font-medium">Total Vehicles</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold" data-testid="text-total-vehicles">{allVehicles.length}</p>
+                  <p className="text-2xl font-bold" data-testid="text-total-vehicles">{activeVehicles.length}</p>
                 </CardContent>
               </Card>
               <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/10">
@@ -543,12 +655,12 @@ export default function FleetManagement() {
               </Alert>
             )}
 
-            {isDegradedMode && !isLoading && allVehicles.length > 0 && (
+            {isDegradedMode && !isLoading && activeVehicles.length > 0 && (
               <Alert className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
                 <Database className="h-4 w-4 text-amber-600" />
                 <AlertTitle className="text-amber-800 dark:text-amber-400">Using Cached Data</AlertTitle>
                 <AlertDescription className="text-amber-700 dark:text-amber-300">
-                  Holman API is unavailable. Showing {allVehicles.length} cached vehicles.
+                  Holman API is unavailable. Showing {activeVehicles.length} cached vehicles{oosCount > 0 && !showOos ? ` (${oosCount} Out of Service hidden)` : ""}.
                 </AlertDescription>
               </Alert>
             )}
@@ -961,7 +1073,24 @@ export default function FleetManagement() {
                 </Collapsible>
 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>Showing {sortedVehicles.length} of {allVehicles.length} vehicles</span>
+                  <span>
+                    Showing {sortedVehicles.length} of {searchQuery.trim() && !showOos ? allVehicles.length : activeVehicles.length} vehicles
+                    {oosCount > 0 && !showOos && !searchQuery.trim() && (
+                      <span className="ml-2 text-amber-600 dark:text-amber-400">
+                        ({oosCount} Out of Service hidden)
+                      </span>
+                    )}
+                    {oosCount > 0 && !showOos && searchQuery.trim() && (
+                      <span className="ml-2 text-amber-600 dark:text-amber-400">
+                        (Out of Service included in search)
+                      </span>
+                    )}
+                  </span>
+                  <label className="flex items-center gap-2 cursor-pointer select-none" title="Out-of-service vehicles are hidden by default">
+                    <EyeOff className="h-4 w-4" />
+                    <span className="text-xs">Show Out of Service</span>
+                    <Switch checked={showOos} onCheckedChange={setShowOos} />
+                  </label>
                 </div>
               </CardContent>
             </Card>
@@ -1023,6 +1152,9 @@ export default function FleetManagement() {
                               </div>
                             </div>
                             <div className="flex flex-col gap-1 items-end">
+                              {(vehicle.statusCode === 2 || vehicle.outOfServiceDate) && (
+                                <Badge className="bg-amber-600 text-white border-amber-700 text-xs">Out of Service</Badge>
+                              )}
                               <Badge className={assignStatus.color + ' border text-xs'}>
                                 {assignStatus.label}
                               </Badge>
@@ -1336,6 +1468,96 @@ export default function FleetManagement() {
 
                 <Separator />
 
+                {/* Cross-System Operations */}
+                <div className="space-y-3">
+                  <h4 className="font-medium text-sm text-muted-foreground">Cross-System Operations</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="sm" className="w-full" onClick={() => openModal("assign")} data-testid="button-fleet-assign">
+                      <UserPlus className="h-4 w-4 mr-1.5" />Assign Tech
+                    </Button>
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("unassign")} disabled={!selectedVehicle.tpmsAssignedTechId && !selectedVehicle.holmanTechAssigned} data-testid="button-fleet-unassign">
+                      <UserX className="h-4 w-4 mr-1.5" />Unassign Tech
+                    </Button>
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("transfer")} data-testid="button-fleet-transfer">
+                      <ArrowLeftRight className="h-4 w-4 mr-1.5" />Transfer Tech
+                    </Button>
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("address")} data-testid="button-fleet-address">
+                      <Home className="h-4 w-4 mr-1.5" />Update Address
+                    </Button>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* PO Section */}
+                <div className="space-y-2">
+                  <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-1.5">
+                    <FileText className="h-4 w-4" />POs for #{selectedVehicle.vehicleNumber}
+                  </h4>
+                  {posLoading ? (
+                    <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading POs...</div>
+                  ) : !vehiclePOs || vehiclePOs.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No POs cached. Sync PO data from Holman Integration → PO Tracker.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {vehiclePOs.slice(0, 8).map((po: any, i: number) => (
+                        <div key={i} className="flex items-center gap-2 p-2 bg-muted/40 rounded text-xs">
+                          <span className="font-mono flex-1">{po.poNumber}</span>
+                          {po.poType === "maintenance"
+                            ? <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border-none shrink-0">MAINT</Badge>
+                            : po.poType === "rental"
+                            ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 text-xs border-none shrink-0">RENTAL</Badge>
+                            : <Badge variant="secondary" className="text-xs shrink-0">{po.poType}</Badge>}
+                          <span className="text-muted-foreground shrink-0">{po.poStatus}</span>
+                          {po.amount != null && <span className="text-muted-foreground shrink-0">${Number(po.amount).toFixed(0)}</span>}
+                        </div>
+                      ))}
+                      {vehiclePOs.length > 8 && <p className="text-xs text-muted-foreground">+{vehiclePOs.length - 8} more — see Holman PO Tracker</p>}
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Operation Log */}
+                <div className="space-y-2">
+                  <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-1.5">
+                    <Activity className="h-4 w-4" />Operation Log
+                  </h4>
+                  {logsLoading ? (
+                    <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading logs...</div>
+                  ) : !vehicleOpLogs || vehicleOpLogs.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No operations logged for this vehicle.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {vehicleOpLogs.slice(0, 5).map((log: any, i: number) => (
+                        <div key={i} className="p-2 bg-muted/40 rounded text-xs space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium capitalize">{log.operationType?.replace(/_/g, " ")}</span>
+                            <span className="text-muted-foreground">{log.createdAt ? new Date(log.createdAt).toLocaleDateString() : "—"}</span>
+                          </div>
+                          {(log.fromLdap || log.toLdap) && (
+                            <div className="text-muted-foreground">{log.fromLdap || "—"} → {log.toLdap || "—"}</div>
+                          )}
+                          <div className="flex gap-1.5 flex-wrap">
+                            {["tpms", "holman", "ams"].map(sys => {
+                              const st = log[`${sys}Status`];
+                              if (!st) return null;
+                              return (
+                                <span key={sys} className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${st === "success" ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" : st === "failed" ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" : "bg-muted text-muted-foreground"}`}>
+                                  {sys.toUpperCase()}: {st}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
                 {/* Actions */}
                 <div className="space-y-3">
                   <h4 className="font-medium text-sm text-muted-foreground">Actions</h4>
@@ -1404,6 +1626,267 @@ export default function FleetManagement() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Fleet Operations Modals */}
+      {/* Assign Tech Modal */}
+      <Dialog open={activeModal === "assign"} onOpenChange={(o) => { if (!o) { setActiveModal(null); setOpResult(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><UserPlus className="h-4 w-4" />Assign Tech — Vehicle #{selectedVehicle?.vehicleNumber}</DialogTitle>
+            <DialogDescription>Writes simultaneously to TPMS, Holman, and AMS.</DialogDescription>
+          </DialogHeader>
+          {opResult ? (
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Operation Complete</p>
+              {["tpms", "holman", "ams"].map(sys => (
+                <div key={sys} className="flex items-center justify-between">
+                  <span className="text-sm uppercase font-mono">{sys}</span>
+                  <div className="flex items-center gap-2">
+                    <SystemStatusBadge status={opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
+                    {(opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
+                      <span className="text-xs text-muted-foreground">{opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setActiveModal(null); setOpResult(null); }}>Close</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Enterprise / LDAP ID *</Label>
+                  <Input className="mt-1" value={assignLdap} onChange={e => setAssignLdap(e.target.value)} placeholder="e.g. JSMITH01" />
+                </div>
+                <div>
+                  <Label className="text-xs">District #</Label>
+                  <Input className="mt-1" value={assignDistrict} onChange={e => setAssignDistrict(e.target.value)} placeholder="e.g. 123" />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Tech Name (for log)</Label>
+                <Input className="mt-1" value={assignTechName} onChange={e => setAssignTechName(e.target.value)} placeholder="First Last" />
+              </div>
+              <div>
+                <Label className="text-xs">Notes</Label>
+                <Input className="mt-1" value={assignNotes} onChange={e => setAssignNotes(e.target.value)} placeholder="Optional notes..." />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setActiveModal(null)}>Cancel</Button>
+                <Button
+                  disabled={!assignLdap || fleetOpMutation.isPending}
+                  onClick={() => fleetOpMutation.mutate({
+                    endpoint: "/api/fleet-ops/assign",
+                    body: { truckNumber: selectedVehicle?.vehicleNumber, ldapId: assignLdap, districtNo: assignDistrict, techName: assignTechName, notes: assignNotes },
+                  })}
+                >
+                  {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
+                  Assign to All Systems
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Unassign Tech Modal */}
+      <Dialog open={activeModal === "unassign"} onOpenChange={(o) => { if (!o) { setActiveModal(null); setOpResult(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><UserX className="h-4 w-4" />Unassign Tech — Vehicle #{selectedVehicle?.vehicleNumber}</DialogTitle>
+            <DialogDescription>
+              Removes assignment from TPMS, Holman, and AMS simultaneously.
+              {selectedVehicle?.tpmsAssignedTechId && <span className="block mt-1 font-medium">Currently: {selectedVehicle.tpmsAssignedTechName || selectedVehicle.tpmsAssignedTechId}</span>}
+            </DialogDescription>
+          </DialogHeader>
+          {opResult ? (
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Operation Complete</p>
+              {["tpms", "holman", "ams"].map(sys => (
+                <div key={sys} className="flex items-center justify-between">
+                  <span className="text-sm uppercase font-mono">{sys}</span>
+                  <div className="flex items-center gap-2">
+                    <SystemStatusBadge status={opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
+                    {(opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
+                      <span className="text-xs text-muted-foreground">{opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setActiveModal(null); setOpResult(null); }}>Close</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs">Notes</Label>
+                <Input className="mt-1" value={unassignNotes} onChange={e => setUnassignNotes(e.target.value)} placeholder="Optional notes..." />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setActiveModal(null)}>Cancel</Button>
+                <Button
+                  variant="destructive"
+                  disabled={fleetOpMutation.isPending}
+                  onClick={() => fleetOpMutation.mutate({
+                    endpoint: "/api/fleet-ops/unassign",
+                    body: { truckNumber: selectedVehicle?.vehicleNumber, ldapId: selectedVehicle?.tpmsAssignedTechId || selectedVehicle?.holmanTechAssigned, notes: unassignNotes },
+                  })}
+                >
+                  {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <UserX className="h-4 w-4 mr-1.5" />}
+                  Unassign from All Systems
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Tech Modal */}
+      <Dialog open={activeModal === "transfer"} onOpenChange={(o) => { if (!o) { setActiveModal(null); setOpResult(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><ArrowLeftRight className="h-4 w-4" />Transfer Tech — Vehicle #{selectedVehicle?.vehicleNumber}</DialogTitle>
+            <DialogDescription>Unassigns current tech and assigns new tech across all systems.</DialogDescription>
+          </DialogHeader>
+          {opResult ? (
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Operation Complete</p>
+              {["tpms", "holman", "ams"].map(sys => (
+                <div key={sys} className="flex items-center justify-between">
+                  <span className="text-sm uppercase font-mono">{sys}</span>
+                  <div className="flex items-center gap-2">
+                    <SystemStatusBadge status={opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
+                    {(opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
+                      <span className="text-xs text-muted-foreground">{opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setActiveModal(null); setOpResult(null); }}>Close</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="p-3 bg-muted/50 rounded text-sm">
+                <span className="text-muted-foreground">From: </span>
+                <span className="font-mono">{selectedVehicle?.tpmsAssignedTechId || selectedVehicle?.holmanTechAssigned || "Unassigned"}</span>
+                {selectedVehicle?.tpmsAssignedTechName && <span className="ml-2 text-muted-foreground">({selectedVehicle.tpmsAssignedTechName})</span>}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">New Tech LDAP ID *</Label>
+                  <Input className="mt-1" value={transferToLdap} onChange={e => setTransferToLdap(e.target.value)} placeholder="e.g. JDOE01" />
+                </div>
+                <div>
+                  <Label className="text-xs">District #</Label>
+                  <Input className="mt-1" value={assignDistrict} onChange={e => setAssignDistrict(e.target.value)} placeholder="e.g. 123" />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">New Tech Name (for log)</Label>
+                <Input className="mt-1" value={transferToName} onChange={e => setTransferToName(e.target.value)} placeholder="First Last" />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setActiveModal(null)}>Cancel</Button>
+                <Button
+                  disabled={!transferToLdap || fleetOpMutation.isPending}
+                  onClick={() => fleetOpMutation.mutate({
+                    endpoint: "/api/fleet-ops/transfer",
+                    body: {
+                      truckNumber: selectedVehicle?.vehicleNumber,
+                      fromLdap: selectedVehicle?.tpmsAssignedTechId || selectedVehicle?.holmanTechAssigned,
+                      toLdap: transferToLdap,
+                      districtNo: assignDistrict,
+                      newTechName: transferToName,
+                    },
+                  })}
+                >
+                  {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <ArrowLeftRight className="h-4 w-4 mr-1.5" />}
+                  Transfer Tech
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Update Address Modal */}
+      <Dialog open={activeModal === "address"} onOpenChange={(o) => { if (!o) { setActiveModal(null); setOpResult(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Home className="h-4 w-4" />Update Address — Vehicle #{selectedVehicle?.vehicleNumber}</DialogTitle>
+            <DialogDescription>Updates address in TPMS and AMS (Holman not applicable).</DialogDescription>
+          </DialogHeader>
+          {opResult ? (
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Operation Complete</p>
+              {[{ key: "tpms", label: "TPMS" }, { key: "ams", label: "AMS" }, { key: "holman", label: "Holman" }].map(({ key, label }) => (
+                <div key={key} className="flex items-center justify-between">
+                  <span className="text-sm uppercase font-mono">{label}</span>
+                  <div className="flex items-center gap-2">
+                    <SystemStatusBadge status={opResult[`${key}Status`] || opResult?.data?.[`${key}Status`]} />
+                    {(opResult[`${key}Message`] || opResult?.data?.[`${key}Message`]) && (
+                      <span className="text-xs text-muted-foreground">{opResult[`${key}Message`] || opResult?.data?.[`${key}Message`]}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setActiveModal(null); setOpResult(null); }}>Close</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs">Tech LDAP ID *</Label>
+                <Input className="mt-1" value={assignLdap} onChange={e => setAssignLdap(e.target.value)} placeholder="e.g. JSMITH01" defaultValue={selectedVehicle?.tpmsAssignedTechId || ""} />
+              </div>
+              <div>
+                <Label className="text-xs">Street Address</Label>
+                <Input className="mt-1" value={addrLine1} onChange={e => setAddrLine1(e.target.value)} placeholder="123 Main St" />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <Label className="text-xs">City</Label>
+                  <Input className="mt-1" value={addrCity} onChange={e => setAddrCity(e.target.value)} placeholder="City" />
+                </div>
+                <div>
+                  <Label className="text-xs">State</Label>
+                  <Input className="mt-1" value={addrState} onChange={e => setAddrState(e.target.value)} placeholder="IL" maxLength={2} />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">ZIP Code</Label>
+                <Input className="mt-1" value={addrZip} onChange={e => setAddrZip(e.target.value)} placeholder="60601" />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setActiveModal(null)}>Cancel</Button>
+                <Button
+                  disabled={!assignLdap || !addrCity || fleetOpMutation.isPending}
+                  onClick={() => fleetOpMutation.mutate({
+                    endpoint: "/api/fleet-ops/update-address",
+                    body: {
+                      truckNumber: selectedVehicle?.vehicleNumber,
+                      ldapId: assignLdap,
+                      address: addrLine1,
+                      city: addrCity,
+                      state: addrState,
+                      zip: addrZip,
+                    },
+                  })}
+                >
+                  {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
+                  Update Address
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Assignment History Dialog */}
       {selectedVehicle?.tpmsAssignedTechId && (

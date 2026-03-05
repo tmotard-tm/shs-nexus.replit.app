@@ -43,6 +43,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: true,
       communicationHub: true,
       techRoster: true,
+      rentalOperations: true,
     },
     activities: {
       enabled: true,
@@ -167,6 +168,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: true,
       communicationHub: true,
       techRoster: true,
+      rentalOperations: true,
     },
     activities: {
       enabled: true,
@@ -290,6 +292,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: false,
       communicationHub: false,
       techRoster: false,
+      rentalOperations: false,
     },
     activities: {
       enabled: false,
@@ -413,6 +416,7 @@ export const DEFAULT_ASSETS_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: true,
       communicationHub: false,
       techRoster: false,
+      rentalOperations: false,
     },
     activities: {
       enabled: false,
@@ -559,6 +563,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/storage-spots': () => perms.sidebar.management.storageSpots,
     '/integrations': () => perms.sidebar.management.integrations,
     '/tech-roster': () => perms.sidebar.management.techRoster,
+    '/rental-operations': () => perms.sidebar.management.rentalOperations,
     '/weekly-onboarding': () => perms.sidebar.management.weeklyOnboarding,
     '/weekly-offboarding': () => perms.sidebar.management.weeklyOffboarding,
     '/communication-hub': () => perms.sidebar.management.communicationHub,

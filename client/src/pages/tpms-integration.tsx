@@ -309,24 +309,24 @@ export default function TpmsIntegration() {
                     ) : stats ? (
                       <div className="grid grid-cols-2 gap-3">
                         <div className="p-3 bg-muted rounded-lg text-center">
-                          <p className="text-2xl font-bold">{stats.total.toLocaleString()}</p>
+                          <p className="text-2xl font-bold">{(stats.total ?? 0).toLocaleString()}</p>
                           <p className="text-xs text-muted-foreground">Total Cached</p>
                         </div>
                         <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg text-center">
-                          <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.live.toLocaleString()}</p>
+                          <p className="text-2xl font-bold text-green-600 dark:text-green-400">{(stats.live ?? 0).toLocaleString()}</p>
                           <p className="text-xs text-muted-foreground">Live (fresh)</p>
                         </div>
                         <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center">
-                          <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.cached.toLocaleString()}</p>
+                          <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{(stats.cached ?? 0).toLocaleString()}</p>
                           <p className="text-xs text-muted-foreground">Cached</p>
                         </div>
                         <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-center">
-                          <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.stale.toLocaleString()}</p>
+                          <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{(stats.stale ?? 0).toLocaleString()}</p>
                           <p className="text-xs text-muted-foreground">Stale (&gt;24h)</p>
                         </div>
-                        {stats.error > 0 && (
+                        {(stats.error ?? 0) > 0 && (
                           <div className="col-span-2 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg text-center">
-                            <p className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.error.toLocaleString()}</p>
+                            <p className="text-2xl font-bold text-red-600 dark:text-red-400">{(stats.error ?? 0).toLocaleString()}</p>
                             <p className="text-xs text-muted-foreground">Errors</p>
                           </div>
                         )}

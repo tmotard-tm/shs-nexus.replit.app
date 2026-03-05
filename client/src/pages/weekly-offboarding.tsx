@@ -88,27 +88,6 @@ export default function WeeklyOffboarding() {
     queryKey: ['/api/weekly-offboarding'],
   });
 
-  interface QueueStatusInfo {
-    total: number;
-    completed: number;
-    pending: number;
-    inProgress: number;
-    departments: Record<string, string>;
-  }
-
-  const employeeIds = termRoster.map(entry => entry.emplId).filter(Boolean);
-
-  const { data: queueStatusMap = {} } = useQuery<Record<string, QueueStatusInfo>>({
-    queryKey: ['/api/weekly-offboarding/queue-status', employeeIds],
-    queryFn: async () => {
-      if (employeeIds.length === 0) return {};
-      const response = await apiRequest('POST', '/api/weekly-offboarding/queue-status', { employeeIds });
-      return response.json();
-    },
-    enabled: employeeIds.length > 0,
-    staleTime: 2 * 60 * 1000,
-  });
-
   // Collect all truck numbers from termRoster for batch fetch (including manual overrides)
   const truckNumbers = Array.from(new Set([
     ...termRoster.map(entry => entry.truck).filter((truck): truck is string => !!truck),
@@ -148,6 +127,7 @@ export default function WeeklyOffboarding() {
     'sent_to_auction': 'Sent to auction',
     'already_picked_up': 'Already picked up',
     'unable_to_reach': 'Unable to reach',
+    'byov': 'BYOV',
   };
 
   // Get unique manual statuses from nexus data
@@ -385,6 +365,7 @@ export default function WeeklyOffboarding() {
     { key: 'sent_to_auction', label: 'Sent to auction', icon: Truck, color: 'text-rose-600', bg: 'bg-rose-50 dark:bg-rose-950' },
     { key: 'already_picked_up', label: 'Already picked up', icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950' },
     { key: 'unable_to_reach', label: 'Unable to reach', icon: AlertCircle, color: 'text-yellow-600', bg: 'bg-yellow-50 dark:bg-yellow-950' },
+    { key: 'byov', label: 'BYOV', icon: CarFront, color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950' },
   ];
 
   const getStatusBadgeVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
@@ -561,7 +542,7 @@ export default function WeeklyOffboarding() {
                     <SelectContent>
                       <SelectItem value="all">All Manual Statuses</SelectItem>
                       <SelectItem value="__none__">-- No Status Set --</SelectItem>
-                      {Array.from(new Set([...uniqueManualStatuses, 'reserved_for_new_hire', 'in_repair', 'declined_repair', 'available_for_rental_pmf', 'sent_to_pmf', 'assigned_to_tech_in_rental', 'assigned_to_tech', 'not_found', 'sent_to_auction', 'already_picked_up', 'unable_to_reach'])).sort().map((status) => (
+                      {Array.from(new Set([...uniqueManualStatuses, 'reserved_for_new_hire', 'in_repair', 'declined_repair', 'available_for_rental_pmf', 'sent_to_pmf', 'assigned_to_tech_in_rental', 'assigned_to_tech', 'not_found', 'sent_to_auction', 'already_picked_up', 'unable_to_reach', 'byov'])).sort().map((status) => (
                         <SelectItem key={status} value={status}>
                           {manualStatusLabels[status] || status}
                         </SelectItem>
@@ -622,7 +603,6 @@ export default function WeeklyOffboarding() {
                         <TableHead className="bg-background sticky top-0">Planning Area</TableHead>
                         <TableHead className="bg-background sticky top-0">Owner</TableHead>
                         <TableHead className="bg-background sticky top-0">Tech Specialty</TableHead>
-                        <TableHead className="w-[120px] bg-background sticky top-0">Queue Tasks</TableHead>
                         <TableHead className="min-w-[150px] bg-background sticky top-0">Manual Status</TableHead>
                         <TableHead className="min-w-[200px] bg-background sticky top-0">Address</TableHead>
                         <TableHead className="min-w-[180px] bg-background sticky top-0">Contact Phone</TableHead>
@@ -677,25 +657,6 @@ export default function WeeklyOffboarding() {
                           <TableCell className="text-sm">{entry.planningArea || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.owner || '-'}</TableCell>
                           <TableCell className="text-sm">{entry.techSpecialty || '-'}</TableCell>
-                          <TableCell className="text-sm">
-                            {(() => {
-                              const qs = entry.emplId ? queueStatusMap[entry.emplId] : null;
-                              if (!qs) {
-                                return <Badge variant="outline" className="text-xs text-muted-foreground">No tasks</Badge>;
-                              }
-                              const allDone = qs.completed === qs.total;
-                              return (
-                                <div className="flex flex-col gap-0.5">
-                                  <Badge variant={allDone ? "default" : "secondary"} className={`text-xs ${allDone ? "bg-green-600" : ""}`}>
-                                    {qs.completed}/{qs.total} done
-                                  </Badge>
-                                  {qs.inProgress > 0 && (
-                                    <span className="text-xs text-blue-600">{qs.inProgress} active</span>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                          </TableCell>
                           <TableCell className="text-sm">
                             {(() => {
                               const nexusInfo = rowTruck ? nexusDataMap.get(rowTruck) : null;
@@ -857,6 +818,7 @@ export default function WeeklyOffboarding() {
                               <SelectItem value="sent_to_auction">Sent to auction</SelectItem>
                               <SelectItem value="already_picked_up">Already picked up</SelectItem>
                               <SelectItem value="unable_to_reach">Unable to reach</SelectItem>
+                              <SelectItem value="byov">BYOV</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
