@@ -12015,10 +12015,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // =====================================================================
   // Rental Operations (T002) — reads from Snowflake pipeline tables
   // =====================================================================
-  // Snowflake table name constants (swap once pipeline schema confirmed)
-  const RENTAL_OPEN_TABLE = "PARTS_SUPPLYCHAIN.FLEET.RENTAL_OPEN";
-  const RENTAL_CLOSED_TABLE = "PARTS_SUPPLYCHAIN.FLEET.RENTAL_CLOSED";
-  const RENTAL_TICKET_TABLE = "PARTS_SUPPLYCHAIN.FLEET.RENTAL_TICKET_DETAIL";
+  // Confirmed Snowflake pipeline table names (updated 2026-03-05)
+  const RENTAL_OPEN_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT";
+  const RENTAL_CLOSED_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_CLOSED_RENTAL_REPORT";
+  const RENTAL_TICKET_TABLE = "PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT";
 
   function calcDaysOpen(startDate: string | null): number {
     if (!startDate) return 0;
