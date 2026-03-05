@@ -211,7 +211,7 @@ export default function RentalOperations() {
           <div className="ml-auto flex items-center gap-3">
             <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground select-none" title="Out-of-service vehicles are hidden by default">
               <EyeOff className="h-4 w-4" />
-              <span>Show OOS</span>
+              <span>Show Out of Service</span>
               <Switch checked={showOos} onCheckedChange={setShowOos} />
             </label>
             <Button variant="outline" size="sm" onClick={() => qualifyMutation.mutate("all")} disabled={qualifyMutation.isPending}>

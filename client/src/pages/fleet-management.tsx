@@ -660,7 +660,7 @@ export default function FleetManagement() {
                 <Database className="h-4 w-4 text-amber-600" />
                 <AlertTitle className="text-amber-800 dark:text-amber-400">Using Cached Data</AlertTitle>
                 <AlertDescription className="text-amber-700 dark:text-amber-300">
-                  Holman API is unavailable. Showing {activeVehicles.length} cached vehicles{oosCount > 0 && !showOos ? ` (${oosCount} OOS hidden)` : ""}.
+                  Holman API is unavailable. Showing {activeVehicles.length} cached vehicles{oosCount > 0 && !showOos ? ` (${oosCount} Out of Service hidden)` : ""}.
                 </AlertDescription>
               </Alert>
             )}
@@ -1077,18 +1077,18 @@ export default function FleetManagement() {
                     Showing {sortedVehicles.length} of {searchQuery.trim() && !showOos ? allVehicles.length : activeVehicles.length} vehicles
                     {oosCount > 0 && !showOos && !searchQuery.trim() && (
                       <span className="ml-2 text-amber-600 dark:text-amber-400">
-                        ({oosCount} OOS hidden)
+                        ({oosCount} Out of Service hidden)
                       </span>
                     )}
                     {oosCount > 0 && !showOos && searchQuery.trim() && (
                       <span className="ml-2 text-amber-600 dark:text-amber-400">
-                        (OOS included in search)
+                        (Out of Service included in search)
                       </span>
                     )}
                   </span>
                   <label className="flex items-center gap-2 cursor-pointer select-none" title="Out-of-service vehicles are hidden by default">
                     <EyeOff className="h-4 w-4" />
-                    <span className="text-xs">Show OOS</span>
+                    <span className="text-xs">Show Out of Service</span>
                     <Switch checked={showOos} onCheckedChange={setShowOos} />
                   </label>
                 </div>
@@ -1153,7 +1153,7 @@ export default function FleetManagement() {
                             </div>
                             <div className="flex flex-col gap-1 items-end">
                               {(vehicle.statusCode === 2 || vehicle.outOfServiceDate) && (
-                                <Badge className="bg-amber-600 text-white border-amber-700 text-xs">OOS</Badge>
+                                <Badge className="bg-amber-600 text-white border-amber-700 text-xs">Out of Service</Badge>
                               )}
                               <Badge className={assignStatus.color + ' border text-xs'}>
                                 {assignStatus.label}
