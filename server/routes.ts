@@ -12564,6 +12564,249 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Cross-system integrity analysis: Enterprise (renter-centric) vs Holman (truck/PO-centric)
+  // Uses same transformation logic as the /open endpoint to ensure consistent comparison
+  app.get("/api/rental-ops/integrity", requireAuth, async (_req, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+      const sf = getSnowflakeService();
+      await sf.connect();
+
+      const intNormVeh = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
+
+      // Levenshtein edit distance for name comparison
+      const intEditDist = (a: string, b: string): number => {
+        if (!a || !b) return Math.max(a.length, b.length);
+        if (a === b) return 0;
+        const m = a.length, n = b.length;
+        const prev = Array.from({ length: n + 1 }, (_, j) => j);
+        const curr = new Array(n + 1).fill(0);
+        for (let i = 1; i <= m; i++) {
+          curr[0] = i;
+          for (let j = 1; j <= n; j++)
+            curr[j] = a[i-1] === b[j-1] ? prev[j-1] : 1 + Math.min(prev[j], curr[j-1], prev[j-1]);
+          prev.splice(0, n + 1, ...curr);
+        }
+        return prev[n];
+      };
+
+      const todayMs = Date.now();
+      const calcDays = (d: string | null) => d ? Math.floor((todayMs - new Date(d).getTime()) / 86400000) : null;
+
+      // Query both Snowflake tables — same as open endpoint
+      const [holmanRaw, entRaw] = await Promise.all([
+        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`) as Promise<any[]>,
+        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
+      ]);
+
+      // Transform Enterprise rows same way as open endpoint (using outer parseClaimNumber)
+      type EntRow = { vehicleNumber: string; renterName: string; poNumber: string; ticketNumber: string; originalStartDate: string | null; daysOpen: number | null };
+      const entTransformed: EntRow[] = [];
+      const entByVeh = new Map<string, EntRow>();
+      for (const r of entRaw) {
+        const vn = intNormVeh(r.VEHICLE_NUMBER || "");
+        if (!vn || entByVeh.has(vn)) continue; // dedup by vehicle
+        const { holmanPo } = parseClaimNumber(r.CLAIM_NUMBER || "");
+        const startDate = entOriginalStart(r);
+        const row: EntRow = {
+          vehicleNumber: vn,
+          renterName: (r.RENTER_NAME || "").trim(),
+          poNumber: holmanPo,
+          ticketNumber: r.TICKET_NUMBER || "",
+          originalStartDate: startDate,
+          daysOpen: calcDays(startDate),
+        };
+        entTransformed.push(row);
+        entByVeh.set(vn, row);
+      }
+
+      // Transform Holman rows — note: Holman open report uses FIRST_NAME + LAST_NAME (not RENTER_NAME)
+      // and PO_NUMBER has a leading apostrophe that must be stripped
+      type HolRow = { vehicleNumber: string; renterName: string; poNumber: string; startDate: string | null; vendor: string };
+      const holmanByVeh = new Map<string, HolRow[]>();
+      for (const r of holmanRaw) {
+        const vn = intNormVeh(r.VEHICLE_NUMBER || "");
+        if (!vn) continue;
+        const renterName = r.RENTER_NAME
+          ? (r.RENTER_NAME as string).trim()
+          : `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim();
+        const row: HolRow = {
+          vehicleNumber: vn,
+          renterName,
+          poNumber: (r.PO_NUMBER || "").replace(/^'/, "").trim(),
+          startDate: r.RENTAL_START_DATE || null,
+          vendor: r.RENTAL_VENDOR || "",
+        };
+        if (!holmanByVeh.has(vn)) holmanByVeh.set(vn, []);
+        holmanByVeh.get(vn)!.push(row);
+      }
+
+      // --- Category 1: Enterprise tickets with NO Holman PO open for that truck ---
+      const orphanedEnterprise: any[] = [];
+      for (const e of entTransformed) {
+        if (!holmanByVeh.has(e.vehicleNumber)) {
+          orphanedEnterprise.push({
+            vehicleNumber: e.vehicleNumber,
+            ticketNumber: e.ticketNumber,
+            renterName: e.renterName,
+            entPo: e.poNumber,
+            originalStartDate: e.originalStartDate,
+            daysOpen: e.daysOpen,
+            severity: "high",
+            issue: "Enterprise ticket open but no matching Holman PO found for this truck — truck may have been updated mid-rental",
+          });
+        }
+      }
+
+      // --- Categories 2-4: Compare trucks present in both systems ---
+      // Process per-VEHICLE (not per PO pair) to avoid duplicate records
+      const genuineMismatchList: any[] = [];
+      const stalePOList: any[] = [];
+      const nameMismatchList: any[] = [];
+      const cleanMatchList: any[] = [];
+      const multiPoList: any[] = [];
+
+      for (const e of entTransformed) {
+        const hRows = holmanByVeh.get(e.vehicleNumber);
+        if (!hRows) continue; // orphaned — already handled
+
+        const entName = e.renterName.toLowerCase();
+        const entPo = e.poNumber;
+        const allHolmanPos = [...new Set(hRows.map(h => h.poNumber))].join(", ");
+        const holmanRenters = [...new Set(hRows.map(h => h.renterName))];
+        const hasPoMatch = hRows.some(h => h.poNumber === entPo);
+
+        // Multi-PO tracking
+        if (hRows.length > 1) {
+          const hasDiffRenters = holmanRenters.length > 1;
+          multiPoList.push({
+            vehicleNumber: e.vehicleNumber,
+            poCount: hRows.length,
+            renters: holmanRenters,
+            hasMultipleRenters: hasDiffRenters,
+            pos: hRows.map(h => ({ po: h.poNumber, renter: h.renterName, startDate: h.startDate, vendor: h.vendor })),
+            severity: hasDiffRenters ? "high" : "low",
+            issue: hasDiffRenters
+              ? "Multiple open POs for this truck with DIFFERENT renters — unexpected truck rotation"
+              : "Multiple open POs for same renter on same truck — likely rewrites or extensions",
+          });
+        }
+
+        // Name comparison against the best-matching Holman row (prefer PO match)
+        const bestHolRow = hRows.find(h => h.poNumber === entPo) || hRows[0];
+        const holName = bestHolRow.renterName.toLowerCase();
+        const nameMatch = entName === holName;
+
+        if (!nameMatch && entName && holName) {
+          const dist = intEditDist(entName, holName);
+          const suffixWords = [" sr", " jr", " ii", " iii"];
+          const hasSuffix = suffixWords.some(s => holName.endsWith(s) || entName.endsWith(s));
+          const isGenuine = dist > 3 && !hasSuffix;
+          const cat = isGenuine ? "genuine_renter_mismatch" : hasSuffix ? "name_suffix" : "name_typo";
+          const entry = {
+            vehicleNumber: e.vehicleNumber,
+            ticketNumber: e.ticketNumber,
+            enterpriseRenter: e.renterName,
+            holmanRenter: bestHolRow.renterName,
+            entPo,
+            holmanPo: bestHolRow.poNumber,
+            allHolmanPos,
+            poMatch: hasPoMatch,
+            originalStartDate: e.originalStartDate,
+            holmanStartDate: bestHolRow.startDate,
+            daysOpen: e.daysOpen,
+            category: cat,
+            severity: isGenuine ? "high" : "low",
+            issue: isGenuine
+              ? "Different person in Enterprise vs Holman for the same truck — truck was likely rotated to a new tech but Enterprise ticket was not updated"
+              : hasSuffix
+              ? "Name suffix difference (Sr/Jr) between Enterprise and Holman records"
+              : "Minor name spelling difference between Enterprise and Holman records",
+          };
+          if (isGenuine) genuineMismatchList.push(entry);
+          else nameMismatchList.push(entry);
+        } else if (!hasPoMatch && entPo && nameMatch) {
+          stalePOList.push({
+            vehicleNumber: e.vehicleNumber,
+            ticketNumber: e.ticketNumber,
+            renterName: e.renterName,
+            entPo,
+            holmanPo: bestHolRow.poNumber,
+            allHolmanPos,
+            originalStartDate: e.originalStartDate,
+            holmanStartDate: bestHolRow.startDate,
+            daysOpen: e.daysOpen,
+            severity: "medium",
+            issue: "Enterprise references an old PO — Holman has rotated to a newer PO for this truck (rewrite/extension not reflected in Enterprise claim number)",
+          });
+        } else if (nameMatch && hasPoMatch) {
+          cleanMatchList.push({ vehicleNumber: e.vehicleNumber, entPo });
+        }
+      }
+
+      // --- Summary ---
+      const totalEnterprise = entTransformed.length;
+      const highRisk = orphanedEnterprise.length + genuineMismatchList.length;
+      const mediumRisk = stalePOList.length;
+      const lowRisk = nameMismatchList.length;
+      const clean = cleanMatchList.length;
+      const integrityScore = totalEnterprise > 0 ? Math.round((clean / totalEnterprise) * 100) : 0;
+
+      res.json({
+        summary: {
+          totalEnterpriseTickets: totalEnterprise,
+          totalHolmanPOs: holmanRaw.length,
+          cleanMatches: clean,
+          highRiskCount: highRisk,
+          mediumRiskCount: mediumRisk,
+          lowRiskCount: lowRisk,
+          integrityScore,
+        },
+        categories: {
+          orphanedEnterprise: {
+            label: "No Holman PO for truck",
+            description: "Enterprise ticket open but truck has no active Holman PO — truck number likely changed mid-rental",
+            severity: "high",
+            count: orphanedEnterprise.length,
+            records: orphanedEnterprise.sort((a, b) => (b.daysOpen || 0) - (a.daysOpen || 0)),
+          },
+          genuineRenterMismatch: {
+            label: "Different renter in each system",
+            description: "Completely different people listed for the same truck — truck was likely rotated to a new tech but Enterprise ticket was not updated",
+            severity: "high",
+            count: genuineMismatchList.length,
+            records: genuineMismatchList.sort((a, b) => (b.daysOpen || 0) - (a.daysOpen || 0)),
+          },
+          stalePO: {
+            label: "Stale PO reference",
+            description: "Enterprise claim number points to an old Holman PO — Holman has since issued a newer PO for this truck via rewrite/extension",
+            severity: "medium",
+            count: stalePOList.length,
+            records: stalePOList.sort((a, b) => (b.daysOpen || 0) - (a.daysOpen || 0)),
+          },
+          nameTypo: {
+            label: "Name spelling difference",
+            description: "Minor formatting or spelling differences between Enterprise and Holman records for the same truck",
+            severity: "low",
+            count: nameMismatchList.length,
+            records: nameMismatchList,
+          },
+          multipleHolmanPOs: {
+            label: "Multiple Holman POs per truck",
+            description: "Truck has more than one open PO in Holman — same renter = rewrites/extensions (expected), different renters = unexpected rotation",
+            severity: "low",
+            count: multiPoList.length,
+            highSeverityCount: multiPoList.filter((x: any) => x.hasMultipleRenters).length,
+            records: multiPoList,
+          },
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/rental-ops/export.xlsx", requireAuth, async (_req, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");

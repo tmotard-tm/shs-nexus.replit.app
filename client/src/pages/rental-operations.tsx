@@ -105,6 +105,12 @@ export default function RentalOperations() {
     staleTime: 10 * 60 * 1000,
   });
 
+  const { data: integrityData, isLoading: loadingIntegrity, refetch: refetchIntegrity } = useQuery<any>({
+    queryKey: ["/api/rental-ops/integrity"],
+    enabled: activeTab === "quality",
+    staleTime: 10 * 60 * 1000,
+  });
+
   const qualifyMutation = useMutation({
     mutationFn: (source: string) => apiRequest("POST", "/api/rental-ops/qualify", { source }),
     onSuccess: () => {
@@ -671,6 +677,149 @@ export default function RentalOperations() {
                 );
               })}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Cross-System Integrity Analysis */}
+        <Card className="mt-4">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-3">
+              <CardTitle className="text-base">Cross-System Integrity: Enterprise vs Holman</CardTitle>
+              {integrityData?.summary && (
+                <Badge className={
+                  integrityData.summary.integrityScore >= 80 ? "bg-green-600 text-white" :
+                  integrityData.summary.integrityScore >= 60 ? "bg-amber-500 text-black" :
+                  "bg-red-600 text-white"
+                }>
+                  {integrityData.summary.integrityScore}% integrity
+                </Badge>
+              )}
+              <Button variant="outline" size="sm" onClick={() => refetchIntegrity()} disabled={loadingIntegrity} className="ml-auto">
+                {loadingIntegrity ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                <span className="ml-1.5">Refresh</span>
+              </Button>
+            </div>
+            <CardDescription className="text-xs">
+              Enterprise tracks rentals by renter; Holman tracks by truck + PO. Mid-rental truck updates can desync these systems.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loadingIntegrity ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" /> Analyzing cross-system integrity...
+              </div>
+            ) : integrityData ? (
+              <div className="space-y-5">
+                {/* Summary bar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                  {[
+                    { label: "Enterprise Tickets", value: integrityData.summary.totalEnterpriseTickets, color: "text-foreground" },
+                    { label: "High Risk", value: integrityData.summary.highRiskCount, color: "text-red-600 dark:text-red-400" },
+                    { label: "Medium Risk", value: integrityData.summary.mediumRiskCount, color: "text-amber-600 dark:text-amber-400" },
+                    { label: "Low Risk", value: integrityData.summary.lowRiskCount, color: "text-blue-600 dark:text-blue-400" },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="border rounded-lg p-3">
+                      <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Category breakdown */}
+                {[
+                  {
+                    key: "orphanedEnterprise",
+                    icon: <XCircle className="h-4 w-4 text-red-500 shrink-0" />,
+                    severityClass: "border-red-200 dark:border-red-900/50 bg-red-50/50 dark:bg-red-950/20",
+                    col1: "Vehicle",
+                    col2: "Ticket",
+                    col3: "Renter",
+                    col4: "Days Open",
+                    renderRow: (r: any) => [r.vehicleNumber, r.ticketNumber, r.renterName, r.daysOpen ? `${r.daysOpen}d` : "—"],
+                  },
+                  {
+                    key: "genuineRenterMismatch",
+                    icon: <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />,
+                    severityClass: "border-red-200 dark:border-red-900/50 bg-red-50/50 dark:bg-red-950/20",
+                    col1: "Vehicle",
+                    col2: "Enterprise Renter",
+                    col3: "Holman Renter",
+                    col4: "Days Open",
+                    renderRow: (r: any) => [r.vehicleNumber, r.enterpriseRenter, r.holmanRenter, r.daysOpen ? `${r.daysOpen}d` : "—"],
+                  },
+                  {
+                    key: "stalePO",
+                    icon: <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />,
+                    severityClass: "border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20",
+                    col1: "Vehicle",
+                    col2: "Enterprise PO",
+                    col3: "Current Holman PO(s)",
+                    col4: "Days Open",
+                    renderRow: (r: any) => [r.vehicleNumber, r.entPo, r.allHolmanPos, r.daysOpen ? `${r.daysOpen}d` : "—"],
+                  },
+                  {
+                    key: "nameTypo",
+                    icon: <Info className="h-4 w-4 text-blue-500 shrink-0" />,
+                    severityClass: "border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20",
+                    col1: "Vehicle",
+                    col2: "Enterprise Name",
+                    col3: "Holman Name",
+                    col4: "PO Match",
+                    renderRow: (r: any) => [r.vehicleNumber, r.enterpriseRenter, r.holmanRenter, r.poMatch ? "Yes" : "No"],
+                  },
+                ].map(({ key, icon, severityClass, col1, col2, col3, col4, renderRow }) => {
+                  const cat = integrityData.categories[key];
+                  if (!cat) return null;
+                  return (
+                    <details key={key} className={`border rounded-lg overflow-hidden ${severityClass}`}>
+                      <summary className="flex items-center gap-2 p-3 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 list-none">
+                        {icon}
+                        <span className="font-medium text-sm">{cat.label}</span>
+                        <Badge variant="secondary" className="text-xs ml-1">{cat.count}</Badge>
+                        <span className="text-xs text-muted-foreground ml-2 flex-1">{cat.description}</span>
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      </summary>
+                      {cat.records && cat.records.length > 0 && (
+                        <div className="border-t">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="text-xs py-2">{col1}</TableHead>
+                                <TableHead className="text-xs py-2">{col2}</TableHead>
+                                <TableHead className="text-xs py-2">{col3}</TableHead>
+                                <TableHead className="text-xs py-2">{col4}</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {cat.records.slice(0, 25).map((r: any, i: number) => {
+                                const [v1, v2, v3, v4] = renderRow(r);
+                                return (
+                                  <TableRow key={i} className="text-xs">
+                                    <TableCell className="font-mono py-1.5">{v1}</TableCell>
+                                    <TableCell className="py-1.5">{v2}</TableCell>
+                                    <TableCell className="py-1.5 text-muted-foreground">{v3}</TableCell>
+                                    <TableCell className="py-1.5">{v4}</TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                              {cat.records.length > 25 && (
+                                <TableRow>
+                                  <TableCell colSpan={4} className="text-xs text-center text-muted-foreground py-2">
+                                    + {cat.records.length - 25} more records
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                    </details>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground py-4 text-center">Switch to this tab to load integrity analysis from Snowflake.</div>
+            )}
           </CardContent>
         </Card>
       </div>
