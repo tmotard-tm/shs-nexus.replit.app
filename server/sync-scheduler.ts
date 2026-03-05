@@ -154,120 +154,202 @@ async function checkAndRunNotificationBackfill(): Promise<void> {
   }
 }
 
-async function backfillAssetsQueueItems(): Promise<void> {
+async function backfillAllDepartments(): Promise<void> {
   try {
-    const existingToolsWorkflows = await db.select({ workflowId: queueItems.workflowId })
-      .from(queueItems)
-      .where(eq(queueItems.department, 'Assets Management'));
-    const toolsWorkflowIds = new Set(existingToolsWorkflows.map(r => r.workflowId).filter(Boolean));
-
-    const ntaoItems = await db.select()
+    const allOffboardingItems = await db.select()
       .from(queueItems)
       .where(and(
-        eq(queueItems.department, 'NTAO'),
+        eq(queueItems.workflowType, 'offboarding'),
         isNotNull(queueItems.workflowId)
       ));
 
-    const missingItems = ntaoItems.filter(item => item.workflowId && !toolsWorkflowIds.has(item.workflowId));
-
-    if (missingItems.length === 0) {
-      console.log('[Backfill] All workflows already have Tools queue items');
-      return;
+    const workflowMap = new Map<string, typeof allOffboardingItems>();
+    for (const item of allOffboardingItems) {
+      if (!item.workflowId) continue;
+      const list = workflowMap.get(item.workflowId) || [];
+      list.push(item);
+      workflowMap.set(item.workflowId, list);
     }
 
-    console.log(`[Backfill] Found ${missingItems.length} workflows missing Tools queue items, creating...`);
-    let created = 0;
+    const DEPARTMENTS = ['NTAO', 'Assets Management', 'Inventory Control', 'FLEET'] as const;
+    const deptNormalize = (d: string) => {
+      const u = d.toUpperCase();
+      if (u === 'NTAO') return 'NTAO';
+      if (u === 'ASSETS MANAGEMENT' || u === 'ASSETS' || u === 'TOOLS') return 'Assets Management';
+      if (u === 'INVENTORY CONTROL' || u === 'INVENTORY') return 'Inventory Control';
+      return 'FLEET';
+    };
 
-    for (const ntaoItem of missingItems) {
+    let totalCreated = 0;
+    const createdByDept: Record<string, number> = { NTAO: 0, 'Assets Management': 0, 'Inventory Control': 0, FLEET: 0 };
+
+    for (const [workflowId, items] of workflowMap) {
+      const existingDepts = new Set(items.map(i => deptNormalize(i.department || '')));
+      const missingDepts = DEPARTMENTS.filter(d => !existingDepts.has(d));
+      if (missingDepts.length === 0) continue;
+
+      const sourceItem = items[0];
+      let parsedData: any = {};
       try {
-        let parsedData: any = {};
+        parsedData = typeof sourceItem.data === 'string' ? JSON.parse(sourceItem.data) : (sourceItem.data || {});
+      } catch { /* empty */ }
+
+      const techName = parsedData?.employee?.name || parsedData?.technician?.techName || 'Unknown';
+      const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.technician?.techRacfid || '';
+      const employeeId = parsedData?.employee?.employeeId || parsedData?.technician?.employeeId || '';
+      const vehicleNumber = parsedData?.vehicle?.vehicleNumber || parsedData?.vehicle?.truckNo || '';
+
+      const baseData = {
+        workflowType: 'offboarding_sequence',
+        phase: 'day0',
+        isDay0Task: true,
+        source: 'backfill',
+        syncedAt: sourceItem.createdAt?.toISOString() || new Date().toISOString(),
+        submitterInfo: parsedData?.submitterInfo || { id: 'system', name: 'Backfill', email: null },
+        workflowId,
+        vehicleType: parsedData?.vehicleType || 'cargo_van',
+        employee: parsedData?.employee || {
+          name: techName, racfId: enterpriseId, employeeId, lastDayWorked: parsedData?.technician?.lastDayWorked || null, enterpriseId,
+        },
+        vehicle: parsedData?.vehicle || {
+          vehicleNumber, vehicleName: vehicleNumber, truckNo: vehicleNumber, location: '', condition: 'unknown', type: 'cargo_van',
+        },
+        submitter: parsedData?.submitter || { name: 'Backfill', submittedAt: new Date().toISOString() },
+        technician: parsedData?.technician || undefined,
+        tpmsLookup: parsedData?.tpmsLookup || { attempted: false, success: false, error: null },
+      };
+
+      for (const dept of missingDepts) {
         try {
-          parsedData = typeof ntaoItem.data === 'string' ? JSON.parse(ntaoItem.data) : (ntaoItem.data || {});
-        } catch { /* empty */ }
+          let taskDef: { title: string; description: string; step: string; subtask: string; workflowStep: number; instructions: string[] };
 
-        const techName = parsedData?.employee?.name || parsedData?.technician?.techName || 'Unknown';
-        const enterpriseId = parsedData?.employee?.enterpriseId || parsedData?.employee?.racfId || parsedData?.technician?.techRacfid || '';
-        const employeeId = parsedData?.employee?.employeeId || parsedData?.technician?.employeeId || '';
-        const vehicleNumber = parsedData?.vehicle?.vehicleNumber || parsedData?.vehicle?.truckNo || '';
-        const lastDayWorked = parsedData?.employee?.lastDayWorked || parsedData?.technician?.lastDayWorked || null;
+          if (dept === 'NTAO') {
+            taskDef = {
+              title: `Day 0: NTAO — National Truck Assortment - Stop Truck Stock Replenishment - ${techName}`,
+              description: `IMMEDIATE TASK: Stop truck stock replenishment for ${techName} (${enterpriseId}). Vehicle: ${vehicleNumber || 'TBD'}. This is a Day 0 task.`,
+              step: 'ntao_stop_replenishment_day0',
+              subtask: 'NTAO',
+              workflowStep: 1,
+              instructions: [
+                "Place a shipping hold to prevent future shipments",
+                "Cancel any pending orders for this Employee",
+                "Cancel all backorders associated with the vehicle",
+                "Remove Employee from automatic replenishment system",
+                "Update truck status in NTAO — National Truck Assortment system",
+                "Complete Day 0 task - no follow-up tasks until all teams complete Day 0"
+              ],
+            };
+          } else if (dept === 'Assets Management') {
+            taskDef = {
+              title: `Day 0: Recover Company Equipment - ${techName}`,
+              description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${techName} (${enterpriseId}). Truck ${vehicleNumber || 'TBD'}. This is a Day 0 task.`,
+              step: 'tools_recover_equipment_day0',
+              subtask: 'Assets',
+              workflowStep: 2,
+              instructions: [
+                "Contact Employee immediately to arrange equipment return",
+                "Recover company phone and verify it's company-issued",
+                "Collect any tablets, mobile hotspots, or other devices",
+                "Retrieve company credit cards (coordinate with OneCard Help Desk if needed)",
+                "Check for accessories (chargers, cases, cables)",
+                "Wipe all device data per security protocol",
+                "Update asset management system with returned items",
+                "Complete Day 0 task - mark complete once all equipment recovered"
+              ],
+            };
+          } else if (dept === 'Inventory Control') {
+            taskDef = {
+              title: `Day 0: Remove from TPMS & Stop Orders - ${vehicleNumber || techName}`,
+              description: `IMMEDIATE TASK: Remove terminated Employee's truck ${vehicleNumber || 'TBD'} from TPMS. Employee: ${techName} (${enterpriseId}). This is a Day 0 task.`,
+              step: 'inventory_remove_tpms_day0',
+              subtask: 'Inventory',
+              workflowStep: 3,
+              instructions: [
+                "Access TPMS (Truck Parts Management System) immediately",
+                "Locate vehicle assignment for terminated Employee",
+                `Remove vehicle ${vehicleNumber || 'TBD'} from TPMS assignment`,
+                "Update vehicle status to unassigned/pending-offboard",
+                "Clear and cancel any pending parts orders for this vehicle/Employee",
+                "Update inventory system to stop automatic replenishment",
+                "Complete Day 0 task - detailed Inventory work will follow in Phase 2"
+              ],
+            };
+          } else {
+            taskDef = {
+              title: `Day 0: Initial Vehicle Coordination - ${vehicleNumber || techName}`,
+              description: `IMMEDIATE TASK: Begin initial coordination for vehicle ${vehicleNumber || 'TBD'}. Employee: ${techName} (${enterpriseId}). This is a Day 0 task.`,
+              step: 'fleet_initial_coordination_day0',
+              subtask: 'Fleet',
+              workflowStep: 4,
+              instructions: [
+                "Contact Employee immediately to notify of offboarding process",
+                "Arrange preliminary meeting/call to discuss vehicle handover",
+                "Obtain current vehicle location and condition information",
+                "Begin coordination with Employee for vehicle retrieval timing",
+                "Assess any immediate vehicle security or safety concerns",
+                "Document initial vehicle status and location",
+                "Complete Day 0 task - detailed Fleet work will follow in Phase 2"
+              ],
+            };
+          }
 
-        const byovStatus = getInitialToolsTaskStatus(vehicleNumber);
+          const taskData = {
+            ...baseData,
+            step: taskDef.step,
+            subtask: taskDef.subtask,
+            workflowStep: taskDef.workflowStep,
+            instructions: taskDef.instructions,
+          };
 
-        const toolsData = {
-          workflowType: 'offboarding_sequence',
-          step: 'tools_recover_equipment_day0',
-          subtask: 'Assets',
-          workflowStep: 5,
-          phase: 'day0',
-          isDay0Task: true,
-          source: 'backfill',
-          syncedAt: ntaoItem.createdAt?.toISOString() || new Date().toISOString(),
-          submitterInfo: parsedData?.submitterInfo || { id: 'system', name: 'Backfill', email: null },
-          workflowId: ntaoItem.workflowId,
-          vehicleType: parsedData?.vehicleType || 'cargo_van',
-          employee: parsedData?.employee || {
-            name: techName,
-            racfId: enterpriseId,
-            employeeId: employeeId,
-            lastDayWorked: lastDayWorked,
-            enterpriseId: enterpriseId,
-          },
-          vehicle: parsedData?.vehicle || {
-            vehicleNumber: vehicleNumber,
-            vehicleName: vehicleNumber,
-            truckNo: vehicleNumber,
-            location: '',
-            condition: 'unknown',
-            type: 'cargo_van',
-          },
-          submitter: parsedData?.submitter || { name: 'Backfill', submittedAt: new Date().toISOString() },
-          technician: parsedData?.technician || undefined,
-          instructions: [
-            "Contact Employee immediately to arrange equipment return",
-            "Recover company phone and verify it's company-issued",
-            "Collect any tablets, mobile hotspots, or other devices",
-            "Retrieve company credit cards (coordinate with OneCard Help Desk if needed)",
-            "Check for accessories (chargers, cases, cables)",
-            "Wipe all device data per security protocol",
-            "Update asset management system with returned items",
-            "Complete Day 0 task - mark complete once all equipment recovered"
-          ],
-          tpmsLookup: parsedData?.tpmsLookup || { attempted: false, success: false, error: null },
-        };
+          const queueItem: any = {
+            workflowType: 'offboarding' as const,
+            title: taskDef.title,
+            description: taskDef.description,
+            status: sourceItem.status || 'pending',
+            priority: 'high' as const,
+            requesterId: 'system',
+            department: dept,
+            workflowId,
+            workflowStep: taskDef.workflowStep,
+            data: JSON.stringify(taskData),
+            metadata: JSON.stringify({
+              createdVia: 'department_backfill',
+              backfilledAt: new Date().toISOString(),
+              sourceItemId: sourceItem.id,
+            }),
+          };
 
-        const toolsQueueItem = {
-          workflowType: 'offboarding' as const,
-          title: `Day 0: Recover Company Equipment - ${techName}`,
-          description: `IMMEDIATE TASK: Begin equipment and tools recovery for terminated Employee ${techName} (${enterpriseId}). Truck ${vehicleNumber || 'TBD'}. This is a Day 0 task - must be completed before Phase 2 tasks are triggered.`,
-          status: ntaoItem.status || 'pending',
-          priority: 'high' as const,
-          requesterId: 'system',
-          department: 'Assets Management',
-          workflowId: ntaoItem.workflowId!,
-          workflowStep: 5,
-          data: JSON.stringify(toolsData),
-          metadata: JSON.stringify({
-            createdVia: 'tools_backfill',
-            backfilledAt: new Date().toISOString(),
-            sourceNtaoItemId: ntaoItem.id,
-          }),
-          isByov: byovStatus.isByov,
-          blockedActions: byovStatus.blockedActions,
-          fleetRoutingDecision: byovStatus.routingPath,
-          routingReceivedAt: byovStatus.isByov ? new Date() : null,
-          assignedTo: TOOLS_OWNER.id,
-        };
+          if (dept === 'NTAO') {
+            await storage.createNTAOQueueItem(queueItem);
+          } else if (dept === 'Assets Management') {
+            const byovStatus = getInitialToolsTaskStatus(vehicleNumber);
+            queueItem.isByov = byovStatus.isByov;
+            queueItem.blockedActions = byovStatus.blockedActions;
+            queueItem.fleetRoutingDecision = byovStatus.routingPath;
+            queueItem.routingReceivedAt = byovStatus.isByov ? new Date() : null;
+            queueItem.assignedTo = TOOLS_OWNER.id;
+            await storage.createAssetsQueueItem(queueItem);
+          } else if (dept === 'Inventory Control') {
+            await storage.createInventoryQueueItem(queueItem);
+          } else {
+            await storage.createFleetQueueItem(queueItem);
+          }
 
-        await storage.createAssetsQueueItem(toolsQueueItem);
-        created++;
-      } catch (err) {
-        console.error(`[Backfill] Error creating Tools item for workflow ${ntaoItem.workflowId}:`, err);
+          createdByDept[dept]++;
+          totalCreated++;
+        } catch (err) {
+          console.error(`[Backfill] Error creating ${dept} item for workflow ${workflowId}:`, err);
+        }
       }
     }
 
-    console.log(`[Backfill] Created ${created} Tools queue items`);
+    if (totalCreated > 0) {
+      console.log(`[Backfill] Created ${totalCreated} missing tasks: NTAO=${createdByDept.NTAO}, Assets=${createdByDept['Assets Management']}, Inventory=${createdByDept['Inventory Control']}, Fleet=${createdByDept.FLEET}`);
+    } else {
+      console.log('[Backfill] All workflows already have tasks in all 4 departments');
+    }
   } catch (error) {
-    console.error('[Backfill] Error during Tools queue backfill:', error);
+    console.error('[Backfill] Error during department backfill:', error);
   }
 }
 
@@ -289,7 +371,7 @@ export function startSyncScheduler(): void {
     // Run check every minute (development only)
     intervalId = setInterval(checkAndRunSync, CHECK_INTERVAL_MS);
     
-    backfillAssetsQueueItems().catch(err => 
+    backfillAllDepartments().catch(err => 
       console.error('[Backfill] Startup backfill failed:', err)
     );
     

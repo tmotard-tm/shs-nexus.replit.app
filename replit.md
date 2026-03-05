@@ -51,7 +51,7 @@ Preferred communication style: Simple, everyday language.
 -   **Template Management**: CRUD operations for workflow templates.
 -   **Activity Logging**: Comprehensive audit trail of system actions.
 -   **Task Queue**: A unified interface for all department-specific queues, including specialized task cards for tools management based on routing status. Features a table-based layout with sortable columns, expandable inline rows, and enhanced filtering.
--   **Snowflake Sync System**: Automated daily synchronization for `all_techs` (employee roster), `termed_techs` (for offboarding), and TPMS data, including enriched employee contact and truck assignment information.
+-   **Snowflake Sync System**: Automated daily synchronization for `all_techs` (employee roster), `termed_techs` (for offboarding), and TPMS data. The `syncTermedTechs` function queries Snowflake directly using the same views as the Weekly Offboarding page (`ORA_TECH_TERM_ROSTER_VW_VIEW` + `SEPARATION_FLEET_DETAILS`) to ensure consistent data. The separation poll (`syncNewSeparations`) creates tasks in all 4 departments (NTAO, Assets, Inventory, Fleet). A startup backfill ensures every offboarding workflow has tasks in all 4 departments.
 -   **TPMS Integration**: Syncs technician-vehicle assignments from Snowflake daily snapshots and retrieves mobile phone numbers.
 -   **Vehicle Assignment System**: Aggregates data from Snowflake, TPMS, and Holman.
 -   **Fleet Management Page**: Consolidated interface for managing vehicles, including stats, search, filters, actions, and a "Nexus Tracking" section for post-offboarding vehicle information.

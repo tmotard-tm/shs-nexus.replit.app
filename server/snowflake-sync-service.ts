@@ -92,6 +92,64 @@ interface SnowflakeTPMSExtractRow {
   FILE_DATE: string | null;
 }
 
+interface SnowflakeTermRosterRow {
+  EMPL_NAME: string;
+  ENTERPRISE_ID: string;
+  EMPLID: string;
+  EMPL_STATUS: string;
+  EFFDT: string;
+  LAST_DATE_WORKED: string;
+  PLANNING_AREA: string;
+  TECH_SPECIALTY?: string;
+  SNSTV_HOME_ADDR1?: string;
+  SNSTV_HOME_ADDR2?: string;
+  SNSTV_HOME_CITY?: string;
+  SNSTV_HOME_STATE?: string;
+  SNSTV_HOME_POSTAL?: string;
+  SNSTV_MAIN_PHONE?: string;
+  SNSTV_CELL_PHONE?: string;
+  SNSTV_HOME_PHONE?: string;
+  TRUCK_LU?: string;
+}
+
+interface SnowflakeSeparationRow {
+  LDAP_ID: string;
+  TECHNICIAN_NAME: string | null;
+  EMPLID: string;
+  PLANNING_AREA: string | null;
+  LAST_DAY: string | null;
+  EFFECTIVE_SEPARATION_DATE: string | null;
+  TRUCK_NUMBER: string | null;
+  CONTACT_NUMBER: string | null;
+  FLEET_PICKUP_ADDRESS: string | null;
+  SNSTV_HOME_ADDR1?: string | null;
+  SNSTV_HOME_ADDR2?: string | null;
+  SNSTV_HOME_CITY?: string | null;
+  SNSTV_HOME_STATE?: string | null;
+  SNSTV_HOME_POSTAL?: string | null;
+  SNSTV_MAIN_PHONE?: string | null;
+  SNSTV_CELL_PHONE?: string | null;
+  SNSTV_HOME_PHONE?: string | null;
+}
+
+interface UnifiedTermEmployee {
+  employeeId: string;
+  techRacfid: string;
+  techName: string;
+  firstName: string;
+  lastName: string;
+  effectiveDate: string | null;
+  lastDayWorked: string | null;
+  planningAreaName: string | null;
+  jobTitle: string | null;
+  districtNo: string | null;
+  truckLu: string | null;
+  cellPhone: string | null;
+  mainPhone: string | null;
+  homePhone: string | null;
+  source: 'term_roster' | 'separation';
+}
+
 interface SyncResult {
   success: boolean;
   syncLogId?: string;
@@ -146,15 +204,146 @@ export class SnowflakeSyncService {
     }
 
     try {
-      // The unified all_techs table should already be populated with effectiveDate and lastDayWorked
-      // from the syncAllTechs function. This function now just creates offboarding tasks
-      // for employees with recent termination dates (effectiveDate within last 30 days).
-      console.log('[Sync] Finding employees needing offboarding from unified roster...');
+      console.log('[Sync] Querying Snowflake for termed employees (unified with Weekly Offboarding)...');
       
-      // Use unified all_techs table - filter by effectiveDate >= CURRENT_DATE - 30 and offboardingTaskCreated = false
-      const techsNeedingOffboarding = await storage.getEmployeesNeedingOffboarding(30);
+      if (!isSnowflakeConfigured()) {
+        throw new Error('Snowflake is not configured — cannot query term roster views');
+      }
+      const snowflakeService = getSnowflakeService();
+
+      const termRosterQuery = `
+        SELECT 
+          t.EMPL_NAME,
+          t.ENTERPRISE_ID,
+          t.EMPLID,
+          t.EMPL_STATUS,
+          t.EFFDT,
+          t.LAST_DATE_WORKED,
+          t.PLANNING_AREA,
+          t.TECH_SPECIALTY,
+          c.SNSTV_HOME_ADDR1,
+          c.SNSTV_HOME_ADDR2,
+          c.SNSTV_HOME_CITY,
+          c.SNSTV_HOME_STATE,
+          c.SNSTV_HOME_POSTAL,
+          c.SNSTV_MAIN_PHONE,
+          c.SNSTV_CELL_PHONE,
+          c.SNSTV_HOME_PHONE,
+          tpms.TRUCK_LU
+        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
+        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+          ON t.EMPLID = c.EMPLID
+        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
+          ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
+        WHERE t.LAST_DATE_WORKED >= '2026-01-01'
+          AND (
+            tpms.TRUCK_LU IS NULL 
+            OR NOT EXISTS (
+              SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT active
+              WHERE active.TRUCK_LU = tpms.TRUCK_LU
+            )
+          )
+        ORDER BY t.LAST_DATE_WORKED DESC
+      `;
+
+      const termRosterRows = await snowflakeService.executeQuery(termRosterQuery) as SnowflakeTermRosterRow[];
+      console.log(`[Sync] Term roster returned ${termRosterRows.length} employees`);
+
+      const seenIds = new Set<string>();
+      const techsNeedingOffboarding: UnifiedTermEmployee[] = [];
+
+      for (const row of termRosterRows) {
+        const eid = (row.ENTERPRISE_ID || '').toUpperCase();
+        const emplId = (row.EMPLID || '').toUpperCase();
+        if (!eid && !emplId) continue;
+        const key = eid || emplId;
+        if (seenIds.has(key)) continue;
+        seenIds.add(key);
+        if (eid) seenIds.add(eid);
+        if (emplId) seenIds.add(emplId);
+
+        const nameParts = (row.EMPL_NAME || '').split(',').map(s => s.trim());
+        techsNeedingOffboarding.push({
+          employeeId: row.EMPLID || '',
+          techRacfid: row.ENTERPRISE_ID || '',
+          techName: row.EMPL_NAME || '',
+          firstName: nameParts.length > 1 ? nameParts[1] : '',
+          lastName: nameParts[0] || '',
+          effectiveDate: row.EFFDT || null,
+          lastDayWorked: row.LAST_DATE_WORKED || null,
+          planningAreaName: row.PLANNING_AREA || null,
+          jobTitle: row.TECH_SPECIALTY || null,
+          districtNo: null,
+          truckLu: row.TRUCK_LU || null,
+          cellPhone: row.SNSTV_CELL_PHONE || null,
+          mainPhone: row.SNSTV_MAIN_PHONE || null,
+          homePhone: row.SNSTV_HOME_PHONE || null,
+          source: 'term_roster',
+        });
+      }
+
+      const sepQuery = `
+        SELECT 
+          s.LDAP_ID,
+          s.TECHNICIAN_NAME,
+          s.EMPLID,
+          s.PLANNING_AREA,
+          s.LAST_DAY,
+          s.EFFECTIVE_SEPARATION_DATE,
+          s.TRUCK_NUMBER,
+          s.CONTACT_NUMBER,
+          s.FLEET_PICKUP_ADDRESS,
+          c.SNSTV_HOME_ADDR1,
+          c.SNSTV_HOME_ADDR2,
+          c.SNSTV_HOME_CITY,
+          c.SNSTV_HOME_STATE,
+          c.SNSTV_HOME_POSTAL,
+          c.SNSTV_MAIN_PHONE,
+          c.SNSTV_CELL_PHONE,
+          c.SNSTV_HOME_PHONE
+        FROM PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS s
+        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+          ON s.EMPLID = c.EMPLID
+        WHERE (s.LAST_DAY >= '2026-01-01' OR s.EFFECTIVE_SEPARATION_DATE >= '2026-01-01')
+        ORDER BY COALESCE(s.LAST_DAY, s.EFFECTIVE_SEPARATION_DATE) DESC NULLS LAST
+      `;
+
+      const sepRows = await snowflakeService.executeQuery(sepQuery) as SnowflakeSeparationRow[];
+      console.log(`[Sync] Separation details returned ${sepRows.length} records, deduplicating...`);
+      let sepAdded = 0;
+
+      for (const row of sepRows) {
+        const ldap = (row.LDAP_ID || '').toUpperCase();
+        const emplId = (row.EMPLID || '').toUpperCase();
+        if (!ldap && !emplId) continue;
+        if (ldap && seenIds.has(ldap)) continue;
+        if (!ldap && emplId && seenIds.has(emplId)) continue;
+        if (ldap) seenIds.add(ldap);
+        if (emplId) seenIds.add(emplId);
+
+        const nameParts = (row.TECHNICIAN_NAME || '').split(',').map(s => s.trim());
+        techsNeedingOffboarding.push({
+          employeeId: row.EMPLID || '',
+          techRacfid: row.LDAP_ID || '',
+          techName: row.TECHNICIAN_NAME || '',
+          firstName: nameParts.length > 1 ? nameParts[1] : '',
+          lastName: nameParts[0] || '',
+          effectiveDate: row.EFFECTIVE_SEPARATION_DATE || null,
+          lastDayWorked: row.LAST_DAY || null,
+          planningAreaName: row.PLANNING_AREA || null,
+          jobTitle: null,
+          districtNo: null,
+          truckLu: row.TRUCK_NUMBER || null,
+          cellPhone: row.SNSTV_CELL_PHONE || row.CONTACT_NUMBER || null,
+          mainPhone: row.SNSTV_MAIN_PHONE || null,
+          homePhone: row.SNSTV_HOME_PHONE || null,
+          source: 'separation',
+        });
+        sepAdded++;
+      }
+
+      console.log(`[Sync] Unified list: ${techsNeedingOffboarding.length} employees (${termRosterRows.length} from term roster + ${sepAdded} additional from separation details)`);
       result.recordsProcessed = techsNeedingOffboarding.length;
-      console.log(`[Sync] Found ${techsNeedingOffboarding.length} employees needing offboarding tasks (from unified roster)`);
 
       // Initialize TPMS service for truck lookups
       const tpmsService = getTPMSService();
@@ -439,9 +628,12 @@ export class SnowflakeSyncService {
             console.log(`[Sync] Created Day 0 task: ${task.step} for ${tech.techName} in ${task.department} queue`);
           }
 
-          // Mark the employee as having offboarding tasks created (uses unified all_techs table)
-          if (firstCreatedItemId) {
-            await storage.markEmployeeOffboardingCreated(tech.employeeId, firstCreatedItemId);
+          if (firstCreatedItemId && tech.employeeId) {
+            try {
+              await storage.markEmployeeOffboardingCreated(tech.employeeId, firstCreatedItemId);
+            } catch (markErr: any) {
+              console.log(`[Sync] Note: Could not mark offboarding created for ${tech.employeeId} in all_techs table (employee may not exist in roster): ${markErr.message}`);
+            }
           }
           
           console.log(`[Sync] Created ${day0Tasks.length} Day 0 offboarding tasks for ${tech.techName} (${tech.employeeId})${truckInfo.truckNo ? ` with truck ${truckInfo.truckNo}` : ''}`);
@@ -1421,8 +1613,24 @@ export class SnowflakeSyncService {
             console.error(`[Separation Sync] Failed to create Tools Queue task for ${techName}:`, toolsError.message);
           }
 
-          // Fleet and Inventory tasks use Day 0 format
+          // NTAO, Fleet, and Inventory tasks use Day 0 format
           const day0Tasks = [
+            {
+              title: `Day 0: NTAO — National Truck Assortment - Stop Truck Stock Replenishment - ${techName}`,
+              description: `IMMEDIATE: Stop truck stock replenishment for ${techName} (${separation.ldapId}). Vehicle: ${vehicleNumber || 'TBD'}. Source: HR Separation Sync.`,
+              department: 'NTAO',
+              step: 'ntao_stop_replenishment_day0',
+              subtask: 'NTAO',
+              workflowStep: 1,
+              instructions: [
+                "Place a shipping hold to prevent future shipments",
+                "Cancel any pending orders for this Employee",
+                "Cancel all backorders associated with the vehicle",
+                "Remove Employee from automatic replenishment system",
+                "Update truck status in NTAO — National Truck Assortment system",
+                "Complete Day 0 task - no follow-up tasks until all teams complete Day 0"
+              ],
+            },
             {
               title: `Day 0: Fleet Coordination - ${vehicleNumber || techName}`,
               description: `IMMEDIATE: Begin fleet coordination for ${techName} (${separation.ldapId}). Vehicle: ${vehicleNumber || 'TBD'}. Pickup Address: ${separation.fleetPickupAddress || 'TBD'}. Source: HR Separation Sync.`,
@@ -1505,7 +1713,9 @@ export class SnowflakeSyncService {
             // Route to correct queue (Tools handled separately above)
             const deptUpper = task.department.toUpperCase();
             
-            if (deptUpper === 'FLEET') {
+            if (deptUpper === 'NTAO') {
+              await storage.createNTAOQueueItem(queueItem);
+            } else if (deptUpper === 'FLEET') {
               await storage.createFleetQueueItem(queueItem);
             } else if (deptUpper === 'INVENTORY CONTROL' || deptUpper === 'INVENTORY') {
               await storage.createInventoryQueueItem(queueItem);
@@ -1514,7 +1724,7 @@ export class SnowflakeSyncService {
             result.tasksCreated++;
           }
 
-          console.log(`[Separation Sync] Created ${day0Tasks.length} tasks for ${techName}`);
+          console.log(`[Separation Sync] Created ${day0Tasks.length + 1} tasks for ${techName} (including Tools)`);
         } catch (taskError: any) {
           console.error(`[Separation Sync] Error creating tasks for ${separation.ldapId}:`, taskError.message);
           result.errors.push(`Failed to create tasks for ${separation.ldapId}: ${taskError.message}`);
