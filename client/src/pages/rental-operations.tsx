@@ -68,8 +68,9 @@ export default function RentalOperations() {
   const [ticketSearch, setTicketSearch] = useState("");
   const [openSort, setOpenSort] = useState({ field: "daysOpen", dir: "desc" as "asc" | "desc" });
   const [showAllPOs, setShowAllPOs] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<"all" | "holman_only" | "enterprise">("all");
 
-  const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number; totalPOLines: number }>({
+  const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number; totalPOLines: number; view: string }>({
     queryKey: ["/api/rental-ops/open", showAllPOs ? "all" : "dedup"],
     queryFn: () => fetch(`/api/rental-ops/open${showAllPOs ? "?view=all" : ""}`, { credentials: "include" }).then(r => r.json()),
     enabled: activeTab === "open" || activeTab === "position",
@@ -129,7 +130,12 @@ export default function RentalOperations() {
 
   const openRows = (openData?.data || []).filter((r: any) => {
     const q = openSearch.toLowerCase();
-    return !q || r.vehicleNumber?.toLowerCase().includes(q) || r.renterName?.toLowerCase().includes(q) || r.poNumber?.toLowerCase().includes(q);
+    const matchesSearch = !q || r.vehicleNumber?.toLowerCase().includes(q) || r.renterName?.toLowerCase().includes(q) || r.poNumber?.toLowerCase().includes(q);
+    const matchesSource =
+      sourceFilter === "all" ? true :
+      sourceFilter === "holman_only" ? !r.hasEnterpriseTicket :
+      r.hasEnterpriseTicket;
+    return matchesSearch && matchesSource;
   });
 
   const sortedOpen = [...openRows].sort((a: any, b: any) => {
@@ -279,19 +285,37 @@ export default function RentalOperations() {
           <TabsContent value="open">
             <Card>
               <CardHeader className="pb-3">
-                <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
                   <CardTitle className="text-base">Open Rentals</CardTitle>
                   <Badge variant="secondary">{sortedOpen.length}</Badge>
-                  {!showAllPOs && openData?.totalPOLines && openData.totalPOLines > sortedOpen.length && (
+                  {!showAllPOs && openData?.totalPOLines && openData.totalPOLines > (openData?.total ?? 0) && (
                     <span className="text-xs text-muted-foreground">{openData.totalPOLines} total PO lines</span>
                   )}
                   <button
                     onClick={() => setShowAllPOs(v => !v)}
-                    className={`ml-1 text-xs px-2 py-1 rounded border transition-colors ${showAllPOs ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-muted-foreground/30"}`}
+                    className={`text-xs px-2 py-1 rounded border transition-colors ${showAllPOs ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-muted-foreground/30"}`}
                   >
-                    {showAllPOs ? "All PO Lines" : "Per Truck (latest PO)"}
+                    {showAllPOs ? "All PO Lines" : "Per Truck"}
                   </button>
-                  <div className="relative ml-auto w-64">
+
+                  {/* Source filter */}
+                  <div className="flex items-center gap-1 ml-1 border rounded overflow-hidden text-xs">
+                    {([
+                      { key: "all", label: `All (${openData?.total ?? "—"})` },
+                      { key: "holman_only", label: `Excel List (${summary?.holmanOnly ?? "—"})` },
+                      { key: "enterprise", label: `+Enterprise (${summary?.enterpriseOverlap ?? "—"})` },
+                    ] as const).map(opt => (
+                      <button
+                        key={opt.key}
+                        onClick={() => setSourceFilter(opt.key)}
+                        className={`px-2 py-1 transition-colors ${sourceFilter === opt.key ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="relative ml-auto w-56">
                     <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input className="pl-8 h-8 text-sm" placeholder="Search vehicle, name, PO..." value={openSearch} onChange={e => setOpenSearch(e.target.value)} />
                   </div>
