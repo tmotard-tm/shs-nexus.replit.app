@@ -50,6 +50,7 @@ import TechRoster from "@/pages/tech-roster";
 import FleetManagement from "@/pages/fleet-management";
 import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import WeeklyOffboarding from "@/pages/weekly-offboarding";
+import RentalOperations from "@/pages/rental-operations";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import Reporting from "@/pages/reporting";
@@ -339,6 +340,12 @@ function Router() {
       <Route path="/fleet-management">
         <ProtectedRoute>
           <FleetManagement />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/rental-operations">
+        <ProtectedRoute>
+          <RentalOperations />
         </ProtectedRoute>
       </Route>
 

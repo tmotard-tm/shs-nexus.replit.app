@@ -43,6 +43,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: true,
       communicationHub: true,
       techRoster: true,
+      rentalOperations: true,
     },
     activities: {
       enabled: true,
@@ -167,6 +168,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: true,
       communicationHub: true,
       techRoster: true,
+      rentalOperations: true,
     },
     activities: {
       enabled: true,
@@ -290,6 +292,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: false,
       communicationHub: false,
       techRoster: false,
+      rentalOperations: false,
     },
     activities: {
       enabled: false,
@@ -452,6 +455,12 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/analytics-board': () => perms.sidebar.dashboards.vehicleAssignmentDash,
     '/rental-dashboard': () => perms.sidebar.dashboards.rentalReductionDash,
     '/reporting': () => perms.sidebar.dashboards.reporting,
+    '/rental-operations': () => perms.sidebar.management.rentalOperations,
+    '/samsara-integration': () => perms.sidebar.management.integrations,
+    '/parq-integration': () => perms.sidebar.management.integrations,
+    '/ams-integration': () => perms.sidebar.management.integrations,
+    '/segno-integration': () => perms.sidebar.management.integrations,
+    '/tpms-integration': () => perms.sidebar.management.integrations,
   };
 
   // Check exact route match

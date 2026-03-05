@@ -80,6 +80,7 @@ export interface RolePermissionSettings {
       weeklyOffboarding: boolean;
       communicationHub: boolean;
       techRoster: boolean;
+      rentalOperations: boolean;
     };
     activities: {
       enabled: boolean;
@@ -1807,3 +1808,100 @@ export const insertCommunicationLogSchema = createInsertSchema(communicationLogs
 });
 export type InsertCommunicationLog = z.infer<typeof insertCommunicationLogSchema>;
 export type CommunicationLog = typeof communicationLogs.$inferSelect;
+
+// ===============================
+// Rental Operations
+// ===============================
+
+// Qualification log — one record per source table per run
+export const rentalQualificationLog = pgTable("rental_qualification_log", {
+  id: serial("id").primaryKey(),
+  sourceTable: text("source_table").notNull(), // "rental_open" | "rental_closed" | "rental_ticket_detail"
+  runAt: timestamp("run_at").defaultNow().notNull(),
+  totalRows: integer("total_rows").notNull().default(0),
+  passRows: integer("pass_rows").notNull().default(0),
+  warnRows: integer("warn_rows").notNull().default(0),
+  failRows: integer("fail_rows").notNull().default(0),
+  nullRateJson: jsonb("null_rate_json"), // { field: pct }
+  duplicateCount: integer("duplicate_count").notNull().default(0),
+  unmatchedVehicleCount: integer("unmatched_vehicle_count").notNull().default(0),
+  invalidDateCount: integer("invalid_date_count").notNull().default(0),
+  mismatchedTechCount: integer("mismatched_tech_count").notNull().default(0),
+  issuesJson: jsonb("issues_json"), // [{ row, field, issue, severity }]
+  triggeredBy: text("triggered_by"),
+});
+
+export const insertRentalQualificationLogSchema = createInsertSchema(rentalQualificationLog).omit({
+  id: true,
+  runAt: true,
+});
+export type RentalQualificationLog = typeof rentalQualificationLog.$inferSelect;
+export type InsertRentalQualificationLog = z.infer<typeof insertRentalQualificationLogSchema>;
+
+// ===============================
+// Holman PO Cache
+// ===============================
+
+export const holmanPoCache = pgTable("holman_po_cache", {
+  id: serial("id").primaryKey(),
+  poNumber: text("po_number").notNull().unique(),
+  vehicleNumber: text("vehicle_number"),
+  vin: text("vin"),
+  poType: text("po_type"), // "maintenance" | "rental" | "other"
+  poStatus: text("po_status"),
+  poDate: date("po_date"),
+  amount: decimal("amount", { precision: 12, scale: 2 }),
+  description: text("description"),
+  vendor: text("vendor"),
+  rawData: jsonb("raw_data"),
+  lastSyncedAt: timestamp("last_synced_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    vehicleIdx: index("holman_po_vehicle_idx").on(table.vehicleNumber),
+    poNumberIdx: index("holman_po_number_idx").on(table.poNumber),
+  };
+});
+
+export const insertHolmanPoCacheSchema = createInsertSchema(holmanPoCache).omit({
+  id: true,
+  lastSyncedAt: true,
+});
+export type HolmanPoCache = typeof holmanPoCache.$inferSelect;
+export type InsertHolmanPoCache = z.infer<typeof insertHolmanPoCacheSchema>;
+
+// ===============================
+// Fleet Operation Log
+// ===============================
+
+export const fleetOperationLog = pgTable("fleet_operation_log", {
+  id: serial("id").primaryKey(),
+  operationType: text("operation_type").notNull(), // "assign" | "unassign" | "transfer" | "update_address"
+  truckNumber: text("truck_number"),
+  fromLdap: text("from_ldap"),
+  toLdap: text("to_ldap"),
+  toTechName: text("to_tech_name"),
+  districtNo: text("district_no"),
+  tpmsStatus: text("tpms_status").default("pending"), // "pending" | "success" | "failed" | "skipped"
+  tpmsMessage: text("tpms_message"),
+  holmanStatus: text("holman_status").default("pending"),
+  holmanMessage: text("holman_message"),
+  amsStatus: text("ams_status").default("pending"),
+  amsMessage: text("ams_message"),
+  requestedBy: text("requested_by"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+}, (table) => {
+  return {
+    truckIdx: index("fleet_op_log_truck_idx").on(table.truckNumber),
+    ldapIdx: index("fleet_op_log_ldap_idx").on(table.toLdap),
+    createdIdx: index("fleet_op_log_created_idx").on(table.createdAt),
+  };
+});
+
+export const insertFleetOperationLogSchema = createInsertSchema(fleetOperationLog).omit({
+  id: true,
+  createdAt: true,
+});
+export type FleetOperationLog = typeof fleetOperationLog.$inferSelect;
+export type InsertFleetOperationLog = z.infer<typeof insertFleetOperationLogSchema>;

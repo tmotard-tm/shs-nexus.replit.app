@@ -63,6 +63,12 @@ import {
   type InsertVehicleNexusData,
   type OffboardingTruckOverride,
   type InsertOffboardingTruckOverride,
+  type RentalQualificationLog,
+  type InsertRentalQualificationLog,
+  type HolmanPoCache,
+  type InsertHolmanPoCache,
+  type FleetOperationLog,
+  type InsertFleetOperationLog,
   users,
   requests,
   apiConfigurations,
@@ -93,6 +99,9 @@ import {
   communicationLogs,
   vehicleNexusData,
   offboardingTruckOverrides,
+  rentalQualificationLog,
+  holmanPoCache,
+  fleetOperationLog,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, inArray, desc, sql } from "drizzle-orm";
@@ -405,6 +414,23 @@ export interface IStorage {
   getAllOffboardingTruckOverrides(): Promise<OffboardingTruckOverride[]>;
   upsertOffboardingTruckOverride(data: InsertOffboardingTruckOverride): Promise<OffboardingTruckOverride>;
   deleteOffboardingTruckOverride(enterpriseId: string): Promise<boolean>;
+
+  // Rental Qualification Log
+  createQualificationLog(data: InsertRentalQualificationLog): Promise<RentalQualificationLog>;
+  getQualificationLogs(sourceTable?: string, limit?: number): Promise<RentalQualificationLog[]>;
+  getLatestQualificationLog(sourceTable: string): Promise<RentalQualificationLog | undefined>;
+
+  // Holman PO Cache
+  upsertHolmanPoCache(records: InsertHolmanPoCache[]): Promise<number>;
+  getHolmanPosByVehicle(vehicleNumber: string): Promise<HolmanPoCache[]>;
+  getHolmanPosAll(filters?: { vehicleNumber?: string; poType?: string; poStatus?: string; search?: string }): Promise<HolmanPoCache[]>;
+  getHolmanPoCacheCount(): Promise<number>;
+  getHolmanPoCacheLastSync(): Promise<Date | null>;
+
+  // Fleet Operation Log
+  createFleetOperationLog(data: InsertFleetOperationLog): Promise<FleetOperationLog>;
+  updateFleetOperationLog(id: number, updates: Partial<FleetOperationLog>): Promise<FleetOperationLog | undefined>;
+  getFleetOperationLogs(filters?: { operationType?: string; truckNumber?: string; ldap?: string }): Promise<FleetOperationLog[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -3425,6 +3451,42 @@ export class MemStorage implements IStorage {
   async deleteOffboardingTruckOverride(_enterpriseId: string): Promise<boolean> {
     throw new Error("MemStorage does not support offboarding truck overrides. Use DatabaseStorage.");
   }
+
+  async createQualificationLog(_data: InsertRentalQualificationLog): Promise<RentalQualificationLog> {
+    throw new Error("MemStorage does not support qualification logs. Use DatabaseStorage.");
+  }
+  async getQualificationLogs(_sourceTable?: string, _limit?: number): Promise<RentalQualificationLog[]> {
+    return [];
+  }
+  async getLatestQualificationLog(_sourceTable: string): Promise<RentalQualificationLog | undefined> {
+    return undefined;
+  }
+
+  async upsertHolmanPoCache(_records: InsertHolmanPoCache[]): Promise<number> {
+    return 0;
+  }
+  async getHolmanPosByVehicle(_vehicleNumber: string): Promise<HolmanPoCache[]> {
+    return [];
+  }
+  async getHolmanPosAll(_filters?: { vehicleNumber?: string; poType?: string; poStatus?: string; search?: string }): Promise<HolmanPoCache[]> {
+    return [];
+  }
+  async getHolmanPoCacheCount(): Promise<number> {
+    return 0;
+  }
+  async getHolmanPoCacheLastSync(): Promise<Date | null> {
+    return null;
+  }
+
+  async createFleetOperationLog(_data: InsertFleetOperationLog): Promise<FleetOperationLog> {
+    throw new Error("MemStorage does not support fleet operation logs. Use DatabaseStorage.");
+  }
+  async updateFleetOperationLog(_id: number, _updates: Partial<FleetOperationLog>): Promise<FleetOperationLog | undefined> {
+    return undefined;
+  }
+  async getFleetOperationLogs(_filters?: { operationType?: string; truckNumber?: string; ldap?: string }): Promise<FleetOperationLog[]> {
+    return [];
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -6093,6 +6155,134 @@ export class DatabaseStorage implements IStorage {
     const result = await db.delete(offboardingTruckOverrides)
       .where(eq(offboardingTruckOverrides.enterpriseId, enterpriseId));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // ========================================
+  // Rental Qualification Log
+  // ========================================
+
+  async createQualificationLog(data: InsertRentalQualificationLog): Promise<RentalQualificationLog> {
+    const result = await db.insert(rentalQualificationLog).values(data).returning();
+    return result[0];
+  }
+
+  async getQualificationLogs(sourceTable?: string, limit: number = 20): Promise<RentalQualificationLog[]> {
+    const query = db.select().from(rentalQualificationLog);
+    if (sourceTable) {
+      return await db.select().from(rentalQualificationLog)
+        .where(eq(rentalQualificationLog.sourceTable, sourceTable))
+        .orderBy(desc(rentalQualificationLog.runAt))
+        .limit(limit);
+    }
+    return await db.select().from(rentalQualificationLog)
+      .orderBy(desc(rentalQualificationLog.runAt))
+      .limit(limit);
+  }
+
+  async getLatestQualificationLog(sourceTable: string): Promise<RentalQualificationLog | undefined> {
+    const result = await db.select().from(rentalQualificationLog)
+      .where(eq(rentalQualificationLog.sourceTable, sourceTable))
+      .orderBy(desc(rentalQualificationLog.runAt))
+      .limit(1);
+    return result[0];
+  }
+
+  // ========================================
+  // Holman PO Cache
+  // ========================================
+
+  async upsertHolmanPoCache(records: InsertHolmanPoCache[]): Promise<number> {
+    if (records.length === 0) return 0;
+    let count = 0;
+    for (const record of records) {
+      await db.insert(holmanPoCache)
+        .values({ ...record, lastSyncedAt: new Date() })
+        .onConflictDoUpdate({
+          target: holmanPoCache.poNumber,
+          set: {
+            vehicleNumber: record.vehicleNumber,
+            vin: record.vin,
+            poType: record.poType,
+            poStatus: record.poStatus,
+            poDate: record.poDate,
+            amount: record.amount,
+            description: record.description,
+            vendor: record.vendor,
+            rawData: record.rawData,
+            lastSyncedAt: new Date(),
+          },
+        });
+      count++;
+    }
+    return count;
+  }
+
+  async getHolmanPosByVehicle(vehicleNumber: string): Promise<HolmanPoCache[]> {
+    return await db.select().from(holmanPoCache)
+      .where(eq(holmanPoCache.vehicleNumber, vehicleNumber))
+      .orderBy(desc(holmanPoCache.poDate));
+  }
+
+  async getHolmanPosAll(filters?: { vehicleNumber?: string; poType?: string; poStatus?: string; search?: string }): Promise<HolmanPoCache[]> {
+    let query = db.select().from(holmanPoCache).$dynamic();
+    const conditions = [];
+    if (filters?.vehicleNumber) conditions.push(eq(holmanPoCache.vehicleNumber, filters.vehicleNumber));
+    if (filters?.poType) conditions.push(eq(holmanPoCache.poType, filters.poType));
+    if (filters?.poStatus) conditions.push(eq(holmanPoCache.poStatus, filters.poStatus));
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+    return await query.orderBy(desc(holmanPoCache.poDate)).limit(1000);
+  }
+
+  async getHolmanPoCacheCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(holmanPoCache);
+    return Number(result[0]?.count ?? 0);
+  }
+
+  async getHolmanPoCacheLastSync(): Promise<Date | null> {
+    const result = await db.select({ lastSync: holmanPoCache.lastSyncedAt })
+      .from(holmanPoCache)
+      .orderBy(desc(holmanPoCache.lastSyncedAt))
+      .limit(1);
+    return result[0]?.lastSync ?? null;
+  }
+
+  // ========================================
+  // Fleet Operation Log
+  // ========================================
+
+  async createFleetOperationLog(data: InsertFleetOperationLog): Promise<FleetOperationLog> {
+    const result = await db.insert(fleetOperationLog).values(data).returning();
+    return result[0];
+  }
+
+  async updateFleetOperationLog(id: number, updates: Partial<FleetOperationLog>): Promise<FleetOperationLog | undefined> {
+    const result = await db.update(fleetOperationLog)
+      .set({ ...updates, completedAt: new Date() })
+      .where(eq(fleetOperationLog.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getFleetOperationLogs(filters?: { operationType?: string; truckNumber?: string; ldap?: string }): Promise<FleetOperationLog[]> {
+    const conditions = [];
+    if (filters?.operationType) conditions.push(eq(fleetOperationLog.operationType, filters.operationType));
+    if (filters?.truckNumber) conditions.push(eq(fleetOperationLog.truckNumber, filters.truckNumber));
+    if (filters?.ldap) {
+      conditions.push(
+        or(eq(fleetOperationLog.toLdap, filters.ldap), eq(fleetOperationLog.fromLdap, filters.ldap))!
+      );
+    }
+    if (conditions.length > 0) {
+      return await db.select().from(fleetOperationLog)
+        .where(and(...conditions))
+        .orderBy(desc(fleetOperationLog.createdAt))
+        .limit(200);
+    }
+    return await db.select().from(fleetOperationLog)
+      .orderBy(desc(fleetOperationLog.createdAt))
+      .limit(200);
   }
 }
 

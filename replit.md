@@ -59,6 +59,13 @@ Preferred communication style: Simple, everyday language.
 -   **Offboarding Workflow Enhancements**: Uses a unified Assets Queue as a Day 0 task with BYOV detection and blocking logic, and a Phase 2 trigger mechanism for creating subsequent fleet tasks based on Day 0 task completion. Features auto-save for task progress, tech data enrichment with HR separation data, date range filtering, incomplete task warnings, and a full-page detail view.
 -   **Communication Hub**: Centralized management for email and SMS templates with `Simulated`, `Whitelisted`, and `Live` modes, developer-only access, and audit logging. Located under Activity section in sidebar. Whitelist mode sends TO all whitelisted addresses with `[TEST - Original recipient: ...]` subject prefix.
 -   **Vehicle Disposition**: Assets Queue displays read-only disposition status from `vehicle_nexus_data.postOffboardedStatus`, set via Weekly Offboarding page. Replaces legacy routing radio buttons.
+-   **Fleet Operations Command Center**: Unified fleet operations hub replacing manual Excel workflows. Four pillars:
+    1. **Rental Operations Hub** (`/rental-operations`): Reads 3 confirmed Snowflake pipeline tables: `PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT`, `PARTS_SUPPLYCHAIN.FLEET.HOLMAN_CLOSED_RENTAL_REPORT`, `PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT`. 5-tab UI: Open Rentals, Closed Rentals, Open Tickets, Position Report, Data Quality. Data qualification scoring stored in `rental_qualification_log` DB table. XLSX export (3 sheets). Route requires `rentalOperations` permission.
+    2. **PO Tracking**: Syncs `PARTS_SUPPLYCHAIN.FLEET.HOLMAN_PO_DETAILS_CDC` from Snowflake into `holman_po_cache`. Surfaced in Fleet Management vehicle detail sheet and in a "PO Tracker" tab on the Holman Integration page. Routes: `/api/holman/pos/*`.
+    3. **Cross-System Tech Assignment** (`server/fleet-operations-service.ts`): Single-operation assign/unassign/transfer writes to TPMS + Holman + AMS simultaneously. Partial failures return HTTP 207 with per-system status. Every operation logged in `fleet_operation_log`. Routes: `/api/fleet-ops/*`.
+    4. **Cross-System Address Management**: Update address in TPMS + AMS in one operation (Holman = N/A for address).
+    - **Holman null spec**: Fields to clear use literal string `"^null^"` (not JSON null).
+    - **Snowflake error handling**: Table-not-found errors return 503 with informative message (tables are pipeline placeholders until provisioned).
 
 # External Dependencies
 
@@ -105,8 +112,14 @@ Preferred communication style: Simple, everyday language.
 - SAML SSO requires IdP admin to register SP ACS URL and Entity ID (printed in server logs on startup)
 - Segno: QA host `hscmt.nonprod.mt.oh.transformco.com:2443` is internal Transformco DNS, unreachable from Replit
 - `SAMSARA_GROUP_ID` and `SAMSARA_ORG_ID` not yet set — live API works across all groups; set Group ID to filter to specific fleet tag
+- Fleet Ops pipeline tables (`RENTAL_OPEN`, `RENTAL_CLOSED`, `RENTAL_TICKET_DETAIL`, `HOLMAN_PO_DETAILS_CDC`) are placeholder names — will return 503 with informative message until Snowflake tables are provisioned by the data engineering team
 
 ## Pending Configuration
 - `SAML_BASE_URL` needs to be set for production deployment if auto-detection doesn't match the registered SP URL
 - `SAMSARA_GROUP_ID`: Provide Samsara tag ID to scope live API calls to a specific fleet group
 - IdP Registration: Provide SAML SP details (ACS URL, Entity ID, NameID format) to IdP admin
+- Fleet pipeline tables: Confirm actual Snowflake table names for `RENTAL_OPEN`, `RENTAL_CLOSED`, `RENTAL_TICKET_DETAIL`, `HOLMAN_PO_DETAILS_CDC` once provisioned; swap constants at top of rental-ops block in `server/routes.ts`
+- `rentalOperations` permission: Default is `false` for Agent role — enable per user via Role Permissions page, or toggle the agent default in `client/src/lib/role-permissions.ts` if all FLEET agents should have access
+
+## Test Users
+- `fleet_agent` / `test123` — role: developer (elevated for testing); dept: FLEET — use `/manual-login`

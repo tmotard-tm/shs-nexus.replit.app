@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { holmanVehiclesCache, vehicleChangeLog, holmanSyncState, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus, HolmanSyncState } from "@shared/schema";
-import { eq, sql, and, desc, inArray } from "drizzle-orm";
+import { holmanVehiclesCache, vehicleChangeLog, holmanSyncState, holmanSubmissions, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus, HolmanSyncState } from "@shared/schema";
+import { eq, sql, and, desc, inArray, gte, isNotNull } from "drizzle-orm";
 
 // Only divisions 01 and RF are relevant for this application
 const ALLOWED_DIVISIONS = ['01', 'RF'];
@@ -357,6 +357,7 @@ class HolmanVehicleSyncService {
           console.log('[HolmanSync] Starting background cache update...');
           await this.updateCache(filteredVehicleData);
           await this.processPendingChanges();
+          await this.reapplyRecentUnassigns();
           console.log('[HolmanSync] Background cache update completed');
         } catch (err) {
           console.error('[HolmanSync] Background cache update failed:', err);
@@ -676,6 +677,38 @@ class HolmanVehicleSyncService {
     }
 
     return { processed, failed };
+  }
+
+  async reapplyRecentUnassigns(): Promise<number> {
+    const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000);
+    const recentUnassigns = await db
+      .select({ holmanVehicleNumber: holmanSubmissions.holmanVehicleNumber })
+      .from(holmanSubmissions)
+      .where(
+        and(
+          eq(holmanSubmissions.action, 'unassign'),
+          eq(holmanSubmissions.status, 'completed'),
+          gte(holmanSubmissions.createdAt, cutoff)
+        )
+      );
+
+    if (recentUnassigns.length === 0) return 0;
+
+    const vehicleNumbers = [...new Set(recentUnassigns.map(r => r.holmanVehicleNumber))];
+    const stripped = vehicleNumbers.map(vn => vn.replace(/^0+/, ''));
+
+    for (const vn of stripped) {
+      await db
+        .update(holmanVehiclesCache)
+        .set({ holmanTechAssigned: null, holmanTechName: null, lastLocalUpdateAt: new Date() })
+        .where(eq(holmanVehiclesCache.holmanVehicleNumber, vn));
+    }
+
+    if (stripped.length > 0) {
+      console.log(`[HolmanSync] Re-applied ${stripped.length} recent unassign(s) after sync: ${vehicleNumbers.join(', ')}`);
+    }
+
+    return vehicleNumbers.length;
   }
 
   async getPendingChangeCount(): Promise<number> {
