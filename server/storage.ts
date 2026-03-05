@@ -4443,7 +4443,14 @@ export class DatabaseStorage implements IStorage {
   async getInventoryQueueItems(): Promise<QueueItem[]> {
     return await db.select().from(queueItems)
       .where(eq(queueItems.department, 'Inventory Control'))
-      .orderBy(desc(queueItems.createdAt));
+      .orderBy(
+        sql`COALESCE(
+          (${queueItems.data}::jsonb -> 'technician' ->> 'lastDayWorked'),
+          (${queueItems.data}::jsonb -> 'employee' ->> 'lastDayWorked'),
+          '1970-01-01'
+        ) DESC`,
+        desc(queueItems.createdAt)
+      );
   }
 
   async createInventoryQueueItem(item: InsertQueueItem): Promise<QueueItem> {
