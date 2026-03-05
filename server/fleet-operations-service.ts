@@ -113,7 +113,15 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
         params.truckNumber,
         params.ldapId
       );
-      if (result.success) return { status: "success", message: result.message || "Assigned" };
+      if (result.success) {
+        // Optimistically update the local cache so the UI reflects the new state immediately
+        try {
+          await db.update(holmanVehiclesCache)
+            .set({ holmanTechAssigned: params.ldapId, holmanTechName: params.techName || params.ldapId, lastLocalUpdateAt: new Date() })
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, params.truckNumber));
+        } catch {}
+        return { status: "success", message: result.message || "Assigned" };
+      }
       return { status: "failed", message: result.message || "Holman assign failed" };
     }
     if (action === "unassign") {
@@ -121,7 +129,15 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
         params.truckNumber,
         null
       );
-      if (result.success) return { status: "success", message: "Unassigned" };
+      if (result.success) {
+        // Optimistically clear the local cache so the UI reflects unassigned state immediately
+        try {
+          await db.update(holmanVehiclesCache)
+            .set({ holmanTechAssigned: null, holmanTechName: null, lastLocalUpdateAt: new Date() })
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, params.truckNumber));
+        } catch {}
+        return { status: "success", message: "Unassigned" };
+      }
       return { status: "failed", message: result.message || "Holman unassign failed" };
     }
     return { status: "skipped", message: "Not applicable for this operation" };
@@ -151,10 +167,13 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
     if (action === "unassign") {
       let currentTech: string | null = null;
       try {
-        const vehicle = await ams.getVehicleByVin(vin);
+        // Use searchVehicles (list endpoint) — same endpoint the AMS Vehicles page uses, reliable format
+        const searchResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
+        const vehicle = Array.isArray(searchResult) ? searchResult[0] : (searchResult?.data?.[0] ?? searchResult);
         currentTech = vehicle?.Tech ?? null;
-      } catch {
-        // VIN not found in AMS - skip
+        console.log(`[FleetOps] AMS pre-check for ${vin}: Tech=${currentTech}, TechName=${vehicle?.TechName}`);
+      } catch (lookupErr: any) {
+        console.warn(`[FleetOps] AMS vehicle lookup failed for ${vin}: ${lookupErr.message}`);
         return { status: "skipped", message: "Vehicle not found in AMS" };
       }
       if (!currentTech) {
@@ -169,7 +188,9 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       } catch (unassignErr: any) {
         const msg = unassignErr.message || "";
         if (msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("tech")) {
-          return { status: "skipped", message: "Tech already cleared in AMS" };
+          // AMS /tech-update endpoint requires a valid enterprise ID — it does not support
+          // clearing via null/empty. Return skipped so it shows as amber (not a hard failure).
+          return { status: "skipped", message: "AMS tech-update does not accept null — manual clear required in AMS" };
         }
         throw unassignErr;
       }
