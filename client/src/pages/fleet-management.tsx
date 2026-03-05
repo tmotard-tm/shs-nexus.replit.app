@@ -538,9 +538,10 @@ export default function FleetManagement() {
   };
 
   // Stats - vehicle is assigned if it has a TPMS tech (source of truth for assignments)
-  const assignedCount = allVehicles.filter(v => v.tpmsAssignedTechId).length;
-  const unassignedCount = allVehicles.length - assignedCount;
-  const mismatchCount = allVehicles.filter(v => {
+  // These counts respect the OOS filter so cards always reflect the visible fleet
+  const assignedCount = activeVehicles.filter(v => v.tpmsAssignedTechId).length;
+  const unassignedCount = activeVehicles.length - assignedCount;
+  const mismatchCount = activeVehicles.filter(v => {
     const h = v.holmanTechAssigned?.trim() || '';
     const t = v.tpmsAssignedTechId?.trim() || '';
     return (h && t && h.toLowerCase() !== t.toLowerCase()) || (h && !t);
@@ -565,7 +566,7 @@ export default function FleetManagement() {
                   <CardTitle className="text-sm font-medium">Total Vehicles</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold" data-testid="text-total-vehicles">{allVehicles.length}</p>
+                  <p className="text-2xl font-bold" data-testid="text-total-vehicles">{activeVehicles.length}</p>
                 </CardContent>
               </Card>
               <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/10">
@@ -652,12 +653,12 @@ export default function FleetManagement() {
               </Alert>
             )}
 
-            {isDegradedMode && !isLoading && allVehicles.length > 0 && (
+            {isDegradedMode && !isLoading && activeVehicles.length > 0 && (
               <Alert className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
                 <Database className="h-4 w-4 text-amber-600" />
                 <AlertTitle className="text-amber-800 dark:text-amber-400">Using Cached Data</AlertTitle>
                 <AlertDescription className="text-amber-700 dark:text-amber-300">
-                  Holman API is unavailable. Showing {allVehicles.length} cached vehicles.
+                  Holman API is unavailable. Showing {activeVehicles.length} cached vehicles{oosCount > 0 && !showOos ? ` (${oosCount} OOS hidden)` : ""}.
                 </AlertDescription>
               </Alert>
             )}
