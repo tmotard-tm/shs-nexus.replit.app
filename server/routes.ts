@@ -12046,13 +12046,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return s.slice(0, 10);
   }
 
-  // Map Holman division codes and text to normalized display values
+  // Return division code as-is — no label mapping
   function mapDivision(divCode: string | null | undefined): string {
-    const d = (divCode || "").trim();
-    if (!d) return "";
-    if (d === "RF" || d.toUpperCase().includes("INTERIM")) return "INTERIM";
-    if (d === "01" || d.toUpperCase().includes("MAINT")) return "MAINT";
-    return d;
+    return (divCode || "").trim();
   }
 
   function handleSnowflakeError(err: any, res: any, table?: string) {
@@ -12204,8 +12200,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           daysOpen: calcDaysOpen(startDate),
         };
       });
-      const maintCount = openData.filter(r => r.division === "MAINT").length;
-      const interimCount = openData.filter(r => r.division === "INTERIM").length;
+      const divisionBreakdown: Record<string, number> = {};
+      for (const r of openData) {
+        const d = r.division || "(blank)";
+        divisionBreakdown[d] = (divisionBreakdown[d] || 0) + 1;
+      }
       const avgDaysOpen = openData.length > 0
         ? Math.round(openData.reduce((s, r) => s + r.daysOpen, 0) / openData.length)
         : 0;
@@ -12225,8 +12224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalOpen: openData.length,
         totalClosed: closedCount,
         extensions: extensionCount,
-        maintCount,
-        interimCount,
+        divisionBreakdown,
         avgDaysOpen,
         top10Longest,
       });

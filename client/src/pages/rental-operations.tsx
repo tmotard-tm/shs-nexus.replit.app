@@ -26,10 +26,7 @@ function DaysBadge({ days }: { days: number }) {
 }
 
 function DivisionBadge({ division }: { division: string }) {
-  const d = (division || "").toUpperCase();
-  if (d.includes("INTERIM")) return <Badge className="bg-purple-600 text-white text-xs">INTERIM</Badge>;
-  if (d.includes("MAINT")) return <Badge className="bg-blue-600 text-white text-xs">MAINT</Badge>;
-  return <Badge variant="secondary" className="text-xs">{division || "—"}</Badge>;
+  return <Badge variant="secondary" className="text-xs font-mono">{division || "—"}</Badge>;
 }
 
 function QualityPill({ log }: { log: any }) {
@@ -224,14 +221,26 @@ export default function RentalOperations() {
             {[...Array(6)].map((_, i) => <Card key={i}><CardContent className="pt-4 pb-3 px-4 h-16 animate-pulse bg-muted/40" /></Card>)}
           </div>
         ) : (
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-            <SummaryCard label="Total Open" value={summary?.totalOpen} color="text-blue-600 dark:text-blue-400" />
-            <SummaryCard label="Total Closed" value={summary?.totalClosed} />
-            <SummaryCard label="Extensions" value={summary?.extensions} color="text-amber-600 dark:text-amber-400" />
-            <SummaryCard label="MAINT" value={summary?.maintCount} />
-            <SummaryCard label="INTERIM" value={summary?.interimCount} />
-            <SummaryCard label="Avg Days Open" value={summary?.avgDaysOpen !== undefined ? `${summary.avgDaysOpen}d` : "—"} />
-          </div>
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <SummaryCard label="Total Open" value={summary?.totalOpen} color="text-blue-600 dark:text-blue-400" />
+              <SummaryCard label="Total Closed" value={summary?.totalClosed} />
+              <SummaryCard label="Extensions" value={summary?.extensions} color="text-amber-600 dark:text-amber-400" />
+              <SummaryCard label="Avg Days Open" value={summary?.avgDaysOpen !== undefined ? `${summary.avgDaysOpen}d` : "—"} />
+            </div>
+            {summary?.divisionBreakdown && Object.keys(summary.divisionBreakdown).length > 0 && (
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-xs text-muted-foreground font-medium">Open by Division:</span>
+                {Object.entries(summary.divisionBreakdown as Record<string, number>)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([code, count]) => (
+                    <span key={code} className="inline-flex items-center gap-1 text-xs bg-muted rounded px-2 py-0.5 font-mono">
+                      {code} <span className="font-semibold text-foreground">{count}</span>
+                    </span>
+                  ))}
+              </div>
+            )}
+          </>
         )}
 
         {/* Tabs */}
