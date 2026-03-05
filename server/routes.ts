@@ -12973,39 +12973,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
-      const rows = await sf.executeQuery(
-        `SELECT * FROM ${HOLMAN_PO_CDC_TABLE} ORDER BY CHANGE_TIMESTAMP DESC LIMIT 5000`
-      ) as any[];
 
-      const records = rows.map((r: any) => {
-        const divDesc = (r.DIVISION || r.DIVISION_DESCRIPTION || r.SERVICE_TYPE || "").toLowerCase();
+      // Pull raw line-item rows. The view has internal aggregates so GROUP BY / window functions
+      // cannot be applied on top of it. Deduplication to one record per PO is handled in JS below.
+      // Confirmed column names from HOLMAN_PO_DETAILS_CDC schema discovery 2026-03-05.
+      const rows = await sf.executeQuery(
+        `SELECT PO_NUMBER, HOLMAN_VEHICLE_NUMBER, CLIENT_VEHICLE_NUMBER, SERIAL_NO,
+                PO_TYPE_DESCRIPTION, DIVISION, PO_STATUS, PO_DATE,
+                LINE_ITEM_COST, DESCRIPTION, VENDOR_NAME, ENTERPRISE_ID
+         FROM ${HOLMAN_PO_CDC_TABLE}
+         WHERE PO_NUMBER IS NOT NULL
+         LIMIT 10000`
+      ) as any[];
+      console.log(`[PO Sync] Fetched ${rows.length} raw rows from CDC table`);
+
+      // Deduplicate in JS: keep last-seen row per (po_number, vehicle_number) pair.
+      const seen = new Map<string, any>();
+      for (const r of rows) {
+        const key = `${r.PO_NUMBER}|${r.HOLMAN_VEHICLE_NUMBER || r.CLIENT_VEHICLE_NUMBER}`;
+        seen.set(key, r);
+      }
+      const deduped = Array.from(seen.values());
+      console.log(`[PO Sync] Deduped to ${deduped.length} unique PO+vehicle records`);
+
+      const records = deduped.map((r: any) => {
+        const typeDesc = (r.PO_TYPE_DESCRIPTION || r.DIVISION || "").toLowerCase();
         let poType: string;
-        if (divDesc.includes("rental") || divDesc.includes("interim")) poType = "rental";
-        else if (divDesc.includes("maint") || divDesc.includes("repair") || divDesc.includes("service")) poType = "maintenance";
+        if (typeDesc.includes("rental") || typeDesc.includes("interim")) poType = "rental";
+        else if (typeDesc.includes("maint") || typeDesc.includes("repair") || typeDesc.includes("service")) poType = "maintenance";
         else poType = "other";
 
         return {
-          poNumber: String(r.PO_NUMBER || r.ORDER_NUMBER || "").replace(/^'/, "").trim(),
-          vehicleNumber: String(r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.CLIENT_VEHICLE_NUMBER || "").trim(),
-          vin: String(r.VIN || "").trim() || null,
+          poNumber: String(r.PO_NUMBER || "").replace(/^'/, "").trim(),
+          vehicleNumber: String(r.HOLMAN_VEHICLE_NUMBER || r.CLIENT_VEHICLE_NUMBER || "").trim(),
+          vin: String(r.SERIAL_NO || "").trim() || null,
           poType,
-          poStatus: String(r.PO_STATUS || r.STATUS || r.ORDER_STATUS || "").trim() || null,
-          poDate: r.PO_DATE || r.ORDER_DATE || r.CHANGE_TIMESTAMP || null,
-          amount: r.AMOUNT || r.TOTAL_AMOUNT || r.COST || null,
-          description: String(r.DESCRIPTION || r.SERVICE_DESCRIPTION || r.DIVISION_DESCRIPTION || "").trim() || null,
-          vendor: String(r.VENDOR || r.VENDOR_NAME || r.SUPPLIER || "").trim() || null,
-          rawData: r,
+          poStatus: String(r.PO_STATUS || "").trim() || null,
+          poDate: r.PO_DATE || null,
+          amount: r.LINE_ITEM_COST ?? null,
+          description: String(r.DESCRIPTION || r.PO_TYPE_DESCRIPTION || "").trim().slice(0, 500) || null,
+          vendor: String(r.VENDOR_NAME || "").trim() || null,
+          rawData: { poTypeDescription: r.PO_TYPE_DESCRIPTION, division: r.DIVISION, enterpriseId: r.ENTERPRISE_ID },
         };
       }).filter(r => r.poNumber);
 
       const synced = await storage.upsertHolmanPoCache(records);
       res.json({ synced, lastSyncedAt: new Date().toISOString() });
     } catch (err: any) {
-      const isTableMissing = err.message?.includes("does not exist") || err.message?.includes("SQL compilation error") || err.code === "002003";
+      // Only treat as "table missing" when the error specifically names the table as not existing.
+      // A SQL compilation error about a column name is NOT a missing table — return 500 with the real message.
+      const msg = err.message || "";
+      const isTableMissing = (msg.includes("does not exist") && msg.toLowerCase().includes("table"))
+        || err.code === "002003";
       const status = isTableMissing ? 503 : 500;
       const message = isTableMissing
         ? `Snowflake pipeline table not yet available: ${HOLMAN_PO_CDC_TABLE}. Sync will work once the table is provisioned.`
-        : err.message;
+        : msg;
+      console.error(`[PO Sync] Error (${status}):`, msg);
       res.status(status).json({ message });
     }
   });
