@@ -16,7 +16,7 @@ import { checkPasswordCompromised, validatePasswordRequirements } from "./passwo
 import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
-import { sql, eq, and, gte, lte, inArray, desc, SQL } from "drizzle-orm";
+import { sql, eq, and, or, gte, lte, inArray, desc, isNotNull, SQL } from "drizzle-orm";
 import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService } from "./ams-api-service";
@@ -12069,6 +12069,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return parseRentalDate(r.ORIGINAL_START_DATE) || parseRentalDate(r.RENTAL_START_DATE);
   }
 
+  // Returns a Set of 5-digit-padded vehicle numbers that are currently out of service
+  // Used to filter OOS trucks from rental-ops listings by default
+  async function getOosVehicleSet(): Promise<Set<string>> {
+    try {
+      const { holmanVehiclesCache } = await import("@shared/schema");
+      const rows = await db.select({ num: holmanVehiclesCache.holmanVehicleNumber })
+        .from(holmanVehiclesCache)
+        .where(
+          or(
+            eq(holmanVehiclesCache.statusCode, 2),
+            isNotNull(holmanVehiclesCache.outOfServiceDate)
+          )
+        );
+      return new Set(rows.map(r => String(r.num || "").trim().padStart(5, "0")));
+    } catch {
+      return new Set(); // graceful degradation if DB unavailable
+    }
+  }
+
   function handleSnowflakeError(err: any, res: any, table?: string) {
     const isTableMissing = err.message?.includes("does not exist") || err.message?.includes("SQL compilation error") || err.code === "002003";
     if (isTableMissing) {
@@ -12077,18 +12096,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.status(500).json({ message: err.message });
   }
 
-  app.get("/api/rental-ops/open", requireAuth, async (_req, res) => {
+  app.get("/api/rental-ops/open", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
 
+      const includeOos = req.query?.includeOos === "true";
+
       // view=raw returns all Holman PO lines (unfiltered, for reference)
       // default = business-logic view matching the Excel formula:
       //   Segment 1: Enterprise ticket table, TICKET_STATUS=OPEN, deduped by vehicle
       //   Segment 2: Holman open, vendor NOT Enterprise/Toll, NOT in Enterprise ticket table
-      const showRaw = (_req as any).query?.view === "raw";
+      const showRaw = req.query?.view === "raw";
 
       const normVeh = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
 
@@ -12229,7 +12250,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       });
 
-      const data = [...enterpriseSegment, ...holmanSegment];
+      let allData = [...enterpriseSegment, ...holmanSegment];
+      let oosCount = 0;
+      if (!includeOos) {
+        const oosVehicles = await getOosVehicleSet();
+        if (oosVehicles.size > 0) {
+          const before = allData.length;
+          allData = allData.filter(v => !oosVehicles.has(String(v.vehicleNumberPadded || v.vehicleNumber || "").trim().padStart(5, "0")));
+          oosCount = before - allData.length;
+        }
+      }
+      const data = allData;
 
       res.json({
         data,
@@ -12237,6 +12268,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         enterpriseCount: enterpriseSegment.length,
         holmanNonEnterpriseCount: holmanSegment.length,
         totalHolmanPOLines: holmanRows.length,
+        oosFilteredCount: oosCount,
         view: "business_logic",
       });
     } catch (err: any) {
@@ -12244,19 +12276,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/rental-ops/closed", requireAuth, async (_req, res) => {
+  app.get("/api/rental-ops/closed", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
+      const includeOos = req.query?.includeOos === "true";
       const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_CLOSED_TABLE} LIMIT 5000`) as any[];
       const seen = new Map<string, any>();
       for (const r of rows) {
         const key = `${r.VEHICLE_NUMBER || r.UNIT_NUMBER || ""}|${(r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim()}`;
         if (!seen.has(key)) seen.set(key, r);
       }
-      const data = Array.from(seen.values()).map((r: any) => {
+      let data = Array.from(seen.values()).map((r: any) => {
         const startDate = parseRentalDate(r.RENTAL_START_DATE || r.START_DATE);
         const endDate = parseRentalDate(r.RENTAL_END_DATE || r.END_DATE);
         return {
@@ -12276,20 +12309,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
           raw: r,
         };
       });
-      res.json({ data, total: data.length, source: RENTAL_CLOSED_TABLE });
+      let oosCount = 0;
+      if (!includeOos) {
+        const oosVehicles = await getOosVehicleSet();
+        if (oosVehicles.size > 0) {
+          const before = data.length;
+          data = data.filter((v: any) => !oosVehicles.has(String(v.vehicleNumber || "").trim().padStart(5, "0")));
+          oosCount = before - data.length;
+        }
+      }
+      res.json({ data, total: data.length, oosFilteredCount: oosCount, source: RENTAL_CLOSED_TABLE });
     } catch (err: any) {
       return handleSnowflakeError(err, res, RENTAL_CLOSED_TABLE);
     }
   });
 
-  app.get("/api/rental-ops/tickets", requireAuth, async (_req, res) => {
+  app.get("/api/rental-ops/tickets", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
+      const includeOos = req.query?.includeOos === "true";
       const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} LIMIT 2000`) as any[];
-      const data = rows.map((r: any) => {
+      let data = rows.map((r: any) => {
         const currentTicketStart = parseRentalDate(r.RENTAL_START_DATE);
         // COALESCE(ORIGINAL_START_DATE, RENTAL_START_DATE) — track from first rental date on rewrites
         const originalStartDate = parseRentalDate(r.ORIGINAL_START_DATE) || currentTicketStart;
@@ -12326,7 +12369,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           raw: r,
         };
       });
-      res.json({ data, total: data.length, source: RENTAL_TICKET_TABLE });
+      let oosCount = 0;
+      if (!includeOos) {
+        const oosVehicles = await getOosVehicleSet();
+        if (oosVehicles.size > 0) {
+          const before = data.length;
+          data = data.filter((v: any) => !oosVehicles.has(String(v.vehicleNumber || "").trim().padStart(5, "0")));
+          oosCount = before - data.length;
+        }
+      }
+      res.json({ data, total: data.length, oosFilteredCount: oosCount, source: RENTAL_TICKET_TABLE });
     } catch (err: any) {
       return handleSnowflakeError(err, res, RENTAL_TICKET_TABLE);
     }

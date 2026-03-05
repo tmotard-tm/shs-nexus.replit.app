@@ -14,10 +14,11 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
-  CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, 
+  CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
   UserPlus, ArrowLeftRight, FileText, Home, Activity
 } from "lucide-react";
@@ -112,6 +113,7 @@ export default function FleetManagement() {
   const [mismatchFilter, setMismatchFilter] = useState("all");
   
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [showOos, setShowOos] = useState(false);
   
   // Quick lookup state
   const [techLookup, setTechLookup] = useState("");
@@ -370,9 +372,16 @@ export default function FleetManagement() {
     holmanTechFilter, tpmsTechFilter, mismatchFilter
   ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0);
 
+  // OOS pre-filter — exclude out-of-service vehicles unless toggle is on
+  const activeVehicles = useMemo(() =>
+    showOos ? allVehicles : allVehicles.filter(v => !v.outOfServiceDate && v.statusCode !== 2),
+    [allVehicles, showOos]
+  );
+  const oosCount = allVehicles.length - activeVehicles.length;
+
   // Apply filters
   const filteredVehicles = useMemo(() => {
-    return allVehicles.filter(vehicle => {
+    return activeVehicles.filter(vehicle => {
       const searchLower = searchQuery.toLowerCase().trim();
       const searchNoLeadingZeros = searchLower.replace(/^0+/, '');
       const vehicleNumNoLeadingZeros = (vehicle.vehicleNumber || '').replace(/^0+/, '').toLowerCase();
@@ -440,7 +449,7 @@ export default function FleetManagement() {
              matchesState && matchesCity && matchesLicenseState && matchesRegion && matchesDivision && matchesDistrict &&
              matchesHolmanTech && matchesTpmsTech && matchesMismatch;
     });
-  }, [allVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
+  }, [activeVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
       vehicleProgramFilter, brandingFilter, interiorFilter, tuneStatusFilter,
       assignmentStatusFilter,
       stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
@@ -1061,7 +1070,19 @@ export default function FleetManagement() {
                 </Collapsible>
 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>Showing {sortedVehicles.length} of {allVehicles.length} vehicles</span>
+                  <span>
+                    Showing {sortedVehicles.length} of {activeVehicles.length} vehicles
+                    {oosCount > 0 && !showOos && (
+                      <span className="ml-2 text-amber-600 dark:text-amber-400">
+                        ({oosCount} OOS hidden)
+                      </span>
+                    )}
+                  </span>
+                  <label className="flex items-center gap-2 cursor-pointer select-none" title="Out-of-service vehicles are hidden by default">
+                    <EyeOff className="h-4 w-4" />
+                    <span className="text-xs">Show OOS</span>
+                    <Switch checked={showOos} onCheckedChange={setShowOos} />
+                  </label>
                 </div>
               </CardContent>
             </Card>

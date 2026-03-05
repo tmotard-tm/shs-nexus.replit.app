@@ -11,10 +11,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { Switch } from "@/components/ui/switch";
 import {
   Download, RefreshCw, Search, AlertTriangle, CheckCircle, XCircle,
   Clock, TrendingUp, Car, Users, FileSpreadsheet, Database,
-  ChevronUp, ChevronDown, Info, Loader2
+  ChevronUp, ChevronDown, Info, Loader2, EyeOff
 } from "lucide-react";
 import { format, parseISO, isValid } from "date-fns";
 
@@ -69,22 +70,31 @@ export default function RentalOperations() {
   const [openSort, setOpenSort] = useState({ field: "daysOpen", dir: "desc" as "asc" | "desc" });
   const [showRaw, setShowRaw] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "enterprise" | "holman_non_enterprise">("all");
+  const [showOos, setShowOos] = useState(false);
 
-  const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number; enterpriseCount: number; holmanNonEnterpriseCount: number; view: string }>({
-    queryKey: ["/api/rental-ops/open", showRaw ? "raw" : "business"],
-    queryFn: () => fetch(`/api/rental-ops/open${showRaw ? "?view=raw" : ""}`, { credentials: "include" }).then(r => r.json()),
+  const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number; enterpriseCount: number; holmanNonEnterpriseCount: number; oosFilteredCount?: number; view: string }>({
+    queryKey: ["/api/rental-ops/open", showRaw ? "raw" : "business", showOos],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (showRaw) params.set("view", "raw");
+      if (showOos) params.set("includeOos", "true");
+      const qs = params.toString();
+      return fetch(`/api/rental-ops/open${qs ? `?${qs}` : ""}`, { credentials: "include" }).then(r => r.json());
+    },
     enabled: activeTab === "open" || activeTab === "position",
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: closedData, isLoading: loadingClosed } = useQuery<{ data: any[]; total: number }>({
-    queryKey: ["/api/rental-ops/closed"],
+  const { data: closedData, isLoading: loadingClosed } = useQuery<{ data: any[]; total: number; oosFilteredCount?: number }>({
+    queryKey: ["/api/rental-ops/closed", showOos],
+    queryFn: () => fetch(`/api/rental-ops/closed${showOos ? "?includeOos=true" : ""}`, { credentials: "include" }).then(r => r.json()),
     enabled: activeTab === "closed" || activeTab === "extensions",
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: ticketData, isLoading: loadingTickets } = useQuery<{ data: any[]; total: number }>({
-    queryKey: ["/api/rental-ops/tickets"],
+  const { data: ticketData, isLoading: loadingTickets } = useQuery<{ data: any[]; total: number; oosFilteredCount?: number }>({
+    queryKey: ["/api/rental-ops/tickets", showOos],
+    queryFn: () => fetch(`/api/rental-ops/tickets${showOos ? "?includeOos=true" : ""}`, { credentials: "include" }).then(r => r.json()),
     enabled: activeTab === "tickets",
     staleTime: 5 * 60 * 1000,
   });
@@ -198,7 +208,12 @@ export default function RentalOperations() {
             <Database className="h-4 w-4" />
             <span>Snowflake Pipeline Tables</span>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-3">
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground select-none" title="Out-of-service vehicles are hidden by default">
+              <EyeOff className="h-4 w-4" />
+              <span>Show OOS</span>
+              <Switch checked={showOos} onCheckedChange={setShowOos} />
+            </label>
             <Button variant="outline" size="sm" onClick={() => qualifyMutation.mutate("all")} disabled={qualifyMutation.isPending}>
               {qualifyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
               <span className="ml-1.5">Run Qualification</span>
