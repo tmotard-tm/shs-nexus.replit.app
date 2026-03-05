@@ -680,7 +680,7 @@ class HolmanVehicleSyncService {
   }
 
   async reapplyRecentUnassigns(): Promise<number> {
-    const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000);
+    const cutoff = new Date(Date.now() - 1 * 60 * 60 * 1000);
     const recentUnassigns = await db
       .select({ holmanVehicleNumber: holmanSubmissions.holmanVehicleNumber })
       .from(holmanSubmissions)

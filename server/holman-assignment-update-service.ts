@@ -127,32 +127,33 @@ class HolmanAssignmentUpdateService {
 
   private buildUnassignPayload(vehicleNumber: string): HolmanAssignmentPayload {
     const paddedVehicleNumber = vehicleNumber.padStart(6, '0');
+    const NULL_VAL = '^null^';
     
     return {
       lesseeCode: this.LESSEE_CODE,
       holmanVehicleNumber: paddedVehicleNumber,
       email: this.FLEET_EMAIL,
-      firstName: null,
-      lastName: null,
-      clientData1: null,
-      clientData2: null,
+      firstName: NULL_VAL,
+      lastName: NULL_VAL,
+      clientData1: NULL_VAL,
+      clientData2: NULL_VAL,
       clientData3: '890',
-      clientData4: null,
-      clientData5: null,
-      clientData6: null,
-      clientData7: null,
+      clientData4: NULL_VAL,
+      clientData5: NULL_VAL,
+      clientData6: NULL_VAL,
+      clientData7: NULL_VAL,
       assignedStatusCode: 'D',
-      prefix: null,
-      addressLine1: null,
-      addressLine2: null,
-      addressLine3: null,
-      city: null,
-      stateProvince: null,
-      zipPostalCode: null,
-      homePhone: null,
-      workPhone: null,
-      workPhoneExtension: null,
-      cellPhone: null,
+      prefix: NULL_VAL,
+      addressLine1: NULL_VAL,
+      addressLine2: NULL_VAL,
+      addressLine3: NULL_VAL,
+      city: NULL_VAL,
+      stateProvince: NULL_VAL,
+      zipPostalCode: NULL_VAL,
+      homePhone: NULL_VAL,
+      workPhone: NULL_VAL,
+      workPhoneExtension: NULL_VAL,
+      cellPhone: NULL_VAL,
     };
   }
 
