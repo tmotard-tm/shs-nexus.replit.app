@@ -67,12 +67,12 @@ export default function RentalOperations() {
   const [closedSearch, setClosedSearch] = useState("");
   const [ticketSearch, setTicketSearch] = useState("");
   const [openSort, setOpenSort] = useState({ field: "daysOpen", dir: "desc" as "asc" | "desc" });
-  const [showAllPOs, setShowAllPOs] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<"all" | "holman_only" | "enterprise">("all");
+  const [showRaw, setShowRaw] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<"all" | "enterprise" | "holman_non_enterprise">("all");
 
-  const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number; totalPOLines: number; view: string }>({
-    queryKey: ["/api/rental-ops/open", showAllPOs ? "all" : "dedup"],
-    queryFn: () => fetch(`/api/rental-ops/open${showAllPOs ? "?view=all" : ""}`, { credentials: "include" }).then(r => r.json()),
+  const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number; enterpriseCount: number; holmanNonEnterpriseCount: number; view: string }>({
+    queryKey: ["/api/rental-ops/open", showRaw ? "raw" : "business"],
+    queryFn: () => fetch(`/api/rental-ops/open${showRaw ? "?view=raw" : ""}`, { credentials: "include" }).then(r => r.json()),
     enabled: activeTab === "open" || activeTab === "position",
     staleTime: 5 * 60 * 1000,
   });
@@ -130,11 +130,11 @@ export default function RentalOperations() {
 
   const openRows = (openData?.data || []).filter((r: any) => {
     const q = openSearch.toLowerCase();
-    const matchesSearch = !q || r.vehicleNumber?.toLowerCase().includes(q) || r.renterName?.toLowerCase().includes(q) || r.poNumber?.toLowerCase().includes(q);
+    const matchesSearch = !q || r.vehicleNumber?.toLowerCase().includes(q) || r.renterName?.toLowerCase().includes(q) || (r.poNumber || "")?.toLowerCase().includes(q);
     const matchesSource =
       sourceFilter === "all" ? true :
-      sourceFilter === "holman_only" ? !r.hasEnterpriseTicket :
-      r.hasEnterpriseTicket;
+      sourceFilter === "enterprise" ? r.source === "enterprise" :
+      r.source === "holman_non_enterprise" || r.source === "holman_raw";
     return matchesSearch && matchesSource;
   });
 
@@ -232,42 +232,27 @@ export default function RentalOperations() {
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <SummaryCard
-                label="Unique Open Trucks"
+                label="Total Open Rentals"
                 value={summary?.totalOpen}
-                sub={summary?.totalOpenPOLines ? `${summary.totalOpenPOLines} total PO lines` : undefined}
+                sub={summary?.enterpriseOpen !== undefined ? `${summary.enterpriseOpen} Enterprise + ${summary.holmanNonEnterprise} Hertz/Avis` : undefined}
                 color="text-blue-600 dark:text-blue-400"
               />
               <SummaryCard label="Total Closed" value={summary?.totalClosed} />
               <SummaryCard label="Extensions" value={summary?.extensions} color="text-amber-600 dark:text-amber-400" />
               <SummaryCard label="Avg Days Open" value={summary?.avgDaysOpen !== undefined ? `${summary.avgDaysOpen}d` : "—"} />
             </div>
-            <div className="flex flex-wrap gap-3 items-center text-xs">
-              {summary?.holmanOnly !== undefined && (
-                <span className="inline-flex items-center gap-1 bg-muted rounded px-2 py-1">
-                  <span className="text-muted-foreground">Holman-only:</span>
-                  <span className="font-semibold text-foreground">{summary.holmanOnly}</span>
-                </span>
-              )}
-              {summary?.enterpriseOverlap !== undefined && (
-                <span className="inline-flex items-center gap-1 bg-muted rounded px-2 py-1">
-                  <span className="text-muted-foreground">Also in Enterprise tickets:</span>
-                  <span className="font-semibold text-foreground">{summary.enterpriseOverlap}</span>
-                </span>
-              )}
-              {summary?.divisionBreakdown && Object.keys(summary.divisionBreakdown).length > 0 && (
-                <>
-                  <span className="text-muted-foreground">|</span>
-                  <span className="text-muted-foreground font-medium">By Division:</span>
-                  {Object.entries(summary.divisionBreakdown as Record<string, number>)
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([code, count]) => (
-                      <span key={code} className="inline-flex items-center gap-1 bg-muted rounded px-2 py-0.5 font-mono">
-                        {code} <span className="font-semibold text-foreground">{count}</span>
-                      </span>
-                    ))}
-                </>
-              )}
-            </div>
+            {summary?.divisionBreakdown && Object.keys(summary.divisionBreakdown).length > 0 && (
+              <div className="flex flex-wrap gap-2 items-center text-xs">
+                <span className="text-muted-foreground font-medium">Holman non-Enterprise by Division:</span>
+                {Object.entries(summary.divisionBreakdown as Record<string, number>)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([code, count]) => (
+                    <span key={code} className="inline-flex items-center gap-1 bg-muted rounded px-2 py-0.5 font-mono">
+                      {code} <span className="font-semibold text-foreground">{count}</span>
+                    </span>
+                  ))}
+              </div>
+            )}
           </>
         )}
 
@@ -288,23 +273,14 @@ export default function RentalOperations() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <CardTitle className="text-base">Open Rentals</CardTitle>
                   <Badge variant="secondary">{sortedOpen.length}</Badge>
-                  {!showAllPOs && openData?.totalPOLines && openData.totalPOLines > (openData?.total ?? 0) && (
-                    <span className="text-xs text-muted-foreground">{openData.totalPOLines} total PO lines</span>
-                  )}
-                  <button
-                    onClick={() => setShowAllPOs(v => !v)}
-                    className={`text-xs px-2 py-1 rounded border transition-colors ${showAllPOs ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-muted-foreground/30"}`}
-                  >
-                    {showAllPOs ? "All PO Lines" : "Per Truck"}
-                  </button>
 
                   {/* Source filter */}
-                  <div className="flex items-center gap-1 ml-1 border rounded overflow-hidden text-xs">
+                  <div className="flex items-center gap-0 border rounded overflow-hidden text-xs">
                     {([
-                      { key: "all", label: `All (${openData?.total ?? "—"})` },
-                      { key: "holman_only", label: `Excel List (${summary?.holmanOnly ?? "—"})` },
-                      { key: "enterprise", label: `+Enterprise (${summary?.enterpriseOverlap ?? "—"})` },
-                    ] as const).map(opt => (
+                      { key: "all" as const, label: `All (${openData?.total ?? "—"})` },
+                      { key: "enterprise" as const, label: `Enterprise (${openData?.enterpriseCount ?? summary?.enterpriseOpen ?? "—"})` },
+                      { key: "holman_non_enterprise" as const, label: `Hertz/Avis (${openData?.holmanNonEnterpriseCount ?? summary?.holmanNonEnterprise ?? "—"})` },
+                    ]).map(opt => (
                       <button
                         key={opt.key}
                         onClick={() => setSourceFilter(opt.key)}
@@ -314,6 +290,14 @@ export default function RentalOperations() {
                       </button>
                     ))}
                   </div>
+
+                  <button
+                    onClick={() => { setShowRaw(v => !v); setSourceFilter("all"); }}
+                    className={`text-xs px-2 py-1 rounded border transition-colors ${showRaw ? "bg-amber-500 text-white border-amber-500" : "bg-muted text-muted-foreground border-muted-foreground/30"}`}
+                    title={showRaw ? "Showing all raw Holman PO lines" : "Showing valid rentals (Excel formula)"}
+                  >
+                    {showRaw ? "Raw Holman Data" : "Valid Rentals"}
+                  </button>
 
                   <div className="relative ml-auto w-56">
                     <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -331,37 +315,35 @@ export default function RentalOperations() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Vehicle #<SortButton field="vehicleNumber" sort={openSort} setSort={setOpenSort} /></TableHead>
-                        <TableHead>Division</TableHead>
                         <TableHead>Tech / Renter<SortButton field="renterName" sort={openSort} setSort={setOpenSort} /></TableHead>
-                        <TableHead>PO Number</TableHead>
+                        <TableHead>Ticket / PO #</TableHead>
                         <TableHead>Start Date<SortButton field="rentalStartDate" sort={openSort} setSort={setOpenSort} /></TableHead>
                         <TableHead>Days Open<SortButton field="daysOpen" sort={openSort} setSort={setOpenSort} /></TableHead>
-                        <TableHead>POs</TableHead>
+                        <TableHead>Ext</TableHead>
                         <TableHead>Source</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {sortedOpen.length === 0 ? (
-                        <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                           {openSearch ? "No results match your search" : "No open rental data from Snowflake pipeline table"}
                         </TableCell></TableRow>
                       ) : sortedOpen.map((r: any, i: number) => (
                         <TableRow key={i}>
                           <TableCell className="font-mono text-sm">{r.vehicleNumber || "—"}</TableCell>
-                          <TableCell><DivisionBadge division={r.division} /></TableCell>
                           <TableCell className="max-w-[200px] truncate">{r.renterName || "—"}</TableCell>
                           <TableCell className="font-mono text-xs">{r.poNumber || "—"}</TableCell>
                           <TableCell className="text-sm">{formatDate(r.rentalStartDate)}</TableCell>
                           <TableCell><DaysBadge days={r.daysOpen || 0} /></TableCell>
-                          <TableCell className="text-xs">
-                            {r.poCount > 1
-                              ? <Badge variant="secondary" className="text-xs font-mono">{r.poCount}</Badge>
-                              : <span className="text-muted-foreground">1</span>}
+                          <TableCell className="text-xs text-muted-foreground">
+                            {r.numberOfExtensions > 0 ? <Badge variant="secondary" className="text-xs">{r.numberOfExtensions}</Badge> : "—"}
                           </TableCell>
                           <TableCell className="text-xs">
-                            {r.hasEnterpriseTicket
-                              ? <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 text-xs border-none">ENT</Badge>
-                              : <span className="text-muted-foreground text-xs">Holman</span>}
+                            {r.source === "enterprise"
+                              ? <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 text-xs border-none">Enterprise</Badge>
+                              : r.source === "holman_non_enterprise"
+                                ? <span className="text-muted-foreground text-xs">{r.rentalVendor?.split(" ")[0] || "Holman"}</span>
+                                : <span className="text-amber-600 dark:text-amber-400 text-xs">Holman (raw)</span>}
                           </TableCell>
                         </TableRow>
                       ))}

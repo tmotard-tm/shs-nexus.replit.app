@@ -12065,93 +12065,152 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
-      const showAll = (_req as any).query?.view === "all";
 
-      // Fetch all PO lines + Enterprise ticket vehicle numbers in parallel
-      const [rows, ticketRows] = await Promise.all([
-        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`) as Promise<any[]>,
-        sf.executeQuery(`SELECT DISTINCT LPAD(VEHICLE_NUMBER, 5, '0') as VN FROM ${RENTAL_TICKET_TABLE}`).catch(() => []) as Promise<any[]>,
-      ]);
+      // view=raw returns all Holman PO lines (unfiltered, for reference)
+      // default = business-logic view matching the Excel formula:
+      //   Segment 1: Enterprise ticket table, TICKET_STATUS=OPEN, deduped by vehicle
+      //   Segment 2: Holman open, vendor NOT Enterprise/Toll, NOT in Enterprise ticket table
+      const showRaw = (_req as any).query?.view === "raw";
 
-      // Build Enterprise ticket vehicle set (zero-padded for consistent comparison)
-      const enterpriseVehicles = new Set<string>((ticketRows as any[]).map((r: any) => String(r.VN || "").trim()));
-
-      // Normalize vehicle number to consistent zero-padded format for comparisons
       const normVeh = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
 
-      // Group by vehicle number — keep all POs per vehicle for poCount, display latest PO
-      const byVehicle = new Map<string, any[]>();
-      for (const r of rows as any[]) {
-        const vn = normVeh(r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || "");
-        if (!vn) continue;
-        if (!byVehicle.has(vn)) byVehicle.set(vn, []);
-        byVehicle.get(vn)!.push(r);
+      if (showRaw) {
+        // Raw Holman PO lines view (all 800 rows, original behavior)
+        const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`) as any[];
+        const ticketRows = await sf.executeQuery(`SELECT DISTINCT LPAD(VEHICLE_NUMBER, 5, '0') as VN FROM ${RENTAL_TICKET_TABLE}`).catch(() => []) as any[];
+        const enterpriseVehicles = new Set<string>(ticketRows.map((r: any) => String(r.VN || "").trim()));
+        const byVehicle = new Map<string, any[]>();
+        for (const r of rows) {
+          const vn = normVeh(r.VEHICLE_NUMBER || "");
+          if (!vn) continue;
+          if (!byVehicle.has(vn)) byVehicle.set(vn, []);
+          byVehicle.get(vn)!.push(r);
+        }
+        const data = rows.filter((r: any) => r.VEHICLE_NUMBER).map((r: any) => {
+          const vn = normVeh(r.VEHICLE_NUMBER || "");
+          const group = byVehicle.get(vn) || [];
+          const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE);
+          return {
+            vehicleNumber: r.VEHICLE_NUMBER,
+            vehicleNumberPadded: vn,
+            division: mapDivision(r.DIVISION),
+            renterName: `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
+            enterpriseId: r.ENTERPRISE_ID || null,
+            district: r.DISTRICT || null,
+            poNumber: (r.PO_NUMBER || "").replace(/^'/, "").trim(),
+            poDate: parseRentalDate(r.PO_DATE),
+            rentalStartDate: startDate,
+            rentalVendor: r.RENTAL_VENDOR || null,
+            daysOpen: calcDaysOpen(startDate),
+            poCount: group.length,
+            hasEnterpriseTicket: enterpriseVehicles.has(vn),
+            source: "holman_raw",
+          };
+        });
+        return res.json({ data, total: data.length, totalPOLines: rows.length, view: "raw" });
       }
 
-      // For deduplicated view: pick the row with latest PO_DATE per vehicle
-      const toRow = (r: any, poCount: number, hasEnterpriseTicket: boolean) => {
-        const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE || r.START_DATE);
-        const vn = r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || "";
+      // === BUSINESS LOGIC VIEW (matches Excel 333 formula) ===
+      // Fetch Enterprise open tickets + all Holman open POs in parallel
+      const [ticketRows, holmanRows] = await Promise.all([
+        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
+        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`) as Promise<any[]>,
+      ]);
+
+      // Build set of all vehicle numbers in Enterprise ticket table (any status) for "not on Enterprise reporting" check
+      const allEntVns = new Set<string>();
+      for (const r of ticketRows) {
+        const vn = normVeh(r.VEHICLE_NUMBER || "");
+        if (vn) allEntVns.add(vn);
+      }
+
+      // SEGMENT 1: Enterprise open tickets, deduplicated by vehicle (latest RENTAL_START_DATE)
+      const entByVehicle = new Map<string, any>();
+      for (const r of ticketRows) {
+        const vn = normVeh(r.VEHICLE_NUMBER || "");
+        if (!vn) continue;
+        const existing = entByVehicle.get(vn);
+        const rDate = new Date(r.RENTAL_START_DATE || "2000-01-01").getTime();
+        const eDate = existing ? new Date(existing.RENTAL_START_DATE || "2000-01-01").getTime() : 0;
+        if (!existing || rDate > eDate) entByVehicle.set(vn, r);
+      }
+
+      const enterpriseSegment = Array.from(entByVehicle.entries()).map(([vn, r]) => {
+        const startDate = parseRentalDate(r.RENTAL_START_DATE);
         return {
-          vehicleNumber: vn,
-          vehicleNumberPadded: normVeh(vn),
+          vehicleNumber: r.VEHICLE_NUMBER,
+          vehicleNumberPadded: vn,
+          division: null,
+          renterName: (r.RENTER_NAME || "").trim(),
+          enterpriseId: null,
+          district: null,
+          poNumber: r.ECARS_2_0_TKT_NBR || null,
+          poDate: startDate,
+          rentalStartDate: startDate,
+          rentalVendor: "Enterprise Rent-A-Car",
+          ticketStatus: r.TICKET_STATUS,
+          daysOpen: calcDaysOpen(startDate),
+          daysAuthorized: r.DAYS_AUTHORIZED ? parseInt(String(r.DAYS_AUTHORIZED)) : null,
+          numberOfExtensions: r.NUMBER_OF_EXTENSIONS ? parseInt(String(r.NUMBER_OF_EXTENSIONS)) : 0,
+          daysBehind: r.DAYS_BEHIND ? parseInt(String(r.DAYS_BEHIND)) : 0,
+          numberOfRewrites: r.NUMBER_OF_REWRITES ? parseInt(String(r.NUMBER_OF_REWRITES)) : 0,
+          repairsComplete: r.REPAIRS_COMPLETE || null,
+          claimsOffice: r.CLAIMS_OFFICE_NAME || null,
+          poCount: 1,
+          hasEnterpriseTicket: true,
+          source: "enterprise",
+        };
+      });
+
+      // SEGMENT 2: Holman non-Enterprise vendor trucks not in Enterprise ticket table at all
+      // Vendor exclusions: Enterprise Rent-A-Car and Enterprise toll charges
+      const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
+      const holmanByVehicle = new Map<string, any[]>();
+      for (const r of holmanRows) {
+        const vn = normVeh(r.VEHICLE_NUMBER || "");
+        if (!vn) continue;
+        if (isEntVendor(r.RENTAL_VENDOR)) continue;   // Enterprise/Toll vendor → skip
+        if (allEntVns.has(vn)) continue;               // Already on Enterprise ticket table → skip
+        if (!holmanByVehicle.has(vn)) holmanByVehicle.set(vn, []);
+        holmanByVehicle.get(vn)!.push(r);
+      }
+
+      const holmanSegment = Array.from(holmanByVehicle.entries()).map(([vn, group]) => {
+        const sorted = group.sort((a: any, b: any) =>
+          new Date(b.PO_DATE || "2000-01-01").getTime() - new Date(a.PO_DATE || "2000-01-01").getTime()
+        );
+        const r = sorted[0];
+        const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE);
+        return {
+          vehicleNumber: r.VEHICLE_NUMBER,
+          vehicleNumberPadded: vn,
           division: mapDivision(r.DIVISION),
-          renterName: r.RENTER_NAME
-            ? (r.RENTER_NAME as string).trim()
-            : `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
+          renterName: `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
           enterpriseId: r.ENTERPRISE_ID || null,
           district: r.DISTRICT || null,
-          poNumber: (r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim(),
-          poDate: parseRentalDate(r.PO_DATE),
+          poNumber: (r.PO_NUMBER || "").replace(/^'/, "").trim(),
+          poDate: startDate,
           rentalStartDate: startDate,
-          rentalEndDate: parseRentalDate(r.RENTAL_END_DATE || r.END_DATE),
-          originalStartDate: parseRentalDate(r.ORIGINAL_START_DATE),
-          authorizedDays: r.NO_OF_DAYS ? parseInt(String(r.NO_OF_DAYS)) : null,
-          rentalDays: r.RENTAL_DAYS || r.NO_OF_DAYS || null,
-          dailyRate: r.DAILY_RATE || null,
-          amount: r.AMOUNT || null,
           rentalVendor: r.RENTAL_VENDOR || null,
-          ataCode: r.ATA_CODE || null,
-          description: r.DESCRIPTION || null,
-          rewriteFlag: r.REWRITE_FLAG || r.EXTENSION_FLAG || null,
           daysOpen: calcDaysOpen(startDate),
-          poCount,
-          hasEnterpriseTicket,
-          raw: r,
+          poCount: group.length,
+          hasEnterpriseTicket: false,
+          source: "holman_non_enterprise",
         };
-      };
+      });
 
-      let data: any[];
-      if (showAll) {
-        // Return all PO lines
-        data = (rows as any[])
-          .filter((r: any) => r.VEHICLE_NUMBER || r.UNIT_NUMBER)
-          .map((r: any) => {
-            const vn = normVeh(r.VEHICLE_NUMBER || r.UNIT_NUMBER || "");
-            const group = byVehicle.get(vn) || [];
-            return toRow(r, group.length, enterpriseVehicles.has(vn));
-          });
-      } else {
-        // Deduplicated: one row per vehicle, latest PO_DATE
-        data = Array.from(byVehicle.entries()).map(([vn, group]) => {
-          const sorted = group.sort((a: any, b: any) => {
-            const da = new Date(a.PO_DATE || "2000-01-01").getTime();
-            const db = new Date(b.PO_DATE || "2000-01-01").getTime();
-            return db - da;
-          });
-          return toRow(sorted[0], group.length, enterpriseVehicles.has(vn));
-        });
-      }
+      const data = [...enterpriseSegment, ...holmanSegment];
 
       res.json({
         data,
         total: data.length,
-        totalPOLines: (rows as any[]).length,
-        source: RENTAL_OPEN_TABLE,
-        view: showAll ? "all" : "deduplicated",
+        enterpriseCount: enterpriseSegment.length,
+        holmanNonEnterpriseCount: holmanSegment.length,
+        totalHolmanPOLines: holmanRows.length,
+        view: "business_logic",
       });
     } catch (err: any) {
-      return handleSnowflakeError(err, res, RENTAL_OPEN_TABLE);
+      return handleSnowflakeError(err, res, RENTAL_TICKET_TABLE);
     }
   });
 
@@ -12243,50 +12302,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
-      const normVehSummary = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
+      const normV = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
+      const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
 
-      const [openRows, closedRows, ticketRows] = await Promise.all([
-        sf.executeQuery(`SELECT VEHICLE_NUMBER, PO_NUMBER, PO_DATE, DIVISION FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
+      const [ticketRows, holmanRows, closedRows] = await Promise.all([
+        sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTAL_START_DATE, TICKET_STATUS FROM ${RENTAL_TICKET_TABLE} WHERE TICKET_STATUS='OPEN' LIMIT 5000`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT VEHICLE_NUMBER, PO_DATE, DIVISION, RENTAL_VENDOR FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
         sf.executeQuery(`SELECT VEHICLE_NUMBER, PO_NUMBER, REWRITE_FLAG FROM ${RENTAL_CLOSED_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
-        sf.executeQuery(`SELECT DISTINCT LPAD(VEHICLE_NUMBER, 5, '0') as VN FROM ${RENTAL_TICKET_TABLE}`).catch(() => []) as Promise<any[]>,
       ]);
 
-      const enterpriseVehicleSet = new Set<string>((ticketRows as any[]).map((r: any) => String(r.VN || "").trim()));
-
-      // Deduplicate open rentals by vehicle — latest PO per truck
-      const openByVehicle = new Map<string, any>();
-      for (const r of openRows as any[]) {
-        const vn = normVehSummary(r.VEHICLE_NUMBER || "");
-        if (!vn) continue;
-        const existing = openByVehicle.get(vn);
-        const rDate = new Date(r.PO_DATE || "2000-01-01").getTime();
-        const eDate = existing ? new Date(existing.PO_DATE || "2000-01-01").getTime() : -1;
-        if (!existing || rDate > eDate) {
-          openByVehicle.set(vn, { ...r, _vn: vn });
+      // Segment 1: unique Enterprise open trucks
+      const entOpenVns = new Set<string>();
+      const entDaysOpenList: number[] = [];
+      for (const r of ticketRows as any[]) {
+        const vn = normV(r.VEHICLE_NUMBER || "");
+        if (vn && !entOpenVns.has(vn)) {
+          entOpenVns.add(vn);
+          entDaysOpenList.push(calcDaysOpen(parseRentalDate(r.RENTAL_START_DATE)));
         }
       }
 
-      const uniqueOpenRows = Array.from(openByVehicle.values());
+      // All Enterprise ticket vehicles (any status — for "on Enterprise reporting" check)
+      const allEntVns = new Set<string>(entOpenVns);
+
+      // Segment 2: Holman non-Enterprise vendor trucks not in Enterprise table
+      const holmanNonEntVns = new Set<string>();
+      const holmanDaysOpenList: number[] = [];
       const divisionBreakdown: Record<string, number> = {};
-      let enterpriseOverlap = 0;
-      let holmanOnly = 0;
-
-      for (const r of uniqueOpenRows) {
-        const d = mapDivision(r.DIVISION) || "(blank)";
-        divisionBreakdown[d] = (divisionBreakdown[d] || 0) + 1;
-        if (enterpriseVehicleSet.has(r._vn)) {
-          enterpriseOverlap++;
-        } else {
-          holmanOnly++;
+      for (const r of holmanRows as any[]) {
+        const vn = normV(r.VEHICLE_NUMBER || "");
+        if (!vn || isEntVendor(r.RENTAL_VENDOR)) continue;
+        if (allEntVns.has(vn)) continue;
+        if (!holmanNonEntVns.has(vn)) {
+          holmanNonEntVns.add(vn);
+          holmanDaysOpenList.push(calcDaysOpen(parseRentalDate(r.PO_DATE)));
+          const d = mapDivision(r.DIVISION) || "(blank)";
+          divisionBreakdown[d] = (divisionBreakdown[d] || 0) + 1;
         }
       }
 
-      // Days open stats using unique trucks
-      const daysOpenList = uniqueOpenRows.map((r: any) => {
-        return calcDaysOpen(parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE));
-      });
-      const avgDaysOpen = daysOpenList.length > 0
-        ? Math.round(daysOpenList.reduce((s, d) => s + d, 0) / daysOpenList.length)
+      const totalOpen = entOpenVns.size + holmanNonEntVns.size;
+      const allDaysOpen = [...entDaysOpenList, ...holmanDaysOpenList];
+      const avgDaysOpen = allDaysOpen.length > 0
+        ? Math.round(allDaysOpen.reduce((s, d) => s + d, 0) / allDaysOpen.length)
         : 0;
 
       // Closed dedup
@@ -12294,7 +12352,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let closedCount = 0;
       let extensionCount = 0;
       for (const r of closedRows as any[]) {
-        const key = `${normVehSummary(r.VEHICLE_NUMBER || "")}|${(r.PO_NUMBER || "").replace(/^'/, "").trim()}`;
+        const key = `${normV(r.VEHICLE_NUMBER || "")}|${(r.PO_NUMBER || "").replace(/^'/, "").trim()}`;
         if (!closedDeduped.has(key)) {
           closedDeduped.add(key);
           closedCount++;
@@ -12303,12 +12361,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       res.json({
-        totalOpen: uniqueOpenRows.length,
-        totalOpenPOLines: (openRows as any[]).length,
+        totalOpen,
+        enterpriseOpen: entOpenVns.size,
+        holmanNonEnterprise: holmanNonEntVns.size,
         totalClosed: closedCount,
         extensions: extensionCount,
-        enterpriseOverlap,
-        holmanOnly,
         divisionBreakdown,
         avgDaysOpen,
       });
