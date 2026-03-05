@@ -245,7 +245,7 @@ export default function RentalOperations() {
                   <SelectItem value="__latest__">Latest ({latestDate ?? "…"})</SelectItem>
                   {(availableDates?.data ?? []).filter(d => d.fileDate !== latestDate).map(d => (
                     <SelectItem key={d.fileDate} value={d.fileDate}>
-                      {d.fileDate} ({d.rowCount} rows)
+                      {d.fileDate} — {(d.ticketRowCount ?? 0)} tickets / {(d.openRowCount ?? 0)} open / {(d.closedRowCount ?? 0)} closed
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -276,10 +276,16 @@ export default function RentalOperations() {
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 text-sm">
             <History className="h-4 w-4 shrink-0" />
             <span>
-              Viewing historical data from <strong>{selectedFileDate}</strong>.
-              {availableDates?.data.find(d => d.fileDate === selectedFileDate)?.sourceFilename && (
-                <> File: <span className="font-mono text-xs">{availableDates!.data.find(d => d.fileDate === selectedFileDate)!.sourceFilename}</span></>
-              )}
+              Viewing historical snapshot from <strong>{selectedFileDate}</strong> — all 3 pipeline tables are filtered to this date.
+              {(() => {
+                const entry = availableDates?.data.find(d => d.fileDate === selectedFileDate);
+                if (!entry) return null;
+                return (
+                  <span className="ml-1 text-xs opacity-75">
+                    ({entry.ticketRowCount ?? 0} tickets · {entry.openRowCount ?? 0} open rentals · {entry.closedRowCount ?? 0} closed rentals)
+                  </span>
+                );
+              })()}
             </span>
             <button
               className="ml-auto text-xs underline underline-offset-2 hover:no-underline shrink-0"
