@@ -9,7 +9,7 @@ import { storage } from './storage';
 const SYNC_HOUR_EST = 5; // 5am EST
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
 const ENRICH_INTERVAL_HOURS = 12; // Enrich every 12 hours
-const SEPARATION_POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for separation sync
+const SEPARATION_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes for separation sync
 const NOTIFICATION_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 let lastSyncDate: string | null = null;

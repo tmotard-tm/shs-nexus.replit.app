@@ -127,11 +127,9 @@ export class SnowflakeSyncService {
       duration: 0,
     };
 
-    if (!isSnowflakeConfigured()) {
-      result.errors.push('Snowflake is not configured - required to query the definitive offboarding roster');
-      result.duration = Date.now() - startTime;
-      return result;
-    }
+    // Note: Snowflake configuration is no longer required for this function
+    // as it reads from the unified all_techs table (populated by syncAllTechs).
+    // We only check if there's data in all_techs to process.
 
     let syncLog;
     try {
@@ -148,192 +146,15 @@ export class SnowflakeSyncService {
     }
 
     try {
-      console.log('[Sync] Querying Weekly Offboarding data source (definitive roster) from Snowflake...');
-      const snowflake = getSnowflakeService();
-
-      const rosterQuery = `
-        SELECT 
-          t.EMPL_NAME,
-          t.ENTERPRISE_ID,
-          t.EMPLID,
-          t.EMPL_STATUS,
-          t.EFFDT,
-          t.LAST_DATE_WORKED,
-          t.PLANNING_AREA,
-          t.TECH_SPECIALTY,
-          c.SNSTV_HOME_ADDR1,
-          c.SNSTV_HOME_ADDR2,
-          c.SNSTV_HOME_CITY,
-          c.SNSTV_HOME_STATE,
-          c.SNSTV_HOME_POSTAL,
-          c.SNSTV_MAIN_PHONE,
-          c.SNSTV_CELL_PHONE,
-          c.SNSTV_HOME_PHONE,
-          tpms.TRUCK_LU
-        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
-        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
-          ON t.EMPLID = c.EMPLID
-        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
-          ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
-        WHERE t.LAST_DATE_WORKED >= '2026-01-01'
-          AND (
-            tpms.TRUCK_LU IS NULL 
-            OR NOT EXISTS (
-              SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT active
-              WHERE active.TRUCK_LU = tpms.TRUCK_LU
-            )
-          )
-        ORDER BY t.LAST_DATE_WORKED DESC
-      `;
-
-      const rosterRows = await snowflake.executeQuery(rosterQuery) as Array<{
-        EMPL_NAME: string;
-        ENTERPRISE_ID: string;
-        EMPLID: string;
-        EMPL_STATUS: string;
-        EFFDT: string;
-        LAST_DATE_WORKED: string;
-        PLANNING_AREA: string;
-        TECH_SPECIALTY: string;
-        SNSTV_HOME_ADDR1: string;
-        SNSTV_HOME_ADDR2: string;
-        SNSTV_HOME_CITY: string;
-        SNSTV_HOME_STATE: string;
-        SNSTV_HOME_POSTAL: string;
-        SNSTV_MAIN_PHONE: string;
-        SNSTV_CELL_PHONE: string;
-        SNSTV_HOME_PHONE: string;
-        TRUCK_LU: string;
-      }>;
-
-      console.log(`[Sync] Term roster returned ${rosterRows.length} records`);
-
-      interface OffboardingCandidate {
-        techName: string;
-        techRacfid: string;
-        employeeId: string;
-        firstName: string;
-        lastName: string;
-        lastDayWorked: string;
-        effectiveDate: string;
-        jobTitle: string;
-        districtNo: string;
-        planningAreaName: string;
-        cellPhone: string;
-        mainPhone: string;
-        homePhone: string;
-        truckLu: string;
-        source: string;
-      }
-
-      const existingIds = new Set<string>();
-      const candidates: OffboardingCandidate[] = [];
-
-      for (const row of rosterRows) {
-        const eid = (row.ENTERPRISE_ID || '').toUpperCase();
-        const emplId = (row.EMPLID || '').toUpperCase();
-        if (eid) existingIds.add(eid);
-        if (emplId) existingIds.add(emplId);
-
-        const nameParts = (row.EMPL_NAME || '').split(',').map(s => s.trim());
-        candidates.push({
-          techName: row.EMPL_NAME || '',
-          techRacfid: row.ENTERPRISE_ID || '',
-          employeeId: row.EMPLID || '',
-          firstName: nameParts[1] || '',
-          lastName: nameParts[0] || '',
-          lastDayWorked: row.LAST_DATE_WORKED || '',
-          effectiveDate: row.EFFDT || '',
-          jobTitle: row.TECH_SPECIALTY || '',
-          districtNo: '',
-          planningAreaName: row.PLANNING_AREA || '',
-          cellPhone: row.SNSTV_CELL_PHONE || '',
-          mainPhone: row.SNSTV_MAIN_PHONE || '',
-          homePhone: row.SNSTV_HOME_PHONE || '',
-          truckLu: row.TRUCK_LU || '',
-          source: 'term_roster',
-        });
-      }
-
-      let separationCount = 0;
-      try {
-        const sepQuery = `
-          SELECT 
-            s.LDAP_ID,
-            s.TECHNICIAN_NAME,
-            s.EMPLID,
-            s.PLANNING_AREA,
-            s.LAST_DAY,
-            s.EFFECTIVE_SEPARATION_DATE,
-            s.TRUCK_NUMBER,
-            s.CONTACT_NUMBER,
-            c.SNSTV_MAIN_PHONE,
-            c.SNSTV_CELL_PHONE,
-            c.SNSTV_HOME_PHONE,
-            r.TECH_SPECIALTY
-          FROM PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS s
-          LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
-            ON s.EMPLID = c.EMPLID
-          LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW r
-            ON s.EMPLID = r.EMPLID
-          WHERE (s.LAST_DAY >= '2026-01-01' OR s.EFFECTIVE_SEPARATION_DATE >= '2026-01-01')
-          ORDER BY COALESCE(s.LAST_DAY, s.EFFECTIVE_SEPARATION_DATE) DESC NULLS LAST
-        `;
-
-        const sepRows = await snowflake.executeQuery(sepQuery) as Array<{
-          LDAP_ID: string;
-          TECHNICIAN_NAME: string | null;
-          EMPLID: string;
-          PLANNING_AREA: string | null;
-          LAST_DAY: string | null;
-          EFFECTIVE_SEPARATION_DATE: string | null;
-          TRUCK_NUMBER: string | null;
-          CONTACT_NUMBER: string | null;
-          SNSTV_MAIN_PHONE: string | null;
-          SNSTV_CELL_PHONE: string | null;
-          SNSTV_HOME_PHONE: string | null;
-          TECH_SPECIALTY: string | null;
-        }>;
-
-        for (const row of sepRows) {
-          const ldap = (row.LDAP_ID || '').toUpperCase();
-          const emplId = (row.EMPLID || '').toUpperCase();
-          if (!ldap && !emplId) continue;
-          if (ldap && existingIds.has(ldap)) continue;
-          if (!ldap && emplId && existingIds.has(emplId)) continue;
-
-          if (ldap) existingIds.add(ldap);
-          if (emplId) existingIds.add(emplId);
-
-          const nameParts = (row.TECHNICIAN_NAME || '').split(',').map(s => s.trim());
-          candidates.push({
-            techName: row.TECHNICIAN_NAME || '',
-            techRacfid: row.LDAP_ID || '',
-            employeeId: row.EMPLID || '',
-            firstName: nameParts[1] || '',
-            lastName: nameParts[0] || '',
-            lastDayWorked: row.LAST_DAY || '',
-            effectiveDate: row.EFFECTIVE_SEPARATION_DATE || '',
-            jobTitle: row.TECH_SPECIALTY || '',
-            districtNo: '',
-            planningAreaName: row.PLANNING_AREA || '',
-            cellPhone: row.SNSTV_CELL_PHONE || '',
-            mainPhone: row.SNSTV_MAIN_PHONE || row.CONTACT_NUMBER || '',
-            homePhone: row.SNSTV_HOME_PHONE || '',
-            truckLu: row.TRUCK_NUMBER || '',
-            source: 'separation',
-          });
-          separationCount++;
-        }
-
-        console.log(`[Sync] Added ${separationCount} additional records from separation table`);
-      } catch (sepError: any) {
-        console.error('[Sync] Error fetching separation records (continuing with main roster only):', sepError.message);
-        result.errors.push(`Separation query failed: ${sepError.message}`);
-      }
-
-      result.recordsProcessed = candidates.length;
-      console.log(`[Sync] Total offboarding candidates from definitive source: ${candidates.length}`);
+      // The unified all_techs table should already be populated with effectiveDate and lastDayWorked
+      // from the syncAllTechs function. This function now just creates offboarding tasks
+      // for employees with recent termination dates (effectiveDate within last 30 days).
+      console.log('[Sync] Finding employees needing offboarding from unified roster...');
+      
+      // Use unified all_techs table - filter by effectiveDate >= CURRENT_DATE - 30 and offboardingTaskCreated = false
+      const techsNeedingOffboarding = await storage.getEmployeesNeedingOffboarding(30);
+      result.recordsProcessed = techsNeedingOffboarding.length;
+      console.log(`[Sync] Found ${techsNeedingOffboarding.length} employees needing offboarding tasks (from unified roster)`);
 
       // Initialize TPMS service for truck lookups
       const tpmsService = getTPMSService();
@@ -344,68 +165,43 @@ export class SnowflakeSyncService {
         console.log('[Sync] TPMS is not configured - skipping truck lookups');
       }
 
-      for (const tech of candidates) {
+      for (const tech of techsNeedingOffboarding) {
         try {
+          // Check for existing offboarding tasks before creating new ones
+          // Skip if there are open tasks OR tasks created within the last 45 days
           const existingTasksResult = await storage.findExistingOffboardingTasks(
             tech.employeeId,
             tech.techRacfid,
-            45
+            45 // 45 day window
           );
 
-          const existingSteps = new Set<string>();
           if (existingTasksResult.hasExisting) {
-            for (const t of existingTasksResult.existingTasks) {
-              let taskData: any = t.data;
-              if (typeof taskData === 'string') {
-                try { taskData = JSON.parse(taskData); } catch { taskData = {}; }
-              }
-              const step = taskData?.step;
-              if (step) {
-                existingSteps.add(step);
-              } else {
-                const dept = (t.department || '').toUpperCase();
-                const title = (t.title || '').toLowerCase();
-                if (dept === 'NTAO') existingSteps.add('ntao_stop_replenishment_day0');
-                else if (dept.includes('ASSETS') || dept === 'TOOLS') existingSteps.add('tools_recover_equipment_day0');
-                else if (dept.includes('FLEET')) existingSteps.add('fleet_initial_coordination_day0');
-                else if (dept.includes('INVENTORY') && (title.includes('tpms') || title.includes('stop orders'))) existingSteps.add('inventory_remove_tpms_day0');
-                else if (dept.includes('INVENTORY') && title.includes('phone')) existingSteps.add('phone_recover_device_day0');
-              }
-            }
+            const openCount = existingTasksResult.existingTasks.filter(
+              t => t.status === 'pending' || t.status === 'in_progress'
+            ).length;
             
-            const allExpectedSteps = [
-              'ntao_stop_replenishment_day0',
-              'tools_recover_equipment_day0',
-              'fleet_initial_coordination_day0',
-              'inventory_remove_tpms_day0',
-              'phone_recover_device_day0',
-            ];
-            const allExist = allExpectedSteps.every(s => existingSteps.has(s));
+            console.log(`[Sync] Skipping offboarding tasks for ${tech.techName} (${tech.employeeId}) - ${existingTasksResult.message}`);
             
-            if (allExist) {
-              const openCount = existingTasksResult.existingTasks.filter(
-                t => t.status === 'pending' || t.status === 'in_progress'
-              ).length;
-              
-              console.log(`[Sync] All 5 tasks exist for ${tech.techName} (${tech.employeeId}) - skipping`);
-              
-              result.queueItemsSkipped++;
-              result.skippedEmployees.push({
-                employeeId: tech.employeeId,
-                enterpriseId: tech.techRacfid,
-                name: tech.techName,
-                reason: `All 5 department tasks already exist (${openCount} open)`,
-                existingTaskCount: existingTasksResult.existingTasks.length,
-                openTaskCount: openCount
-              });
-              
-              continue;
-            }
+            // Count this as 1 skipped employee (not 4 skipped queue items)
+            result.queueItemsSkipped++;
+            result.skippedEmployees.push({
+              employeeId: tech.employeeId,
+              enterpriseId: tech.techRacfid,
+              name: tech.techName,
+              reason: openCount > 0 
+                ? `${openCount} open task(s) exist for this employee` 
+                : `${existingTasksResult.existingTasks.length} task(s) created within the last 45 days`,
+              existingTaskCount: existingTasksResult.existingTasks.length,
+              openTaskCount: openCount
+            });
             
-            const missingSteps = allExpectedSteps.filter(s => !existingSteps.has(s));
-            console.log(`[Sync] Partial tasks for ${tech.techName} (${tech.employeeId}): ${existingTasksResult.existingTasks.length} exist, missing steps: ${missingSteps.join(', ')}`);
+            // Do NOT mark as offboarding created - allow future syncs to re-check
+            // Once existing tasks are completed AND outside the 45-day window,
+            // the employee will be eligible for new tasks in a future sync
+            continue;
           }
 
+          // Attempt to look up truck from TPMS if configured
           let truckInfo: {
             truckNo?: string;
             districtNo?: string;
@@ -414,13 +210,7 @@ export class SnowflakeSyncService {
             lookupError?: string;
           } = { lookupSuccess: false };
 
-          if (tech.truckLu) {
-            truckInfo = {
-              truckNo: tech.truckLu.trim(),
-              lookupSuccess: true,
-            };
-            console.log(`[Sync] Using truck from Snowflake roster for ${tech.techRacfid}: ${truckInfo.truckNo}`);
-          } else if (tpmsConfigured && tech.techRacfid) {
+          if (tpmsConfigured && tech.techRacfid) {
             try {
               console.log(`[Sync] Looking up truck for tech ${tech.techRacfid}...`);
               const tpmsResult = await tpmsService.lookupTruckByEnterpriseId(tech.techRacfid);
@@ -443,6 +233,7 @@ export class SnowflakeSyncService {
             }
           }
 
+          // Generate unique workflow ID for this offboarding sequence
           const workflowId = `offboard_sync_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
           const vehicleNumber = truckInfo.truckNo || '';
           
@@ -564,13 +355,8 @@ export class SnowflakeSyncService {
           ];
 
           let firstCreatedItemId: string | null = null;
-          let createdCount = 0;
 
           for (const task of day0Tasks) {
-            if (existingSteps.has(task.step)) {
-              continue;
-            }
-            
             const isPhoneRecoveryTask = task.step === 'phone_recover_device_day0';
             const queueItem: InsertQueueItem = {
               workflowType: 'offboarding',
@@ -649,25 +435,16 @@ export class SnowflakeSyncService {
             if (!firstCreatedItemId) {
               firstCreatedItemId = createdItem.id;
             }
-            createdCount++;
             result.queueItemsCreated++;
             console.log(`[Sync] Created Day 0 task: ${task.step} for ${tech.techName} in ${task.department} queue`);
           }
 
+          // Mark the employee as having offboarding tasks created (uses unified all_techs table)
           if (firstCreatedItemId) {
-            try {
-              await storage.markEmployeeOffboardingCreated(
-                tech.employeeId || '',
-                tech.techRacfid || '',
-                firstCreatedItemId
-              );
-            } catch (markErr: any) {
-              console.log(`[Sync] Note: Could not mark offboarding created for employeeId=${tech.employeeId}, racfid=${tech.techRacfid} in all_techs (may be separation-only record): ${markErr.message}`);
-            }
+            await storage.markEmployeeOffboardingCreated(tech.employeeId, firstCreatedItemId);
           }
           
-          const skippedCount = existingSteps.size;
-          console.log(`[Sync] Created ${createdCount} new Day 0 tasks for ${tech.techName} (${tech.employeeId})${skippedCount > 0 ? ` (${skippedCount} already existed)` : ''}${truckInfo.truckNo ? ` with truck ${truckInfo.truckNo}` : ''}`);
+          console.log(`[Sync] Created ${day0Tasks.length} Day 0 offboarding tasks for ${tech.techName} (${tech.employeeId})${truckInfo.truckNo ? ` with truck ${truckInfo.truckNo}` : ''}`);
         } catch (error: any) {
           console.error(`[Sync] Error creating queue items for ${tech.employeeId}:`, error.message);
           result.errors.push(`Error creating queue items for ${tech.employeeId}: ${error.message}`);

@@ -43,7 +43,6 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: true,
       communicationHub: true,
       techRoster: true,
-      rentalOperations: true,
     },
     activities: {
       enabled: true,
@@ -168,7 +167,6 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: true,
       communicationHub: true,
       techRoster: true,
-      rentalOperations: true,
     },
     activities: {
       enabled: true,
@@ -292,7 +290,6 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       weeklyOffboarding: false,
       communicationHub: false,
       techRoster: false,
-      rentalOperations: false,
     },
     activities: {
       enabled: false,
@@ -374,130 +371,6 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
   },
 };
 
-export const DEFAULT_ASSETS_PERMISSIONS: RolePermissionSettings = {
-  homePage: true,
-  quickActions: {
-    enabled: true,
-    taskQueue: true,
-    offboarding: true,
-    onboarding: false,
-    assignVehicle: false,
-    weeklyOnboarding: false,
-    weeklyOffboarding: true,
-    createVehicle: false,
-  },
-  sidebar: {
-    enabled: true,
-    dashboards: {
-      enabled: false,
-      dashboard: false,
-      vehicleAssignmentDash: false,
-      operationsDash: false,
-      rentalReductionDash: false,
-      reporting: false,
-    },
-    queues: {
-      enabled: true,
-      queueManagement: true,
-      ntaoQueue: false,
-      assetsQueue: true,
-      inventoryQueue: true,
-      fleetQueue: false,
-    },
-    management: {
-      enabled: true,
-      storageSpots: false,
-      integrations: false,
-      userManagement: false,
-      templateManagement: false,
-      rolePermissions: false,
-      fleetManagement: false,
-      weeklyOnboarding: false,
-      weeklyOffboarding: true,
-      communicationHub: false,
-      techRoster: false,
-      rentalOperations: false,
-    },
-    activities: {
-      enabled: false,
-      activityLogs: false,
-      communicationHub: false,
-    },
-    account: {
-      enabled: true,
-      changePassword: true,
-    },
-    helpAndTutorial: {
-      enabled: true,
-      tutorial: true,
-      about: true,
-    },
-  },
-  pageFeatures: {
-    queueManagement: {
-      enabled: true,
-      filters: {
-        enabled: true,
-        queueCheckboxes: true,
-        statusCards: true,
-        employeeSearch: true,
-        workflowTypeFilter: true,
-        assignedAgentFilter: false,
-        dateFilters: true,
-        sortOrder: true,
-      },
-      taskActions: {
-        enabled: true,
-        viewTask: true,
-        startWork: true,
-        continueWork: true,
-        pickUpForMe: true,
-        assignToOther: false,
-      },
-      adminActions: {
-        enabled: false,
-        releaseTask: false,
-        reassignTask: false,
-      },
-    },
-    userManagement: {
-      enabled: false,
-      createUser: false,
-      editUser: false,
-      deleteUser: false,
-      resetPassword: false,
-      changeRole: false,
-    },
-    templateManagement: {
-      enabled: false,
-      createTemplate: false,
-      editTemplate: false,
-      deleteTemplate: false,
-      toggleStatus: false,
-    },
-    fleetManagement: {
-      enabled: false,
-      viewVehicles: false,
-      syncToHolman: false,
-      unassignVehicle: false,
-      viewHistory: false,
-    },
-    storageSpots: {
-      enabled: false,
-      createSpot: false,
-      editSpot: false,
-      deleteSpot: false,
-    },
-    communicationHub: {
-      enabled: false,
-      editTemplates: false,
-      changeMode: false,
-      manageWhitelist: false,
-      viewLogs: false,
-    },
-  },
-};
-
 // Get default permissions for a role
 export function getDefaultPermissions(role: UserRole): RolePermissionSettings {
   if (role === 'developer') {
@@ -505,9 +378,6 @@ export function getDefaultPermissions(role: UserRole): RolePermissionSettings {
   }
   if (role === 'admin') {
     return DEFAULT_ADMIN_PERMISSIONS;
-  }
-  if (role === 'assets') {
-    return DEFAULT_ASSETS_PERMISSIONS;
   }
   return DEFAULT_AGENT_PERMISSIONS;
 }
@@ -563,7 +433,6 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/storage-spots': () => perms.sidebar.management.storageSpots,
     '/integrations': () => perms.sidebar.management.integrations,
     '/tech-roster': () => perms.sidebar.management.techRoster,
-    '/rental-operations': () => perms.sidebar.management.rentalOperations,
     '/weekly-onboarding': () => perms.sidebar.management.weeklyOnboarding,
     '/weekly-offboarding': () => perms.sidebar.management.weeklyOffboarding,
     '/communication-hub': () => perms.sidebar.management.communicationHub,
@@ -630,11 +499,6 @@ export function getAccessibleQueueModules(user: User | null): string[] {
     return ['ntao', 'assets', 'inventory', 'fleet'];
   }
 
-  // Assets role gets assets and inventory queues
-  if (userRole === 'assets') {
-    return ['assets', 'inventory'];
-  }
-
   // For agents, determine access based on departments array
   if (user.departments && Array.isArray(user.departments)) {
     return user.departments.map(dept => {
@@ -664,10 +528,6 @@ export function getRoleDisplayName(role: string, user?: User): string {
   
   if (role === 'admin') {
     return 'Admin';
-  }
-
-  if (role === 'assets') {
-    return 'Assets Specialist';
   }
   
   // For agent users, show their primary department if available
@@ -706,11 +566,6 @@ export function getUserLandingPage(user: User | null): string {
   // Admin gets the home/dashboard
   if (userRole === 'admin') {
     return '/';
-  }
-
-  // Assets role goes to queue management
-  if (userRole === 'assets') {
-    return '/queue-management';
   }
 
   // For agent users, redirect to queue management

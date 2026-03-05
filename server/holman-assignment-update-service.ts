@@ -206,16 +206,14 @@ class HolmanAssignmentUpdateService {
       const response = await holmanApiService.submitVehicleArray([payload]);
       console.log(`[HolmanAssignmentUpdate] Holman response:`, response);
 
-      // Holman returns userReferenceToken (not submissionId/id) for batch submissions
-      const submissionId = response?.userReferenceToken || response?.submissionId || response?.id || null;
+      const submissionId = response?.submissionId || response?.id || null;
       const message = enterpriseId 
         ? 'Vehicle assignment updated successfully in Holman'
         : 'Vehicle unassigned successfully in Holman (technician data cleared)';
 
-      // Save submission and immediately mark completed — Holman 202 means "accepted for processing"
-      // There is no poll-back API for batch submissions; 202 is the final confirmation
+      // Save submission to database for tracking
       try {
-        const submission = await holmanSubmissionService.createSubmission({
+        await holmanSubmissionService.createSubmission({
           holmanVehicleNumber: payload.holmanVehicleNumber,
           action: enterpriseId ? 'assign' : 'unassign',
           enterpriseId: enterpriseId || null,
@@ -223,8 +221,6 @@ class HolmanAssignmentUpdateService {
           payload,
           response,
         });
-        // Mark completed since 202 = accepted and queued by Holman
-        await holmanSubmissionService.updateSubmissionStatus(submission.id, 'completed');
       } catch (dbError: any) {
         console.error(`[HolmanAssignmentUpdate] Failed to save submission to DB:`, dbError);
       }

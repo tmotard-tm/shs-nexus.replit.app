@@ -312,15 +312,6 @@ export const PAGES: PageDefinition[] = [
     permissionKey: "techRoster",
   },
   {
-    key: "rentalOperations",
-    label: "Rental Operations",
-    description: "Rental tracking, data quality, and consolidated reporting from Snowflake pipeline tables",
-    path: "/rental-operations",
-    icon: FileText,
-    category: "management",
-    permissionKey: "rentalOperations",
-  },
-  {
     key: "reporting",
     label: "Reports",
     description: "Operations dashboard and metrics",

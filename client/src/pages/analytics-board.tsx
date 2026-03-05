@@ -36,16 +36,13 @@ export default function AnalyticsBoard() {
   });
 
   const allVehicles = apiResponse?.vehicles || [];
-
-  // Exclude out-of-service vehicles (statusCode 2 = OOS in Holman) — same filter as Fleet Management
-  const activeVehicles = allVehicles.filter((v: any) => !v.outOfServiceDate && v.statusCode !== 2);
-
+  
   // Vehicle is assigned if it has a tech assigned via TPMS or Holman
-  const assignedVehicles = activeVehicles.filter(isVehicleAssigned);
-  const unassignedVehicles = activeVehicles.filter(v => !isVehicleAssigned(v));
+  const assignedVehicles = allVehicles.filter(isVehicleAssigned);
+  const unassignedVehicles = allVehicles.filter(v => !isVehicleAssigned(v));
 
-  // Use Holman fleet data for maps — OOS vehicles excluded
-  const mapVehicleData = activeVehicles;
+  // Use Holman fleet data for maps
+  const mapVehicleData = allVehicles;
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -73,7 +70,7 @@ export default function AnalyticsBoard() {
                 {vehiclesLoading ? (
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 ) : (
-                  <p className="text-lg font-bold text-foreground" data-testid="text-vehicles-count">{activeVehicles.length}</p>
+                  <p className="text-lg font-bold text-foreground" data-testid="text-vehicles-count">{allVehicles.length}</p>
                 )}
                 <p className="text-sm text-muted-foreground">Active Fleet</p>
               </CardContent>

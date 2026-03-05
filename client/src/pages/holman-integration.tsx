@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
-import { RefreshCw, Database, Users, Wrench, Gauge, CheckCircle, XCircle, Loader2, ArrowUpDown, ArrowUp, ArrowDown, Filter, FileText, DollarSign, Car, Search } from "lucide-react";
+import { RefreshCw, Database, Users, Wrench, Gauge, CheckCircle, XCircle, Loader2, ArrowUpDown, ArrowUp, ArrowDown, Filter } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -37,43 +37,6 @@ import {
 export default function HolmanIntegration() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("overview");
-
-  // PO Tracker state
-  const [poSearch, setPoSearch] = useState("");
-  const [poTypeFilter, setPoTypeFilter] = useState("all");
-  const [poStatusFilter, setPoStatusFilter] = useState("all");
-  const [poVehicleFilter, setPoVehicleFilter] = useState("");
-
-  const { data: poData, isLoading: poLoading, refetch: refetchPos } = useQuery<any[]>({
-    queryKey: ["/api/holman/pos", { type: poTypeFilter, status: poStatusFilter, vehicle: poVehicleFilter }],
-    enabled: activeTab === "po-tracker",
-    staleTime: 5 * 60 * 1000,
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      if (poTypeFilter !== "all") params.set("poType", poTypeFilter);
-      if (poStatusFilter !== "all") params.set("poStatus", poStatusFilter);
-      if (poVehicleFilter) params.set("vehicleNumber", poVehicleFilter);
-      const res = await fetch(`/api/holman/pos?${params}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch POs");
-      const json = await res.json();
-      return json.data || json || [];
-    },
-  });
-
-  const { data: poSyncStatus } = useQuery<any>({
-    queryKey: ["/api/holman/pos/sync/status"],
-    enabled: activeTab === "po-tracker",
-    staleTime: 60 * 1000,
-  });
-
-  const poSyncMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/holman/pos/sync", {}),
-    onSuccess: (data: any) => {
-      refetchPos();
-      toast({ title: "PO sync complete", description: `Synced ${data?.synced ?? 0} records from Snowflake` });
-    },
-    onError: (e: any) => toast({ title: "PO sync failed", description: e.message, variant: "destructive" }),
-  });
   
   const [sortConfig, setSortConfig] = useState<{column: string, direction: 'asc' | 'desc'} | null>(null);
   const [filters, setFilters] = useState<Record<string, string[]>>({});
@@ -556,7 +519,7 @@ export default function HolmanIntegration() {
           </CardHeader>
           <CardContent>
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-6">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
                 <TabsTrigger value="vehicles" data-testid="tab-vehicles">
                   <Database className="h-4 w-4 mr-2" />
@@ -573,10 +536,6 @@ export default function HolmanIntegration() {
                 <TabsTrigger value="odometer" data-testid="tab-odometer">
                   <Gauge className="h-4 w-4 mr-2" />
                   Odometer
-                </TabsTrigger>
-                <TabsTrigger value="po-tracker" data-testid="tab-po-tracker">
-                  <FileText className="h-4 w-4 mr-2" />
-                  PO Tracker
                 </TabsTrigger>
               </TabsList>
 
@@ -871,173 +830,6 @@ export default function HolmanIntegration() {
                   </Button>
                 </div>
                 {renderDataTable(odometerData, odometerLoading, odometerError, "odometer")}
-              </TabsContent>
-
-              <TabsContent value="po-tracker" className="space-y-4">
-                {/* Sync Controls */}
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="text-sm text-muted-foreground">
-                    {poSyncStatus?.rowCount != null
-                      ? `${poSyncStatus.rowCount} POs cached`
-                      : "No PO data cached"}
-                    {poSyncStatus?.lastSyncedAt && (
-                      <span className="ml-2 text-xs">
-                        (last sync: {new Date(poSyncStatus.lastSyncedAt).toLocaleString()})
-                      </span>
-                    )}
-                  </div>
-                  <Button
-                    onClick={() => poSyncMutation.mutate()}
-                    disabled={poSyncMutation.isPending}
-                    size="sm"
-                    className="ml-auto"
-                  >
-                    {poSyncMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                    )}
-                    Sync from Snowflake
-                  </Button>
-                </div>
-
-                {/* Stats Row */}
-                {poData && poData.length > 0 && (
-                  <div className="grid grid-cols-3 gap-3">
-                    <Card>
-                      <CardContent className="pt-4 pb-3 px-4">
-                        <p className="text-xs text-muted-foreground">Total POs</p>
-                        <p className="text-2xl font-bold">{poData.length}</p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="pt-4 pb-3 px-4">
-                        <p className="text-xs text-muted-foreground">Maintenance POs</p>
-                        <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                          {poData.filter((p: any) => p.poType === "maintenance").length}
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="pt-4 pb-3 px-4">
-                        <p className="text-xs text-muted-foreground">Rental POs</p>
-                        <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">
-                          {poData.filter((p: any) => p.poType === "rental").length}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
-
-                {/* Filters */}
-                <div className="flex flex-wrap gap-2">
-                  <div className="relative flex-1 min-w-[180px]">
-                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      className="pl-8 h-9"
-                      placeholder="Search PO#, vehicle, vendor..."
-                      value={poSearch}
-                      onChange={(e) => setPoSearch(e.target.value)}
-                    />
-                  </div>
-                  <Select value={poTypeFilter} onValueChange={setPoTypeFilter}>
-                    <SelectTrigger className="w-40 h-9">
-                      <SelectValue placeholder="PO Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Types</SelectItem>
-                      <SelectItem value="maintenance">Maintenance</SelectItem>
-                      <SelectItem value="rental">Rental</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={poStatusFilter} onValueChange={setPoStatusFilter}>
-                    <SelectTrigger className="w-40 h-9">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="open">Open</SelectItem>
-                      <SelectItem value="closed">Closed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    className="w-36 h-9"
-                    placeholder="Vehicle #"
-                    value={poVehicleFilter}
-                    onChange={(e) => setPoVehicleFilter(e.target.value)}
-                  />
-                </div>
-
-                {/* PO Table */}
-                {poLoading ? (
-                  <div className="flex items-center justify-center py-12 text-muted-foreground">
-                    <Loader2 className="h-6 w-6 animate-spin mr-2" />Loading POs...
-                  </div>
-                ) : !poData || poData.length === 0 ? (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <FileText className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                    <p className="font-medium">No PO data cached</p>
-                    <p className="text-sm mt-1">Click "Sync from Snowflake" to load PO data</p>
-                  </div>
-                ) : (
-                  <div className="border rounded-md">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>PO Number</TableHead>
-                          <TableHead>Vehicle #</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Amount</TableHead>
-                          <TableHead>Vendor</TableHead>
-                          <TableHead className="max-w-[200px]">Description</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(poData || [])
-                          .filter((po: any) => {
-                            const q = poSearch.toLowerCase();
-                            if (!q) return true;
-                            return (
-                              po.poNumber?.toLowerCase().includes(q) ||
-                              po.vehicleNumber?.toLowerCase().includes(q) ||
-                              po.vendor?.toLowerCase().includes(q) ||
-                              po.description?.toLowerCase().includes(q)
-                            );
-                          })
-                          .slice(0, 500)
-                          .map((po: any, i: number) => (
-                            <TableRow key={i}>
-                              <TableCell className="font-mono text-sm">{po.poNumber || "—"}</TableCell>
-                              <TableCell className="font-mono text-sm">{po.vehicleNumber || "—"}</TableCell>
-                              <TableCell>
-                                {po.poType === "maintenance" ? (
-                                  <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border-none">MAINT</Badge>
-                                ) : po.poType === "rental" ? (
-                                  <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 text-xs border-none">RENTAL</Badge>
-                                ) : (
-                                  <Badge variant="secondary" className="text-xs">{po.poType || "other"}</Badge>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant={po.poStatus?.toLowerCase() === "open" ? "default" : "secondary"} className="text-xs">
-                                  {po.poStatus || "—"}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-sm">{po.poDate ? new Date(po.poDate).toLocaleDateString() : "—"}</TableCell>
-                              <TableCell className="text-sm">
-                                {po.amount != null ? `$${Number(po.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                              </TableCell>
-                              <TableCell className="text-sm">{po.vendor || "—"}</TableCell>
-                              <TableCell className="text-xs max-w-[200px] truncate">{po.description || "—"}</TableCell>
-                            </TableRow>
-                          ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
               </TabsContent>
             </Tabs>
           </CardContent>
