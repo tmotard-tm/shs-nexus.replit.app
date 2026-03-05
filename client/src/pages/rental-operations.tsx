@@ -67,9 +67,11 @@ export default function RentalOperations() {
   const [closedSearch, setClosedSearch] = useState("");
   const [ticketSearch, setTicketSearch] = useState("");
   const [openSort, setOpenSort] = useState({ field: "daysOpen", dir: "desc" as "asc" | "desc" });
+  const [showAllPOs, setShowAllPOs] = useState(false);
 
-  const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number }>({
-    queryKey: ["/api/rental-ops/open"],
+  const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number; totalPOLines: number }>({
+    queryKey: ["/api/rental-ops/open", showAllPOs ? "all" : "dedup"],
+    queryFn: () => fetch(`/api/rental-ops/open${showAllPOs ? "?view=all" : ""}`, { credentials: "include" }).then(r => r.json()),
     enabled: activeTab === "open" || activeTab === "position",
     staleTime: 5 * 60 * 1000,
   });
@@ -223,23 +225,43 @@ export default function RentalOperations() {
         ) : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <SummaryCard label="Total Open" value={summary?.totalOpen} color="text-blue-600 dark:text-blue-400" />
+              <SummaryCard
+                label="Unique Open Trucks"
+                value={summary?.totalOpen}
+                sub={summary?.totalOpenPOLines ? `${summary.totalOpenPOLines} total PO lines` : undefined}
+                color="text-blue-600 dark:text-blue-400"
+              />
               <SummaryCard label="Total Closed" value={summary?.totalClosed} />
               <SummaryCard label="Extensions" value={summary?.extensions} color="text-amber-600 dark:text-amber-400" />
               <SummaryCard label="Avg Days Open" value={summary?.avgDaysOpen !== undefined ? `${summary.avgDaysOpen}d` : "—"} />
             </div>
-            {summary?.divisionBreakdown && Object.keys(summary.divisionBreakdown).length > 0 && (
-              <div className="flex flex-wrap gap-2 items-center">
-                <span className="text-xs text-muted-foreground font-medium">Open by Division:</span>
-                {Object.entries(summary.divisionBreakdown as Record<string, number>)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([code, count]) => (
-                    <span key={code} className="inline-flex items-center gap-1 text-xs bg-muted rounded px-2 py-0.5 font-mono">
-                      {code} <span className="font-semibold text-foreground">{count}</span>
-                    </span>
-                  ))}
-              </div>
-            )}
+            <div className="flex flex-wrap gap-3 items-center text-xs">
+              {summary?.holmanOnly !== undefined && (
+                <span className="inline-flex items-center gap-1 bg-muted rounded px-2 py-1">
+                  <span className="text-muted-foreground">Holman-only:</span>
+                  <span className="font-semibold text-foreground">{summary.holmanOnly}</span>
+                </span>
+              )}
+              {summary?.enterpriseOverlap !== undefined && (
+                <span className="inline-flex items-center gap-1 bg-muted rounded px-2 py-1">
+                  <span className="text-muted-foreground">Also in Enterprise tickets:</span>
+                  <span className="font-semibold text-foreground">{summary.enterpriseOverlap}</span>
+                </span>
+              )}
+              {summary?.divisionBreakdown && Object.keys(summary.divisionBreakdown).length > 0 && (
+                <>
+                  <span className="text-muted-foreground">|</span>
+                  <span className="text-muted-foreground font-medium">By Division:</span>
+                  {Object.entries(summary.divisionBreakdown as Record<string, number>)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([code, count]) => (
+                      <span key={code} className="inline-flex items-center gap-1 bg-muted rounded px-2 py-0.5 font-mono">
+                        {code} <span className="font-semibold text-foreground">{count}</span>
+                      </span>
+                    ))}
+                </>
+              )}
+            </div>
           </>
         )}
 
@@ -257,9 +279,18 @@ export default function RentalOperations() {
           <TabsContent value="open">
             <Card>
               <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <CardTitle className="text-base">Open Rentals</CardTitle>
                   <Badge variant="secondary">{sortedOpen.length}</Badge>
+                  {!showAllPOs && openData?.totalPOLines && openData.totalPOLines > sortedOpen.length && (
+                    <span className="text-xs text-muted-foreground">{openData.totalPOLines} total PO lines</span>
+                  )}
+                  <button
+                    onClick={() => setShowAllPOs(v => !v)}
+                    className={`ml-1 text-xs px-2 py-1 rounded border transition-colors ${showAllPOs ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-muted-foreground/30"}`}
+                  >
+                    {showAllPOs ? "All PO Lines" : "Per Truck (latest PO)"}
+                  </button>
                   <div className="relative ml-auto w-64">
                     <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input className="pl-8 h-8 text-sm" placeholder="Search vehicle, name, PO..." value={openSearch} onChange={e => setOpenSearch(e.target.value)} />
@@ -281,12 +312,13 @@ export default function RentalOperations() {
                         <TableHead>PO Number</TableHead>
                         <TableHead>Start Date<SortButton field="rentalStartDate" sort={openSort} setSort={setOpenSort} /></TableHead>
                         <TableHead>Days Open<SortButton field="daysOpen" sort={openSort} setSort={setOpenSort} /></TableHead>
-                        <TableHead>Ext</TableHead>
+                        <TableHead>POs</TableHead>
+                        <TableHead>Source</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {sortedOpen.length === 0 ? (
-                        <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                        <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                           {openSearch ? "No results match your search" : "No open rental data from Snowflake pipeline table"}
                         </TableCell></TableRow>
                       ) : sortedOpen.map((r: any, i: number) => (
@@ -297,7 +329,16 @@ export default function RentalOperations() {
                           <TableCell className="font-mono text-xs">{r.poNumber || "—"}</TableCell>
                           <TableCell className="text-sm">{formatDate(r.rentalStartDate)}</TableCell>
                           <TableCell><DaysBadge days={r.daysOpen || 0} /></TableCell>
-                          <TableCell>{r.rewriteFlag === "Y" ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 text-xs border-none">Y</Badge> : "—"}</TableCell>
+                          <TableCell className="text-xs">
+                            {r.poCount > 1
+                              ? <Badge variant="secondary" className="text-xs font-mono">{r.poCount}</Badge>
+                              : <span className="text-muted-foreground">1</span>}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {r.hasEnterpriseTicket
+                              ? <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 text-xs border-none">ENT</Badge>
+                              : <span className="text-muted-foreground text-xs">Holman</span>}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

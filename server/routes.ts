@@ -12065,12 +12065,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
-      const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 2000`) as any[];
-      const data = rows.map((r: any) => {
+      const showAll = (_req as any).query?.view === "all";
+
+      // Fetch all PO lines + Enterprise ticket vehicle numbers in parallel
+      const [rows, ticketRows] = await Promise.all([
+        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`) as Promise<any[]>,
+        sf.executeQuery(`SELECT DISTINCT LPAD(VEHICLE_NUMBER, 5, '0') as VN FROM ${RENTAL_TICKET_TABLE}`).catch(() => []) as Promise<any[]>,
+      ]);
+
+      // Build Enterprise ticket vehicle set (zero-padded for consistent comparison)
+      const enterpriseVehicles = new Set<string>((ticketRows as any[]).map((r: any) => String(r.VN || "").trim()));
+
+      // Normalize vehicle number to consistent zero-padded format for comparisons
+      const normVeh = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
+
+      // Group by vehicle number — keep all POs per vehicle for poCount, display latest PO
+      const byVehicle = new Map<string, any[]>();
+      for (const r of rows as any[]) {
+        const vn = normVeh(r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || "");
+        if (!vn) continue;
+        if (!byVehicle.has(vn)) byVehicle.set(vn, []);
+        byVehicle.get(vn)!.push(r);
+      }
+
+      // For deduplicated view: pick the row with latest PO_DATE per vehicle
+      const toRow = (r: any, poCount: number, hasEnterpriseTicket: boolean) => {
         const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE || r.START_DATE);
+        const vn = r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || "";
         return {
-          vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || "",
-          division: mapDivision(r.DIVISION || r.RENTAL_TYPE),
+          vehicleNumber: vn,
+          vehicleNumberPadded: normVeh(vn),
+          division: mapDivision(r.DIVISION),
           renterName: r.RENTER_NAME
             ? (r.RENTER_NAME as string).trim()
             : `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
@@ -12090,10 +12115,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description: r.DESCRIPTION || null,
           rewriteFlag: r.REWRITE_FLAG || r.EXTENSION_FLAG || null,
           daysOpen: calcDaysOpen(startDate),
+          poCount,
+          hasEnterpriseTicket,
           raw: r,
         };
+      };
+
+      let data: any[];
+      if (showAll) {
+        // Return all PO lines
+        data = (rows as any[])
+          .filter((r: any) => r.VEHICLE_NUMBER || r.UNIT_NUMBER)
+          .map((r: any) => {
+            const vn = normVeh(r.VEHICLE_NUMBER || r.UNIT_NUMBER || "");
+            const group = byVehicle.get(vn) || [];
+            return toRow(r, group.length, enterpriseVehicles.has(vn));
+          });
+      } else {
+        // Deduplicated: one row per vehicle, latest PO_DATE
+        data = Array.from(byVehicle.entries()).map(([vn, group]) => {
+          const sorted = group.sort((a: any, b: any) => {
+            const da = new Date(a.PO_DATE || "2000-01-01").getTime();
+            const db = new Date(b.PO_DATE || "2000-01-01").getTime();
+            return db - da;
+          });
+          return toRow(sorted[0], group.length, enterpriseVehicles.has(vn));
+        });
+      }
+
+      res.json({
+        data,
+        total: data.length,
+        totalPOLines: (rows as any[]).length,
+        source: RENTAL_OPEN_TABLE,
+        view: showAll ? "all" : "deduplicated",
       });
-      res.json({ data, total: data.length, source: RENTAL_OPEN_TABLE });
     } catch (err: any) {
       return handleSnowflakeError(err, res, RENTAL_OPEN_TABLE);
     }
@@ -12187,46 +12243,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
-      const [openRows, closedRows] = await Promise.all([
-        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 2000`).catch(() => []) as Promise<any[]>,
-        sf.executeQuery(`SELECT * FROM ${RENTAL_CLOSED_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
+      const normVehSummary = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
+
+      const [openRows, closedRows, ticketRows] = await Promise.all([
+        sf.executeQuery(`SELECT VEHICLE_NUMBER, PO_NUMBER, PO_DATE, DIVISION FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT VEHICLE_NUMBER, PO_NUMBER, REWRITE_FLAG FROM ${RENTAL_CLOSED_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT DISTINCT LPAD(VEHICLE_NUMBER, 5, '0') as VN FROM ${RENTAL_TICKET_TABLE}`).catch(() => []) as Promise<any[]>,
       ]);
-      const openData = openRows.map((r: any) => {
-        const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE || r.START_DATE);
-        return {
-          vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
-          division: mapDivision(r.DIVISION || r.RENTAL_TYPE),
-          rewriteFlag: r.REWRITE_FLAG || null,
-          daysOpen: calcDaysOpen(startDate),
-        };
-      });
-      const divisionBreakdown: Record<string, number> = {};
-      for (const r of openData) {
-        const d = r.division || "(blank)";
-        divisionBreakdown[d] = (divisionBreakdown[d] || 0) + 1;
+
+      const enterpriseVehicleSet = new Set<string>((ticketRows as any[]).map((r: any) => String(r.VN || "").trim()));
+
+      // Deduplicate open rentals by vehicle — latest PO per truck
+      const openByVehicle = new Map<string, any>();
+      for (const r of openRows as any[]) {
+        const vn = normVehSummary(r.VEHICLE_NUMBER || "");
+        if (!vn) continue;
+        const existing = openByVehicle.get(vn);
+        const rDate = new Date(r.PO_DATE || "2000-01-01").getTime();
+        const eDate = existing ? new Date(existing.PO_DATE || "2000-01-01").getTime() : -1;
+        if (!existing || rDate > eDate) {
+          openByVehicle.set(vn, { ...r, _vn: vn });
+        }
       }
-      const avgDaysOpen = openData.length > 0
-        ? Math.round(openData.reduce((s, r) => s + r.daysOpen, 0) / openData.length)
+
+      const uniqueOpenRows = Array.from(openByVehicle.values());
+      const divisionBreakdown: Record<string, number> = {};
+      let enterpriseOverlap = 0;
+      let holmanOnly = 0;
+
+      for (const r of uniqueOpenRows) {
+        const d = mapDivision(r.DIVISION) || "(blank)";
+        divisionBreakdown[d] = (divisionBreakdown[d] || 0) + 1;
+        if (enterpriseVehicleSet.has(r._vn)) {
+          enterpriseOverlap++;
+        } else {
+          holmanOnly++;
+        }
+      }
+
+      // Days open stats using unique trucks
+      const daysOpenList = uniqueOpenRows.map((r: any) => {
+        return calcDaysOpen(parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE));
+      });
+      const avgDaysOpen = daysOpenList.length > 0
+        ? Math.round(daysOpenList.reduce((s, d) => s + d, 0) / daysOpenList.length)
         : 0;
-      const top10Longest = [...openData].sort((a, b) => b.daysOpen - a.daysOpen).slice(0, 10);
+
+      // Closed dedup
       const closedDeduped = new Set<string>();
       let closedCount = 0;
       let extensionCount = 0;
-      for (const r of closedRows) {
-        const key = `${r.VEHICLE_NUMBER || ""}|${(r.PO_NUMBER || "").replace(/^'/, "")}`;
+      for (const r of closedRows as any[]) {
+        const key = `${normVehSummary(r.VEHICLE_NUMBER || "")}|${(r.PO_NUMBER || "").replace(/^'/, "").trim()}`;
         if (!closedDeduped.has(key)) {
           closedDeduped.add(key);
           closedCount++;
           if (r.REWRITE_FLAG === "Y") extensionCount++;
         }
       }
+
       res.json({
-        totalOpen: openData.length,
+        totalOpen: uniqueOpenRows.length,
+        totalOpenPOLines: (openRows as any[]).length,
         totalClosed: closedCount,
         extensions: extensionCount,
+        enterpriseOverlap,
+        holmanOnly,
         divisionBreakdown,
         avgDaysOpen,
-        top10Longest,
       });
     } catch (err: any) {
       return handleSnowflakeError(err, res);
