@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
@@ -15,7 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   Download, RefreshCw, Search, AlertTriangle, CheckCircle, XCircle,
   Clock, TrendingUp, Car, Users, FileSpreadsheet, Database,
-  ChevronUp, ChevronDown, Info, Loader2, EyeOff
+  ChevronUp, ChevronDown, Info, Loader2, EyeOff, History
 } from "lucide-react";
 import { format, parseISO, isValid } from "date-fns";
 
@@ -71,13 +72,25 @@ export default function RentalOperations() {
   const [showRaw, setShowRaw] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "enterprise" | "holman_non_enterprise">("all");
   const [showOos, setShowOos] = useState(false);
+  // null = always use MAX(FILE_DATE); a date string = view that specific file's data
+  const [selectedFileDate, setSelectedFileDate] = useState<string | null>(null);
+
+  const { data: availableDates } = useQuery<{ data: Array<{ fileDate: string; sourceFilename: string; loadedTs: string; rowCount: number }>; latestDate: string | null }>({
+    queryKey: ["/api/rental-ops/available-dates"],
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const latestDate = availableDates?.latestDate ?? null;
+  const isHistorical = selectedFileDate !== null && selectedFileDate !== latestDate;
+  const effectiveDate = selectedFileDate; // null = backend uses MAX
 
   const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number; enterpriseCount: number; holmanNonEnterpriseCount: number; oosFilteredCount?: number; view: string }>({
-    queryKey: ["/api/rental-ops/open", showRaw ? "raw" : "business", showOos],
+    queryKey: ["/api/rental-ops/open", showRaw ? "raw" : "business", showOos, effectiveDate],
     queryFn: () => {
       const params = new URLSearchParams();
       if (showRaw) params.set("view", "raw");
       if (showOos) params.set("includeOos", "true");
+      if (effectiveDate) params.set("fileDate", effectiveDate);
       const qs = params.toString();
       return fetch(`/api/rental-ops/open${qs ? `?${qs}` : ""}`, { credentials: "include" }).then(r => r.json());
     },
@@ -93,14 +106,23 @@ export default function RentalOperations() {
   });
 
   const { data: ticketData, isLoading: loadingTickets } = useQuery<{ data: any[]; total: number; oosFilteredCount?: number }>({
-    queryKey: ["/api/rental-ops/tickets", showOos],
-    queryFn: () => fetch(`/api/rental-ops/tickets${showOos ? "?includeOos=true" : ""}`, { credentials: "include" }).then(r => r.json()),
+    queryKey: ["/api/rental-ops/tickets", showOos, effectiveDate],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (showOos) params.set("includeOos", "true");
+      if (effectiveDate) params.set("fileDate", effectiveDate);
+      return fetch(`/api/rental-ops/tickets?${params.toString()}`, { credentials: "include" }).then(r => r.json());
+    },
     enabled: activeTab === "tickets",
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: summary, isLoading: loadingSummary } = useQuery<any>({
-    queryKey: ["/api/rental-ops/summary"],
+    queryKey: ["/api/rental-ops/summary", effectiveDate],
+    queryFn: () => {
+      const params = effectiveDate ? `?fileDate=${effectiveDate}` : "";
+      return fetch(`/api/rental-ops/summary${params}`, { credentials: "include" }).then(r => r.json());
+    },
     staleTime: 5 * 60 * 1000,
   });
 
@@ -208,7 +230,27 @@ export default function RentalOperations() {
             <Database className="h-4 w-4" />
             <span>Snowflake Pipeline Tables</span>
           </div>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-3 flex-wrap">
+            {/* File date selector */}
+            <div className="flex items-center gap-1.5">
+              <History className="h-4 w-4 text-muted-foreground" />
+              <Select
+                value={selectedFileDate ?? "__latest__"}
+                onValueChange={(v) => setSelectedFileDate(v === "__latest__" ? null : v)}
+              >
+                <SelectTrigger className="h-8 text-xs w-44">
+                  <SelectValue placeholder="Select file date…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__latest__">Latest ({latestDate ?? "…"})</SelectItem>
+                  {(availableDates?.data ?? []).filter(d => d.fileDate !== latestDate).map(d => (
+                    <SelectItem key={d.fileDate} value={d.fileDate}>
+                      {d.fileDate} ({d.rowCount} rows)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground select-none" title="Out-of-service vehicles are hidden by default">
               <EyeOff className="h-4 w-4" />
               <span>Show Out of Service</span>
@@ -228,6 +270,25 @@ export default function RentalOperations() {
             </Button>
           </div>
         </div>
+
+        {/* Historical data banner */}
+        {isHistorical && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 text-sm">
+            <History className="h-4 w-4 shrink-0" />
+            <span>
+              Viewing historical data from <strong>{selectedFileDate}</strong>.
+              {availableDates?.data.find(d => d.fileDate === selectedFileDate)?.sourceFilename && (
+                <> File: <span className="font-mono text-xs">{availableDates!.data.find(d => d.fileDate === selectedFileDate)!.sourceFilename}</span></>
+              )}
+            </span>
+            <button
+              className="ml-auto text-xs underline underline-offset-2 hover:no-underline shrink-0"
+              onClick={() => setSelectedFileDate(null)}
+            >
+              Return to latest
+            </button>
+          </div>
+        )}
 
         {/* Data Quality Banner */}
         <div className="flex flex-wrap gap-2 p-3 bg-muted/40 rounded-lg border">

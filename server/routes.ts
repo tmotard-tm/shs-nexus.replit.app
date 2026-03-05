@@ -12019,8 +12019,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const RENTAL_OPEN_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT";
   const RENTAL_CLOSED_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_CLOSED_RENTAL_REPORT";
   const RENTAL_TICKET_TABLE = "PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT";
-  // Table is appended daily — always restrict to the latest file only
-  const TICKET_MAX_DATE = `FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${RENTAL_TICKET_TABLE})`;
+  // Table is appended daily — always restrict to a single file's data.
+  // If fileDate is provided (YYYY-MM-DD) use that date; otherwise default to MAX(FILE_DATE).
+  function ticketDateFilter(fileDate?: string): string {
+    if (fileDate && /^\d{4}-\d{2}-\d{2}$/.test(fileDate)) {
+      return `FILE_DATE = '${fileDate}'`;
+    }
+    return `FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${RENTAL_TICKET_TABLE})`;
+  }
 
   function calcDaysOpen(startDate: string | null): number {
     if (!startDate) return 0;
@@ -12123,7 +12129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (showRaw) {
         // Raw Holman PO lines view (all 800 rows, original behavior)
         const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`) as any[];
-        const ticketRows = await sf.executeQuery(`SELECT DISTINCT LPAD(VEHICLE_NUMBER, 5, '0') as VN FROM ${RENTAL_TICKET_TABLE} WHERE ${TICKET_MAX_DATE}`).catch(() => []) as any[];
+        const ticketRows = await sf.executeQuery(`SELECT DISTINCT LPAD(VEHICLE_NUMBER, 5, '0') as VN FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)}`).catch(() => []) as any[];
         const enterpriseVehicles = new Set<string>(ticketRows.map((r: any) => String(r.VN || "").trim()));
         const byVehicle = new Map<string, any[]>();
         for (const r of rows) {
@@ -12159,7 +12165,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // === BUSINESS LOGIC VIEW (matches Excel 333 formula) ===
       // Fetch Enterprise open tickets + all Holman open POs in parallel
       const [ticketRows, holmanRows] = await Promise.all([
-        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${TICKET_MAX_DATE} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
+        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
         sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`) as Promise<any[]>,
       ]);
 
@@ -12338,7 +12344,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sf = getSnowflakeService();
       await sf.connect();
       const includeOos = req.query?.includeOos === "true";
-      const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${TICKET_MAX_DATE} LIMIT 2000`) as any[];
+      const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} LIMIT 2000`) as any[];
       let data = rows.map((r: any) => {
         const currentTicketStart = parseRentalDate(r.RENTAL_START_DATE);
         // COALESCE(ORIGINAL_START_DATE, RENTAL_START_DATE) — track from first rental date on rewrites
@@ -12391,7 +12397,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/rental-ops/summary", requireAuth, async (_req, res) => {
+  app.get("/api/rental-ops/summary", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
@@ -12405,7 +12411,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
 
       const [ticketRows, holmanRows, closedRows] = await Promise.all([
-        sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTAL_START_DATE, TICKET_STATUS FROM ${RENTAL_TICKET_TABLE} WHERE ${TICKET_MAX_DATE} AND TICKET_STATUS='OPEN' LIMIT 5000`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTAL_START_DATE, TICKET_STATUS FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`).catch(() => []) as Promise<any[]>,
         sf.executeQuery(`SELECT VEHICLE_NUMBER, PO_DATE, DIVISION, RENTAL_VENDOR FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
         sf.executeQuery(`SELECT VEHICLE_NUMBER, PO_NUMBER, REWRITE_FLAG FROM ${RENTAL_CLOSED_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
       ]);
@@ -12473,6 +12479,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Returns all distinct FILE_DATEs loaded into the Enterprise ticket table,
+  // newest first, so the frontend can offer a date-picker for historical views.
+  app.get("/api/rental-ops/available-dates", requireAuth, async (_req, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured", data: [] });
+      const sf = getSnowflakeService();
+      await sf.connect();
+      const rows = await sf.executeQuery(
+        `SELECT FILE_DATE, SOURCE_FILENAME, LOADED_TS, COUNT(*) as ROW_COUNT
+         FROM ${RENTAL_TICKET_TABLE}
+         GROUP BY FILE_DATE, SOURCE_FILENAME, LOADED_TS
+         ORDER BY FILE_DATE DESC
+         LIMIT 60`
+      ) as any[];
+      const toIsoDate = (v: any): string => {
+        if (!v) return "";
+        // Snowflake DATE columns may arrive as JS Date objects
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        const s = String(v).trim();
+        // Already ISO YYYY-MM-DD
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+        // Fallback: parse and re-format
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? s.slice(0, 10) : d.toISOString().slice(0, 10);
+      };
+      const data = rows.map((r: any) => ({
+        fileDate: toIsoDate(r.FILE_DATE),
+        sourceFilename: r.SOURCE_FILENAME || null,
+        loadedTs: r.LOADED_TS || null,
+        rowCount: Number(r.ROW_COUNT || 0),
+      }));
+      res.json({ data, latestDate: data[0]?.fileDate || null });
+    } catch (err: any) {
+      return handleSnowflakeError(err, res, RENTAL_TICKET_TABLE);
+    }
+  });
+
   app.post("/api/rental-ops/qualify", requireAuth, async (req: any, res) => {
     const source = req.body?.source || "all";
     const triggeredBy = req.user?.username || "unknown";
@@ -12480,7 +12524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     async function qualifyTable(tableName: string, sourceKey: string, sf: any) {
       try {
-        const fileFilter = tableName === RENTAL_TICKET_TABLE ? ` WHERE ${TICKET_MAX_DATE}` : "";
+        const fileFilter = tableName === RENTAL_TICKET_TABLE ? ` WHERE ${ticketDateFilter()}` : "";
         const rows = await sf.executeQuery(`SELECT * FROM ${tableName}${fileFilter} LIMIT 5000`) as any[];
         const issues: any[] = [];
         let passRows = 0, warnRows = 0, failRows = 0;
@@ -12661,7 +12705,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Query both Snowflake tables — same as open endpoint
       const [holmanRaw, entRaw] = await Promise.all([
         sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 5000`) as Promise<any[]>,
-        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${TICKET_MAX_DATE} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
+        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
       ]);
 
       // Transform Enterprise rows same way as open endpoint (using outer parseClaimNumber)
