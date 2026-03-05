@@ -74,21 +74,15 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       return { status: "skipped", message: "TPMS not configured" };
     }
     if (action === "assign") {
-      const result = await tpms.tempTruckAssign(params.ldapId, params.districtNo, params.truckNumber);
-      if (result.success) return { status: "success", message: result.message || "Assigned" };
-      return { status: "failed", message: result.message || "TPMS assign failed" };
+      await tpms.tempTruckAssign(params.ldapId, params.districtNo, params.truckNumber);
+      return { status: "success", message: "Assigned" };
     }
     if (action === "unassign") {
-      const result = await tpms.updateTechInfo({
-        ldapId: params.ldapId,
-        truckNo: "",
-        districtNo: params.districtNo || "",
-      });
-      if (result.success) return { status: "success", message: "Unassigned" };
-      return { status: "failed", message: result.message || "TPMS unassign failed" };
+      await tpms.tempTruckAssign(params.ldapId, params.districtNo || "", "");
+      return { status: "success", message: "Unassigned" };
     }
     if (action === "update_address") {
-      const result = await tpms.updateTechInfo({
+      await tpms.updateTechInfo({
         ldapId: params.ldapId,
         addresses: [{
           type: "PRIMARY",
@@ -99,8 +93,7 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
           zipCd: params.zip,
         }],
       });
-      if (result.success) return { status: "success", message: "Address updated" };
-      return { status: "failed", message: result.message || "TPMS address update failed" };
+      return { status: "success", message: "Address updated" };
     }
     return { status: "skipped", message: "Unknown TPMS action" };
   } catch (err: any) {
@@ -147,22 +140,26 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       return { status: "skipped", message: "VIN not found for truck" };
     }
     if (action === "assign") {
-      const result = await ams.updateTechAssignment(vin, { tech: params.ldapId });
-      if (result.success) return { status: "success", message: "Assigned" };
-      return { status: "failed", message: result.message || "AMS assign failed" };
+      await ams.updateTechAssignment(vin, {
+        techEnterpriseId: params.ldapId,
+        updateUser: params.requestedBy || "nexus",
+      });
+      return { status: "success", message: "Assigned" };
     }
     if (action === "unassign") {
-      const result = await ams.updateTechAssignment(vin, { tech: "^null^" });
-      if (result.success) return { status: "success", message: "Unassigned" };
-      return { status: "failed", message: result.message || "AMS unassign failed" };
+      await ams.updateTechAssignment(vin, {
+        techEnterpriseId: "^null^",
+        updateUser: params.requestedBy || "nexus",
+      });
+      return { status: "success", message: "Unassigned" };
     }
     if (action === "update_address") {
-      const result = await ams.updateUserFields(vin, {
+      await ams.updateUserFields(vin, {
+        updateUser: params.requestedBy || "nexus",
         address: params.address,
         zip: params.zip,
       });
-      if (result.success) return { status: "success", message: "Address updated" };
-      return { status: "failed", message: result.message || "AMS address update failed" };
+      return { status: "success", message: "Address updated" };
     }
     return { status: "skipped", message: "Unknown AMS action" };
   } catch (err: any) {
