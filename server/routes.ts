@@ -12111,7 +12111,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       //   Segment 2: Holman open, vendor NOT Enterprise/Toll, NOT in Enterprise ticket table
       const showRaw = req.query?.view === "raw";
 
-      const normVeh = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
+      // Strip leading zeros before padding so "088039" and "88039" normalize to the same key "88039".
+      const normVeh = (v: string) => {
+        if (!v) return "";
+        const s = String(v).trim().replace(/^0+/, "") || "0";
+        return s.padStart(5, "0");
+      };
 
       if (showRaw) {
         // Raw Holman PO lines view (all 800 rows, original behavior)
@@ -12390,7 +12395,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
-      const normV = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
+      const normV = (v: string) => {
+        if (!v) return "";
+        const s = String(v).trim().replace(/^0+/, "") || "0";
+        return s.padStart(5, "0");
+      };
       const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
 
       const [ticketRows, holmanRows, closedRows] = await Promise.all([
