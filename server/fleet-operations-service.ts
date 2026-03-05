@@ -74,11 +74,15 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       return { status: "skipped", message: "TPMS not configured" };
     }
     if (action === "assign") {
-      await tpms.tempTruckAssign(params.ldapId, params.districtNo, params.truckNumber);
+      await tpms.updateTechInfo({ ldapId: params.ldapId, truckNo: params.truckNumber });
       return { status: "success", message: "Assigned" };
     }
     if (action === "unassign") {
-      await tpms.tempTruckAssign(params.ldapId, params.districtNo || "", "");
+      const current = await tpms.getTechInfo(params.ldapId).catch(() => null);
+      if (!current?.truckNo || current.truckNo.trim() === "") {
+        return { status: "skipped", message: "Already unassigned in TPMS" };
+      }
+      await tpms.updateTechInfo({ ldapId: params.ldapId, truckNo: "" });
       return { status: "success", message: "Unassigned" };
     }
     if (action === "update_address") {
@@ -148,7 +152,7 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
     }
     if (action === "unassign") {
       await ams.updateTechAssignment(vin, {
-        techEnterpriseId: "^null^",
+        techEnterpriseId: "",
         updateUser: params.requestedBy || "nexus",
       });
       return { status: "success", message: "Unassigned" };
