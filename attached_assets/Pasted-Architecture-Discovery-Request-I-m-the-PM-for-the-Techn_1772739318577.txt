@@ -1,0 +1,106 @@
+Architecture Discovery Request
+I'm the PM for the Technician Offboarding Process Redesign. We're planning the future architecture for how all offboarding queues in Nexus should work together (Tools, Phone Recovery, Fleet, Inventory, LOA). Before we commit to an approach, I need to understand the current technical state of the system.
+
+Please answer each question below with as much detail as possible. Use code snippets, table structures, or lists where helpful. If something doesn't exist yet, say so.
+
+Why This Matters
+We have multiple queues being built independently (Tools Queue in production, Phone Recovery Sprints 0-2 complete, Fleet and Inventory planned). We need to decide whether to continue building them as separate filtered views on the same table, create a unified technician record, or add a dashboard layer on top. Your answers will directly inform that decision.
+
+Section 1: Schema and Data Model
+Q1: queue_items table structure
+
+Show me the current structure of the queue_items table in shared/schema.ts. List all columns with their types. For each column, note which queue type uses it:
+
+Used by all queues
+Used only by phone recovery
+Used only by tools
+Used only by [specific queue]
+Not currently used by any queue
+I'm trying to understand how wide this table is and how many columns are queue-specific vs. shared.
+
+Q2: Queue type values
+
+What are all the distinct queue type values currently supported? How are they defined (enum, string literal, etc.)? List every value that can appear in the queue type field today.
+
+Q3: Table width and nullability
+
+How many columns in queue_items are nullable and only apply to specific queue types? Is the table getting unwieldy, or is it still manageable? Any columns that were added for one queue but ended up being useful for others?
+
+Section 2: Snowflake Sync
+Q4: Sync logic walkthrough
+
+In server/snowflake-sync-service.ts, walk me through what happens when a separation event syncs from Snowflake:
+
+Which queue types get tasks created automatically?
+What data is populated on each task?
+Are there any conditional rules (e.g., "only create a phone recovery task if the tech has a company phone")?
+Does one sync event create multiple rows in queue_items (one per queue type)?
+Q5: Sync frequency
+
+What is the current sync frequency? Is it the same for all queue types, or do different queues refresh on different schedules? Specifically: is there a difference between the "weekly offboarding view" refresh cycle and the Assets/Tools queue sync cycle?
+
+Q6: Dual sync paths
+
+Is there a separate sync path or data source for the "weekly offboarding view" vs. the queue tasks that Claudia works in the Assets/Tools queue? If so, what are the differences in source tables, refresh timing, and data scope? This relates to the Manzoor case where a tech appeared in the weekly view but not in Claudia's queue.
+
+Section 3: Tags and Metadata
+Q7: TLT and BYOV tag placement
+
+We need to add two new tags to offboarding records:
+
+TLT (Tech Lead Technician): These techs may have iPads in addition to standard tools
+BYOV (Bring Your Own Vehicle): Identified by 88-series truck numbers, these techs have different tool/parts recovery needs
+Where would these best live in the current schema? Options:
+
+New columns on queue_items (set per task at sync time)
+A separate technician_offboarding or similar table with a one-to-many relationship to queue_items
+Somewhere else in the current schema
+What's your recommendation given the current architecture?
+
+Q8: Tag propagation
+
+If a new tag (like TLT) needs to appear on every task for a given technician across all queue types, how would that work today? Would the sync service set it on each task row at creation? Or is there a mechanism to set it once on a technician-level record and have it inherited by all tasks?
+
+Section 4: Cross-Queue Views
+Q9: Current technician-level views
+
+Does any page in Nexus currently show a view that spans multiple queue types for a single technician? For example, can anyone currently see "Technician X has a tools task, a phone recovery task, and a fleet task" in one place? Or is every view filtered to a single queue type?
+
+Q10: Technician clearance dashboard feasibility
+
+What would it take to build a "technician clearance dashboard" that:
+
+Lists all active offboarding technicians
+Shows a status column per queue type (tools: complete, fleet: in progress, phone: pending, etc.)
+Lets a manager click a technician to see all their tasks
+Is this a straightforward grouped query on the existing queue_items table, or are there structural barriers (e.g., missing technician identifier, inconsistent data across queue types)?
+
+Section 5: API Integration Points
+Q11: API call architecture
+
+How are the external API calls (TPMS, AMS, Segno) currently wired into the system?
+
+Are they triggered from specific queue views (e.g., a button in the Tools Queue calls Segno)?
+Are they triggered from the sync service?
+Are they triggered manually by an operator?
+Could they be centralized into a shared "offboarding actions" layer, or are they tightly coupled to specific queue views?
+Section 6: Contact History
+Q12: Contact log storage
+
+The Phone Recovery Queue has a ContactLogForm and ContactHistoryTimeline (built in Sprint 1). Where is this contact history data stored?
+
+On the queue_items table (e.g., a JSON column)?
+In a separate contact_logs table?
+Somewhere else?
+If it's per-task, could it be adapted to be per-technician so that contact attempts from different queues (tools outreach by Claudia, phone outreach by Monica) are visible to each other?
+
+Section 7: Performance and Scale
+Q13: Current volume and growth
+
+How many rows are currently in queue_items?
+What's the approximate growth rate (rows per week)?
+Are there any archival or cleanup mechanisms for completed/resolved tasks, or do they stay in the table indefinitely?
+At the current growth rate, do you foresee any performance concerns with querying this table as it grows?
+Response Format
+Please structure your response using the same section headers (Section 1 through Section 7) so I can map answers back to questions easily. If any question requires clarification, note what you need and answer as best you can with current knowledge.
+
