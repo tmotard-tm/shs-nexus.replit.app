@@ -23,7 +23,6 @@ import { AmsApiService } from "./ams-api-service";
 const amsApiService = new AmsApiService();
 import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
-import { filterQueueItemsByWORoster, updateWORosterCache } from "./snowflake-sync-service";
 import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
 // SAML SSO INTEGRATION
@@ -1845,9 +1844,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!currentUser || !hasQueueAccess(currentUser, 'ntao')) {
         return res.status(403).json({ message: "Access denied to NTAO queue" });
       }
-      const allItems = await storage.getNTAOQueueItems();
-      const showAll = req.query.showAll === 'true';
-      const queueItems = filterQueueItemsByWORoster(allItems, showAll);
+      const queueItems = await storage.getNTAOQueueItems();
       res.json(queueItems);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch NTAO queue items" });
@@ -1978,13 +1975,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const showAll = req.query.showAll === 'true';
-      const woFiltered = filterQueueItemsByWORoster(filteredItems, showAll);
-
       const elapsed = Date.now() - startTime;
-      console.log(`[Assets Queue] GET /api/assets-queue returned ${woFiltered.length} items in ${elapsed}ms (daysBack=${daysBack})`);
+      console.log(`[Assets Queue] GET /api/assets-queue returned ${filteredItems.length} items in ${elapsed}ms (daysBack=${daysBack})`);
 
-      res.json(woFiltered);
+      res.json(filteredItems);
     } catch (error) {
       const elapsed = Date.now() - startTime;
       console.error(`[Assets Queue] Error after ${elapsed}ms:`, error);
@@ -2547,9 +2541,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!currentUser || !hasQueueAccess(currentUser, 'inventory')) {
         return res.status(403).json({ message: "Access denied to Inventory queue" });
       }
-      const allItems = await storage.getInventoryQueueItems();
-      const showAll = req.query.showAll === 'true';
-      const queueItems = filterQueueItemsByWORoster(allItems, showAll);
+      const queueItems = await storage.getInventoryQueueItems();
       res.json(queueItems);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch Inventory queue items" });
@@ -3170,9 +3162,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!currentUser || !hasQueueAccess(currentUser, 'fleet')) {
         return res.status(403).json({ message: "Access denied to Fleet queue" });
       }
-      const allItems = await storage.getFleetQueueItems();
-      const showAll = req.query.showAll === 'true';
-      const queueItems = filterQueueItemsByWORoster(allItems, showAll);
+      const queueItems = await storage.getFleetQueueItems();
       res.json(queueItems);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch Fleet queue items" });
@@ -3498,9 +3488,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied to requested queues" });
       }
       
-      const allItems = await storage.getUnifiedQueueItems(allowedModules as QueueModule[], status);
-      const showAll = req.query.showAll === 'true';
-      const items = filterQueueItemsByWORoster(allItems, showAll);
+      const items = await storage.getUnifiedQueueItems(allowedModules as QueueModule[], status);
       
       // Sprint 2: Compute currentBlockingStatus for Assets Management items
       const enrichedItems = await Promise.all(items.map(async (item) => {
@@ -3588,15 +3576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied to requested queues" });
       }
       
-      const showAll = req.query.showAll === 'true';
-      const allItems = await storage.getUnifiedQueueItems(allowedModules as QueueModule[]);
-      const filtered = filterQueueItemsByWORoster(allItems, showAll);
-      const stats = {
-        pending: filtered.filter(i => i.status === 'pending').length,
-        in_progress: filtered.filter(i => i.status === 'in_progress').length,
-        completed: filtered.filter(i => i.status === 'completed').length,
-        total: filtered.length,
-      };
+      const stats = await storage.getUnifiedQueueStats(allowedModules as QueueModule[]);
       res.json(stats);
     } catch (error) {
       console.error('Error fetching unified queue stats:', error);
@@ -8868,15 +8848,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const allData = [...formattedData, ...separationRecords];
-
-      const cacheEmplIds = new Set<string>();
-      const cacheEntIds = new Set<string>();
-      for (const r of allData) {
-        if (r.emplId) cacheEmplIds.add(r.emplId);
-        if (r.enterpriseId) cacheEntIds.add(r.enterpriseId);
-      }
-      updateWORosterCache(cacheEmplIds, cacheEntIds);
-
       res.json(allData);
     } catch (error: any) {
       console.error("Error fetching weekly offboarding data:", error);
