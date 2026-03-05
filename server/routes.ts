@@ -12051,6 +12051,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return (divCode || "").trim();
   }
 
+  // Parse Enterprise claim number format: "114771300       -D/R"
+  // Holman PO = digits before the hyphen (trimmed)
+  // Letter after hyphen = alphabet position = rewrite count (D=4, F=6, etc.)
+  // This matches NUMBER_OF_REWRITES column but lets us surface the PO number
+  function parseClaimNumber(claimNum: string): { holmanPo: string } {
+    const clean = (claimNum || "").trim();
+    const hyphenIdx = clean.lastIndexOf("-");
+    if (hyphenIdx < 0) return { holmanPo: clean.replace(/\s+/g, "") };
+    const holmanPo = clean.slice(0, hyphenIdx).replace(/\s+/g, "");
+    return { holmanPo };
+  }
+
+  // Coalesce originalStartDate with rentalStartDate — if ORIGINAL_START_DATE is present
+  // the rental has been rewritten and we track days from the very first start date
+  function entOriginalStart(r: any): string | null {
+    return parseRentalDate(r.ORIGINAL_START_DATE) || parseRentalDate(r.RENTAL_START_DATE);
+  }
+
   function handleSnowflakeError(err: any, res: any, table?: string) {
     const isTableMissing = err.message?.includes("does not exist") || err.message?.includes("SQL compilation error") || err.code === "002003";
     if (isTableMissing) {
@@ -12136,7 +12154,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const enterpriseSegment = Array.from(entByVehicle.entries()).map(([vn, r]) => {
-        const startDate = parseRentalDate(r.RENTAL_START_DATE);
+        // originalStartDate = COALESCE(ORIGINAL_START_DATE, RENTAL_START_DATE)
+        // If ORIGINAL_START_DATE exists → this is a rewrite; track days from the very first rental date
+        // If not → new rental, use RENTAL_START_DATE
+        const originalStartDate = entOriginalStart(r);
+        const currentTicketStart = parseRentalDate(r.RENTAL_START_DATE);
+        const { holmanPo } = parseClaimNumber(r.CLAIM_NUMBER || "");
         return {
           vehicleNumber: r.VEHICLE_NUMBER,
           vehicleNumberPadded: vn,
@@ -12144,13 +12167,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           renterName: (r.RENTER_NAME || "").trim(),
           enterpriseId: null,
           district: null,
-          poNumber: r.ECARS_2_0_TKT_NBR || null,
-          poDate: startDate,
-          rentalStartDate: startDate,
+          ticketNumber: r.ECARS_2_0_TKT_NBR || null,
+          // Holman PO extracted from claim number (e.g. "114771300       -D/R" → "114771300")
+          poNumber: holmanPo || null,
+          claimNumber: (r.CLAIM_NUMBER || "").trim(),
+          poDate: originalStartDate,
+          rentalStartDate: currentTicketStart,        // current ticket/rewrite start
+          originalStartDate,                          // first rental date (or current if no rewrite)
+          isRewrite: !!(r.ORIGINAL_START_DATE && parseRentalDate(r.ORIGINAL_START_DATE)),
           rentalVendor: "Enterprise Rent-A-Car",
           ticketStatus: r.TICKET_STATUS,
-          daysOpen: calcDaysOpen(startDate),
+          // daysOpen counted from ORIGINAL_START_DATE so rewrites show full rental age
+          daysOpen: calcDaysOpen(originalStartDate),
           daysAuthorized: r.DAYS_AUTHORIZED ? parseInt(String(r.DAYS_AUTHORIZED)) : null,
+          initialDaysAuthorized: r.INITIAL_DAYS_AUTHORIZED ? parseInt(String(r.INITIAL_DAYS_AUTHORIZED)) : null,
           numberOfExtensions: r.NUMBER_OF_EXTENSIONS ? parseInt(String(r.NUMBER_OF_EXTENSIONS)) : 0,
           daysBehind: r.DAYS_BEHIND ? parseInt(String(r.DAYS_BEHIND)) : 0,
           numberOfRewrites: r.NUMBER_OF_REWRITES ? parseInt(String(r.NUMBER_OF_REWRITES)) : 0,
@@ -12260,33 +12290,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await sf.connect();
       const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} LIMIT 2000`) as any[];
       const data = rows.map((r: any) => {
-        const openDate = parseRentalDate(r.RENTAL_START_DATE || r.OPEN_DATE || r.START_DATE || r.CREATED_DATE);
-        const originalStart = parseRentalDate(r.ORIGINAL_START_DATE);
+        const currentTicketStart = parseRentalDate(r.RENTAL_START_DATE);
+        // COALESCE(ORIGINAL_START_DATE, RENTAL_START_DATE) — track from first rental date on rewrites
+        const originalStartDate = parseRentalDate(r.ORIGINAL_START_DATE) || currentTicketStart;
+        const { holmanPo } = parseClaimNumber(r.CLAIM_NUMBER || "");
         return {
           vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.ASSET_NUMBER || "",
-          ticketNumber: r.ECARS_2_0_TKT_NBR || r.TICKET_NUMBER || r.WORK_ORDER || r.PO_NUMBER || "",
+          ticketNumber: r.ECARS_2_0_TKT_NBR || "",
+          // Holman PO number extracted from claim number (digits before the "-D/R" suffix)
+          holmanPoNumber: holmanPo || null,
           claimNumber: (r.CLAIM_NUMBER || "").trim(),
-          renterName: (r.RENTER_NAME || r.DRIVER_NAME || "").trim(),
+          renterName: (r.RENTER_NAME || "").trim(),
           claimsOfficeName: r.CLAIMS_OFFICE_NAME || null,
-          openDate,
-          originalStartDate: originalStart,
-          closeDate: parseRentalDate(r.CLOSE_DATE || r.END_DATE),
+          rentalStartDate: currentTicketStart,          // this ticket's start date
+          originalStartDate,                            // COALESCE(ORIGINAL_START_DATE, RENTAL_START_DATE)
+          isRewrite: !!(r.ORIGINAL_START_DATE && parseRentalDate(r.ORIGINAL_START_DATE)),
           rentingBranch: r.RENTING_BRANCH || null,
           rentingCity: r.RENTING_CITY_NAME || null,
           rentingState: r.RENTING_STATE || null,
           carClass: r.CAR_CLASS_AUTHORIZED_DESCRIPTION || null,
           daysAuthorized: r.DAYS_AUTHORIZED ? parseInt(String(r.DAYS_AUTHORIZED)) : null,
+          initialDaysAuthorized: r.INITIAL_DAYS_AUTHORIZED ? parseInt(String(r.INITIAL_DAYS_AUTHORIZED)) : null,
           rentalDays: r.RENTAL_DAYS ? parseInt(String(r.RENTAL_DAYS)) : null,
           daysBehind: r.DAYS_BEHIND ? parseInt(String(r.DAYS_BEHIND)) : 0,
           rateAuthorized: r.RATE_AUTHORIZED || null,
           numberOfExtensions: r.NUMBER_OF_EXTENSIONS ? parseInt(String(r.NUMBER_OF_EXTENSIONS)) : 0,
           numberOfRewrites: r.NUMBER_OF_REWRITES ? parseInt(String(r.NUMBER_OF_REWRITES)) : 0,
           repairsComplete: r.REPAIRS_COMPLETE || null,
-          status: r.TICKET_STATUS || r.STATUS || "",
+          status: r.TICKET_STATUS || "",
           rentedVehYear: r.RENTED_VEH_YEAR || null,
           rentedVehMake: r.RENTED_VEH_MAKE || null,
           rentedVehModel: r.RENTED_VEH_MODEL || null,
-          daysOpen: calcDaysOpen(originalStart || openDate),
+          // daysOpen always from originalStartDate (first rental date including rewrites)
+          daysOpen: calcDaysOpen(originalStartDate),
           raw: r,
         };
       });

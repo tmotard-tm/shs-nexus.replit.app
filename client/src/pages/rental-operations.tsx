@@ -150,9 +150,14 @@ export default function RentalOperations() {
     return !q || r.vehicleNumber?.toLowerCase().includes(q) || r.renterName?.toLowerCase().includes(q) || r.poNumber?.toLowerCase().includes(q);
   });
 
-  const ticketRows = (ticketData?.data || []).filter((r: any) => {
+  const ticketRows = (ticketData?.data as any[] || []).filter((r: any) => {
     const q = ticketSearch.toLowerCase();
-    return !q || r.vehicleNumber?.toLowerCase().includes(q) || r.ticketNumber?.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q);
+    return !q
+      || r.vehicleNumber?.toLowerCase().includes(q)
+      || r.ticketNumber?.toLowerCase().includes(q)
+      || r.holmanPoNumber?.toLowerCase().includes(q)
+      || r.renterName?.toLowerCase().includes(q)
+      || r.claimNumber?.toLowerCase().includes(q);
   });
 
   const extensionRows = (closedData?.data || []).filter((r: any) => r.rewriteFlag === "Y");
@@ -436,14 +441,14 @@ export default function RentalOperations() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Vehicle #</TableHead>
-                        <TableHead>Ticket #</TableHead>
+                        <TableHead>Holman PO</TableHead>
+                        <TableHead>ECARS Ticket</TableHead>
                         <TableHead>Renter / Tech</TableHead>
-                        <TableHead>Original Start</TableHead>
+                        <TableHead>Orig. Start</TableHead>
                         <TableHead>Days Open</TableHead>
                         <TableHead>Days Auth</TableHead>
                         <TableHead>Rewrites</TableHead>
-                        <TableHead>Repairs Done</TableHead>
-                        <TableHead>Status</TableHead>
+                        <TableHead>Repairs</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -454,26 +459,29 @@ export default function RentalOperations() {
                       ) : ticketRows.map((r: any, i: number) => (
                         <TableRow key={i}>
                           <TableCell className="font-mono text-sm">{r.vehicleNumber || "—"}</TableCell>
-                          <TableCell className="font-mono text-xs">{r.ticketNumber || "—"}</TableCell>
-                          <TableCell className="max-w-[160px] truncate text-xs">{r.renterName || "—"}</TableCell>
-                          <TableCell className="text-sm">{formatDate(r.originalStartDate || r.openDate)}</TableCell>
-                          <TableCell>
-                            {r.daysOpen > 90
-                              ? <Badge className="bg-amber-500 text-black text-xs">{r.daysOpen}d</Badge>
-                              : <span className="text-sm">{r.daysOpen}d</span>}
+                          <TableCell className="font-mono text-xs">
+                            {r.holmanPoNumber || "—"}
                           </TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">{r.ticketNumber || "—"}</TableCell>
+                          <TableCell className="max-w-[160px] truncate text-xs">{r.renterName || "—"}</TableCell>
+                          <TableCell className="text-sm">
+                            <div>{formatDate(r.originalStartDate)}</div>
+                            {r.isRewrite && r.rentalStartDate !== r.originalStartDate && (
+                              <div className="text-xs text-muted-foreground">rewrite {formatDate(r.rentalStartDate)}</div>
+                            )}
+                          </TableCell>
+                          <TableCell><DaysBadge days={r.daysOpen || 0} /></TableCell>
                           <TableCell className="text-sm">{r.daysAuthorized ?? "—"}</TableCell>
                           <TableCell className="text-sm">
                             {r.numberOfRewrites > 0
-                              ? <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 text-xs border-none">{r.numberOfRewrites}</Badge>
-                              : "0"}
+                              ? <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 text-xs border-none">{r.numberOfRewrites}×</Badge>
+                              : <span className="text-muted-foreground text-xs">—</span>}
                           </TableCell>
                           <TableCell>
                             {r.repairsComplete === "Yes"
                               ? <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs border-none">Yes</Badge>
                               : <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 text-xs border-none">No</Badge>}
                           </TableCell>
-                          <TableCell>{r.status || "—"}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
