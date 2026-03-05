@@ -30,7 +30,6 @@ import {
   Calendar,
   X,
   Loader2,
-  ChevronUp,
   ChevronDown,
   Smartphone,
 } from "lucide-react";
@@ -57,6 +56,27 @@ function getTechName(task: QueueItem): string {
     if (d.technician?.techName) return d.technician.techName;
   } catch {}
   return task.title;
+}
+
+function getEnterpriseId(task: QueueItem): string | null {
+  try {
+    const d = JSON.parse(task.data || "{}");
+    return d.technician?.enterpriseId || d.technician?.techRacfid || null;
+  } catch {}
+  return null;
+}
+
+function getDateAgingBadge(date: Date | null): { label: string; className: string } | null {
+  if (!date) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const diffDays = Math.floor((today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return { label: "Upcoming", className: "bg-blue-100 text-blue-700 border-blue-200" };
+  if (diffDays <= 7) return { label: "New", className: "bg-green-100 text-green-700 border-green-200" };
+  if (diffDays <= 30) return { label: "Active", className: "bg-amber-100 text-amber-700 border-amber-200" };
+  return { label: "Overdue", className: "bg-red-100 text-red-700 border-red-200" };
 }
 
 function getSeparationDate(task: QueueItem): Date | null {
@@ -159,7 +179,7 @@ export function PhoneRecoveryDashboard() {
   const [memberFilter, setMemberFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [sortColumn, setSortColumn] = useState<SortColumn>("daysOpen");
+  const [sortColumn, setSortColumn] = useState<SortColumn>("separationDate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [selectedTask, setSelectedTask] = useState<QueueItem | null>(null);
   const [activeTab, setActiveTab] = useState<"history" | "action">("action");
@@ -321,10 +341,7 @@ export function PhoneRecoveryDashboard() {
     queryClient.invalidateQueries({ queryKey: ["/api/phone-recovery"] });
   }
 
-  const SortIcon = ({ col }: { col: SortColumn }) => {
-    if (sortColumn !== col) return null;
-    return sortDirection === "asc" ? <ChevronUp className="h-3 w-3 inline ml-0.5" /> : <ChevronDown className="h-3 w-3 inline ml-0.5" />;
-  };
+
 
   if (isLoading) {
     return (
@@ -567,32 +584,38 @@ export function PhoneRecoveryDashboard() {
         </div>
 
         {/* Task Table */}
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm overflow-hidden">
+        <div className="w-full bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 rounded-lg shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-[#1A4B8C] text-white">
+                <tr>
                   {([
-                    { key: "technician" as SortColumn, label: "Technician" },
-                    { key: "separationDate" as SortColumn, label: "Sep. Date" },
-                    { key: "stage" as SortColumn, label: "Stage" },
-                    { key: "status" as SortColumn, label: "Status" },
-                    { key: "daysOpen" as SortColumn, label: "Days Open" },
-                    { key: "assignedTo" as SortColumn, label: "Assigned To" },
-                    { key: "alert" as SortColumn, label: "Alert" },
+                    { key: "technician" as SortColumn, label: "Technician", width: "w-48" },
+                    { key: "separationDate" as SortColumn, label: "Last Day", width: "w-28" },
+                    { key: "stage" as SortColumn, label: "Stage", width: "w-24" },
+                    { key: "status" as SortColumn, label: "Status", width: "w-28" },
+                    { key: "daysOpen" as SortColumn, label: "Days Open", width: "w-24" },
+                    { key: "assignedTo" as SortColumn, label: "Assigned To", width: "w-28" },
+                    { key: "alert" as SortColumn, label: "Alert", width: "w-24" },
                   ]).map((col) => (
                     <th
                       key={col.key}
                       onClick={() => toggleSort(col.key)}
-                      className="text-left px-4 py-3 text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 font-medium cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 select-none"
+                      className={`${col.width} px-4 py-3 font-semibold cursor-pointer hover:bg-[#153d73] transition-colors select-none`}
                     >
-                      {col.label}
-                      <SortIcon col={col.key} />
+                      <div className="flex items-center gap-1">
+                        {col.label}
+                        {sortColumn === col.key && (
+                          <ChevronDown
+                            className={`h-3 w-3 transition-transform ${sortDirection === "asc" ? "rotate-180" : ""}`}
+                          />
+                        )}
+                      </div>
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100 dark:divide-gray-800">
                 {filteredTasks.map((task) => {
                   const status = getStatus(task);
                   const stage = getStage(task);
@@ -600,20 +623,39 @@ export function PhoneRecoveryDashboard() {
                   const escalated = isEscalated(task);
                   const aging = isAging(task);
                   const sc = getStatusColor(status);
+                  const sepDate = getSeparationDate(task);
+                  const agingBadge = getDateAgingBadge(sepDate);
+                  const enterpriseId = getEnterpriseId(task);
 
-                  let rowBg = "hover:bg-gray-50 dark:hover:bg-gray-800";
-                  if (escalated) rowBg = "bg-red-50/50 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-950/30";
-                  else if (aging) rowBg = "bg-amber-50/50 dark:bg-amber-950/20 hover:bg-amber-50 dark:hover:bg-amber-950/30";
+                  let rowClass = "hover:bg-slate-50 dark:hover:bg-gray-800";
+                  if (escalated) rowClass = "bg-red-50/60 hover:bg-red-50 dark:bg-red-950/20 dark:hover:bg-red-950/30";
+                  else if (aging) rowClass = "bg-amber-50/40 hover:bg-amber-50 dark:bg-amber-950/20 dark:hover:bg-amber-950/30";
 
                   return (
                     <tr
                       key={task.id}
                       onClick={() => openDetail(task)}
-                      className={`border-b border-gray-100 dark:border-gray-800 cursor-pointer transition-colors ${rowBg}`}
+                      className={`group transition-all cursor-pointer ${rowClass}`}
                     >
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{getTechName(task)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                        {(() => { const sd = getSeparationDate(task); return sd ? sd.toLocaleDateString() : "—"; })()}
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-900 dark:text-white">{getTechName(task)}</div>
+                        {enterpriseId && (
+                          <div className="text-xs text-slate-400 font-mono">{enterpriseId}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-gray-400">
+                        <div className="flex flex-col gap-1">
+                          <span>
+                            {sepDate
+                              ? sepDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                              : "N/A"}
+                          </span>
+                          {agingBadge && (
+                            <span className={`inline-block text-[10px] px-1.5 py-0 rounded-full font-medium border w-fit ${agingBadge.className}`}>
+                              {agingBadge.label}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${
@@ -629,12 +671,12 @@ export function PhoneRecoveryDashboard() {
                           {status}
                         </span>
                       </td>
-                      <td className={`px-4 py-3 text-sm font-medium ${
-                        days > 14 ? "text-red-600 dark:text-red-400" : days > 5 ? "text-amber-600 dark:text-amber-400" : "text-gray-700 dark:text-gray-300"
+                      <td className={`px-4 py-3 font-medium ${
+                        days > 14 ? "text-red-600 dark:text-red-400" : days > 5 ? "text-amber-600 dark:text-amber-400" : "text-slate-700 dark:text-gray-300"
                       }`}>
                         {days}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{task.assignedTo || "—"}</td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-gray-400">{task.assignedTo || "—"}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {escalated && (
@@ -649,7 +691,7 @@ export function PhoneRecoveryDashboard() {
                               Aging
                             </span>
                           )}
-                          {!escalated && !aging && <span className="text-xs text-gray-400">—</span>}
+                          {!escalated && !aging && <span className="text-xs text-slate-400">—</span>}
                         </div>
                       </td>
                     </tr>
@@ -657,7 +699,7 @@ export function PhoneRecoveryDashboard() {
                 })}
                 {filteredTasks.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-400 dark:text-gray-500">
                       No tasks match the current filters
                     </td>
                   </tr>
