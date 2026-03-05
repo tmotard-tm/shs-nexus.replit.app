@@ -12027,6 +12027,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return Math.floor((Date.now() - start.getTime()) / 86400000);
   }
 
+  // Normalize various date formats to ISO YYYY-MM-DD
+  function parseRentalDate(d: string | null | undefined): string | null {
+    if (!d) return null;
+    const s = String(d).trim();
+    if (!s || s === "null") return null;
+    // Already ISO: 2026-02-10 or 2026-02-10 00:00:00
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    // MM/DD/YYYY or M/D/YYYY
+    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
+    // 7-digit MDDYYYY e.g. 7212025 = 07/21/2025
+    if (/^\d{7}$/.test(s)) {
+      return `${s.slice(3)}-${s[0].padStart(2, "0")}-${s.slice(1, 3)}`;
+    }
+    // 8-digit MMDDYYYY
+    if (/^\d{8}$/.test(s)) return `${s.slice(4)}-${s.slice(0, 2)}-${s.slice(2, 4)}`;
+    return s.slice(0, 10);
+  }
+
+  // Map Holman division codes and text to normalized display values
+  function mapDivision(divCode: string | null | undefined): string {
+    const d = (divCode || "").trim();
+    if (!d) return "";
+    if (d === "RF" || d.toUpperCase().includes("INTERIM")) return "INTERIM";
+    if (d === "01" || d.toUpperCase().includes("MAINT")) return "MAINT";
+    return d;
+  }
+
   function handleSnowflakeError(err: any, res: any, table?: string) {
     const isTableMissing = err.message?.includes("does not exist") || err.message?.includes("SQL compilation error") || err.code === "002003";
     if (isTableMissing) {
@@ -12042,19 +12070,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sf = getSnowflakeService();
       await sf.connect();
       const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 2000`) as any[];
-      const data = rows.map((r: any) => ({
-        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || "",
-        division: r.DIVISION || r.RENTAL_TYPE || "",
-        renterName: (r.RENTER_NAME || r.DRIVER_NAME || "").trim(),
-        poNumber: (r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim(),
-        rentalStartDate: r.RENTAL_START_DATE || r.START_DATE || null,
-        rentalEndDate: r.RENTAL_END_DATE || r.END_DATE || null,
-        originalStartDate: r.ORIGINAL_START_DATE || null,
-        rentalDays: r.RENTAL_DAYS || null,
-        rewriteFlag: r.REWRITE_FLAG || r.EXTENSION_FLAG || null,
-        daysOpen: calcDaysOpen(r.RENTAL_START_DATE || r.START_DATE),
-        raw: r,
-      }));
+      const data = rows.map((r: any) => {
+        const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE || r.START_DATE);
+        return {
+          vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || "",
+          division: mapDivision(r.DIVISION || r.RENTAL_TYPE),
+          renterName: r.RENTER_NAME
+            ? (r.RENTER_NAME as string).trim()
+            : `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
+          enterpriseId: r.ENTERPRISE_ID || null,
+          district: r.DISTRICT || null,
+          poNumber: (r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim(),
+          poDate: parseRentalDate(r.PO_DATE),
+          rentalStartDate: startDate,
+          rentalEndDate: parseRentalDate(r.RENTAL_END_DATE || r.END_DATE),
+          originalStartDate: parseRentalDate(r.ORIGINAL_START_DATE),
+          authorizedDays: r.NO_OF_DAYS ? parseInt(String(r.NO_OF_DAYS)) : null,
+          rentalDays: r.RENTAL_DAYS || r.NO_OF_DAYS || null,
+          dailyRate: r.DAILY_RATE || null,
+          amount: r.AMOUNT || null,
+          rentalVendor: r.RENTAL_VENDOR || null,
+          ataCode: r.ATA_CODE || null,
+          description: r.DESCRIPTION || null,
+          rewriteFlag: r.REWRITE_FLAG || r.EXTENSION_FLAG || null,
+          daysOpen: calcDaysOpen(startDate),
+          raw: r,
+        };
+      });
       res.json({ data, total: data.length, source: RENTAL_OPEN_TABLE });
     } catch (err: any) {
       return handleSnowflakeError(err, res, RENTAL_OPEN_TABLE);
@@ -12073,18 +12115,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const key = `${r.VEHICLE_NUMBER || r.UNIT_NUMBER || ""}|${(r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim()}`;
         if (!seen.has(key)) seen.set(key, r);
       }
-      const data = Array.from(seen.values()).map((r: any) => ({
-        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
-        division: r.DIVISION || "",
-        renterName: (r.RENTER_NAME || "").trim(),
-        poNumber: (r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim(),
-        rentalStartDate: r.RENTAL_START_DATE || r.START_DATE || null,
-        rentalEndDate: r.RENTAL_END_DATE || r.END_DATE || null,
-        originalStartDate: r.ORIGINAL_START_DATE || null,
-        rentalDays: r.RENTAL_DAYS || null,
-        rewriteFlag: r.REWRITE_FLAG || null,
-        raw: r,
-      }));
+      const data = Array.from(seen.values()).map((r: any) => {
+        const startDate = parseRentalDate(r.RENTAL_START_DATE || r.START_DATE);
+        const endDate = parseRentalDate(r.RENTAL_END_DATE || r.END_DATE);
+        return {
+          vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
+          division: mapDivision(r.DIVISION),
+          renterName: r.RENTER_NAME
+            ? (r.RENTER_NAME as string).trim()
+            : `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
+          clientNumber: r.CLIENT_NUMBER || null,
+          clientCompanyName: r.CLIENT_COMPANY_NAME || null,
+          poNumber: (r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim(),
+          rentalStartDate: startDate,
+          rentalEndDate: endDate,
+          originalStartDate: parseRentalDate(r.ORIGINAL_START_DATE),
+          rentalDays: r.RENTAL_DAYS ? parseInt(String(r.RENTAL_DAYS)) : null,
+          rewriteFlag: r.REWRITE_FLAG || null,
+          raw: r,
+        };
+      });
       res.json({ data, total: data.length, source: RENTAL_CLOSED_TABLE });
     } catch (err: any) {
       return handleSnowflakeError(err, res, RENTAL_CLOSED_TABLE);
@@ -12098,17 +12148,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sf = getSnowflakeService();
       await sf.connect();
       const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} LIMIT 2000`) as any[];
-      const data = rows.map((r: any) => ({
-        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.ASSET_NUMBER || "",
-        ticketNumber: r.TICKET_NUMBER || r.WORK_ORDER || r.PO_NUMBER || "",
-        openDate: r.OPEN_DATE || r.START_DATE || r.CREATED_DATE || null,
-        closeDate: r.CLOSE_DATE || r.END_DATE || null,
-        description: r.DESCRIPTION || r.SERVICE_TYPE || "",
-        vendor: r.VENDOR || r.SUPPLIER || "",
-        status: r.STATUS || r.TICKET_STATUS || "",
-        daysOpen: calcDaysOpen(r.OPEN_DATE || r.START_DATE || r.CREATED_DATE),
-        raw: r,
-      }));
+      const data = rows.map((r: any) => {
+        const openDate = parseRentalDate(r.RENTAL_START_DATE || r.OPEN_DATE || r.START_DATE || r.CREATED_DATE);
+        const originalStart = parseRentalDate(r.ORIGINAL_START_DATE);
+        return {
+          vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.ASSET_NUMBER || "",
+          ticketNumber: r.ECARS_2_0_TKT_NBR || r.TICKET_NUMBER || r.WORK_ORDER || r.PO_NUMBER || "",
+          claimNumber: (r.CLAIM_NUMBER || "").trim(),
+          renterName: (r.RENTER_NAME || r.DRIVER_NAME || "").trim(),
+          claimsOfficeName: r.CLAIMS_OFFICE_NAME || null,
+          openDate,
+          originalStartDate: originalStart,
+          closeDate: parseRentalDate(r.CLOSE_DATE || r.END_DATE),
+          rentingBranch: r.RENTING_BRANCH || null,
+          rentingCity: r.RENTING_CITY_NAME || null,
+          rentingState: r.RENTING_STATE || null,
+          carClass: r.CAR_CLASS_AUTHORIZED_DESCRIPTION || null,
+          daysAuthorized: r.DAYS_AUTHORIZED ? parseInt(String(r.DAYS_AUTHORIZED)) : null,
+          rentalDays: r.RENTAL_DAYS ? parseInt(String(r.RENTAL_DAYS)) : null,
+          daysBehind: r.DAYS_BEHIND ? parseInt(String(r.DAYS_BEHIND)) : 0,
+          rateAuthorized: r.RATE_AUTHORIZED || null,
+          numberOfExtensions: r.NUMBER_OF_EXTENSIONS ? parseInt(String(r.NUMBER_OF_EXTENSIONS)) : 0,
+          numberOfRewrites: r.NUMBER_OF_REWRITES ? parseInt(String(r.NUMBER_OF_REWRITES)) : 0,
+          repairsComplete: r.REPAIRS_COMPLETE || null,
+          status: r.TICKET_STATUS || r.STATUS || "",
+          rentedVehYear: r.RENTED_VEH_YEAR || null,
+          rentedVehMake: r.RENTED_VEH_MAKE || null,
+          rentedVehModel: r.RENTED_VEH_MODEL || null,
+          daysOpen: calcDaysOpen(originalStart || openDate),
+          raw: r,
+        };
+      });
       res.json({ data, total: data.length, source: RENTAL_TICKET_TABLE });
     } catch (err: any) {
       return handleSnowflakeError(err, res, RENTAL_TICKET_TABLE);
@@ -12125,14 +12195,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} LIMIT 2000`).catch(() => []) as Promise<any[]>,
         sf.executeQuery(`SELECT * FROM ${RENTAL_CLOSED_TABLE} LIMIT 5000`).catch(() => []) as Promise<any[]>,
       ]);
-      const openData = openRows.map((r: any) => ({
-        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
-        division: r.DIVISION || "",
-        rewriteFlag: r.REWRITE_FLAG || null,
-        daysOpen: calcDaysOpen(r.RENTAL_START_DATE || r.START_DATE),
-      }));
-      const maintCount = openData.filter(r => (r.division || "").toUpperCase().includes("MAINT")).length;
-      const interimCount = openData.filter(r => (r.division || "").toUpperCase().includes("INTERIM")).length;
+      const openData = openRows.map((r: any) => {
+        const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE || r.START_DATE);
+        return {
+          vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
+          division: mapDivision(r.DIVISION || r.RENTAL_TYPE),
+          rewriteFlag: r.REWRITE_FLAG || null,
+          daysOpen: calcDaysOpen(startDate),
+        };
+      });
+      const maintCount = openData.filter(r => r.division === "MAINT").length;
+      const interimCount = openData.filter(r => r.division === "INTERIM").length;
       const avgDaysOpen = openData.length > 0
         ? Math.round(openData.reduce((s, r) => s + r.daysOpen, 0) / openData.length)
         : 0;
@@ -12188,11 +12261,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const vNum = r.VEHICLE_NUMBER || r.UNIT_NUMBER || r.TRUCK_NUMBER || r.ASSET_NUMBER || "";
           const dupKey = `${vNum}|${(r.PO_NUMBER || r.RENTAL_AGREEMENT || "").replace(/^'/, "").trim()}`;
 
+          // Required fields use actual column names per table
           const requiredFields = sourceKey === "rental_open"
-            ? ["VEHICLE_NUMBER", "RENTAL_START_DATE", "RENTER_NAME"]
+            ? ["VEHICLE_NUMBER", "PO_DATE", "PO_NUMBER"]
             : sourceKey === "rental_closed"
             ? ["VEHICLE_NUMBER", "PO_NUMBER", "RENTAL_END_DATE"]
-            : ["VEHICLE_NUMBER", "TICKET_NUMBER", "OPEN_DATE"];
+            : ["VEHICLE_NUMBER", "ECARS_2_0_TKT_NBR", "RENTAL_START_DATE"];
 
           for (const field of requiredFields) {
             const val = r[field];
@@ -12204,8 +12278,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           if (sourceKey === "rental_closed") {
-            const start = new Date(r.RENTAL_START_DATE || r.START_DATE || "");
-            const end = new Date(r.RENTAL_END_DATE || r.END_DATE || "");
+            const start = new Date(parseRentalDate(r.RENTAL_START_DATE) || "");
+            const end = new Date(parseRentalDate(r.RENTAL_END_DATE) || "");
             if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end < start) {
               issues.push({ row: rowNum, field: "RENTAL_END_DATE", issue: "End date before start date", severity: "fail" });
               rowSeverity = "fail";
@@ -12218,17 +12292,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           if (sourceKey === "rental_open") {
-            const startDate = new Date(r.RENTAL_START_DATE || r.START_DATE || "");
-            if (!isNaN(startDate.getTime()) && startDate > new Date()) {
-              issues.push({ row: rowNum, field: "RENTAL_START_DATE", issue: "Future start date", severity: "warn" });
+            const poDate = new Date(parseRentalDate(r.PO_DATE) || "");
+            if (!isNaN(poDate.getTime()) && poDate > new Date()) {
+              issues.push({ row: rowNum, field: "PO_DATE", issue: "Future PO date", severity: "warn" });
               if (rowSeverity === "pass") rowSeverity = "warn";
             }
           }
 
           if (sourceKey === "rental_ticket_detail") {
-            const daysOpen = calcDaysOpen(r.OPEN_DATE || r.START_DATE || r.CREATED_DATE);
+            const originalStart = parseRentalDate(r.ORIGINAL_START_DATE);
+            const rentalStart = parseRentalDate(r.RENTAL_START_DATE);
+            const daysOpen = calcDaysOpen(originalStart || rentalStart);
             if (daysOpen > 90) {
-              issues.push({ row: rowNum, field: "OPEN_DATE", issue: `Ticket open ${daysOpen} days (>90)`, severity: "warn" });
+              issues.push({ row: rowNum, field: "ORIGINAL_START_DATE", issue: `Ticket open ${daysOpen} days (>90)`, severity: "warn" });
               if (rowSeverity === "pass") rowSeverity = "warn";
             }
           }

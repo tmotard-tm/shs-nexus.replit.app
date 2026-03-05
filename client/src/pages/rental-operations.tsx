@@ -381,33 +381,43 @@ export default function RentalOperations() {
                       <TableRow>
                         <TableHead>Vehicle #</TableHead>
                         <TableHead>Ticket #</TableHead>
-                        <TableHead>Open Date</TableHead>
-                        <TableHead>Close Date</TableHead>
+                        <TableHead>Renter / Tech</TableHead>
+                        <TableHead>Original Start</TableHead>
                         <TableHead>Days Open</TableHead>
+                        <TableHead>Days Auth</TableHead>
+                        <TableHead>Rewrites</TableHead>
+                        <TableHead>Repairs Done</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead>Vendor</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {ticketRows.length === 0 ? (
-                        <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                           {ticketSearch ? "No results match your search" : "No ticket data from Snowflake pipeline table"}
                         </TableCell></TableRow>
                       ) : ticketRows.map((r: any, i: number) => (
                         <TableRow key={i}>
                           <TableCell className="font-mono text-sm">{r.vehicleNumber || "—"}</TableCell>
                           <TableCell className="font-mono text-xs">{r.ticketNumber || "—"}</TableCell>
-                          <TableCell className="text-sm">{formatDate(r.openDate)}</TableCell>
-                          <TableCell className="text-sm">{formatDate(r.closeDate)}</TableCell>
+                          <TableCell className="max-w-[160px] truncate text-xs">{r.renterName || "—"}</TableCell>
+                          <TableCell className="text-sm">{formatDate(r.originalStartDate || r.openDate)}</TableCell>
                           <TableCell>
                             {r.daysOpen > 90
                               ? <Badge className="bg-amber-500 text-black text-xs">{r.daysOpen}d</Badge>
                               : <span className="text-sm">{r.daysOpen}d</span>}
                           </TableCell>
+                          <TableCell className="text-sm">{r.daysAuthorized ?? "—"}</TableCell>
+                          <TableCell className="text-sm">
+                            {r.numberOfRewrites > 0
+                              ? <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 text-xs border-none">{r.numberOfRewrites}</Badge>
+                              : "0"}
+                          </TableCell>
+                          <TableCell>
+                            {r.repairsComplete === "Yes"
+                              ? <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs border-none">Yes</Badge>
+                              : <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 text-xs border-none">No</Badge>}
+                          </TableCell>
                           <TableCell>{r.status || "—"}</TableCell>
-                          <TableCell className="max-w-[200px] truncate text-xs">{r.description || "—"}</TableCell>
-                          <TableCell className="text-xs">{r.vendor || "—"}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
