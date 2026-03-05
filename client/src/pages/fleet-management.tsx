@@ -379,10 +379,12 @@ export default function FleetManagement() {
   );
   const oosCount = allVehicles.length - activeVehicles.length;
 
-  // Apply filters
+  // Apply filters — when a search is active, include OOS vehicles so targeted
+  // lookups (e.g. searching by truck number) always return a result
   const filteredVehicles = useMemo(() => {
-    return activeVehicles.filter(vehicle => {
-      const searchLower = searchQuery.toLowerCase().trim();
+    const searchLower = searchQuery.toLowerCase().trim();
+    const pool = (searchLower && !showOos) ? allVehicles : activeVehicles;
+    return pool.filter(vehicle => {
       const searchNoLeadingZeros = searchLower.replace(/^0+/, '');
       const vehicleNumNoLeadingZeros = (vehicle.vehicleNumber || '').replace(/^0+/, '').toLowerCase();
       
@@ -1072,10 +1074,15 @@ export default function FleetManagement() {
 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>
-                    Showing {sortedVehicles.length} of {activeVehicles.length} vehicles
-                    {oosCount > 0 && !showOos && (
+                    Showing {sortedVehicles.length} of {searchQuery.trim() && !showOos ? allVehicles.length : activeVehicles.length} vehicles
+                    {oosCount > 0 && !showOos && !searchQuery.trim() && (
                       <span className="ml-2 text-amber-600 dark:text-amber-400">
                         ({oosCount} OOS hidden)
+                      </span>
+                    )}
+                    {oosCount > 0 && !showOos && searchQuery.trim() && (
+                      <span className="ml-2 text-amber-600 dark:text-amber-400">
+                        (OOS included in search)
                       </span>
                     )}
                   </span>
@@ -1145,6 +1152,9 @@ export default function FleetManagement() {
                               </div>
                             </div>
                             <div className="flex flex-col gap-1 items-end">
+                              {(vehicle.statusCode === 2 || vehicle.outOfServiceDate) && (
+                                <Badge className="bg-amber-600 text-white border-amber-700 text-xs">OOS</Badge>
+                              )}
                               <Badge className={assignStatus.color + ' border text-xs'}>
                                 {assignStatus.label}
                               </Badge>
