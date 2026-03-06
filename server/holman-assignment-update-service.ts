@@ -128,32 +128,35 @@ class HolmanAssignmentUpdateService {
   private buildUnassignPayload(vehicleNumber: string): HolmanAssignmentPayload {
     const paddedVehicleNumber = vehicleNumber.padStart(6, '0');
     const NULL_VAL = '^null^';
-    
+
+    // Only clear driver identity fields with "^null^" (Holman's sentinel to erase a field).
+    // Address and phone fields are sent as JSON null, which tells Holman "don't touch this field",
+    // preserving whatever address is already on the vehicle record.
     return {
       lesseeCode: this.LESSEE_CODE,
       holmanVehicleNumber: paddedVehicleNumber,
       email: this.FLEET_EMAIL,
-      firstName: NULL_VAL,
-      lastName: NULL_VAL,
-      clientData1: NULL_VAL,
-      clientData2: NULL_VAL,
+      firstName: NULL_VAL,      // clear driver first name
+      lastName: NULL_VAL,       // clear driver last name
+      clientData1: NULL_VAL,    // clear last-name copy stored in clientData1
+      clientData2: NULL_VAL,    // clear Enterprise ID / LDAP stored in clientData2
       clientData3: '890',
-      clientData4: NULL_VAL,
-      clientData5: NULL_VAL,
-      clientData6: NULL_VAL,
-      clientData7: NULL_VAL,
-      assignedStatusCode: 'D',
-      prefix: NULL_VAL,
-      addressLine1: NULL_VAL,
-      addressLine2: NULL_VAL,
-      addressLine3: NULL_VAL,
-      city: NULL_VAL,
-      stateProvince: NULL_VAL,
-      zipPostalCode: NULL_VAL,
-      homePhone: NULL_VAL,
-      workPhone: NULL_VAL,
-      workPhoneExtension: NULL_VAL,
-      cellPhone: NULL_VAL,
+      clientData4: null,
+      clientData5: null,
+      clientData6: null,
+      clientData7: null,
+      assignedStatusCode: 'D',  // mark as unassigned
+      prefix: null,             // leave district prefix as-is
+      addressLine1: null,       // leave address as-is
+      addressLine2: null,
+      addressLine3: null,
+      city: null,
+      stateProvince: null,
+      zipPostalCode: null,
+      homePhone: null,
+      workPhone: null,
+      workPhoneExtension: null,
+      cellPhone: null,
     };
   }
 
