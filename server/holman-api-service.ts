@@ -452,27 +452,28 @@ export class HolmanApiService {
     error?: string;
   }> {
     try {
-      const token = await this.getAccessToken();
       const paddedVehicleNum = vehicleNumber.padStart(6, '0');
-      const url = `${this.apiEndpoint}/vehicles/custom-query`;
+      // Reuse the same query shape as lookupVehicleByNumber which is confirmed working.
+      // Only include properties known to be valid custom-query response fields.
+      // firstName/lastName/clientData2 are submit-payload field names, NOT query properties.
       const body = {
         lesseeCode: '2B56',
-        properties: ['holmanVehicleNumber', 'assignedStatus', 'firstName', 'lastName', 'clientData2'],
+        properties: [
+          'holmanVehicleNumber',
+          'clientVehicleNumber',
+          'vin',
+          'status',
+          'assignedStatus',
+        ],
         filters: { holmanVehicleNumber: paddedVehicleNum },
         pageNumber: 1,
         pageSize: 5,
       };
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!resp.ok) {
-        return { found: false, error: `HTTP ${resp.status}` };
-      }
-      const data = await resp.json();
+      console.log(`[HolmanVerify] custom-query body:`, JSON.stringify(body));
+      const data = await this.makeRequest<any>('/vehicles/custom-query', 'POST', body);
       const item = data?.items?.[0];
-      if (!item) return { found: false, error: 'Vehicle not found' };
+      if (!item) return { found: false, error: 'Vehicle not found in Holman' };
+      console.log(`[HolmanVerify] Vehicle ${vehicleNumber} raw item:`, JSON.stringify(item));
       return {
         found: true,
         assignedStatus: item.assignedStatus || item.status || '',
