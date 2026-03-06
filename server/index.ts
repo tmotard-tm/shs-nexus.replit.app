@@ -220,6 +220,23 @@ async function initializeSnowflake() {
     console.error("❌ Failed to start sync scheduler:", error);
   }
 
+  // Background Holman submission verifier — polls every 90s for pending assign/unassign operations
+  // and re-fetches the vehicle from Holman to confirm the change was actually applied
+  try {
+    const HOLMAN_VERIFY_INTERVAL_MS = 90_000;
+    setInterval(async () => {
+      try {
+        const { holmanSubmissionService } = await import("./holman-submission-service");
+        await holmanSubmissionService.pollPendingSubmissions();
+      } catch (err: any) {
+        console.error("[HolmanVerify] Background poll error:", err.message);
+      }
+    }, HOLMAN_VERIFY_INTERVAL_MS);
+    log("✅ Holman submission verifier started (every 90s)");
+  } catch (error) {
+    console.error("❌ Failed to start Holman verifier:", error);
+  }
+
   // Auto-sync truck inventory on startup if empty
   try {
     const { getSnowflakeService } = await import("./snowflake-service");

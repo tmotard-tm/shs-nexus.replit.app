@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -309,6 +309,52 @@ export default function FleetManagement() {
       toast({ title: "Operation failed", description: err.message, variant: "destructive" });
     },
   });
+
+  // Poll Holman submission status while it's pending verification (202 async queue)
+  const holmanPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    const submissionId = opResult?.holmanSubmissionDbId;
+    const isHolmanPending = opResult?.holman?.status === "pending";
+
+    if (submissionId && isHolmanPending) {
+      if (holmanPollRef.current) clearInterval(holmanPollRef.current);
+      holmanPollRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/holman/submissions/${submissionId}`, { credentials: "include" });
+          if (!res.ok) return;
+          const json = await res.json();
+          const sub = json.submission;
+          if (!sub) return;
+
+          if (sub.status === "completed" || sub.status === "failed") {
+            if (holmanPollRef.current) clearInterval(holmanPollRef.current);
+            setOpResult((prev: any) => ({
+              ...prev,
+              holman: {
+                ...prev.holman,
+                status: sub.status === "completed" ? "success" : "failed",
+                message: sub.status === "completed"
+                  ? "Confirmed by Holman"
+                  : (sub.errorMessage || "Holman verification failed"),
+              },
+            }));
+            queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/logs", selectedVehicle?.vehicleNumber] });
+          }
+        } catch {
+          // ignore poll errors silently
+        }
+      }, 5_000);
+    } else {
+      if (holmanPollRef.current) {
+        clearInterval(holmanPollRef.current);
+        holmanPollRef.current = null;
+      }
+    }
+
+    return () => {
+      if (holmanPollRef.current) clearInterval(holmanPollRef.current);
+    };
+  }, [opResult?.holmanSubmissionDbId, opResult?.holman?.status]);
 
   function openModal(m: FleetModal) {
     setOpResult(null);
@@ -1642,9 +1688,9 @@ export default function FleetManagement() {
                 <div key={sys} className="flex items-center justify-between">
                   <span className="text-sm uppercase font-mono">{sys}</span>
                   <div className="flex items-center gap-2">
-                    <SystemStatusBadge status={opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
-                    {(opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
-                      <span className="text-xs text-muted-foreground">{opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
+                    <SystemStatusBadge status={opResult?.[sys]?.status || opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
+                    {(opResult?.[sys]?.message || opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
+                      <span className="text-xs text-muted-foreground">{opResult?.[sys]?.message || opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
                     )}
                   </div>
                 </div>
@@ -1708,9 +1754,9 @@ export default function FleetManagement() {
                 <div key={sys} className="flex items-center justify-between">
                   <span className="text-sm uppercase font-mono">{sys}</span>
                   <div className="flex items-center gap-2">
-                    <SystemStatusBadge status={opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
-                    {(opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
-                      <span className="text-xs text-muted-foreground">{opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
+                    <SystemStatusBadge status={opResult?.[sys]?.status || opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
+                    {(opResult?.[sys]?.message || opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
+                      <span className="text-xs text-muted-foreground">{opResult?.[sys]?.message || opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
                     )}
                   </div>
                 </div>
@@ -1758,9 +1804,9 @@ export default function FleetManagement() {
                 <div key={sys} className="flex items-center justify-between">
                   <span className="text-sm uppercase font-mono">{sys}</span>
                   <div className="flex items-center gap-2">
-                    <SystemStatusBadge status={opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
-                    {(opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
-                      <span className="text-xs text-muted-foreground">{opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
+                    <SystemStatusBadge status={opResult?.[sys]?.status || opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
+                    {(opResult?.[sys]?.message || opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
+                      <span className="text-xs text-muted-foreground">{opResult?.[sys]?.message || opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
                     )}
                   </div>
                 </div>
@@ -1828,9 +1874,9 @@ export default function FleetManagement() {
                 <div key={key} className="flex items-center justify-between">
                   <span className="text-sm uppercase font-mono">{label}</span>
                   <div className="flex items-center gap-2">
-                    <SystemStatusBadge status={opResult[`${key}Status`] || opResult?.data?.[`${key}Status`]} />
-                    {(opResult[`${key}Message`] || opResult?.data?.[`${key}Message`]) && (
-                      <span className="text-xs text-muted-foreground">{opResult[`${key}Message`] || opResult?.data?.[`${key}Message`]}</span>
+                    <SystemStatusBadge status={opResult?.[key]?.status || opResult[`${key}Status`] || opResult?.data?.[`${key}Status`]} />
+                    {(opResult?.[key]?.message || opResult[`${key}Message`] || opResult?.data?.[`${key}Message`]) && (
+                      <span className="text-xs text-muted-foreground">{opResult?.[key]?.message || opResult[`${key}Message`] || opResult?.data?.[`${key}Message`]}</span>
                     )}
                   </div>
                 </div>

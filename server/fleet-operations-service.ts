@@ -41,8 +41,9 @@ interface UpdateAddressParams {
 }
 
 interface SystemResult {
-  status: "success" | "failed" | "skipped";
+  status: "success" | "failed" | "skipped" | "pending";
   message: string;
+  submissionDbId?: string;
 }
 
 interface OperationResult {
@@ -50,6 +51,7 @@ interface OperationResult {
   tpms: SystemResult;
   holman: SystemResult;
   ams: SystemResult;
+  holmanSubmissionDbId?: string;
   overallSuccess: boolean;
   partialSuccess: boolean;
 }
@@ -120,7 +122,8 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
             .set({ holmanTechAssigned: params.ldapId, holmanTechName: params.techName || params.ldapId, lastLocalUpdateAt: new Date() })
             .where(eq(holmanVehiclesCache.holmanVehicleNumber, params.truckNumber));
         } catch {}
-        return { status: "success", message: result.message || "Assigned" };
+        // Holman processes async (202 Accepted). Return pending until verification confirms.
+        return { status: "pending", message: result.message || "Queued — awaiting Holman confirmation", submissionDbId: result.submissionDbId };
       }
       return { status: "failed", message: result.message || "Holman assign failed" };
     }
@@ -136,7 +139,8 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
             .set({ holmanTechAssigned: null, holmanTechName: null, lastLocalUpdateAt: new Date() })
             .where(eq(holmanVehiclesCache.holmanVehicleNumber, params.truckNumber));
         } catch {}
-        return { status: "success", message: "Unassigned" };
+        // Holman processes async (202 Accepted). Return pending until verification confirms.
+        return { status: "pending", message: result.message || "Queued — awaiting Holman confirmation", submissionDbId: result.submissionDbId };
       }
       return { status: "failed", message: result.message || "Holman unassign failed" };
     }
@@ -211,8 +215,9 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
 
 function buildResult(log: FleetOperationLog, tpms: SystemResult, holman: SystemResult, ams: SystemResult): OperationResult {
   const anyFailed = tpms.status === "failed" || holman.status === "failed" || ams.status === "failed";
-  const anySuccess = tpms.status === "success" || holman.status === "success" || ams.status === "success";
-  // overallSuccess = nothing failed (success + skipped is a clean outcome)
+  const anySuccess = tpms.status === "success" || holman.status === "success" || ams.status === "success"
+    || tpms.status === "pending" || holman.status === "pending" || ams.status === "pending";
+  // overallSuccess = nothing failed (success + skipped + pending is a clean outcome)
   const overallSuccess = !anyFailed;
   // partialSuccess = some failed AND some succeeded (true mixed outcome)
   const partialSuccess = anyFailed && anySuccess;
@@ -221,6 +226,7 @@ function buildResult(log: FleetOperationLog, tpms: SystemResult, holman: SystemR
     tpms,
     holman,
     ams,
+    holmanSubmissionDbId: holman.submissionDbId,
     overallSuccess,
     partialSuccess,
   };

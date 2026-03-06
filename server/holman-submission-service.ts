@@ -88,65 +88,161 @@ export class HolmanSubmissionService {
     return updated || null;
   }
 
+  // ─── Vehicle-lookup verification (primary strategy) ──────────────────────────
+  // Holman's batch submission API returns 202 Accepted (async queue).
+  // There is no status-check endpoint for the userReferenceToken, so we verify
+  // by re-fetching the vehicle from Holman and confirming the field changed.
+  async verifyByVehicleLookup(submission: HolmanSubmission): Promise<{
+    verified: boolean;
+    newStatus: 'completed' | 'failed' | 'pending';
+    message: string;
+    rawVehicle?: any;
+  }> {
+    const vehicleNumber = submission.holmanVehicleNumber;
+    const action = submission.action;
+
+    console.log(`[HolmanVerify] Checking vehicle ${vehicleNumber} for action: ${action}`);
+
+    const result = await holmanApiService.getVehicleAssignedStatus(vehicleNumber);
+
+    if (!result.found) {
+      const msg = `Vehicle lookup failed: ${result.error}`;
+      console.warn(`[HolmanVerify] ${msg}`);
+      return { verified: false, newStatus: 'pending', message: msg };
+    }
+
+    const assignedStatus = (result.assignedStatus || '').toLowerCase();
+    const rawVehicle = result.rawVehicle;
+
+    console.log(`[HolmanVerify] Vehicle ${vehicleNumber} assignedStatus: "${result.assignedStatus}"`);
+
+    let success = false;
+    let message = '';
+
+    if (action === 'unassign') {
+      // Expect "Unassigned" — also check that firstName/clientData2 are cleared
+      const nameCleared = !rawVehicle?.firstName || rawVehicle.firstName === '';
+      success = assignedStatus.includes('unassign');
+      message = success
+        ? `Confirmed unassigned (assignedStatus="${result.assignedStatus}", firstName cleared: ${nameCleared})`
+        : `Still showing "${result.assignedStatus}" — Holman may still be processing`;
+    } else if (action === 'assign') {
+      success = assignedStatus.includes('assign') && !assignedStatus.includes('unassign');
+      message = success
+        ? `Confirmed assigned (assignedStatus="${result.assignedStatus}")`
+        : `Still showing "${result.assignedStatus}" — Holman may still be processing`;
+    } else {
+      // field_test or unknown — just confirm the vehicle was found
+      success = true;
+      message = `Vehicle found, action "${action}" not directly verifiable`;
+    }
+
+    if (success) {
+      await this.updateSubmissionStatus(submission.id, 'completed');
+      return { verified: true, newStatus: 'completed', message, rawVehicle };
+    } else {
+      // Not yet processed — leave as pending so next poll cycle retries
+      return { verified: false, newStatus: 'pending', message, rawVehicle };
+    }
+  }
+
+  // Schedule a verification after a delay (fires and forgets — updates DB on completion)
+  scheduleVerification(
+    submissionId: string,
+    delayMs: number = 60_000,
+    maxAttempts: number = 5
+  ): void {
+    const attempt = async (attemptsLeft: number) => {
+      try {
+        const submission = await this.getSubmissionById(submissionId);
+        if (!submission) {
+          console.warn(`[HolmanVerify] Submission ${submissionId} not found`);
+          return;
+        }
+        if (submission.status === 'completed' || submission.status === 'failed') {
+          console.log(`[HolmanVerify] Submission ${submissionId} already ${submission.status}, skipping`);
+          return;
+        }
+
+        const { newStatus, message } = await this.verifyByVehicleLookup(submission);
+        console.log(`[HolmanVerify] ${submissionId} → ${newStatus}: ${message} (${attemptsLeft - 1} attempts left)`);
+
+        if (newStatus !== 'completed' && attemptsLeft > 1) {
+          // Back-off: 60s → 90s → 120s → 150s
+          const nextDelay = Math.min(delayMs * 1.5, 150_000);
+          setTimeout(() => attempt(attemptsLeft - 1), nextDelay);
+        } else if (newStatus !== 'completed') {
+          await this.updateSubmissionStatus(
+            submissionId,
+            'failed',
+            `Verification timed out after ${maxAttempts} attempts. Last: ${message}`
+          );
+        }
+      } catch (err: any) {
+        console.error(`[HolmanVerify] Error verifying ${submissionId}:`, err.message);
+      }
+    };
+
+    console.log(`[HolmanVerify] Scheduling verification for ${submissionId} in ${delayMs}ms`);
+    setTimeout(() => attempt(maxAttempts), delayMs);
+  }
+
+  // Legacy: check via Holman status API (kept for field_test submissions)
   async checkSubmissionStatus(submission: HolmanSubmission): Promise<{
     checked: boolean;
     newStatus?: 'processing' | 'completed' | 'failed';
     message?: string;
   }> {
     if (!submission.submissionId) {
-      console.log(`[HolmanSubmission] No submissionId for ${submission.id}, marking as completed`);
       await this.updateSubmissionStatus(submission.id, 'completed');
-      return { checked: true, newStatus: 'completed', message: 'No submission ID - assuming synchronous completion' };
+      return { checked: true, newStatus: 'completed', message: 'No submission ID' };
     }
-
-    const result = await holmanApiService.getSubmissionStatus(submission.submissionId);
-    
-    if (!result.success) {
-      console.log(`[HolmanSubmission] Failed to check status for ${submission.id}: ${result.error}`);
-      return { checked: false, message: result.error };
+    // For assign/unassign use vehicle lookup; for field_test keep legacy path
+    if (submission.action === 'assign' || submission.action === 'unassign') {
+      const r = await this.verifyByVehicleLookup(submission);
+      return { checked: r.verified, newStatus: r.newStatus === 'pending' ? 'processing' : r.newStatus, message: r.message };
     }
-
-    const holmanStatus = result.status?.toLowerCase();
-    
-    if (holmanStatus === 'completed' || holmanStatus === 'success' || holmanStatus === 'processed') {
-      await this.updateSubmissionStatus(submission.id, 'completed');
-      return { checked: true, newStatus: 'completed', message: result.message };
-    }
-    
-    if (holmanStatus === 'failed' || holmanStatus === 'error' || holmanStatus === 'rejected') {
-      await this.updateSubmissionStatus(submission.id, 'failed', result.message);
-      return { checked: true, newStatus: 'failed', message: result.message };
-    }
-    
-    if (holmanStatus === 'processing' || holmanStatus === 'pending' || holmanStatus === 'queued') {
-      if (submission.status !== 'processing') {
-        await this.updateSubmissionStatus(submission.id, 'processing');
+    // Legacy status-API path for field_test
+    try {
+      const result = await holmanApiService.getSubmissionStatus(submission.submissionId);
+      if (!result.success) return { checked: false, message: result.error };
+      const s = result.status?.toLowerCase() || '';
+      if (s.includes('complet') || s.includes('success') || s.includes('process')) {
+        await this.updateSubmissionStatus(submission.id, 'completed');
+        return { checked: true, newStatus: 'completed', message: result.message };
+      }
+      if (s.includes('fail') || s.includes('error') || s.includes('reject')) {
+        await this.updateSubmissionStatus(submission.id, 'failed', result.message);
+        return { checked: true, newStatus: 'failed', message: result.message };
       }
       return { checked: true, newStatus: 'processing', message: 'Still processing' };
+    } catch {
+      return { checked: false, message: 'Status API unavailable' };
     }
-
-    console.log(`[HolmanSubmission] Unknown status '${holmanStatus}' for ${submission.id}`);
-    return { checked: true, message: `Unknown status: ${holmanStatus}` };
   }
 
-  async pollPendingSubmissions(): Promise<{ checked: number; updated: number }> {
+  // Poll stale pending submissions (called by scheduler every 90s)
+  async pollPendingSubmissions(): Promise<{ checked: number; completed: number; stillPending: number }> {
     const pending = await this.getAllPendingSubmissions();
     console.log(`[HolmanSubmission] Polling ${pending.length} pending submissions`);
-    
-    let checked = 0;
-    let updated = 0;
-    
+
+    let completed = 0;
+    let stillPending = 0;
+
     for (const submission of pending) {
-      const result = await this.checkSubmissionStatus(submission);
-      checked++;
-      if (result.newStatus && result.newStatus !== submission.status) {
-        updated++;
-      }
-      await new Promise(r => setTimeout(r, 500));
+      // Only verify submissions older than 45 seconds (give Holman time to process)
+      const ageMs = Date.now() - new Date(submission.createdAt!).getTime();
+      if (ageMs < 45_000) { stillPending++; continue; }
+
+      const { newStatus } = await this.verifyByVehicleLookup(submission);
+      if (newStatus === 'completed') completed++;
+      else stillPending++;
+
+      await new Promise(r => setTimeout(r, 300));
     }
-    
-    console.log(`[HolmanSubmission] Poll complete: ${checked} checked, ${updated} updated`);
-    return { checked, updated };
+
+    console.log(`[HolmanSubmission] Poll done: ${completed} completed, ${stillPending} still pending`);
+    return { checked: pending.length, completed, stillPending };
   }
 
   async markAsCompleted(holmanVehicleNumber: string): Promise<number> {

@@ -7526,6 +7526,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const { holmanSubmissionService } = await import("./holman-submission-service");
 
   // Get pending submissions for a vehicle
+  // Get a single submission by DB id — used by the UI to poll for verification status
+  app.get("/api/holman/submissions/:id", requireAuth, async (req: any, res) => {
+    try {
+      const submission = await holmanSubmissionService.getSubmissionById(req.params.id);
+      if (!submission) return res.status(404).json({ success: false, error: "Submission not found" });
+      res.json({ success: true, submission });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Trigger immediate verification for a specific submission (for manual retry)
+  app.post("/api/holman/submissions/:id/verify", requireAuth, async (req: any, res) => {
+    try {
+      const submission = await holmanSubmissionService.getSubmissionById(req.params.id);
+      if (!submission) return res.status(404).json({ success: false, error: "Submission not found" });
+      const result = await holmanSubmissionService.verifyByVehicleLookup(submission);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   app.get("/api/holman/submissions/vehicle/:vehicleNumber", requireAuth, async (req: any, res) => {
     try {
       const { vehicleNumber } = req.params;

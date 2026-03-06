@@ -59,7 +59,8 @@ interface HolmanAssignmentPayload {
 interface UpdateResult {
   success: boolean;
   holmanVehicleNumber: string;
-  submissionId?: string;
+  submissionId?: string;       // Holman userReferenceToken
+  submissionDbId?: string;     // Our DB record ID — used for UI polling
   message?: string;
   error?: string;
   payload?: HolmanAssignmentPayload;
@@ -216,8 +217,10 @@ class HolmanAssignmentUpdateService {
         ? 'Vehicle assignment updated successfully in Holman'
         : 'Vehicle unassigned successfully in Holman (technician data cleared)';
 
-      // Save submission and immediately mark completed — Holman 202 means "accepted for processing"
-      // There is no poll-back API for batch submissions; 202 is the final confirmation
+      // Save submission as "pending" — Holman 202 means queued, NOT completed.
+      // Schedule a background verification loop that re-fetches the vehicle from Holman
+      // and confirms assignedStatus actually changed before marking as completed.
+      let submissionDbId: string | undefined;
       try {
         const submission = await holmanSubmissionService.createSubmission({
           holmanVehicleNumber: payload.holmanVehicleNumber,
@@ -227,8 +230,9 @@ class HolmanAssignmentUpdateService {
           payload,
           response,
         });
-        // Mark completed since 202 = accepted and queued by Holman
-        await holmanSubmissionService.updateSubmissionStatus(submission.id, 'completed');
+        submissionDbId = submission.id;
+        // First check at 60s, up to 5 retry attempts with back-off
+        holmanSubmissionService.scheduleVerification(submission.id, 60_000, 5);
       } catch (dbError: any) {
         console.error(`[HolmanAssignmentUpdate] Failed to save submission to DB:`, dbError);
       }
@@ -237,6 +241,7 @@ class HolmanAssignmentUpdateService {
         success: true,
         holmanVehicleNumber: payload.holmanVehicleNumber,
         submissionId,
+        submissionDbId,
         message,
         payload,
         response,

@@ -443,6 +443,46 @@ export class HolmanApiService {
     }
   }
 
+  // Lightweight check: fetch only assignedStatus for a vehicle number.
+  // Used by the async verification loop to confirm Holman processed an assign/unassign.
+  async getVehicleAssignedStatus(vehicleNumber: string): Promise<{
+    found: boolean;
+    assignedStatus?: string;  // "Assigned" | "Unassigned" | ...
+    rawVehicle?: any;
+    error?: string;
+  }> {
+    try {
+      const token = await this.getAccessToken();
+      const paddedVehicleNum = vehicleNumber.padStart(6, '0');
+      const url = `${this.apiEndpoint}/vehicles/custom-query`;
+      const body = {
+        lesseeCode: '2B56',
+        properties: ['holmanVehicleNumber', 'assignedStatus', 'firstName', 'lastName', 'clientData2'],
+        filters: { holmanVehicleNumber: paddedVehicleNum },
+        pageNumber: 1,
+        pageSize: 5,
+      };
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        return { found: false, error: `HTTP ${resp.status}` };
+      }
+      const data = await resp.json();
+      const item = data?.items?.[0];
+      if (!item) return { found: false, error: 'Vehicle not found' };
+      return {
+        found: true,
+        assignedStatus: item.assignedStatus || item.status || '',
+        rawVehicle: item,
+      };
+    } catch (err: any) {
+      return { found: false, error: err.message || 'Unknown error' };
+    }
+  }
+
   async getContacts(
     lesseeCode?: string,
     pageNumber: number = 1,
