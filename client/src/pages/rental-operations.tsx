@@ -164,10 +164,13 @@ export default function RentalOperations() {
   });
 
   const { data: summary, isLoading: loadingSummary } = useQuery<any>({
-    queryKey: ["/api/rental-ops/summary", effectiveDate],
+    queryKey: ["/api/rental-ops/summary", effectiveDate, showOos],
     queryFn: () => {
-      const params = effectiveDate ? `?fileDate=${effectiveDate}` : "";
-      return fetch(`/api/rental-ops/summary${params}`, { credentials: "include" }).then(r => r.json());
+      const params = new URLSearchParams();
+      if (effectiveDate) params.set("fileDate", effectiveDate);
+      if (showOos) params.set("includeOos", "true");
+      const qs = params.toString();
+      return fetch(`/api/rental-ops/summary${qs ? `?${qs}` : ""}`, { credentials: "include" }).then(r => r.json());
     },
     staleTime: 5 * 60 * 1000,
   });
