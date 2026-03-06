@@ -12423,48 +12423,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sf.executeQuery(`SELECT VEHICLE_NUMBER, PO_NUMBER, REWRITE_FLAG FROM ${RENTAL_CLOSED_TABLE} WHERE ${closedDateFilter(req.query?.fileDate as string)} LIMIT 5000`).catch(() => []) as Promise<any[]>,
       ]);
 
-      // Segment 1: unique Enterprise open trucks
-      const entOpenVns = new Set<string>();
-      const entDaysOpenList: number[] = [];
+      // Segment 1: unique Enterprise open trucks (track days per vehicle)
+      const entOpenMap = new Map<string, number>(); // vn → daysOpen
       for (const r of ticketRows as any[]) {
         const vn = normV(r.VEHICLE_NUMBER || "");
-        if (vn && !entOpenVns.has(vn)) {
-          entOpenVns.add(vn);
-          entDaysOpenList.push(calcDaysOpen(parseRentalDate(r.RENTAL_START_DATE)));
+        if (vn && !entOpenMap.has(vn)) {
+          entOpenMap.set(vn, calcDaysOpen(parseRentalDate(r.RENTAL_START_DATE)));
         }
       }
+      const entOpenVns = new Set<string>(entOpenMap.keys());
 
       // All Enterprise ticket vehicles (any status — for "on Enterprise reporting" check)
       const allEntVns = new Set<string>(entOpenVns);
 
       // Segment 2: Holman non-Enterprise vendor trucks not in Enterprise table
-      const holmanNonEntVns = new Set<string>();
-      const holmanDaysOpenList: number[] = [];
-      const divisionBreakdown: Record<string, number> = {};
+      const holmanNonEntMap = new Map<string, { days: number; division: string }>(); // vn → info
       for (const r of holmanRows as any[]) {
         const vn = normV(r.VEHICLE_NUMBER || "");
         if (!vn || isEntVendor(r.RENTAL_VENDOR)) continue;
         if (allEntVns.has(vn)) continue;
-        if (!holmanNonEntVns.has(vn)) {
-          holmanNonEntVns.add(vn);
-          holmanDaysOpenList.push(calcDaysOpen(parseRentalDate(r.PO_DATE)));
-          const d = mapDivision(r.DIVISION) || "(blank)";
-          divisionBreakdown[d] = (divisionBreakdown[d] || 0) + 1;
+        if (!holmanNonEntMap.has(vn)) {
+          holmanNonEntMap.set(vn, {
+            days: calcDaysOpen(parseRentalDate(r.PO_DATE)),
+            division: mapDivision(r.DIVISION) || "(blank)",
+          });
+        }
+      }
+      const holmanNonEntVns = new Set<string>(holmanNonEntMap.keys());
+
+      // Apply the same OOS filter as the open endpoint (so summary matches Open Rentals tab count)
+      const includeOosSummary = req.query?.includeOos === "true";
+      const oosVehicles = includeOosSummary ? new Set<string>() : await getOosVehicleSet();
+      if (oosVehicles.size > 0) {
+        const normPad = (v: string) => String(v || "").trim().padStart(5, "0");
+        for (const vn of Array.from(entOpenVns)) {
+          if (oosVehicles.has(normPad(vn))) { entOpenVns.delete(vn); entOpenMap.delete(vn); }
+        }
+        for (const vn of Array.from(holmanNonEntVns)) {
+          if (oosVehicles.has(normPad(vn))) { holmanNonEntVns.delete(vn); holmanNonEntMap.delete(vn); }
         }
       }
 
       const totalOpen = entOpenVns.size + holmanNonEntVns.size;
-      const allDaysOpen = [...entDaysOpenList, ...holmanDaysOpenList];
+      const allDaysOpen = [...entOpenMap.values(), ...Array.from(holmanNonEntMap.values()).map(v => v.days)];
       const avgDaysOpen = allDaysOpen.length > 0
         ? Math.round(allDaysOpen.reduce((s, d) => s + d, 0) / allDaysOpen.length)
         : 0;
 
-      // Closed dedup
+      const divisionBreakdown: Record<string, number> = {};
+      for (const { division } of holmanNonEntMap.values()) {
+        divisionBreakdown[division] = (divisionBreakdown[division] || 0) + 1;
+      }
+
+      // Closed dedup (also OOS-filter to match closed tab count)
       const closedDeduped = new Set<string>();
       let closedCount = 0;
       let extensionCount = 0;
       for (const r of closedRows as any[]) {
-        const key = `${normV(r.VEHICLE_NUMBER || "")}|${(r.PO_NUMBER || "").replace(/^'/, "").trim()}`;
+        const vn = normV(r.VEHICLE_NUMBER || "");
+        if (oosVehicles.size > 0 && oosVehicles.has(String(vn).padStart(5, "0"))) continue;
+        const key = `${vn}|${(r.PO_NUMBER || "").replace(/^'/, "").trim()}`;
         if (!closedDeduped.has(key)) {
           closedDeduped.add(key);
           closedCount++;
