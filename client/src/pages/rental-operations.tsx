@@ -118,7 +118,7 @@ export default function RentalOperations() {
   const [openSort, setOpenSort] = useState({ field: "daysOpen", dir: "desc" as "asc" | "desc" });
   const [showRaw, setShowRaw] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "enterprise" | "holman_non_enterprise">("all");
-  const [showOos, setShowOos] = useState(false);
+  const [showOos, setShowOos] = useState(true);
   const [selectedFileDate, setSelectedFileDate] = useState<string | null>(null);
 
   const { data: availableDates } = useQuery<{ data: Array<{ fileDate: string; sourceFilename: string; loadedTs: string; rowCount: number; ticketRowCount?: number; openRowCount?: number; closedRowCount?: number }>; latestDate: string | null }>({
