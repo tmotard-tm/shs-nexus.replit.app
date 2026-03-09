@@ -12593,10 +12593,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const duplicateMap = new Map<string, number>();
         const nullCounts: Record<string, number> = {};
 
+        // Normalize vehicle numbers to bare integers (strip leading zeros) so that
+        // "000526" from Holman cache matches "526" from the Snowflake rental table.
+        const normVehicleNum = (v: string) => String(parseInt(v, 10) || v).trim();
         const knownVehicles = new Set<string>();
         try {
           const vcRows = await db.select({ num: holmanVehiclesCache.holmanVehicleNumber }).from(holmanVehiclesCache).limit(5000);
-          for (const v of vcRows) if (v.num) knownVehicles.add(v.num);
+          for (const v of vcRows) if (v.num) knownVehicles.add(normVehicleNum(v.num));
         } catch {}
 
         for (let i = 0; i < rows.length; i++) {
@@ -12654,7 +12657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
 
-          if (vNum && knownVehicles.size > 0 && !knownVehicles.has(vNum)) {
+          if (vNum && knownVehicles.size > 0 && !knownVehicles.has(normVehicleNum(String(vNum)))) {
             issues.push({ row: rowNum, field: "VEHICLE_NUMBER", issue: `Vehicle ${vNum} not in Holman fleet cache`, severity: "warn" });
             if (rowSeverity === "pass") rowSeverity = "warn";
           }
