@@ -20,8 +20,9 @@ import {
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
-  UserPlus, ArrowLeftRight, FileText, Home, Activity, Download
+  UserPlus, ArrowLeftRight, FileText, Home, Activity
 } from "lucide-react";
+import { GiMagicLamp } from "react-icons/gi";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -744,8 +745,8 @@ export default function FleetManagement() {
                       variant="outline"
                       data-testid="button-fleet-export-csv"
                     >
-                      <Download className="h-4 w-4 mr-2" />
-                      Export CSV
+                      <GiMagicLamp className="h-4 w-4 mr-2" />
+                      Sean's Genie
                     </Button>
                     <Button 
                       onClick={() => refetch()}
