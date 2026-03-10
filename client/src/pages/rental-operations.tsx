@@ -265,42 +265,56 @@ export default function RentalOperations() {
   const qualMap: Record<string, any> = {};
   for (const q of qualityLatest || []) qualMap[q.sourceTable] = q;
 
-  // Analytics: compute aging buckets from open data
-  const agingBuckets = useMemo(() => {
+  // Analytics: compute aging buckets from open data (always use business-logic rows, not raw PO lines)
+  const analyticsRows = useMemo(() => {
     const all = openData?.data || [];
+    // If openData is raw mode (multiple PO lines per vehicle), deduplicate by vehicleNumberPadded
+    if (openData?.view === "raw") {
+      const seen = new Map<string, any>();
+      for (const r of all) {
+        const key = r.vehicleNumberPadded || r.vehicleNumber || "";
+        if (key && !seen.has(key)) seen.set(key, r);
+      }
+      return Array.from(seen.values());
+    }
+    return all;
+  }, [openData]);
+
+  const agingBuckets = useMemo(() => {
     const counts: Record<string, number> = { "28+ Days": 0, "21-27 Days": 0, "14-20 Days": 0, "<14 Days": 0 };
-    for (const r of all) {
+    for (const r of analyticsRows) {
       const b = agingBucket(r.daysOpen || 0);
       counts[b] = (counts[b] || 0) + 1;
     }
-    const total = all.length;
+    // Use summary total as authoritative denominator so percentages match the header figure
+    const denominator = summary?.totalOpen ?? analyticsRows.length;
     return Object.entries(counts).map(([bucket, count]) => ({
       bucket,
       count,
-      pct: total > 0 ? count / total : 0,
+      pct: denominator > 0 ? count / denominator : 0,
       fill: AGING_COLORS[bucket],
     }));
-  }, [openData]);
+  }, [analyticsRows, summary]);
 
   const totalOver14 = useMemo(() => {
     return agingBuckets.filter(b => b.bucket !== "<14 Days").reduce((s, b) => s + b.count, 0);
   }, [agingBuckets]);
 
-  const totalOpen = openData?.total ?? 0;
+  // Always use summary total as authoritative "Total Open" figure (matches header cards)
+  const totalOpen = summary?.totalOpen ?? analyticsRows.length;
   const pctOver14 = totalOpen > 0 ? totalOver14 / totalOpen : 0;
 
-  // Analytics: vendor/source breakdown from open data
+  // Analytics: vendor/source breakdown from deduplicated open data
   const vendorBreakdown = useMemo(() => {
-    const all = openData?.data || [];
     const map: Record<string, { count: number; over14: number; totalDays: number }> = {};
-    for (const r of all) {
+    for (const r of analyticsRows) {
       const vendor = r.source === "enterprise" ? "Enterprise" : (r.rentalVendor || r.source || "Unknown");
       if (!map[vendor]) map[vendor] = { count: 0, over14: 0, totalDays: 0 };
       map[vendor].count++;
       map[vendor].totalDays += r.daysOpen || 0;
       if ((r.daysOpen || 0) >= 14) map[vendor].over14++;
     }
-    const total = all.length;
+    const total = summary?.totalOpen ?? analyticsRows.length;
     return Object.entries(map)
       .map(([vendor, stats]) => ({
         vendor,
@@ -310,7 +324,7 @@ export default function RentalOperations() {
         over14: stats.over14,
       }))
       .sort((a, b) => b.count - a.count);
-  }, [openData]);
+  }, [analyticsRows, summary]);
 
   // Analytics: daily trend from availableDates
   const trendData = useMemo(() => {
