@@ -553,24 +553,24 @@ export default function TpmsIntegration() {
                           <TableBody>
                             <TableRow>
                               <TableCell className="text-muted-foreground">Total cached records</TableCell>
-                              <TableCell className="font-bold text-right">{stats.total.toLocaleString()}</TableCell>
+                              <TableCell className="font-bold text-right">{(stats.total ?? 0).toLocaleString()}</TableCell>
                             </TableRow>
                             <TableRow>
                               <TableCell className="text-muted-foreground">Live / Fresh (&lt;24h)</TableCell>
-                              <TableCell className="text-green-600 font-bold text-right">{stats.live.toLocaleString()}</TableCell>
+                              <TableCell className="text-green-600 font-bold text-right">{(stats.live ?? 0).toLocaleString()}</TableCell>
                             </TableRow>
                             <TableRow>
                               <TableCell className="text-muted-foreground">Cached</TableCell>
-                              <TableCell className="text-blue-600 font-bold text-right">{stats.cached.toLocaleString()}</TableCell>
+                              <TableCell className="text-blue-600 font-bold text-right">{(stats.cached ?? 0).toLocaleString()}</TableCell>
                             </TableRow>
                             <TableRow>
                               <TableCell className="text-muted-foreground">Stale (&gt;24h old)</TableCell>
-                              <TableCell className="text-amber-600 font-bold text-right">{stats.stale.toLocaleString()}</TableCell>
+                              <TableCell className="text-amber-600 font-bold text-right">{(stats.stale ?? 0).toLocaleString()}</TableCell>
                             </TableRow>
                             <TableRow>
                               <TableCell className="text-muted-foreground">Errors</TableCell>
-                              <TableCell className={`font-bold text-right ${stats.error > 0 ? "text-red-600" : "text-muted-foreground"}`}>
-                                {stats.error.toLocaleString()}
+                              <TableCell className={`font-bold text-right ${(stats.error ?? 0) > 0 ? "text-red-600" : "text-muted-foreground"}`}>
+                                {(stats.error ?? 0).toLocaleString()}
                               </TableCell>
                             </TableRow>
                           </TableBody>
@@ -619,11 +619,11 @@ export default function TpmsIntegration() {
                             </TableRow>
                             <TableRow>
                               <TableCell className="text-muted-foreground">Vehicles Synced</TableCell>
-                              <TableCell className="font-bold text-right">{fleetState.vehiclesSynced.toLocaleString()} / {fleetState.totalVehiclesToSync.toLocaleString()}</TableCell>
+                              <TableCell className="font-bold text-right">{(fleetState.vehiclesSynced ?? 0).toLocaleString()} / {(fleetState.totalVehiclesToSync ?? 0).toLocaleString()}</TableCell>
                             </TableRow>
                             <TableRow>
                               <TableCell className="text-muted-foreground">With Assignments</TableCell>
-                              <TableCell className="font-bold text-right">{fleetState.vehiclesWithAssignments.toLocaleString()}</TableCell>
+                              <TableCell className="font-bold text-right">{(fleetState.vehiclesWithAssignments ?? 0).toLocaleString()}</TableCell>
                             </TableRow>
                             <TableRow>
                               <TableCell className="text-muted-foreground">Last Sync</TableCell>
@@ -686,19 +686,19 @@ export default function TpmsIntegration() {
                         <TableBody>
                           <TableRow>
                             <TableCell className="text-muted-foreground">Processed</TableCell>
-                            <TableCell className="font-bold text-right">{progress.processedTechs.toLocaleString()} / {progress.totalTechs.toLocaleString()}</TableCell>
+                            <TableCell className="font-bold text-right">{(progress.processedTechs ?? 0).toLocaleString()} / {(progress.totalTechs ?? 0).toLocaleString()}</TableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell className="text-muted-foreground">Succeeded</TableCell>
-                            <TableCell className="text-green-600 font-bold text-right">{progress.successCount.toLocaleString()}</TableCell>
+                            <TableCell className="text-green-600 font-bold text-right">{(progress.successCount ?? 0).toLocaleString()}</TableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell className="text-muted-foreground">Skipped (recent)</TableCell>
-                            <TableCell className="text-muted-foreground font-bold text-right">{progress.skippedCount.toLocaleString()}</TableCell>
+                            <TableCell className="text-muted-foreground font-bold text-right">{(progress.skippedCount ?? 0).toLocaleString()}</TableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell className="text-muted-foreground">Errors</TableCell>
-                            <TableCell className={`font-bold text-right ${progress.errorCount > 0 ? "text-red-600" : ""}`}>{progress.errorCount.toLocaleString()}</TableCell>
+                            <TableCell className={`font-bold text-right ${(progress.errorCount ?? 0) > 0 ? "text-red-600" : ""}`}>{(progress.errorCount ?? 0).toLocaleString()}</TableCell>
                           </TableRow>
                           {progress.startedAt && (
                             <TableRow>
