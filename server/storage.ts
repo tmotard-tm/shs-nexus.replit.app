@@ -431,6 +431,9 @@ export interface IStorage {
   createFleetOperationLog(data: InsertFleetOperationLog): Promise<FleetOperationLog>;
   updateFleetOperationLog(id: number, updates: Partial<FleetOperationLog>): Promise<FleetOperationLog | undefined>;
   getFleetOperationLogs(filters?: { operationType?: string; truckNumber?: string; ldap?: string }): Promise<FleetOperationLog[]>;
+
+  // Vehicle Odometer Bulk Update
+  bulkUpdateVehicleOdometers(updates: Array<{ vehicleNumber: string; odometer: number; odometerDate: string; odometerSource: string }>): Promise<number>;
 }
 
 export class MemStorage implements IStorage {
@@ -3487,6 +3490,9 @@ export class MemStorage implements IStorage {
   async getFleetOperationLogs(_filters?: { operationType?: string; truckNumber?: string; ldap?: string }): Promise<FleetOperationLog[]> {
     return [];
   }
+  async bulkUpdateVehicleOdometers(_updates: Array<{ vehicleNumber: string; odometer: number; odometerDate: string; odometerSource: string }>): Promise<number> {
+    return 0;
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -6290,6 +6296,18 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(fleetOperationLog)
       .orderBy(desc(fleetOperationLog.createdAt))
       .limit(200);
+  }
+
+  async bulkUpdateVehicleOdometers(updates: Array<{ vehicleNumber: string; odometer: number; odometerDate: string; odometerSource: string }>): Promise<number> {
+    if (updates.length === 0) return 0;
+    let count = 0;
+    for (const u of updates) {
+      await db.update(holmanVehiclesCache)
+        .set({ odometer: u.odometer, odometerDate: u.odometerDate, odometerSource: u.odometerSource })
+        .where(eq(holmanVehiclesCache.holmanVehicleNumber, u.vehicleNumber));
+      count++;
+    }
+    return count;
   }
 }
 

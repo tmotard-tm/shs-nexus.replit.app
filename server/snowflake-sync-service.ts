@@ -2704,6 +2704,155 @@ export class SnowflakeSyncService {
 
     return result;
   }
+
+  async enrichVehicleOdometerData(): Promise<{
+    vehiclesUpdated: number;
+    samsaraCount: number;
+    fuelCardCount: number;
+    holmanPoCount: number;
+    holmanCacheCount: number;
+  }> {
+    const summary = { vehiclesUpdated: 0, samsaraCount: 0, fuelCardCount: 0, holmanPoCount: 0, holmanCacheCount: 0 };
+
+    const sf = getSnowflakeService();
+    await sf.connect();
+
+    interface OdoCandidate { miles: number; date: string; source: string; }
+
+    const odoByVin   = new Map<string, OdoCandidate[]>();
+    const odoByTruck = new Map<string, OdoCandidate[]>();
+
+    const addByVin = (vin: string, c: OdoCandidate) => {
+      const k = vin.toUpperCase().trim();
+      if (!odoByVin.has(k)) odoByVin.set(k, []);
+      odoByVin.get(k)!.push(c);
+    };
+    const addByTruck = (truck: string, c: OdoCandidate) => {
+      const k = String(truck).replace(/^0+/, '') || '0';
+      if (!odoByTruck.has(k)) odoByTruck.set(k, []);
+      odoByTruck.get(k)!.push(c);
+    };
+
+    // Source 2: Samsara
+    const samsaraPromise = sf.executeQuery(`
+      SELECT VIN, COALESCE(OBD_MILES, GPS_MILES) AS ODOMETER_MILES, COALESCE(OBD_TIME, GPS_TIME) AS ODOMETER_DATE
+      FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
+      WHERE VIN IS NOT NULL
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY VIN ORDER BY COALESCE(OBD_TIME, GPS_TIME) DESC NULLS LAST) = 1
+    `, []).catch((e: any) => { console.warn('[OdoEnrich] Samsara error:', e?.message); return []; });
+
+    // Source 3: Fuel card
+    const fuelPromise = sf.executeQuery(`
+      SELECT LPAD(TRUCK_NUMBER, 6, '0') AS TRUCK_NO, ODOMETER, DATE AS ODO_DATE
+      FROM PRD_EBDB.TECHNICIANS.CREDIT_CARD_EXPENSE_TRACKING
+      WHERE DATE >= CURRENT_DATE() - 365 AND ODOMETER > 0
+        AND TRUCK_NUMBER NOT IN ('000000', 'Rental') AND TRUCK_NUMBER IS NOT NULL
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY LPAD(TRUCK_NUMBER, 6, '0') ORDER BY DATE DESC) = 1
+    `, []).catch((e: any) => { console.warn('[OdoEnrich] Fuel card error:', e?.message); return []; });
+
+    // Source 4: Holman PO
+    const poPromise = sf.executeQuery(`
+      SELECT HOLMAN_VEHICLE_NUMBER, ODOMETER, PO_DATE
+      FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS
+      WHERE ODOMETER > 0 AND HOLMAN_VEHICLE_NUMBER IS NOT NULL
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY HOLMAN_VEHICLE_NUMBER ORDER BY PO_DATE DESC) = 1
+    `, []).catch((e: any) => { console.warn('[OdoEnrich] Holman PO error:', e?.message); return []; });
+
+    const [samsaraRows, fuelRows, poRows] = await Promise.all([samsaraPromise, fuelPromise, poPromise]) as [any[], any[], any[]];
+
+    for (const r of samsaraRows) {
+      if (r.VIN && r.ODOMETER_MILES != null && r.ODOMETER_DATE) {
+        addByVin(r.VIN, { miles: Number(r.ODOMETER_MILES), date: String(r.ODOMETER_DATE), source: 'Samsara' });
+        summary.samsaraCount++;
+      }
+    }
+    for (const r of fuelRows) {
+      if (r.TRUCK_NO && r.ODOMETER != null && r.ODO_DATE) {
+        addByTruck(r.TRUCK_NO, { miles: Number(r.ODOMETER), date: String(r.ODO_DATE), source: 'Fuel Card' });
+        summary.fuelCardCount++;
+      }
+    }
+    for (const r of poRows) {
+      if (r.HOLMAN_VEHICLE_NUMBER && r.ODOMETER != null && r.PO_DATE) {
+        addByTruck(r.HOLMAN_VEHICLE_NUMBER, { miles: Number(r.ODOMETER), date: String(r.PO_DATE), source: 'Holman PO' });
+        summary.holmanPoCount++;
+      }
+    }
+
+    // Source 1: existing Holman cache entries (query Postgres directly)
+    const { db: pgDb } = await import('./db');
+    const { holmanVehiclesCache } = await import('@shared/schema');
+    const { isNull } = await import('drizzle-orm');
+
+    const cacheRows = await pgDb.select({
+      vehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+      vin: holmanVehiclesCache.vin,
+      odometer: holmanVehiclesCache.odometer,
+      odometerDate: holmanVehiclesCache.odometerDate,
+    }).from(holmanVehiclesCache)
+      .where(isNull(holmanVehiclesCache.outOfServiceDate));
+
+    const ODOMETER_MIN = 1_000;
+    const ODOMETER_MAX = 600_000;
+
+    const selectBest = (candidates: OdoCandidate[]): OdoCandidate | null => {
+      const inRange = candidates.filter(c => c.miles >= ODOMETER_MIN && c.miles <= ODOMETER_MAX);
+      if (inRange.length === 0) return null;
+      const maxMiles = Math.max(...inRange.map(c => c.miles));
+      const threshold = maxMiles * 0.30;
+      const clean = inRange.filter(c => c.miles >= threshold);
+      const pool = clean.length > 0 ? clean : inRange;
+      pool.sort((a, b) => {
+        const da = a.date ? new Date(a.date).getTime() : 0;
+        const db2 = b.date ? new Date(b.date).getTime() : 0;
+        return db2 - da;
+      });
+      return pool[0];
+    };
+
+    const formatDateMDY = (raw: string): string => {
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return raw;
+      const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(d.getUTCDate()).padStart(2, '0');
+      return `${mm}/${dd}/${d.getUTCFullYear()}`;
+    };
+
+    const updates: Array<{ vehicleNumber: string; odometer: number; odometerDate: string; odometerSource: string }> = [];
+
+    for (const row of cacheRows) {
+      const candidates: OdoCandidate[] = [];
+
+      // Source 1: Holman cache existing value
+      if (row.odometer && row.odometerDate) {
+        candidates.push({ miles: row.odometer, date: row.odometerDate, source: 'Holman Vehicle Info' });
+        summary.holmanCacheCount++;
+      }
+
+      // Source 2: Samsara (by VIN)
+      const vinKey = row.vin ? row.vin.toUpperCase().trim() : null;
+      if (vinKey && odoByVin.has(vinKey)) candidates.push(...odoByVin.get(vinKey)!);
+
+      // Sources 3+4 (by truck number)
+      const truckKey = String(row.vehicleNumber).replace(/^0+/, '') || '0';
+      if (odoByTruck.has(truckKey)) candidates.push(...odoByTruck.get(truckKey)!);
+
+      const best = selectBest(candidates);
+      if (best) {
+        updates.push({
+          vehicleNumber: row.vehicleNumber,
+          odometer: Math.round(best.miles),
+          odometerDate: formatDateMDY(best.date),
+          odometerSource: best.source,
+        });
+      }
+    }
+
+    const { storage } = await import('./storage');
+    summary.vehiclesUpdated = await storage.bulkUpdateVehicleOdometers(updates);
+    console.log(`[OdoEnrich] Complete: ${summary.vehiclesUpdated} vehicles updated (Samsara: ${summary.samsaraCount}, Fuel: ${summary.fuelCardCount}, HolmanPO: ${summary.holmanPoCount}, Cache: ${summary.holmanCacheCount})`);
+    return summary;
+  }
 }
 
 let syncServiceInstance: SnowflakeSyncService | null = null;

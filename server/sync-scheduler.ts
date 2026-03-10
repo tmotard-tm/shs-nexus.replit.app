@@ -62,7 +62,16 @@ async function checkAndRunSync(): Promise<void> {
       console.log('[Scheduler] Starting all techs sync...');
       const allTechsResult = await syncService.syncAllTechs('scheduler');
       console.log(`[Scheduler] All techs sync complete: ${allTechsResult.recordsProcessed} processed`);
-      
+
+      // Enrich vehicle odometer data from all 4 sources
+      console.log('[Scheduler] Starting vehicle odometer enrichment...');
+      try {
+        const odoResult = await syncService.enrichVehicleOdometerData();
+        console.log(`[Scheduler] Odometer enrichment complete: ${odoResult.vehiclesUpdated} vehicles updated`);
+      } catch (odoErr: any) {
+        console.error('[Scheduler] Odometer enrichment failed (non-fatal):', odoErr?.message);
+      }
+
       lastSyncDate = currentDateStr;
       console.log(`[Scheduler] Scheduled sync completed successfully for ${currentDateStr}`);
     }

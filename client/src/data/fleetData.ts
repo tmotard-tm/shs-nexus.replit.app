@@ -21,6 +21,7 @@ export interface FleetVehicle {
   odometerDelivery: number;
   odometer?: number;
   odometerDate?: string;
+  odometerSource?: string;
   deliveryAddress: string;
   city: string;
   state: string;

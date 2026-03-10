@@ -7453,6 +7453,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/holman/fleet-vehicles/sync-odometer", requireAuth, async (req: any, res) => {
+    try {
+      const { getSnowflakeSyncService, } = await import("./snowflake-sync-service");
+      const syncSvc = getSnowflakeSyncService();
+      const result = await syncSvc.enrichVehicleOdometerData();
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("[OdoSync] Manual trigger error:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Update vehicle assignment in Holman based on TPMS data
   const { holmanAssignmentUpdateService } = await import("./holman-assignment-update-service");
 
@@ -13263,6 +13275,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.query.ldap) filters.ldap = req.query.ldap as string;
       const logs = await storage.getFleetOperationLogs(filters);
       res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // PO flags per vehicle — open rental and maintenance PO counts
+  app.get("/api/fleet-vehicles/po-flags", requireAuth, async (req: any, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT vehicle_number, po_type, COUNT(*) AS cnt
+        FROM holman_po_cache
+        WHERE UPPER(po_status) = 'OPEN'
+          AND po_type IN ('rental', 'maintenance')
+        GROUP BY vehicle_number, po_type
+      `);
+      const flags: Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }> = {};
+      for (const row of rows.rows as Array<{ vehicle_number: string; po_type: string; cnt: string | number }>) {
+        const vn = row.vehicle_number;
+        if (!flags[vn]) flags[vn] = { hasOpenRental: false, openRentalCount: 0, hasOpenMaintenance: false, openMaintenanceCount: 0 };
+        const cnt = Number(row.cnt);
+        if (row.po_type === 'rental') { flags[vn].hasOpenRental = true; flags[vn].openRentalCount = cnt; }
+        if (row.po_type === 'maintenance') { flags[vn].hasOpenMaintenance = true; flags[vn].openMaintenanceCount = cnt; }
+      }
+      res.json(flags);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

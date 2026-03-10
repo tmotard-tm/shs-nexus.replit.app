@@ -31,6 +31,7 @@ interface FleetVehicle {
   outOfServiceDate: string;
   odometer: number;
   odometerDate: string;
+  odometerSource?: string;
   regRenewalDate: string;
   branding: string;
   interior: string;
@@ -247,6 +248,7 @@ class HolmanVehicleSyncService {
         outOfServiceDate: v.outOfServiceDate,
         odometer: v.odometer || 0,
         odometerDate: v.odometerDate || '',
+        odometerSource: (v as any).odometerSource || undefined,
         regRenewalDate: v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || '',
         branding: v.branding || 'Standard',
         interior: v.interior || 'Standard',
@@ -499,6 +501,7 @@ class HolmanVehicleSyncService {
         outOfServiceDate: v.outOfServiceDate,
         odometer: v.odometer || 0,
         odometerDate: v.odometerDate || '',
+        odometerSource: (v as any).odometerSource || undefined,
         regRenewalDate: v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || '',
         branding: v.branding || 'Standard',
         interior: v.interior || 'Standard',
@@ -839,6 +842,7 @@ class HolmanVehicleSyncService {
       outOfServiceDate: v.outOfServiceDate || '',
       odometer: v.odometer || 0,
       odometerDate: v.odometerDate || '',
+        odometerSource: (v as any).odometerSource || undefined,
       regRenewalDate: v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || '',
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',
@@ -874,6 +878,7 @@ class HolmanVehicleSyncService {
       outOfServiceDate: v.outOfServiceDate || '',
       odometer: v.odometer || 0,
       odometerDate: v.odometerDate || '',
+        odometerSource: (v as any).odometerSource || undefined,
       regRenewalDate: v.regRenewalDate || '',
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',

@@ -20,7 +20,7 @@ import {
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
-  UserPlus, ArrowLeftRight, FileText, Home, Activity
+  UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare
 } from "lucide-react";
 import { GiMagicLamp } from "react-icons/gi";
 import { BackButton } from "@/components/ui/back-button";
@@ -244,7 +244,7 @@ export default function FleetManagement() {
   });
 
   // ─── Cross-System Fleet Operations State ───────────────────────────────────
-  type FleetModal = "assign" | "unassign" | "transfer" | "address" | null;
+  type FleetModal = "assign" | "unassign" | "transfer" | "address" | "poHistory" | "amsComments" | null;
   const [activeModal, setActiveModal] = useState<FleetModal>(null);
 
   // Assign form
@@ -260,6 +260,12 @@ export default function FleetManagement() {
   // Unassign form
   const [unassignNotes, setUnassignNotes] = useState("");
 
+  // PO History filter state
+  const [poFilterDateFrom, setPoFilterDateFrom] = useState("");
+  const [poFilterDateTo, setPoFilterDateTo] = useState("");
+  const [poFilterPoNumber, setPoFilterPoNumber] = useState("");
+  const [poFilterVendor, setPoFilterVendor] = useState("");
+
   // Address form
   const [addrLine1, setAddrLine1] = useState("");
   const [addrCity, setAddrCity] = useState("");
@@ -268,6 +274,18 @@ export default function FleetManagement() {
 
   // Operation result (per-system status returned from fleet-ops endpoint)
   const [opResult, setOpResult] = useState<any>(null);
+
+  // PO flags (open rental / maintenance counts per vehicle) — loaded once
+  const { data: poFlagsData } = useQuery<Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }>>({
+    queryKey: ['/api/fleet-vehicles/po-flags'],
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  type PoFlag = { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number };
+  const poFlagsMap = useMemo(() => {
+    if (!poFlagsData) return new Map<string, PoFlag>();
+    return new Map<string, PoFlag>(Object.entries(poFlagsData));
+  }, [poFlagsData]);
 
   // POs for selected vehicle
   const { data: vehiclePOs, isLoading: posLoading } = useQuery<any[]>({
@@ -279,6 +297,33 @@ export default function FleetManagement() {
       if (!res.ok) return [];
       const json = await res.json();
       return json.data || json || [];
+    },
+  });
+
+  // AMS vehicle data for selected vehicle
+  const { data: amsVehicle, isLoading: amsLoading } = useQuery<any>({
+    queryKey: ["/api/ams/vehicles", selectedVehicle?.vin],
+    enabled: !!selectedVehicle?.vin,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    queryFn: async () => {
+      const res = await fetch(`/api/ams/vehicles/${selectedVehicle!.vin}`, { credentials: "include" });
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json || null;
+    },
+  });
+
+  // AMS comments for selected vehicle (fetched when modal opens)
+  const { data: amsComments, isLoading: amsCommentsLoading } = useQuery<any[]>({
+    queryKey: ["/api/ams/vehicles/comments", selectedVehicle?.vin],
+    enabled: activeModal === "amsComments" && !!selectedVehicle?.vin,
+    staleTime: 2 * 60 * 1000,
+    queryFn: async () => {
+      const res = await fetch(`/api/ams/vehicles/${selectedVehicle!.vin}/comments`, { credentials: "include" });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.data || []);
     },
   });
 
@@ -1187,6 +1232,7 @@ export default function FleetManagement() {
                     const distanceScore = (vehicle as any).distanceScore;
                     const distanceInfo = distanceScore ? getDistanceLabel(distanceScore) : null;
                     const hasMismatch = assignStatus.status === 'mismatch';
+                    const poFlags = poFlagsMap.get(vehicle.vehicleNumber);
                     
                     return (
                       <Card 
@@ -1225,6 +1271,12 @@ export default function FleetManagement() {
                               <Badge variant="outline" className="text-xs">
                                 {ownership.type}
                               </Badge>
+                              {poFlags?.hasOpenRental && (
+                                <Badge className="bg-red-600 text-white text-xs border-none">RENTAL ({poFlags.openRentalCount})</Badge>
+                              )}
+                              {poFlags?.hasOpenMaintenance && (
+                                <Badge className="bg-amber-500 text-white text-xs border-none">MAINT ({poFlags.openMaintenanceCount})</Badge>
+                              )}
                             </div>
                           </div>
                           
@@ -1300,6 +1352,16 @@ export default function FleetManagement() {
                             </div>
                           </div>
                           
+                          {/* Odometer */}
+                          {vehicle.odometer ? (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground pt-1 border-t">
+                              <Gauge className="h-3 w-3 shrink-0" />
+                              <span>{vehicle.odometer.toLocaleString()} mi</span>
+                              {vehicle.odometerDate && <span>· {vehicle.odometerDate}</span>}
+                              {vehicle.odometerSource && <span>· {vehicle.odometerSource}</span>}
+                            </div>
+                          ) : null}
+
                           {/* Status Badge + Action */}
                           <div className="flex items-center justify-between pt-2 border-t">
                             <Badge className={assignStatus.color + ' border text-xs'}>
@@ -1440,6 +1502,86 @@ export default function FleetManagement() {
 
                 <Separator />
 
+                {/* Cross-System Operations — moved here so it's immediately visible */}
+                <div className="space-y-3">
+                  <h4 className="font-medium text-sm text-muted-foreground">Cross-System Operations</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="sm" className="w-full" onClick={() => openModal("assign")} data-testid="button-fleet-assign">
+                      <UserPlus className="h-4 w-4 mr-1.5" />Assign Tech
+                    </Button>
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("unassign")} disabled={!selectedVehicle.tpmsAssignedTechId && !selectedVehicle.holmanTechAssigned} data-testid="button-fleet-unassign">
+                      <UserX className="h-4 w-4 mr-1.5" />Unassign Tech
+                    </Button>
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("transfer")} data-testid="button-fleet-transfer">
+                      <ArrowLeftRight className="h-4 w-4 mr-1.5" />Transfer Tech
+                    </Button>
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("address")} data-testid="button-fleet-address">
+                      <Home className="h-4 w-4 mr-1.5" />Update Address
+                    </Button>
+                  </div>
+                  {/* PO History button */}
+                  <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("poHistory")} data-testid="button-po-history">
+                    <FileText className="h-4 w-4 mr-1.5" />
+                    PO History {vehiclePOs && vehiclePOs.length > 0 ? `(${vehiclePOs.length})` : posLoading ? "" : ""}
+                  </Button>
+                </div>
+
+                <Separator />
+
+                {/* AMS Information */}
+                <div className="space-y-3">
+                  <h4 className="font-medium text-sm text-muted-foreground">AMS Information</h4>
+                  {amsLoading ? (
+                    <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading AMS data...</div>
+                  ) : !amsVehicle ? (
+                    <p className="text-xs text-muted-foreground">AMS data not available for this vehicle.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Road Ready</Label>
+                          <div className="mt-1">
+                            {amsVehicle.RoadReady === "Y" || amsVehicle.RoadReady === "Yes" ? (
+                              <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border-none text-xs">Ready</Badge>
+                            ) : amsVehicle.RoadReady ? (
+                              <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 border-none text-xs">{amsVehicle.RoadReady}</Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">N/A</span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Grade</Label>
+                          <p className="text-sm">{amsVehicle.GradeDescription || amsVehicle.Grade || "N/A"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">AMS Tech</Label>
+                          <p className="text-sm font-mono">{amsVehicle.Tech || "—"}</p>
+                          {amsVehicle.TechName && <p className="text-xs text-muted-foreground">{amsVehicle.TechName}</p>}
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Branding</Label>
+                          <p className="text-sm">{amsVehicle.BrandingName || amsVehicle.Branding || "N/A"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Reg Renewal</Label>
+                          <p className="text-sm">{amsVehicle.RegRenewalDate || "N/A"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">AMS Odometer</Label>
+                          <p className="text-sm">{amsVehicle.CurOdometer ? amsVehicle.CurOdometer.toLocaleString() + " mi" : "N/A"}</p>
+                          {amsVehicle.CurOdometerDate && <p className="text-xs text-muted-foreground">{amsVehicle.CurOdometerDate}</p>}
+                        </div>
+                      </div>
+                      <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("amsComments")} data-testid="button-ams-comments">
+                        <MessageSquare className="h-4 w-4 mr-1.5" />Comment History
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
                 {/* Nexus Tracking Data */}
                 <div className="space-y-4">
                   <h4 className="font-medium text-sm text-muted-foreground">Nexus Tracking</h4>
@@ -1530,56 +1672,6 @@ export default function FleetManagement() {
                   )}
                 </div>
 
-                <Separator />
-
-                {/* Cross-System Operations */}
-                <div className="space-y-3">
-                  <h4 className="font-medium text-sm text-muted-foreground">Cross-System Operations</h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button size="sm" className="w-full" onClick={() => openModal("assign")} data-testid="button-fleet-assign">
-                      <UserPlus className="h-4 w-4 mr-1.5" />Assign Tech
-                    </Button>
-                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("unassign")} disabled={!selectedVehicle.tpmsAssignedTechId && !selectedVehicle.holmanTechAssigned} data-testid="button-fleet-unassign">
-                      <UserX className="h-4 w-4 mr-1.5" />Unassign Tech
-                    </Button>
-                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("transfer")} data-testid="button-fleet-transfer">
-                      <ArrowLeftRight className="h-4 w-4 mr-1.5" />Transfer Tech
-                    </Button>
-                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("address")} data-testid="button-fleet-address">
-                      <Home className="h-4 w-4 mr-1.5" />Update Address
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* PO Section */}
-                <div className="space-y-2">
-                  <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-1.5">
-                    <FileText className="h-4 w-4" />POs for #{selectedVehicle.vehicleNumber}
-                  </h4>
-                  {posLoading ? (
-                    <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading POs...</div>
-                  ) : !vehiclePOs || vehiclePOs.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No POs cached. Sync PO data from Holman Integration → PO Tracker.</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {vehiclePOs.slice(0, 8).map((po: any, i: number) => (
-                        <div key={i} className="flex items-center gap-2 p-2 bg-muted/40 rounded text-xs">
-                          <span className="font-mono flex-1">{po.poNumber}</span>
-                          {po.poType === "maintenance"
-                            ? <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border-none shrink-0">MAINT</Badge>
-                            : po.poType === "rental"
-                            ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 text-xs border-none shrink-0">RENTAL</Badge>
-                            : <Badge variant="secondary" className="text-xs shrink-0">{po.poType}</Badge>}
-                          <span className="text-muted-foreground shrink-0">{po.poStatus}</span>
-                          {po.amount != null && <span className="text-muted-foreground shrink-0">${Number(po.amount).toFixed(0)}</span>}
-                        </div>
-                      ))}
-                      {vehiclePOs.length > 8 && <p className="text-xs text-muted-foreground">+{vehiclePOs.length - 8} more — see Holman PO Tracker</p>}
-                    </div>
-                  )}
-                </div>
 
                 <Separator />
 
@@ -1961,6 +2053,192 @@ export default function FleetManagement() {
           techName={selectedVehicle.tpmsAssignedTechName || selectedVehicle.tpmsAssignedTechId}
         />
       )}
+
+      {/* PO History Modal */}
+      <Dialog
+        open={activeModal === "poHistory"}
+        onOpenChange={(o) => {
+          if (!o) {
+            setActiveModal(null);
+            setPoFilterDateFrom("");
+            setPoFilterDateTo("");
+            setPoFilterPoNumber("");
+            setPoFilterVendor("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              PO History — Vehicle #{selectedVehicle?.vehicleNumber}
+            </DialogTitle>
+            <DialogDescription>
+              All POs cached from Holman for this vehicle.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Filter bar */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1">
+            <div>
+              <Label className="text-xs text-muted-foreground">Date From</Label>
+              <Input
+                type="date"
+                className="mt-1 h-8 text-xs"
+                value={poFilterDateFrom}
+                onChange={e => setPoFilterDateFrom(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Date To</Label>
+              <Input
+                type="date"
+                className="mt-1 h-8 text-xs"
+                value={poFilterDateTo}
+                onChange={e => setPoFilterDateTo(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">PO #</Label>
+              <Input
+                className="mt-1 h-8 text-xs"
+                placeholder="Search PO number..."
+                value={poFilterPoNumber}
+                onChange={e => setPoFilterPoNumber(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Vendor</Label>
+              <Input
+                className="mt-1 h-8 text-xs"
+                placeholder="Search vendor..."
+                value={poFilterVendor}
+                onChange={e => setPoFilterVendor(e.target.value)}
+              />
+            </div>
+          </div>
+          {(poFilterDateFrom || poFilterDateTo || poFilterPoNumber || poFilterVendor) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="self-start text-xs h-7 text-muted-foreground"
+              onClick={() => { setPoFilterDateFrom(""); setPoFilterDateTo(""); setPoFilterPoNumber(""); setPoFilterVendor(""); }}
+            >
+              Clear all filters
+            </Button>
+          )}
+
+          {/* Table */}
+          <div className="flex-1 overflow-auto min-h-0">
+            {posLoading ? (
+              <div className="flex items-center justify-center h-32 text-muted-foreground text-sm gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />Loading POs...
+              </div>
+            ) : !vehiclePOs || vehiclePOs.length === 0 ? (
+              <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+                No POs cached for this vehicle.
+              </div>
+            ) : (() => {
+              const filtered = vehiclePOs.filter((po: any) => {
+                if (poFilterPoNumber && !String(po.poNumber || "").toLowerCase().includes(poFilterPoNumber.toLowerCase())) return false;
+                if (poFilterVendor && !String(po.vendor || po.vendorName || "").toLowerCase().includes(poFilterVendor.toLowerCase())) return false;
+                const poDate = po.poDate || po.openDate || po.date || "";
+                if (poFilterDateFrom && poDate && poDate < poFilterDateFrom) return false;
+                if (poFilterDateTo && poDate && poDate > poFilterDateTo) return false;
+                return true;
+              });
+              return (
+                <>
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-background border-b">
+                      <tr>
+                        <th className="text-left py-2 px-2 font-medium text-muted-foreground">PO #</th>
+                        <th className="text-left py-2 px-2 font-medium text-muted-foreground">Type</th>
+                        <th className="text-left py-2 px-2 font-medium text-muted-foreground">Status</th>
+                        <th className="text-left py-2 px-2 font-medium text-muted-foreground">Date</th>
+                        <th className="text-right py-2 px-2 font-medium text-muted-foreground">Amount</th>
+                        <th className="text-left py-2 px-2 font-medium text-muted-foreground">Vendor</th>
+                        <th className="text-left py-2 px-2 font-medium text-muted-foreground">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="text-center py-8 text-muted-foreground">No POs match your filters.</td>
+                        </tr>
+                      ) : filtered.map((po: any, i: number) => (
+                        <tr key={i} className="border-b hover:bg-muted/30">
+                          <td className="py-1.5 px-2 font-mono">{po.poNumber || "—"}</td>
+                          <td className="py-1.5 px-2">
+                            {po.poType === "maintenance"
+                              ? <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border-none">MAINT</Badge>
+                              : po.poType === "rental"
+                              ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 text-xs border-none">RENTAL</Badge>
+                              : po.poType
+                              ? <Badge variant="secondary" className="text-xs">{po.poType}</Badge>
+                              : <span className="text-muted-foreground">—</span>}
+                          </td>
+                          <td className="py-1.5 px-2">
+                            <span className={`font-medium ${po.poStatus?.toUpperCase() === 'OPEN' ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}`}>
+                              {po.poStatus || "—"}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2 text-muted-foreground">{po.poDate || po.openDate || po.date || "—"}</td>
+                          <td className="py-1.5 px-2 text-right">{po.amount != null ? `$${Number(po.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
+                          <td className="py-1.5 px-2">{po.vendor || po.vendorName || "—"}</td>
+                          <td className="py-1.5 px-2 text-muted-foreground max-w-[200px] truncate">{po.description || po.serviceDescription || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-xs text-muted-foreground px-2 py-2 border-t">
+                    Showing {filtered.length} of {vehiclePOs.length} POs
+                  </p>
+                </>
+              );
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* AMS Comment History Modal */}
+      <Dialog
+        open={activeModal === "amsComments"}
+        onOpenChange={(o) => { if (!o) setActiveModal(null); }}
+      >
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              AMS Comment History — {selectedVehicle?.vin}
+            </DialogTitle>
+            <DialogDescription>
+              Comments logged in AMS for this vehicle.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto min-h-0 space-y-2">
+            {amsCommentsLoading ? (
+              <div className="flex items-center justify-center h-32 text-muted-foreground text-sm gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />Loading comments...
+              </div>
+            ) : !amsComments || amsComments.length === 0 ? (
+              <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+                No comments found for this vehicle.
+              </div>
+            ) : amsComments.map((comment: any, i: number) => (
+              <div key={i} className="p-3 bg-muted/40 rounded-lg space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium">{comment.Author || comment.author || comment.CreatedBy || "Unknown"}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {comment.CommentDate || comment.commentDate || comment.CreatedAt || comment.createdAt || ""}
+                  </span>
+                </div>
+                <p className="text-sm">{comment.Comment || comment.comment || comment.Text || comment.text || "—"}</p>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </MainContent>
   );
 }
