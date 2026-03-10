@@ -13288,6 +13288,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           hvc.license_state AS "licenseState",
           hvc.holman_tech_assigned AS "holmanTechEnterpriseId",
           hvc.holman_tech_name AS "holmanTechName",
+          hvc.odometer AS "holmanOdometer",
+          hvc.odometer_date AS "holmanOdometerDate",
           t.enterprise_id AS "tpmsEnterpriseId",
           t.tech_id AS "tpmsTechId",
           TRIM(t.first_name) AS "tpmsFirstName",
@@ -13305,43 +13307,132 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const vehicles = vehicleRows.rows as any[];
       console.log(`[Fleet CSV] Queried ${vehicles.length} active vehicles from Holman cache`);
 
-      let odometerByVin = new Map<string, { miles: number | null; date: string | null }>();
+      // ─── Odometer candidate type ────────────────────────────────────────────
+      interface OdoCandidate { miles: number; date: string; source: string; }
+
+      // Keyed by normalized truck number (stripped leading zeros) or VIN (uppercased)
+      const odoByTruck = new Map<string, OdoCandidate[]>(); // key = stripped truck number
+      const odoByVin   = new Map<string, OdoCandidate[]>(); // key = VIN uppercase
+
+      const addByTruck = (truck: string, c: OdoCandidate) => {
+        const k = String(truck).replace(/^0+/, "") || "0";
+        if (!odoByTruck.has(k)) odoByTruck.set(k, []);
+        odoByTruck.get(k)!.push(c);
+      };
+      const addByVin = (vin: string, c: OdoCandidate) => {
+        const k = vin.toUpperCase().trim();
+        if (!odoByVin.has(k)) odoByVin.set(k, []);
+        odoByVin.get(k)!.push(c);
+      };
+
+      // ─── Source 1: Holman cache (already in PostgreSQL row) ─────────────────
+      // Pulled inline below per vehicle — no extra query needed.
+
+      // ─── Sources 2-4: Snowflake ──────────────────────────────────────────────
       try {
         const samsaraService = getSamsaraService();
         if (samsaraService.isSnowflakeAvailable()) {
           const { getSnowflakeService } = await import("./snowflake-service");
           const snowflake = getSnowflakeService();
           await snowflake.connect();
-          // Use QUALIFY (Snowflake-native) to get latest odometer per vehicle.
-          // Partition by VIN (the vehicle identifier in this table).
-          // Coalesce OBD_MILES/OBD_TIME (preferred, direct OBD reader) with GPS_MILES/GPS_TIME (fallback).
-          const odoRows = await snowflake.executeQuery(`
-            SELECT
-              VIN,
-              COALESCE(OBD_MILES, GPS_MILES) AS ODOMETER_MILES,
-              COALESCE(OBD_TIME, GPS_TIME)   AS ODOMETER_DATE
-            FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
-            WHERE VIN IS NOT NULL
-            QUALIFY ROW_NUMBER() OVER (
-              PARTITION BY VIN
-              ORDER BY COALESCE(OBD_TIME, GPS_TIME) DESC NULLS LAST
-            ) = 1
-          `, []) as Array<{ VIN: string; ODOMETER_MILES: number | null; ODOMETER_DATE: string | null }>;
-          for (const row of odoRows) {
-            if (row.VIN) {
-              odometerByVin.set(row.VIN.toUpperCase().trim(), {
-                miles: row.ODOMETER_MILES,
-                date: row.ODOMETER_DATE,
-              });
+
+          // Source 2: Samsara ODOMETER — latest OBD/GPS reading per VIN
+          try {
+            const samsaraRows = await snowflake.executeQuery(`
+              SELECT
+                VIN,
+                COALESCE(OBD_MILES, GPS_MILES)  AS ODOMETER_MILES,
+                COALESCE(OBD_TIME,  GPS_TIME)   AS ODOMETER_DATE
+              FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
+              WHERE VIN IS NOT NULL
+              QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY VIN
+                ORDER BY COALESCE(OBD_TIME, GPS_TIME) DESC NULLS LAST
+              ) = 1
+            `, []) as Array<{ VIN: string; ODOMETER_MILES: number | null; ODOMETER_DATE: string | null }>;
+            for (const r of samsaraRows) {
+              if (r.VIN && r.ODOMETER_MILES != null && r.ODOMETER_DATE) {
+                addByVin(r.VIN, { miles: r.ODOMETER_MILES, date: String(r.ODOMETER_DATE), source: "Samsara" });
+              }
             }
-          }
-          console.log(`[Fleet CSV] Loaded Samsara odometer for ${odometerByVin.size} VINs from Snowflake`);
+            console.log(`[Fleet CSV] Samsara: ${samsaraRows.length} odometer rows loaded`);
+          } catch (e: any) { console.warn("[Fleet CSV] Samsara odometer error:", e?.message); }
+
+          // Source 3: Fuel card — tech-entered odometer at fueling (last 365 days, non-zero)
+          try {
+            const fuelRows = await snowflake.executeQuery(`
+              SELECT LPAD(TRUCK_NUMBER, 6, '0') AS TRUCK_NO, ODOMETER, DATE AS ODO_DATE
+              FROM PRD_EBDB.TECHNICIANS.CREDIT_CARD_EXPENSE_TRACKING
+              WHERE DATE >= CURRENT_DATE() - 365
+                AND ODOMETER > 0
+                AND TRUCK_NUMBER NOT IN ('000000', 'Rental')
+                AND TRUCK_NUMBER IS NOT NULL
+              QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY LPAD(TRUCK_NUMBER, 6, '0')
+                ORDER BY DATE DESC
+              ) = 1
+            `, []) as Array<{ TRUCK_NO: string; ODOMETER: number | null; ODO_DATE: string | null }>;
+            for (const r of fuelRows) {
+              if (r.TRUCK_NO && r.ODOMETER != null && r.ODO_DATE) {
+                addByTruck(r.TRUCK_NO, { miles: r.ODOMETER, date: String(r.ODO_DATE), source: "Fuel Card" });
+              }
+            }
+            console.log(`[Fleet CSV] Fuel card: ${fuelRows.length} odometer rows loaded`);
+          } catch (e: any) { console.warn("[Fleet CSV] Fuel card odometer error:", e?.message); }
+
+          // Source 4: Holman repair PO — odometer at last repair
+          try {
+            const repairRows = await snowflake.executeQuery(`
+              SELECT HOLMAN_VEHICLE_NUMBER, ODOMETER, PO_DATE
+              FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS
+              WHERE ODOMETER > 0
+                AND HOLMAN_VEHICLE_NUMBER IS NOT NULL
+              QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY HOLMAN_VEHICLE_NUMBER
+                ORDER BY PO_DATE DESC
+              ) = 1
+            `, []) as Array<{ HOLMAN_VEHICLE_NUMBER: string; ODOMETER: number | null; PO_DATE: string | null }>;
+            for (const r of repairRows) {
+              if (r.HOLMAN_VEHICLE_NUMBER && r.ODOMETER != null && r.PO_DATE) {
+                addByTruck(r.HOLMAN_VEHICLE_NUMBER, { miles: r.ODOMETER, date: String(r.PO_DATE), source: "Holman Repair" });
+              }
+            }
+            console.log(`[Fleet CSV] Holman repair: ${repairRows.length} odometer rows loaded`);
+          } catch (e: any) { console.warn("[Fleet CSV] Holman repair odometer error:", e?.message); }
+
         } else {
-          console.warn("[Fleet CSV] Snowflake not configured, skipping Samsara odometer");
+          console.warn("[Fleet CSV] Snowflake not configured — skipping Samsara, fuel card, repair sources");
         }
       } catch (snowflakeErr: any) {
-        console.warn("[Fleet CSV] Samsara Snowflake error, omitting odometer:", snowflakeErr?.message);
+        console.warn("[Fleet CSV] Snowflake connection error:", snowflakeErr?.message);
       }
+
+      // ─── Normalization: pick best odometer reading per vehicle ───────────────
+      const ODOMETER_MIN = 1_000;
+      const ODOMETER_MAX = 600_000;
+
+      const selectBestOdometer = (candidates: OdoCandidate[]): (OdoCandidate & { excluded?: string[] }) | null => {
+        // Step 1: absolute range filter
+        const inRange = candidates.filter(c => c.miles >= ODOMETER_MIN && c.miles <= ODOMETER_MAX);
+        if (inRange.length === 0) return null;
+
+        // Step 2: outlier detection — discard any reading < 30% of max in range
+        // Catches dropped-zero typos (e.g., 8500 instead of 85000)
+        const maxMiles = Math.max(...inRange.map(c => c.miles));
+        const threshold = maxMiles * 0.30;
+        const clean = inRange.filter(c => c.miles >= threshold);
+        const excluded = inRange.filter(c => c.miles < threshold).map(c => `${c.source}(${c.miles})`);
+
+        const pool = clean.length > 0 ? clean : inRange; // fallback if all filtered
+
+        // Step 3: pick reading with the latest date
+        pool.sort((a, b) => {
+          const da = a.date ? new Date(a.date).getTime() : 0;
+          const db = b.date ? new Date(b.date).getTime() : 0;
+          return db - da;
+        });
+        return { ...pool[0], excluded };
+      };
 
       const escapeCell = (v: any): string => {
         if (v === null || v === undefined) return "";
@@ -13359,13 +13450,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Holman Tech Enterprise ID", "Holman Tech Name",
         "TPMS Enterprise ID", "TPMS Tech ID", "TPMS First Name", "TPMS Last Name",
         "TPMS District", "TPMS Contact", "TPMS Email",
-        "Samsara Odometer (Miles)", "Samsara Odometer Date",
+        "Odometer (Miles)", "Odometer Date", "Odometer Source", "Odometer Notes",
       ];
 
       const csvLines = [
         headers.join(","),
         ...vehicles.map((v: any) => {
-          const odo = v.vin ? odometerByVin.get(String(v.vin).toUpperCase().trim()) : undefined;
+          // Collect candidates for this vehicle from all sources
+          const truckKey = String(v.vehicleNumber || "").replace(/^0+/, "") || "0";
+          const vinKey   = v.vin ? String(v.vin).toUpperCase().trim() : null;
+
+          const candidates: OdoCandidate[] = [];
+
+          // Source 1: Holman cache
+          if (v.holmanOdometer && v.holmanOdometerDate) {
+            candidates.push({ miles: Number(v.holmanOdometer), date: String(v.holmanOdometerDate), source: "Holman Cache" });
+          }
+          // Source 2: Samsara (by VIN)
+          if (vinKey && odoByVin.has(vinKey)) candidates.push(...odoByVin.get(vinKey)!);
+          // Sources 3+4: Fuel card & Holman repair (by truck number)
+          if (odoByTruck.has(truckKey)) candidates.push(...odoByTruck.get(truckKey)!);
+
+          const best = selectBestOdometer(candidates);
+          const notes = best?.excluded?.length ? `Excluded outliers: ${best.excluded.join(", ")}` : "";
+
           return [
             v.vehicleNumber, v.vin, v.year, v.make, v.model, v.color,
             v.division, v.district, v.region, v.state, v.city,
@@ -13373,7 +13481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             v.holmanTechEnterpriseId, v.holmanTechName,
             v.tpmsEnterpriseId, v.tpmsTechId, v.tpmsFirstName, v.tpmsLastName,
             v.tpmsDistrict, v.tpmsContact, v.tpmsEmail,
-            odo?.miles ?? "", odo?.date ?? "",
+            best?.miles ?? "", best?.date ?? "", best?.source ?? "", notes,
           ].map(escapeCell).join(",");
         }),
       ];
