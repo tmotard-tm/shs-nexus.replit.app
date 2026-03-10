@@ -13352,7 +13352,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             `, []) as Array<{ VIN: string; ODOMETER_MILES: number | null; ODOMETER_DATE: string | null }>;
             for (const r of samsaraRows) {
               if (r.VIN && r.ODOMETER_MILES != null && r.ODOMETER_DATE) {
-                addByVin(r.VIN, { miles: r.ODOMETER_MILES, date: String(r.ODOMETER_DATE), source: "Samsara" });
+                addByVin(r.VIN, { miles: r.ODOMETER_MILES, date: String(r.ODOMETER_DATE), source: "Samsara" });  
               }
             }
             console.log(`[Fleet CSV] Samsara: ${samsaraRows.length} odometer rows loaded`);
@@ -13374,7 +13374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             `, []) as Array<{ TRUCK_NO: string; ODOMETER: number | null; ODO_DATE: string | null }>;
             for (const r of fuelRows) {
               if (r.TRUCK_NO && r.ODOMETER != null && r.ODO_DATE) {
-                addByTruck(r.TRUCK_NO, { miles: r.ODOMETER, date: String(r.ODO_DATE), source: "Fuel Card" });
+                addByTruck(r.TRUCK_NO, { miles: r.ODOMETER, date: String(r.ODO_DATE), source: "Fuel Card" });  
               }
             }
             console.log(`[Fleet CSV] Fuel card: ${fuelRows.length} odometer rows loaded`);
@@ -13394,7 +13394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             `, []) as Array<{ HOLMAN_VEHICLE_NUMBER: string; ODOMETER: number | null; PO_DATE: string | null }>;
             for (const r of repairRows) {
               if (r.HOLMAN_VEHICLE_NUMBER && r.ODOMETER != null && r.PO_DATE) {
-                addByTruck(r.HOLMAN_VEHICLE_NUMBER, { miles: r.ODOMETER, date: String(r.PO_DATE), source: "Holman Repair" });
+                addByTruck(r.HOLMAN_VEHICLE_NUMBER, { miles: r.ODOMETER, date: String(r.PO_DATE), source: "Holman PO" });
               }
             }
             console.log(`[Fleet CSV] Holman repair: ${repairRows.length} odometer rows loaded`);
@@ -13443,6 +13443,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return s;
       };
 
+      // Normalize any date string to MM/DD/YYYY regardless of source format.
+      // Handles ISO 8601 (2025-03-10T14:30:00.000Z), Snowflake timestamps, plain YYYY-MM-DD, etc.
+      const formatDate = (raw: string | null | undefined): string => {
+        if (!raw) return "";
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return raw; // return as-is if unparseable
+        const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const dd = String(d.getUTCDate()).padStart(2, "0");
+        const yyyy = d.getUTCFullYear();
+        return `${mm}/${dd}/${yyyy}`;
+      };
+
       const headers = [
         "Vehicle Number", "VIN", "Year", "Make", "Model", "Color",
         "Division", "District", "Region", "State", "City",
@@ -13464,7 +13476,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Source 1: Holman cache
           if (v.holmanOdometer && v.holmanOdometerDate) {
-            candidates.push({ miles: Number(v.holmanOdometer), date: String(v.holmanOdometerDate), source: "Holman Cache" });
+            candidates.push({ miles: Number(v.holmanOdometer), date: String(v.holmanOdometerDate), source: "Holman Vehicle Info" });
           }
           // Source 2: Samsara (by VIN)
           if (vinKey && odoByVin.has(vinKey)) candidates.push(...odoByVin.get(vinKey)!);
@@ -13481,7 +13493,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             v.holmanTechEnterpriseId, v.holmanTechName,
             v.tpmsEnterpriseId, v.tpmsTechId, v.tpmsFirstName, v.tpmsLastName,
             v.tpmsDistrict, v.tpmsContact, v.tpmsEmail,
-            best?.miles != null ? Math.round(best.miles * 10) / 10 : "", best?.date ?? "", best?.source ?? "", notes,
+            best?.miles != null ? Math.round(best.miles * 10) / 10 : "", formatDate(best?.date), best?.source ?? "", notes,
           ].map(escapeCell).join(",");
         }),
       ];
