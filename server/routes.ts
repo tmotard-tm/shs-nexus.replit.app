@@ -13270,8 +13270,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fleet-vehicles/export.csv", requireAuth, async (req: any, res) => {
     try {
+      // DISTINCT ON ensures one row per vehicle even if TPMS has multiple records (keyed by enterprise_id AND truck_number)
       const vehicleRows = await db.execute(sql`
-        SELECT
+        SELECT DISTINCT ON (hvc.holman_vehicle_number)
           hvc.holman_vehicle_number AS "vehicleNumber",
           hvc.vin AS "vin",
           hvc.model_year AS "year",
@@ -13298,17 +13299,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         LEFT JOIN tpms_cached_assignments t
           ON LTRIM(t.truck_no, '0') = LTRIM(hvc.holman_vehicle_number, '0')
         WHERE hvc.out_of_service_date IS NULL
-        ORDER BY hvc.holman_vehicle_number
+        ORDER BY hvc.holman_vehicle_number, t.last_success_at DESC NULLS LAST
       `);
 
       const vehicles = vehicleRows.rows as any[];
+      console.log(`[Fleet CSV] Queried ${vehicles.length} active vehicles from Holman cache`);
 
       let odometerByVin = new Map<string, { miles: number | null; date: string | null }>();
       try {
         const samsaraService = getSamsaraService();
         if (samsaraService.isSnowflakeAvailable()) {
-          const odometerData = await samsaraService.getOdometer();
-          for (const row of odometerData) {
+          const { getSnowflakeService } = await import("./snowflake-service");
+          const snowflake = getSnowflakeService();
+          await snowflake.connect();
+          // Partition by VIN (not VEHICLE_ID) so we can join to Holman by VIN
+          const odoRows = await snowflake.executeQuery(`
+            SELECT VIN, OBD_MILES, OBD_TIME
+            FROM (
+              SELECT VIN, OBD_MILES, OBD_TIME,
+                     ROW_NUMBER() OVER (PARTITION BY VIN ORDER BY OBD_TIME DESC) AS rn
+              FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
+              WHERE VIN IS NOT NULL AND VIN != ''
+            ) WHERE rn = 1
+          `, []) as Array<{ VIN: string; OBD_MILES: number | null; OBD_TIME: string | null }>;
+          for (const row of odoRows) {
             if (row.VIN) {
               odometerByVin.set(row.VIN.toUpperCase().trim(), {
                 miles: row.OBD_MILES,
@@ -13316,7 +13330,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               });
             }
           }
-          console.log(`[Fleet CSV] Loaded Samsara odometer for ${odometerByVin.size} vehicles from Snowflake`);
+          console.log(`[Fleet CSV] Loaded Samsara odometer for ${odometerByVin.size} VINs from Snowflake`);
         } else {
           console.warn("[Fleet CSV] Snowflake not configured, skipping Samsara odometer");
         }
