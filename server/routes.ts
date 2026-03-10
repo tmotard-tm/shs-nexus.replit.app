@@ -13283,20 +13283,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PO flags per vehicle — open rental and maintenance PO counts
   app.get("/api/fleet-vehicles/po-flags", requireAuth, async (req: any, res) => {
     try {
+      // "Open" statuses in Holman are APPROVED, HOLD, BILL HOLD (not literally 'OPEN')
+      // Rental POs are identified by description containing 'RENTAL'
+      // All other open POs are considered maintenance/service
       const rows = await db.execute(sql`
-        SELECT vehicle_number, po_type, COUNT(*) AS cnt
+        SELECT
+          vehicle_number,
+          CASE WHEN UPPER(description) LIKE '%RENTAL%' THEN 'rental' ELSE 'maintenance' END AS derived_type,
+          COUNT(*) AS cnt
         FROM holman_po_cache
-        WHERE UPPER(po_status) = 'OPEN'
-          AND po_type IN ('rental', 'maintenance')
-        GROUP BY vehicle_number, po_type
+        WHERE UPPER(po_status) IN ('APPROVED', 'HOLD', 'BILL HOLD')
+        GROUP BY vehicle_number, derived_type
       `);
       const flags: Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }> = {};
-      for (const row of rows.rows as Array<{ vehicle_number: string; po_type: string; cnt: string | number }>) {
+      for (const row of rows.rows as Array<{ vehicle_number: string; derived_type: string; cnt: string | number }>) {
         const vn = row.vehicle_number;
+        if (!vn) continue;
         if (!flags[vn]) flags[vn] = { hasOpenRental: false, openRentalCount: 0, hasOpenMaintenance: false, openMaintenanceCount: 0 };
         const cnt = Number(row.cnt);
-        if (row.po_type === 'rental') { flags[vn].hasOpenRental = true; flags[vn].openRentalCount = cnt; }
-        if (row.po_type === 'maintenance') { flags[vn].hasOpenMaintenance = true; flags[vn].openMaintenanceCount = cnt; }
+        if (row.derived_type === 'rental') { flags[vn].hasOpenRental = true; flags[vn].openRentalCount = cnt; }
+        if (row.derived_type === 'maintenance') { flags[vn].hasOpenMaintenance = true; flags[vn].openMaintenanceCount = cnt; }
       }
       res.json(flags);
     } catch (err: any) {

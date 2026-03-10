@@ -244,7 +244,7 @@ export default function FleetManagement() {
   });
 
   // ─── Cross-System Fleet Operations State ───────────────────────────────────
-  type FleetModal = "assign" | "unassign" | "transfer" | "address" | "poHistory" | "amsComments" | null;
+  type FleetModal = "assign" | "unassign" | "address" | "poHistory" | "amsComments" | null;
   const [activeModal, setActiveModal] = useState<FleetModal>(null);
 
   // Assign form
@@ -253,9 +253,6 @@ export default function FleetManagement() {
   const [assignDistrict, setAssignDistrict] = useState("");
   const [assignNotes, setAssignNotes] = useState("");
 
-  // Transfer form
-  const [transferToLdap, setTransferToLdap] = useState("");
-  const [transferToName, setTransferToName] = useState("");
 
   // Unassign form
   const [unassignNotes, setUnassignNotes] = useState("");
@@ -283,8 +280,16 @@ export default function FleetManagement() {
   });
   type PoFlag = { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number };
   const poFlagsMap = useMemo(() => {
-    if (!poFlagsData) return new Map<string, PoFlag>();
-    return new Map<string, PoFlag>(Object.entries(poFlagsData));
+    const m = new Map<string, PoFlag>();
+    if (!poFlagsData) return m;
+    for (const [rawKey, val] of Object.entries(poFlagsData)) {
+      m.set(rawKey, val as PoFlag);
+      const stripped = rawKey.replace(/^0+/, '') || rawKey;
+      if (stripped !== rawKey) m.set(stripped, val as PoFlag);
+      const padded = rawKey.padStart(5, '0');
+      if (padded !== rawKey) m.set(padded, val as PoFlag);
+    }
+    return m;
   }, [poFlagsData]);
 
   // POs for selected vehicle
@@ -404,14 +409,9 @@ export default function FleetManagement() {
 
   function openModal(m: FleetModal) {
     setOpResult(null);
-    // Pre-populate district from selected vehicle when opening assign/transfer
-    if (m === "assign" || m === "transfer") {
+    // Pre-populate district from selected vehicle when opening assign
+    if (m === "assign") {
       setAssignDistrict(selectedVehicle?.district || "");
-    }
-    // Pre-populate from tech when opening transfer
-    if (m === "transfer") {
-      setTransferToLdap("");
-      setTransferToName("");
     }
     // Pre-populate address from vehicle location
     if (m === "address") {
@@ -1357,7 +1357,7 @@ export default function FleetManagement() {
                             <div className="flex items-center gap-1 text-xs text-muted-foreground pt-1 border-t">
                               <Gauge className="h-3 w-3 shrink-0" />
                               <span>{vehicle.odometer.toLocaleString()} mi</span>
-                              {vehicle.odometerDate && <span>· {vehicle.odometerDate}</span>}
+                              {vehicle.odometerDate && <span>· {vehicle.odometerDate.slice(0, 10)}</span>}
                               {vehicle.odometerSource && <span>· {vehicle.odometerSource}</span>}
                             </div>
                           ) : null}
@@ -1502,9 +1502,9 @@ export default function FleetManagement() {
 
                 <Separator />
 
-                {/* Cross-System Operations — moved here so it's immediately visible */}
+                {/* Operations */}
                 <div className="space-y-3">
-                  <h4 className="font-medium text-sm text-muted-foreground">Cross-System Operations</h4>
+                  <h4 className="font-medium text-sm text-muted-foreground">Operations</h4>
                   <div className="grid grid-cols-2 gap-2">
                     <Button size="sm" className="w-full" onClick={() => openModal("assign")} data-testid="button-fleet-assign">
                       <UserPlus className="h-4 w-4 mr-1.5" />Assign Tech
@@ -1512,18 +1512,36 @@ export default function FleetManagement() {
                     <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("unassign")} disabled={!selectedVehicle.tpmsAssignedTechId && !selectedVehicle.holmanTechAssigned} data-testid="button-fleet-unassign">
                       <UserX className="h-4 w-4 mr-1.5" />Unassign Tech
                     </Button>
-                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("transfer")} data-testid="button-fleet-transfer">
-                      <ArrowLeftRight className="h-4 w-4 mr-1.5" />Transfer Tech
-                    </Button>
                     <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("address")} data-testid="button-fleet-address">
                       <Home className="h-4 w-4 mr-1.5" />Update Address
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => syncToHolmanMutation.mutate({ vehicleNumber: selectedVehicle.vehicleNumber, enterpriseId: selectedVehicle.tpmsAssignedTechId })}
+                      disabled={syncToHolmanMutation.isPending}
+                      data-testid="button-sync-holman"
+                    >
+                      {syncToHolmanMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1.5" />}
+                      Sync to Holman
+                    </Button>
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("poHistory")} data-testid="button-po-history">
+                      <FileText className="h-4 w-4 mr-1.5" />
+                      PO History{vehiclePOs && vehiclePOs.length > 0 ? ` (${vehiclePOs.length})` : ""}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => setShowHistoryDialog(true)}
+                      disabled={!selectedVehicle.tpmsAssignedTechId}
+                      data-testid="button-view-history"
+                    >
+                      <History className="h-4 w-4 mr-1.5" />History
+                    </Button>
                   </div>
-                  {/* PO History button */}
-                  <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("poHistory")} data-testid="button-po-history">
-                    <FileText className="h-4 w-4 mr-1.5" />
-                    PO History {vehiclePOs && vehiclePOs.length > 0 ? `(${vehiclePOs.length})` : posLoading ? "" : ""}
-                  </Button>
+                  <ViewInventoryButton vehicleNumber={selectedVehicle.vehicleNumber} className="w-full" size="sm" />
                 </div>
 
                 <Separator />
@@ -1712,71 +1730,6 @@ export default function FleetManagement() {
                   )}
                 </div>
 
-                <Separator />
-
-                {/* Actions */}
-                <div className="space-y-3">
-                  <h4 className="font-medium text-sm text-muted-foreground">Actions</h4>
-                  
-                  <div className="grid grid-cols-2 gap-2">
-                    {/* Sync to Holman */}
-                    <Button 
-                      onClick={() => syncToHolmanMutation.mutate({ 
-                        vehicleNumber: selectedVehicle.vehicleNumber, 
-                        enterpriseId: selectedVehicle.tpmsAssignedTechId 
-                      })}
-                      disabled={syncToHolmanMutation.isPending}
-                      className="w-full"
-                      data-testid="button-sync-holman"
-                    >
-                      {syncToHolmanMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                      )}
-                      Sync to Holman
-                    </Button>
-
-                    {/* Unassign from Holman */}
-                    <Button 
-                      variant="outline"
-                      onClick={() => {
-                        if (window.confirm(`Are you sure you want to unassign vehicle ${selectedVehicle.vehicleNumber} in Holman?`)) {
-                          syncToHolmanMutation.mutate({ 
-                            vehicleNumber: selectedVehicle.vehicleNumber, 
-                            enterpriseId: null 
-                          });
-                        }
-                      }}
-                      disabled={syncToHolmanMutation.isPending || !selectedVehicle.holmanTechAssigned}
-                      className="w-full"
-                      data-testid="button-unassign-holman"
-                    >
-                      <UserX className="h-4 w-4 mr-2" />
-                      Unassign
-                    </Button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    {/* View Inventory */}
-                    <ViewInventoryButton 
-                      vehicleNumber={selectedVehicle.vehicleNumber} 
-                      className="w-full"
-                    />
-
-                    {/* View History */}
-                    <Button 
-                      variant="outline"
-                      onClick={() => setShowHistoryDialog(true)}
-                      disabled={!selectedVehicle.tpmsAssignedTechId}
-                      className="w-full"
-                      data-testid="button-view-history"
-                    >
-                      <History className="h-4 w-4 mr-2" />
-                      History
-                    </Button>
-                  </div>
-                </div>
               </div>
             </>
           )}
@@ -1893,76 +1846,6 @@ export default function FleetManagement() {
                 >
                   {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <UserX className="h-4 w-4 mr-1.5" />}
                   Unassign from All Systems
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Transfer Tech Modal */}
-      <Dialog open={activeModal === "transfer"} onOpenChange={(o) => { if (!o) { setActiveModal(null); setOpResult(null); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><ArrowLeftRight className="h-4 w-4" />Transfer Tech — Vehicle #{selectedVehicle?.vehicleNumber}</DialogTitle>
-            <DialogDescription>Unassigns current tech and assigns new tech across all systems.</DialogDescription>
-          </DialogHeader>
-          {opResult ? (
-            <div className="space-y-3">
-              <p className="text-sm font-medium">Operation Complete</p>
-              {["tpms", "holman", "ams"].map(sys => (
-                <div key={sys} className="flex items-center justify-between">
-                  <span className="text-sm uppercase font-mono">{sys}</span>
-                  <div className="flex items-center gap-2">
-                    <SystemStatusBadge status={opResult?.[sys]?.status || opResult[`${sys}Status`] || opResult?.data?.[`${sys}Status`]} />
-                    {(opResult?.[sys]?.message || opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]) && (
-                      <span className="text-xs text-muted-foreground">{opResult?.[sys]?.message || opResult[`${sys}Message`] || opResult?.data?.[`${sys}Message`]}</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-              <DialogFooter>
-                <Button variant="outline" onClick={() => { setActiveModal(null); setOpResult(null); }}>Close</Button>
-              </DialogFooter>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="p-3 bg-muted/50 rounded text-sm">
-                <span className="text-muted-foreground">From: </span>
-                <span className="font-mono">{selectedVehicle?.tpmsAssignedTechId || selectedVehicle?.holmanTechAssigned || "Unassigned"}</span>
-                {selectedVehicle?.tpmsAssignedTechName && <span className="ml-2 text-muted-foreground">({selectedVehicle.tpmsAssignedTechName})</span>}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs">New Tech LDAP ID *</Label>
-                  <Input className="mt-1" value={transferToLdap} onChange={e => setTransferToLdap(e.target.value)} placeholder="e.g. JDOE01" />
-                </div>
-                <div>
-                  <Label className="text-xs">District #</Label>
-                  <Input className="mt-1" value={assignDistrict} onChange={e => setAssignDistrict(e.target.value)} placeholder="e.g. 123" />
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs">New Tech Name (for log)</Label>
-                <Input className="mt-1" value={transferToName} onChange={e => setTransferToName(e.target.value)} placeholder="First Last" />
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setActiveModal(null)}>Cancel</Button>
-                <Button
-                  disabled={!transferToLdap || fleetOpMutation.isPending}
-                  onClick={() => fleetOpMutation.mutate({
-                    endpoint: "/api/fleet-ops/transfer",
-                    body: {
-                      truckNumber: selectedVehicle?.vehicleNumber,
-                      fromLdap: selectedVehicle?.tpmsAssignedTechId || selectedVehicle?.holmanTechAssigned,
-                      toLdap: transferToLdap,
-                      districtNo: assignDistrict,
-                      newTechName: transferToName,
-                    },
-                  })}
-                >
-                  {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <ArrowLeftRight className="h-4 w-4 mr-1.5" />}
-                  Transfer Tech
                 </Button>
               </DialogFooter>
             </div>
