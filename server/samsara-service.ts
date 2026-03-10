@@ -41,7 +41,6 @@ export interface SamsaraSafetyScore {
 }
 
 export interface SamsaraOdometer {
-  VEHICLE_ID: string;
   VIN: string | null;
   OBD_MILES: number | null;
   GPS_MILES: number | null;

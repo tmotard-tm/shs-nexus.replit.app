@@ -13312,20 +13312,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const { getSnowflakeService } = await import("./snowflake-service");
           const snowflake = getSnowflakeService();
           await snowflake.connect();
-          // Use QUALIFY (Snowflake-native) to get latest odometer per vehicle, then join by VIN.
+          // Use QUALIFY (Snowflake-native) to get latest odometer per vehicle.
+          // Partition by VIN (the vehicle identifier in this table).
           // Coalesce OBD_MILES/OBD_TIME (preferred, direct OBD reader) with GPS_MILES/GPS_TIME (fallback).
           const odoRows = await snowflake.executeQuery(`
             SELECT
-              VEHICLE_ID,
               VIN,
               COALESCE(OBD_MILES, GPS_MILES) AS ODOMETER_MILES,
               COALESCE(OBD_TIME, GPS_TIME)   AS ODOMETER_DATE
             FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
+            WHERE VIN IS NOT NULL
             QUALIFY ROW_NUMBER() OVER (
-              PARTITION BY VEHICLE_ID
+              PARTITION BY VIN
               ORDER BY COALESCE(OBD_TIME, GPS_TIME) DESC NULLS LAST
             ) = 1
-          `, []) as Array<{ VEHICLE_ID: string; VIN: string | null; ODOMETER_MILES: number | null; ODOMETER_DATE: string | null }>;
+          `, []) as Array<{ VIN: string; ODOMETER_MILES: number | null; ODOMETER_DATE: string | null }>;
           for (const row of odoRows) {
             if (row.VIN) {
               odometerByVin.set(row.VIN.toUpperCase().trim(), {
