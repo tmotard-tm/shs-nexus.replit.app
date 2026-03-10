@@ -112,6 +112,10 @@ export default function FleetManagement() {
   const [holmanTechFilter, setHolmanTechFilter] = useState("all");
   const [tpmsTechFilter, setTpmsTechFilter] = useState("all");
   const [mismatchFilter, setMismatchFilter] = useState("all");
+
+  // PO & Rental flags filters
+  const [filterOpenPos, setFilterOpenPos] = useState(false);
+  const [filterOpenRental, setFilterOpenRental] = useState(false);
   
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [showOos, setShowOos] = useState(false);
@@ -480,7 +484,7 @@ export default function FleetManagement() {
     assignmentStatusFilter,
     stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
     holmanTechFilter, tpmsTechFilter, mismatchFilter
-  ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0);
+  ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0) + (filterOpenPos ? 1 : 0) + (filterOpenRental ? 1 : 0);
 
   // OOS pre-filter — exclude out-of-service vehicles unless toggle is on
   const activeVehicles = useMemo(() =>
@@ -554,18 +558,26 @@ export default function FleetManagement() {
       const matchesMismatch = mismatchFilter === "all" || 
         (mismatchFilter === "mismatch" && hasMismatch) ||
         (mismatchFilter === "match" && !hasMismatch);
+
+      // PO & Rental flags filters
+      const vn = vehicle.vehicleNumber || '';
+      const vnStripped = vn.replace(/^0+/, '');
+      const matchesOpenPos = !filterOpenPos || (poFlagsMap.get(vn) ?? poFlagsMap.get(vnStripped) ?? 0) > 0;
+      const matchesOpenRental = !filterOpenRental || rentalFlagsSet.has(vn) || rentalFlagsSet.has(vnStripped);
       
       return matchesSearch && matchesMake && matchesModel && matchesYear && matchesColor &&
              matchesProgram && matchesBranding && matchesInterior && matchesTuneStatus &&
              matchesAssignment &&
              matchesState && matchesCity && matchesLicenseState && matchesRegion && matchesDivision && matchesDistrict &&
-             matchesHolmanTech && matchesTpmsTech && matchesMismatch;
+             matchesHolmanTech && matchesTpmsTech && matchesMismatch &&
+             matchesOpenPos && matchesOpenRental;
     });
   }, [activeVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
       vehicleProgramFilter, brandingFilter, interiorFilter, tuneStatusFilter,
       assignmentStatusFilter,
       stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
-      holmanTechFilter, tpmsTechFilter, mismatchFilter]);
+      holmanTechFilter, tpmsTechFilter, mismatchFilter,
+      filterOpenPos, filterOpenRental, poFlagsMap, rentalFlagsSet]);
 
   // Sort by zip distance if target provided
   const sortedVehicles = useMemo(() => {
@@ -628,6 +640,8 @@ export default function FleetManagement() {
     setHolmanTechFilter("all");
     setTpmsTechFilter("all");
     setMismatchFilter("all");
+    setFilterOpenPos(false);
+    setFilterOpenRental(false);
   };
 
   const getAssignmentStatus = (vehicle: FleetVehicle) => {
@@ -1174,6 +1188,27 @@ export default function FleetManagement() {
                             </SelectContent>
                           </Select>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* PO & Rental Filters */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">PO &amp; Rental</h4>
+                      <div className="flex flex-wrap gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <Switch checked={filterOpenPos} onCheckedChange={setFilterOpenPos} />
+                          <span className="text-sm">Has Open POs</span>
+                          {filterOpenPos && (
+                            <Badge className="bg-amber-500 text-white text-xs border-none">active</Badge>
+                          )}
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <Switch checked={filterOpenRental} onCheckedChange={setFilterOpenRental} />
+                          <span className="text-sm">Has Open Rental</span>
+                          {filterOpenRental && (
+                            <Badge className="bg-red-600 text-white text-xs border-none">active</Badge>
+                          )}
+                        </label>
                       </div>
                     </div>
                     
