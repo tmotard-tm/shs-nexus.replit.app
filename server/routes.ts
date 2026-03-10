@@ -13280,33 +13280,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // PO flags per vehicle — open rental and maintenance PO counts
-  app.get("/api/fleet-vehicles/po-flags", requireAuth, async (req: any, res) => {
+  // Open PO counts per vehicle — APPROVED / HOLD / BILL HOLD statuses from holman_po_cache
+  app.get("/api/fleet-vehicles/po-flags", requireAuth, async (_req: any, res) => {
     try {
-      // "Open" statuses in Holman are APPROVED, HOLD, BILL HOLD (not literally 'OPEN')
-      // Rental POs are identified by description containing 'RENTAL'
-      // All other open POs are considered maintenance/service
       const rows = await db.execute(sql`
-        SELECT
-          vehicle_number,
-          CASE WHEN UPPER(description) LIKE '%RENTAL%' THEN 'rental' ELSE 'maintenance' END AS derived_type,
-          COUNT(*) AS cnt
+        SELECT vehicle_number, COUNT(*) AS cnt
         FROM holman_po_cache
         WHERE UPPER(po_status) IN ('APPROVED', 'HOLD', 'BILL HOLD')
-        GROUP BY vehicle_number, derived_type
+        GROUP BY vehicle_number
       `);
-      const flags: Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }> = {};
-      for (const row of rows.rows as Array<{ vehicle_number: string; derived_type: string; cnt: string | number }>) {
+      const flags: Record<string, { openPoCount: number }> = {};
+      for (const row of rows.rows as Array<{ vehicle_number: string; cnt: string | number }>) {
         const vn = row.vehicle_number;
         if (!vn) continue;
-        if (!flags[vn]) flags[vn] = { hasOpenRental: false, openRentalCount: 0, hasOpenMaintenance: false, openMaintenanceCount: 0 };
-        const cnt = Number(row.cnt);
-        if (row.derived_type === 'rental') { flags[vn].hasOpenRental = true; flags[vn].openRentalCount = cnt; }
-        if (row.derived_type === 'maintenance') { flags[vn].hasOpenMaintenance = true; flags[vn].openMaintenanceCount = cnt; }
+        flags[vn] = { openPoCount: Number(row.cnt) };
       }
       res.json(flags);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Open rental flags per vehicle — sourced from Snowflake rental ops tables (same as Rental Operations page)
+  app.get("/api/fleet-vehicles/rental-flags", requireAuth, async (_req: any, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.json({});
+      const sf = getSnowflakeService();
+      await sf.connect();
+
+      const normVeh = (v: string) => {
+        if (!v) return "";
+        const s = String(v).trim().replace(/^0+/, "") || "0";
+        return s.padStart(5, "0");
+      };
+
+      // Run both rental sources in parallel — same tables as Rental Operations page
+      const [ticketRows, holmanRows] = await Promise.allSettled([
+        sf.executeQuery(`SELECT DISTINCT VEHICLE_NUMBER FROM ${RENTAL_TICKET_TABLE} WHERE FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${RENTAL_TICKET_TABLE}) AND TICKET_STATUS='OPEN'`) as Promise<any[]>,
+        sf.executeQuery(`SELECT DISTINCT VEHICLE_NUMBER FROM ${RENTAL_OPEN_TABLE} WHERE FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${RENTAL_OPEN_TABLE})`) as Promise<any[]>,
+      ]);
+
+      const rentalVehicles: Record<string, { source: string }> = {};
+
+      if (ticketRows.status === "fulfilled") {
+        for (const r of ticketRows.value) {
+          const vn = normVeh(r.VEHICLE_NUMBER || "");
+          if (vn) rentalVehicles[vn] = { source: "enterprise" };
+        }
+      }
+      if (holmanRows.status === "fulfilled") {
+        for (const r of holmanRows.value) {
+          const vn = normVeh(r.VEHICLE_NUMBER || "");
+          if (vn && !rentalVehicles[vn]) rentalVehicles[vn] = { source: "holman" };
+        }
+      }
+
+      res.json(rentalVehicles);
+    } catch (err: any) {
+      // Graceful degradation — Snowflake failure should not break the page
+      console.warn("[rental-flags] Snowflake query failed:", err.message);
+      res.json({});
     }
   });
 

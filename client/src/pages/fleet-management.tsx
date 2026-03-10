@@ -272,25 +272,43 @@ export default function FleetManagement() {
   // Operation result (per-system status returned from fleet-ops endpoint)
   const [opResult, setOpResult] = useState<any>(null);
 
-  // PO flags (open rental / maintenance counts per vehicle) — loaded once
-  const { data: poFlagsData } = useQuery<Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }>>({
+  // Open PO counts per vehicle (from holman_po_cache — APPROVED/HOLD/BILL HOLD)
+  const { data: poFlagsData } = useQuery<Record<string, { openPoCount: number }>>({
     queryKey: ['/api/fleet-vehicles/po-flags'],
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
-  type PoFlag = { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number };
   const poFlagsMap = useMemo(() => {
-    const m = new Map<string, PoFlag>();
+    const m = new Map<string, number>();
     if (!poFlagsData) return m;
-    for (const [rawKey, val] of Object.entries(poFlagsData)) {
-      m.set(rawKey, val as PoFlag);
-      const stripped = rawKey.replace(/^0+/, '') || rawKey;
-      if (stripped !== rawKey) m.set(stripped, val as PoFlag);
-      const padded = rawKey.padStart(5, '0');
-      if (padded !== rawKey) m.set(padded, val as PoFlag);
+    for (const [vn, val] of Object.entries(poFlagsData)) {
+      m.set(vn, val.openPoCount);
+      const stripped = vn.replace(/^0+/, '') || vn;
+      if (stripped !== vn) m.set(stripped, val.openPoCount);
+      const padded = vn.padStart(5, '0');
+      if (padded !== vn) m.set(padded, val.openPoCount);
     }
     return m;
   }, [poFlagsData]);
+
+  // Open rental flags per vehicle — sourced from Snowflake rental ops tables (same as Rental Operations page)
+  const { data: rentalFlagsData } = useQuery<Record<string, { source: string }>>({
+    queryKey: ['/api/fleet-vehicles/rental-flags'],
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  const rentalFlagsSet = useMemo(() => {
+    const s = new Set<string>();
+    if (!rentalFlagsData) return s;
+    for (const vn of Object.keys(rentalFlagsData)) {
+      s.add(vn);
+      const stripped = vn.replace(/^0+/, '') || vn;
+      if (stripped !== vn) s.add(stripped);
+      const padded = vn.padStart(5, '0');
+      if (padded !== vn) s.add(padded);
+    }
+    return s;
+  }, [rentalFlagsData]);
 
   // POs for selected vehicle
   const { data: vehiclePOs, isLoading: posLoading } = useQuery<any[]>({
@@ -1232,7 +1250,8 @@ export default function FleetManagement() {
                     const distanceScore = (vehicle as any).distanceScore;
                     const distanceInfo = distanceScore ? getDistanceLabel(distanceScore) : null;
                     const hasMismatch = assignStatus.status === 'mismatch';
-                    const poFlags = poFlagsMap.get(vehicle.vehicleNumber);
+                    const openPoCount = poFlagsMap.get(vehicle.vehicleNumber) ?? poFlagsMap.get(vehicle.vehicleNumber?.replace(/^0+/, '') || vehicle.vehicleNumber) ?? 0;
+                    const hasOpenRental = rentalFlagsSet.has(vehicle.vehicleNumber) || rentalFlagsSet.has((vehicle.vehicleNumber || '').replace(/^0+/, ''));
                     
                     return (
                       <Card 
@@ -1271,11 +1290,11 @@ export default function FleetManagement() {
                               <Badge variant="outline" className="text-xs">
                                 {ownership.type}
                               </Badge>
-                              {poFlags?.hasOpenRental && (
-                                <Badge className="bg-red-600 text-white text-xs border-none">RENTAL ({poFlags.openRentalCount})</Badge>
+                              {hasOpenRental && (
+                                <Badge className="bg-red-600 text-white text-xs border-none">RENTAL</Badge>
                               )}
-                              {poFlags?.hasOpenMaintenance && (
-                                <Badge className="bg-amber-500 text-white text-xs border-none">MAINT ({poFlags.openMaintenanceCount})</Badge>
+                              {openPoCount > 0 && (
+                                <Badge className="bg-amber-500 text-white text-xs border-none">OPEN PO ({openPoCount})</Badge>
                               )}
                             </div>
                           </div>
