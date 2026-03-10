@@ -13481,7 +13481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             v.holmanTechEnterpriseId, v.holmanTechName,
             v.tpmsEnterpriseId, v.tpmsTechId, v.tpmsFirstName, v.tpmsLastName,
             v.tpmsDistrict, v.tpmsContact, v.tpmsEmail,
-            best?.miles ?? "", best?.date ?? "", best?.source ?? "", notes,
+            best?.miles != null ? Math.round(best.miles * 10) / 10 : "", best?.date ?? "", best?.source ?? "", notes,
           ].map(escapeCell).join(",");
         }),
       ];
