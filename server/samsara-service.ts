@@ -46,6 +46,7 @@ export interface SamsaraOdometer {
   OBD_MILES: number | null;
   GPS_MILES: number | null;
   OBD_TIME: string | null;
+  GPS_TIME: string | null;
 }
 
 export interface SamsaraTrip {
