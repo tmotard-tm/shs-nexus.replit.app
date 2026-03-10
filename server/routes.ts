@@ -7149,7 +7149,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Vehicles endpoints
   app.get("/api/holman/vehicles", requireAuth, async (req: any, res) => {
     try {
-      const { lesseeCode, statusCodes, soldDateCode, pageNumber, pageSize } = req.query;
+      const { lesseeCode, statusCodes, soldDateCode, pageNumber, pageSize, vehicleNumber } = req.query;
+
+      // When a vehicle number filter is provided, use the custom-query endpoint
+      // which supports filtering by holmanVehicleNumber
+      if (vehicleNumber && String(vehicleNumber).trim()) {
+        const vn = String(vehicleNumber).trim();
+        const result = await holmanApiService.queryVehiclesCustom({
+          lesseeCode: (lesseeCode as string) || "2B56",
+          filters: { holmanVehicleNumber: vn },
+          pageNumber: pageNumber ? parseInt(pageNumber as string) : 1,
+          pageSize: pageSize ? parseInt(pageSize as string) : 100,
+        });
+        return res.json(result);
+      }
+
       const result = await holmanApiService.getVehicles(
         lesseeCode,
         statusCodes,
@@ -7160,7 +7174,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(result);
     } catch (error: any) {
       console.error("Error fetching Holman vehicles:", error);
-      // Try to extract the actual API error message if available
       const errorMessage = error.message || "Failed to fetch vehicles from Holman API";
       res.status(500).json({ message: errorMessage });
     }
