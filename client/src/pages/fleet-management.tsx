@@ -112,10 +112,6 @@ export default function FleetManagement() {
   const [holmanTechFilter, setHolmanTechFilter] = useState("all");
   const [tpmsTechFilter, setTpmsTechFilter] = useState("all");
   const [mismatchFilter, setMismatchFilter] = useState("all");
-
-  // PO & Rental flags filters
-  const [filterOpenPos, setFilterOpenPos] = useState(false);
-  const [filterOpenRental, setFilterOpenRental] = useState(false);
   
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [showOos, setShowOos] = useState(false);
@@ -276,43 +272,25 @@ export default function FleetManagement() {
   // Operation result (per-system status returned from fleet-ops endpoint)
   const [opResult, setOpResult] = useState<any>(null);
 
-  // Open PO counts per vehicle (from holman_po_cache — APPROVED/HOLD/BILL HOLD)
-  const { data: poFlagsData } = useQuery<Record<string, { openPoCount: number }>>({
+  // PO flags (open rental / maintenance counts per vehicle) — loaded once
+  const { data: poFlagsData } = useQuery<Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }>>({
     queryKey: ['/api/fleet-vehicles/po-flags'],
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
+  type PoFlag = { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number };
   const poFlagsMap = useMemo(() => {
-    const m = new Map<string, number>();
+    const m = new Map<string, PoFlag>();
     if (!poFlagsData) return m;
-    for (const [vn, val] of Object.entries(poFlagsData)) {
-      m.set(vn, val.openPoCount);
-      const stripped = vn.replace(/^0+/, '') || vn;
-      if (stripped !== vn) m.set(stripped, val.openPoCount);
-      const padded = vn.padStart(5, '0');
-      if (padded !== vn) m.set(padded, val.openPoCount);
+    for (const [rawKey, val] of Object.entries(poFlagsData)) {
+      m.set(rawKey, val as PoFlag);
+      const stripped = rawKey.replace(/^0+/, '') || rawKey;
+      if (stripped !== rawKey) m.set(stripped, val as PoFlag);
+      const padded = rawKey.padStart(5, '0');
+      if (padded !== rawKey) m.set(padded, val as PoFlag);
     }
     return m;
   }, [poFlagsData]);
-
-  // Open rental flags per vehicle — sourced from Snowflake rental ops tables (same as Rental Operations page)
-  const { data: rentalFlagsData } = useQuery<Record<string, { source: string }>>({
-    queryKey: ['/api/fleet-vehicles/rental-flags'],
-    staleTime: 10 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-  const rentalFlagsSet = useMemo(() => {
-    const s = new Set<string>();
-    if (!rentalFlagsData) return s;
-    for (const vn of Object.keys(rentalFlagsData)) {
-      s.add(vn);
-      const stripped = vn.replace(/^0+/, '') || vn;
-      if (stripped !== vn) s.add(stripped);
-      const padded = vn.padStart(5, '0');
-      if (padded !== vn) s.add(padded);
-    }
-    return s;
-  }, [rentalFlagsData]);
 
   // POs for selected vehicle
   const { data: vehiclePOs, isLoading: posLoading } = useQuery<any[]>({
@@ -484,7 +462,7 @@ export default function FleetManagement() {
     assignmentStatusFilter,
     stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
     holmanTechFilter, tpmsTechFilter, mismatchFilter
-  ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0) + (filterOpenPos ? 1 : 0) + (filterOpenRental ? 1 : 0);
+  ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0);
 
   // OOS pre-filter — exclude out-of-service vehicles unless toggle is on
   const activeVehicles = useMemo(() =>
@@ -558,26 +536,18 @@ export default function FleetManagement() {
       const matchesMismatch = mismatchFilter === "all" || 
         (mismatchFilter === "mismatch" && hasMismatch) ||
         (mismatchFilter === "match" && !hasMismatch);
-
-      // PO & Rental flags filters
-      const vn = vehicle.vehicleNumber || '';
-      const vnStripped = vn.replace(/^0+/, '');
-      const matchesOpenPos = !filterOpenPos || (poFlagsMap.get(vn) ?? poFlagsMap.get(vnStripped) ?? 0) > 0;
-      const matchesOpenRental = !filterOpenRental || rentalFlagsSet.has(vn) || rentalFlagsSet.has(vnStripped);
       
       return matchesSearch && matchesMake && matchesModel && matchesYear && matchesColor &&
              matchesProgram && matchesBranding && matchesInterior && matchesTuneStatus &&
              matchesAssignment &&
              matchesState && matchesCity && matchesLicenseState && matchesRegion && matchesDivision && matchesDistrict &&
-             matchesHolmanTech && matchesTpmsTech && matchesMismatch &&
-             matchesOpenPos && matchesOpenRental;
+             matchesHolmanTech && matchesTpmsTech && matchesMismatch;
     });
   }, [activeVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
       vehicleProgramFilter, brandingFilter, interiorFilter, tuneStatusFilter,
       assignmentStatusFilter,
       stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
-      holmanTechFilter, tpmsTechFilter, mismatchFilter,
-      filterOpenPos, filterOpenRental, poFlagsMap, rentalFlagsSet]);
+      holmanTechFilter, tpmsTechFilter, mismatchFilter]);
 
   // Sort by zip distance if target provided
   const sortedVehicles = useMemo(() => {
@@ -640,8 +610,6 @@ export default function FleetManagement() {
     setHolmanTechFilter("all");
     setTpmsTechFilter("all");
     setMismatchFilter("all");
-    setFilterOpenPos(false);
-    setFilterOpenRental(false);
   };
 
   const getAssignmentStatus = (vehicle: FleetVehicle) => {
@@ -1190,27 +1158,6 @@ export default function FleetManagement() {
                         </div>
                       </div>
                     </div>
-
-                    {/* PO & Rental Filters */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">PO &amp; Rental</h4>
-                      <div className="flex flex-wrap gap-4">
-                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                          <Switch checked={filterOpenPos} onCheckedChange={setFilterOpenPos} />
-                          <span className="text-sm">Has Open POs</span>
-                          {filterOpenPos && (
-                            <Badge className="bg-amber-500 text-white text-xs border-none">active</Badge>
-                          )}
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                          <Switch checked={filterOpenRental} onCheckedChange={setFilterOpenRental} />
-                          <span className="text-sm">Has Open Rental</span>
-                          {filterOpenRental && (
-                            <Badge className="bg-red-600 text-white text-xs border-none">active</Badge>
-                          )}
-                        </label>
-                      </div>
-                    </div>
                     
                     {/* Filter Actions */}
                     <div className="flex justify-between items-center pt-2 border-t">
@@ -1285,8 +1232,7 @@ export default function FleetManagement() {
                     const distanceScore = (vehicle as any).distanceScore;
                     const distanceInfo = distanceScore ? getDistanceLabel(distanceScore) : null;
                     const hasMismatch = assignStatus.status === 'mismatch';
-                    const openPoCount = poFlagsMap.get(vehicle.vehicleNumber) ?? poFlagsMap.get(vehicle.vehicleNumber?.replace(/^0+/, '') || vehicle.vehicleNumber) ?? 0;
-                    const hasOpenRental = rentalFlagsSet.has(vehicle.vehicleNumber) || rentalFlagsSet.has((vehicle.vehicleNumber || '').replace(/^0+/, ''));
+                    const poFlags = poFlagsMap.get(vehicle.vehicleNumber);
                     
                     return (
                       <Card 
@@ -1325,11 +1271,11 @@ export default function FleetManagement() {
                               <Badge variant="outline" className="text-xs">
                                 {ownership.type}
                               </Badge>
-                              {hasOpenRental && (
-                                <Badge className="bg-red-600 text-white text-xs border-none">RENTAL</Badge>
+                              {poFlags?.hasOpenRental && (
+                                <Badge className="bg-red-600 text-white text-xs border-none">RENTAL ({poFlags.openRentalCount})</Badge>
                               )}
-                              {openPoCount > 0 && (
-                                <Badge className="bg-amber-500 text-white text-xs border-none">OPEN PO ({openPoCount})</Badge>
+                              {poFlags?.hasOpenMaintenance && (
+                                <Badge className="bg-amber-500 text-white text-xs border-none">MAINT ({poFlags.openMaintenanceCount})</Badge>
                               )}
                             </div>
                           </div>

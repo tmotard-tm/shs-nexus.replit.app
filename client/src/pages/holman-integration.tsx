@@ -82,7 +82,6 @@ export default function HolmanIntegration() {
     lesseeCodes: "2B56",
     statusCodes: "",
     soldDateCode: "5",
-    vehicleNumber: "",
     pageNumber: 1,
     pageSize: 1000
   });
@@ -134,9 +133,7 @@ export default function HolmanIntegration() {
       pageSize: vehiclesParams.pageSize.toString()
     };
     if (vehiclesParams.lesseeCodes) params.lesseeCode = vehiclesParams.lesseeCodes;
-    if (vehiclesParams.vehicleNumber.trim()) {
-      params.vehicleNumber = vehiclesParams.vehicleNumber.trim();
-    } else if (vehiclesParams.statusCodes) {
+    if (vehiclesParams.statusCodes) {
       // Trim and remove trailing commas
       const cleaned = vehiclesParams.statusCodes.trim().replace(/,+$/, '');
       if (cleaned) {
@@ -619,19 +616,6 @@ export default function HolmanIntegration() {
                       placeholder="e.g., 2B56"
                       data-testid="input-vehicles-lessee-codes"
                     />
-                  </div>
-                  <div>
-                    <Label htmlFor="vehicles-vehicle-number">Vehicle Number</Label>
-                    <Input
-                      id="vehicles-vehicle-number"
-                      value={vehiclesParams.vehicleNumber}
-                      onChange={(e) => setVehiclesParams({...vehiclesParams, vehicleNumber: e.target.value})}
-                      placeholder="e.g., 06008"
-                      data-testid="input-vehicles-vehicle-number"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Filter to a specific vehicle (overrides Status Codes)
-                    </p>
                   </div>
                   <div>
                     <Label htmlFor="vehicles-status-codes">Status Codes</Label>
