@@ -20,7 +20,7 @@ import {
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
-  UserPlus, ArrowLeftRight, FileText, Home, Activity
+  UserPlus, ArrowLeftRight, FileText, Home, Activity, Download
 } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
@@ -731,15 +731,32 @@ export default function FleetManagement() {
                       </CardDescription>
                     </div>
                   </div>
-                  <Button 
-                    onClick={() => refetch()}
-                    variant="outline"
-                    disabled={isFetching}
-                    data-testid="button-refresh"
-                  >
-                    <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
-                    Refresh
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={() => {
+                        const a = document.createElement("a");
+                        a.href = "/api/fleet-vehicles/export.csv";
+                        a.download = "";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                      }}
+                      variant="outline"
+                      data-testid="button-fleet-export-csv"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Export CSV
+                    </Button>
+                    <Button 
+                      onClick={() => refetch()}
+                      variant="outline"
+                      disabled={isFetching}
+                      data-testid="button-refresh"
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">

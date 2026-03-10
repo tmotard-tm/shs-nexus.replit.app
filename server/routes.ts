@@ -13268,6 +13268,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/fleet-vehicles/export.csv", requireAuth, async (req: any, res) => {
+    try {
+      const vehicleRows = await db.execute(sql`
+        SELECT
+          hvc.holman_vehicle_number AS "vehicleNumber",
+          hvc.vin AS "vin",
+          hvc.model_year AS "year",
+          hvc.make_name AS "make",
+          hvc.model_name AS "model",
+          hvc.color AS "color",
+          hvc.division AS "division",
+          hvc.district AS "district",
+          hvc.region AS "region",
+          hvc.state AS "state",
+          hvc.city AS "city",
+          hvc.license_plate AS "licensePlate",
+          hvc.license_state AS "licenseState",
+          hvc.holman_tech_assigned AS "holmanTechEnterpriseId",
+          hvc.holman_tech_name AS "holmanTechName",
+          t.enterprise_id AS "tpmsEnterpriseId",
+          t.tech_id AS "tpmsTechId",
+          TRIM(t.first_name) AS "tpmsFirstName",
+          TRIM(t.last_name) AS "tpmsLastName",
+          t.district_no AS "tpmsDistrict",
+          t.contact_no AS "tpmsContact",
+          t.email AS "tpmsEmail"
+        FROM holman_vehicles_cache hvc
+        LEFT JOIN tpms_cached_assignments t
+          ON LTRIM(t.truck_no, '0') = LTRIM(hvc.holman_vehicle_number, '0')
+        WHERE hvc.out_of_service_date IS NULL
+        ORDER BY hvc.holman_vehicle_number
+      `);
+
+      const vehicles = vehicleRows.rows as any[];
+
+      let odometerByVin = new Map<string, { miles: number | null; date: string | null }>();
+      try {
+        const samsaraService = getSamsaraService();
+        if (samsaraService.isSnowflakeAvailable()) {
+          const odometerData = await samsaraService.getOdometer();
+          for (const row of odometerData) {
+            if (row.VIN) {
+              odometerByVin.set(row.VIN.toUpperCase().trim(), {
+                miles: row.OBD_MILES,
+                date: row.OBD_TIME,
+              });
+            }
+          }
+          console.log(`[Fleet CSV] Loaded Samsara odometer for ${odometerByVin.size} vehicles from Snowflake`);
+        } else {
+          console.warn("[Fleet CSV] Snowflake not configured, skipping Samsara odometer");
+        }
+      } catch (snowflakeErr: any) {
+        console.warn("[Fleet CSV] Samsara Snowflake error, omitting odometer:", snowflakeErr?.message);
+      }
+
+      const escapeCell = (v: any): string => {
+        if (v === null || v === undefined) return "";
+        const s = String(v);
+        if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+          return `"${s.replace(/"/g, '""')}"`;
+        }
+        return s;
+      };
+
+      const headers = [
+        "Vehicle Number", "VIN", "Year", "Make", "Model", "Color",
+        "Division", "District", "Region", "State", "City",
+        "License Plate", "License State",
+        "Holman Tech Enterprise ID", "Holman Tech Name",
+        "TPMS Enterprise ID", "TPMS Tech ID", "TPMS First Name", "TPMS Last Name",
+        "TPMS District", "TPMS Contact", "TPMS Email",
+        "Samsara Odometer (Miles)", "Samsara Odometer Date",
+      ];
+
+      const csvLines = [
+        headers.join(","),
+        ...vehicles.map((v: any) => {
+          const odo = v.vin ? odometerByVin.get(String(v.vin).toUpperCase().trim()) : undefined;
+          return [
+            v.vehicleNumber, v.vin, v.year, v.make, v.model, v.color,
+            v.division, v.district, v.region, v.state, v.city,
+            v.licensePlate, v.licenseState,
+            v.holmanTechEnterpriseId, v.holmanTechName,
+            v.tpmsEnterpriseId, v.tpmsTechId, v.tpmsFirstName, v.tpmsLastName,
+            v.tpmsDistrict, v.tpmsContact, v.tpmsEmail,
+            odo?.miles ?? "", odo?.date ?? "",
+          ].map(escapeCell).join(",");
+        }),
+      ];
+
+      const timestamp = new Date().toISOString().split("T")[0];
+      const filename = `fleet_vehicles_${timestamp}.csv`;
+
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(csvLines.join("\n"));
+    } catch (error: any) {
+      console.error("[Fleet CSV] Export failed:", error);
+      res.status(500).json({ message: "Failed to generate fleet vehicles CSV" });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack
