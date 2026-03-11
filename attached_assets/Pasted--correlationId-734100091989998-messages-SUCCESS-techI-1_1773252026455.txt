@@ -1,0 +1,65 @@
+{
+    "correlationId": "734100091989998",
+    "messages": [
+        "SUCCESS"
+    ],
+    "techInfoList": [
+        {
+            "ldapId": "MSERNA1 ",
+            "firstName": "MARIO",
+            "lastName": "SERNA",
+            "techId": "0015917",
+            "districtNo": "0008220",
+            "techManagerLdapId": "RGERLAC ",
+            "truckNo": "023362 ",
+            "contactNo": "2489411968",
+            "email": "2489411968@tmomail.net",
+            "addresses": [
+                {
+                    "addressType": "DROP_RETURN",
+                    "shipToName": "Mario Serna",
+                    "addrLine1": "7368 Lobdell Road",
+                    "city": "Linden",
+                    "stateCd": "MI",
+                    "zipCd": "48451"
+                },
+                {
+                    "addressType": "RE_ASSORTMENT",
+                    "shipToName": "Mario Serna",
+                    "addrLine1": "7368 Lobdell Road",
+                    "city": "Linden",
+                    "stateCd": "MI",
+                    "zipCd": "48451"
+                },
+                {
+                    "addressType": "PRIMARY",
+                    "shipToName": "Mario Serna",
+                    "addrLine1": "7368 Lobdell Road",
+                    "city": "Linden",
+                    "stateCd": "MI",
+                    "zipCd": "48451"
+                },
+                {
+                    "addressType": "ALTERNATE",
+                    "shipToName": "Mario Serna",
+                    "addrLine1": "7368 Lobdell Road",
+                    "city": "Linden",
+                    "stateCd": "MI",
+                    "zipCd": "48451"
+                }
+            ],
+            "latestShippingHold": {
+                "beginDate": "2025-04-25",
+                "endDate": "2025-05-31",
+                "holdReason": "Other"
+            },
+            "techReplenishment": {
+                "primarySrc": "DirectTech",
+                "overridePrimarySrc": false
+            }
+        }
+    ],
+    "messagesAsSet": [
+        "SUCCESS"
+    ]
+}

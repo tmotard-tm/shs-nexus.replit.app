@@ -7,8 +7,8 @@ interface TPMSToken {
 }
 
 interface TechInfoResponse {
-  correlationId: string;
-  messages: string[];
+  correlationId?: string;
+  messages?: string[];
   ldapId: string;
   firstName: string;
   lastName: string;
@@ -21,6 +21,13 @@ interface TechInfoResponse {
   addresses?: TechAddress[];
   latestShippingHold?: ShippingHold;
   techReplenishment?: TechReplenishment;
+}
+
+interface TPMSApiResponse {
+  correlationId: string;
+  messages: string[];
+  messagesAsSet: string[];
+  techInfoList: TechInfoResponse[];
 }
 
 interface TechAddress {
@@ -180,11 +187,26 @@ class TPMSService {
       throw error;
     }
 
-    const data: TechInfoResponse = await response.json();
-    
-    if (data.messages && !data.messages.includes('SUCCESS')) {
-      throw new Error(`TPMS error: ${data.messages.join(', ')}`);
+    const raw: TPMSApiResponse = await response.json();
+
+    if (raw.messages && !raw.messages.includes('SUCCESS')) {
+      throw new Error(`TPMS error: ${raw.messages.join(', ')}`);
     }
+
+    const entry = raw.techInfoList?.[0];
+    if (!entry) {
+      throw new Error('TPMS returned no tech info entries');
+    }
+
+    // Trim trailing whitespace that TPMS includes in string fields
+    const data: TechInfoResponse = {
+      ...entry,
+      correlationId: raw.correlationId,
+      messages: raw.messages,
+      ldapId: entry.ldapId?.trim() ?? entry.ldapId,
+      truckNo: entry.truckNo?.trim() ?? entry.truckNo,
+      techManagerLdapId: entry.techManagerLdapId?.trim() ?? entry.techManagerLdapId,
+    };
 
     console.log(`[TPMS] Tech info retrieved successfully for ${cleanId}, Truck: ${data.truckNo || 'N/A'}`);
     return data;
