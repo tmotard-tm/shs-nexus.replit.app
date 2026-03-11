@@ -13,6 +13,7 @@ import rateLimit from "express-rate-limit";
 import DOMPurify from "isomorphic-dompurify";
 import bcrypt from "bcrypt";
 import { checkPasswordCompromised, validatePasswordRequirements } from "./password-screening";
+import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-number-utils";
 import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
@@ -8239,7 +8240,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/truck-inventory/summary/:truck", requireAuth, async (req: any, res) => {
     try {
       const { truck } = req.params;
-      const paddedTruck = truck.padStart(6, '0');
+      const paddedTruck = toHolmanRef(truck);
       console.log(`[Inventory] Looking up truck: ${truck} -> padded: ${paddedTruck}`);
       const inventory = await storage.getTruckInventory(paddedTruck);
       console.log(`[Inventory] Found ${inventory.length} items for truck ${paddedTruck}`);
@@ -10043,7 +10044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const truckNumbers = cachedVehicles
-        .map((v) => v.holmanVehicleNumber?.padStart(6, '0'))
+        .map((v) => toHolmanRef(v.holmanVehicleNumber))
         .filter(Boolean) as string[];
 
       console.log(`[Fleet-Sync] Starting initial sync for ${truckNumbers.length} vehicles`);
@@ -11207,7 +11208,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const apiKey = process.env.X_API_Key;
         if (apiKey) {
-          const cleanVehicleNumber = vehicleNumber.replace(/^0+/, '');
+          const cleanVehicleNumber = toCanonical(vehicleNumber);
           const keysMap: Record<string, string> = {
             'present': 'Present',
             'not_present': 'Not Present',
@@ -12182,7 +12183,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             isNotNull(holmanVehiclesCache.outOfServiceDate)
           )
         );
-      return new Set(rows.map(r => String(r.num || "").trim().padStart(5, "0")));
+      return new Set(rows.map(r => toDisplayNumber(r.num)));
     } catch {
       return new Set(); // graceful degradation if DB unavailable
     }
@@ -12211,11 +12212,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       //   Segment 2: Holman open, vendor NOT Enterprise/Toll, NOT in Enterprise ticket table
       const showRaw = req.query?.view === "raw";
 
-      // Strip leading zeros before padding so "088039" and "88039" normalize to the same key "88039".
       const normVeh = (v: string) => {
         if (!v) return "";
-        const s = String(v).trim().replace(/^0+/, "") || "0";
-        return s.padStart(5, "0");
+        return toDisplayNumber(v);
       };
 
       if (showRaw) {
@@ -12361,7 +12360,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const oosVehicles = await getOosVehicleSet();
         if (oosVehicles.size > 0) {
           const before = allData.length;
-          allData = allData.filter(v => !oosVehicles.has(String(v.vehicleNumberPadded || v.vehicleNumber || "").trim().padStart(5, "0")));
+          allData = allData.filter(v => !oosVehicles.has(toDisplayNumber(v.vehicleNumberPadded || v.vehicleNumber || "")));
           oosCount = before - allData.length;
         }
       }
@@ -12419,7 +12418,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const oosVehicles = await getOosVehicleSet();
         if (oosVehicles.size > 0) {
           const before = data.length;
-          data = data.filter((v: any) => !oosVehicles.has(String(v.vehicleNumber || "").trim().padStart(5, "0")));
+          data = data.filter((v: any) => !oosVehicles.has(toDisplayNumber(v.vehicleNumber)));
           oosCount = before - data.length;
         }
       }
@@ -12479,7 +12478,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const oosVehicles = await getOosVehicleSet();
         if (oosVehicles.size > 0) {
           const before = data.length;
-          data = data.filter((v: any) => !oosVehicles.has(String(v.vehicleNumber || "").trim().padStart(5, "0")));
+          data = data.filter((v: any) => !oosVehicles.has(toDisplayNumber(v.vehicleNumber)));
           oosCount = before - data.length;
         }
       }
@@ -12497,8 +12496,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await sf.connect();
       const normV = (v: string) => {
         if (!v) return "";
-        const s = String(v).trim().replace(/^0+/, "") || "0";
-        return s.padStart(5, "0");
+        return toDisplayNumber(v);
       };
       const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
 
@@ -12540,7 +12538,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const includeOosSummary = req.query?.includeOos === "true";
       const oosVehicles = includeOosSummary ? new Set<string>() : await getOosVehicleSet();
       if (oosVehicles.size > 0) {
-        const normPad = (v: string) => String(v || "").trim().padStart(5, "0");
+        const normPad = (v: string) => toDisplayNumber(v);
         for (const vn of Array.from(entOpenVns)) {
           if (oosVehicles.has(normPad(vn))) { entOpenVns.delete(vn); entOpenMap.delete(vn); }
         }
@@ -12566,7 +12564,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let extensionCount = 0;
       for (const r of closedRows as any[]) {
         const vn = normV(r.VEHICLE_NUMBER || "");
-        if (oosVehicles.size > 0 && oosVehicles.has(String(vn).padStart(5, "0"))) continue;
+        if (oosVehicles.size > 0 && oosVehicles.has(toDisplayNumber(vn))) continue;
         const key = `${vn}|${(r.PO_NUMBER || "").replace(/^'/, "").trim()}`;
         if (!closedDeduped.has(key)) {
           closedDeduped.add(key);
@@ -12808,7 +12806,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sf = getSnowflakeService();
       await sf.connect();
 
-      const intNormVeh = (v: string) => v ? String(v).trim().padStart(5, "0") : "";
+      const intNormVeh = (v: string) => v ? toDisplayNumber(v) : "";
 
       // Levenshtein edit distance for name comparison
       const intEditDist = (a: string, b: string): number => {
@@ -13407,7 +13405,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const odoByVin   = new Map<string, OdoCandidate[]>(); // key = VIN uppercase
 
       const addByTruck = (truck: string, c: OdoCandidate) => {
-        const k = String(truck).replace(/^0+/, "") || "0";
+        const k = toCanonical(truck);
         if (!odoByTruck.has(k)) odoByTruck.set(k, []);
         odoByTruck.get(k)!.push(c);
       };
@@ -13561,7 +13559,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         headers.join(","),
         ...vehicles.map((v: any) => {
           // Collect candidates for this vehicle from all sources
-          const truckKey = String(v.vehicleNumber || "").replace(/^0+/, "") || "0";
+          const truckKey = toCanonical(v.vehicleNumber);
           const vinKey   = v.vin ? String(v.vin).toUpperCase().trim() : null;
 
           const candidates: OdoCandidate[] = [];

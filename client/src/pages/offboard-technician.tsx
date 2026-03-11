@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toHolmanRef } from "@shared/vehicle-number-utils";
 import { useLocation } from "wouter";
 import { TopBar } from "@/components/layout/top-bar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -107,8 +108,7 @@ export default function OffboardTechnician() {
   const handleHolmanLookup = async (vehicleNum: string) => {
     if (!vehicleNum) return;
     
-    // Left-pad vehicle number to 6 characters
-    const paddedVehicleNum = vehicleNum.padStart(6, '0');
+    const paddedVehicleNum = toHolmanRef(vehicleNum);
     
     setIsLookingUpHolman(true);
     setHolmanLookupResult(null);
@@ -838,7 +838,7 @@ export default function OffboardTechnician() {
                                 if (truckNo) {
                                   setIsLookingUpHolman(true);
                                   setHolmanLookupResult(null);
-                                  const paddedVehicleNum = truckNo.padStart(6, '0');
+                                  const paddedVehicleNum = toHolmanRef(truckNo);
                                   
                                   // Run both lookups in parallel for faster response
                                   const parallelStart = performance.now();

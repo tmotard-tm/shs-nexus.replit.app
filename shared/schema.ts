@@ -323,6 +323,10 @@ export const vehicles = pgTable("vehicles", {
   remainingBookValue: decimal("remaining_book_value", { precision: 10, scale: 2 }),
   leaseEndDate: date("lease_end_date"),
   status: text("status").notNull().default("available"), // available, assigned, maintenance, retired
+  holmanVehicleRef: varchar("holman_vehicle_ref", { length: 10 }),
+  tpmsVehicleRef: varchar("tpms_vehicle_ref", { length: 10 }),
+  snowflakeVehicleRef: varchar("snowflake_vehicle_ref", { length: 20 }),
+  vehicleNumberDisplay: varchar("vehicle_number_display", { length: 10 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -625,6 +629,7 @@ export const tpmsCachedAssignments = pgTable("tpms_cached_assignments", {
 export const vehicleNexusData = pgTable("vehicle_nexus_data", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vehicleNumber: varchar("vehicle_number", { length: 20 }).notNull().unique(),
+  vehicleNumberDisplay: varchar("vehicle_number_display", { length: 10 }),
   postOffboardedStatus: text("post_offboarded_status"), // Reserved for new hire, In repair, Declined repair, Available to assign for rental / sent to PMF, Not found
   nexusNewLocation: text("nexus_new_location"), // Full address: street, state, zipcode
   nexusNewLocationContact: varchar("nexus_new_location_contact", { length: 30 }), // Phone number
@@ -650,6 +655,7 @@ export const offboardingTruckOverrides = pgTable("offboarding_truck_overrides", 
   id: serial("id").primaryKey(),
   enterpriseId: varchar("enterprise_id", { length: 50 }).notNull().unique(),
   truckNumber: varchar("truck_number", { length: 20 }).notNull(),
+  vehicleNumberDisplay: varchar("vehicle_number_display", { length: 10 }),
   updatedBy: text("updated_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -1477,6 +1483,10 @@ export const holmanVehiclesCache = pgTable("holman_vehicles_cache", {
   lastLocalUpdateAt: timestamp("last_local_update_at"),
   lastChangeDate: timestamp("last_change_date"), // Holman's lastChangeDate field for this vehicle
   lastChangeRecordId: text("last_change_record_id"), // Holman's lastChangeRecordId for tracking changes
+  holmanVehicleRef: varchar("holman_vehicle_ref", { length: 10 }),
+  tpmsVehicleRef: varchar("tpms_vehicle_ref", { length: 10 }),
+  snowflakeVehicleRef: varchar("snowflake_vehicle_ref", { length: 20 }),
+  vehicleNumberDisplay: varchar("vehicle_number_display", { length: 10 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

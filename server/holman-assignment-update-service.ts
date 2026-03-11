@@ -3,6 +3,7 @@ import { holmanApiService } from './holman-api-service';
 import { holmanSubmissionService } from './holman-submission-service';
 import { db } from './db';
 import { holmanVehiclesCache } from '@shared/schema';
+import { toCanonical } from './vehicle-number-utils';
 import { eq } from 'drizzle-orm';
 
 interface TechAddress {
@@ -107,7 +108,7 @@ class HolmanAssignmentUpdateService {
   }
 
   private isBYOV(vehicleNumber: string): boolean {
-    const normalized = vehicleNumber.replace(/^0+/, '');
+    const normalized = toCanonical(vehicleNumber);
     return normalized.startsWith('88');
   }
 

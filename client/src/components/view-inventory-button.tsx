@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { toCanonical } from "@shared/vehicle-number-utils";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -47,7 +48,7 @@ export function ViewInventoryButton({
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
 
-  const cleanVehicleNumber = vehicleNumber?.replace(/^0+/, '') || '';
+  const cleanVehicleNumber = toCanonical(vehicleNumber);
 
   const { data: inventory, isLoading, error } = useQuery<InventorySummary>({
     queryKey: ['/api/truck-inventory/summary', cleanVehicleNumber],

@@ -1,3 +1,5 @@
+import { toCanonical } from "@shared/vehicle-number-utils";
+
 export interface HolmanStatusInfo {
   code: number;
   label: string;
@@ -76,7 +78,7 @@ export function getVehicleOwnership(vehicleNumber: string | undefined | null): V
     };
   }
 
-  const normalized = vehicleNumber.replace(/^0+/, '');
+  const normalized = toCanonical(vehicleNumber);
   const isBYOV = normalized.startsWith('88');
 
   if (isBYOV) {
@@ -100,6 +102,6 @@ export function getVehicleOwnership(vehicleNumber: string | undefined | null): V
 
 export function isBYOV(vehicleNumber: string | undefined | null): boolean {
   if (!vehicleNumber) return false;
-  const normalized = vehicleNumber.replace(/^0+/, '');
+  const normalized = toCanonical(vehicleNumber);
   return normalized.startsWith('88');
 }

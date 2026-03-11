@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { toCanonical } from "@shared/vehicle-number-utils";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -131,8 +132,8 @@ export default function ActiveVehicles() {
   const filteredVehicles = baseVehicles.filter(vehicle => {
     const searchLower = searchQuery.toLowerCase().trim();
     // Strip leading zeros from both search query and vehicle number for flexible matching
-    const searchNoLeadingZeros = searchLower.replace(/^0+/, '');
-    const vehicleNumNoLeadingZeros = (vehicle.vehicleNumber || '').replace(/^0+/, '').toLowerCase();
+    const searchNoLeadingZeros = toCanonical(searchLower);
+    const vehicleNumNoLeadingZeros = toCanonical(vehicle.vehicleNumber).toLowerCase();
     
     const matchesSearch = !searchQuery || 
       (vehicle.vin || '').toLowerCase().includes(searchLower) ||

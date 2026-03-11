@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { toCanonical } from "@shared/vehicle-number-utils";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -679,7 +680,7 @@ export default function WeeklyOffboarding() {
                           <TableCell className="text-sm">{entry.contactPhone || '-'}</TableCell>
                           <TableCell className="text-sm">
                             {(() => {
-                              const samsaraInfo = rowTruck ? samsaraData[rowTruck] || samsaraData[rowTruck?.replace(/^0+/, '')] : null;
+                              const samsaraInfo = rowTruck ? samsaraData[rowTruck] || samsaraData[toCanonical(rowTruck)] : null;
                               if (samsaraInfo?.address) {
                                 return (
                                   <div className="flex flex-col">

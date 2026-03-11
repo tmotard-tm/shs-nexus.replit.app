@@ -107,6 +107,7 @@ import { db } from "./db";
 import { eq, and, or, inArray, desc, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
+import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-number-utils";
 
 export interface IStorage {
   // Users
@@ -3824,7 +3825,10 @@ export class DatabaseStorage implements IStorage {
 
   // Truck Inventory Module
   async getTruckInventory(truck: string): Promise<TruckInventory[]> {
-    return await db.select().from(truckInventory).where(eq(truckInventory.truck, truck));
+    const variants = [...new Set([truck, toCanonical(truck), toDisplayNumber(truck), toHolmanRef(truck)])].filter(Boolean);
+    return await db.select().from(truckInventory).where(
+      inArray(truckInventory.truck, variants)
+    );
   }
 
   async getTruckInventoryByEnterpriseId(enterpriseId: string): Promise<TruckInventory[]> {
@@ -4712,7 +4716,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createVehicle(vehicle: InsertVehicle): Promise<Vehicle> {
-    const result = await db.insert(vehicles).values(vehicle).returning();
+    const vn = vehicle.vehicleNumber;
+    const enriched = {
+      ...vehicle,
+      holmanVehicleRef: toHolmanRef(vn),
+      tpmsVehicleRef: toTpmsRef(vn),
+      snowflakeVehicleRef: vn,
+      vehicleNumberDisplay: toDisplayNumber(vn),
+    };
+    const result = await db.insert(vehicles).values(enriched).returning();
     return result[0];
   }
 
@@ -4720,7 +4732,15 @@ export class DatabaseStorage implements IStorage {
     return await db.transaction(async (tx) => {
       const results: Vehicle[] = [];
       for (const vehicle of vehicleList) {
-        const result = await tx.insert(vehicles).values(vehicle).returning();
+        const vn = vehicle.vehicleNumber;
+        const enriched = {
+          ...vehicle,
+          holmanVehicleRef: toHolmanRef(vn),
+          tpmsVehicleRef: toTpmsRef(vn),
+          snowflakeVehicleRef: vn,
+          vehicleNumberDisplay: toDisplayNumber(vn),
+        };
+        const result = await tx.insert(vehicles).values(enriched).returning();
         results.push(result[0]);
       }
       return results;
@@ -4728,8 +4748,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateVehicle(id: string, updates: Partial<Vehicle>): Promise<Vehicle | undefined> {
+    const enriched: Partial<Vehicle> = { ...updates, updatedAt: new Date() };
+    if (updates.vehicleNumber) {
+      enriched.holmanVehicleRef = toHolmanRef(updates.vehicleNumber);
+      enriched.tpmsVehicleRef = toTpmsRef(updates.vehicleNumber);
+      enriched.snowflakeVehicleRef = updates.vehicleNumber;
+      enriched.vehicleNumberDisplay = toDisplayNumber(updates.vehicleNumber);
+    }
     const result = await db.update(vehicles)
-      .set({...updates, updatedAt: new Date()})
+      .set(enriched)
       .where(eq(vehicles.id, id))
       .returning();
     return result[0];
@@ -6124,6 +6151,7 @@ export class DatabaseStorage implements IStorage {
           phoneRecoveryInitiated: data.phoneRecoveryInitiated,
           updatedBy: data.updatedBy,
           updatedAt: new Date(),
+          vehicleNumberDisplay: toDisplayNumber(data.vehicleNumber),
         })
         .where(eq(vehicleNexusData.vehicleNumber, data.vehicleNumber))
         .returning();
@@ -6132,6 +6160,7 @@ export class DatabaseStorage implements IStorage {
       const result = await db.insert(vehicleNexusData).values({
         ...data,
         id: randomUUID(),
+        vehicleNumberDisplay: toDisplayNumber(data.vehicleNumber),
       }).returning();
       return result[0];
     }
@@ -6152,13 +6181,17 @@ export class DatabaseStorage implements IStorage {
           truckNumber: data.truckNumber,
           updatedBy: data.updatedBy,
           updatedAt: new Date(),
+          vehicleNumberDisplay: data.truckNumber ? toDisplayNumber(data.truckNumber) : null,
         })
         .where(eq(offboardingTruckOverrides.enterpriseId, data.enterpriseId))
         .returning();
       return result[0];
     } else {
       const result = await db.insert(offboardingTruckOverrides)
-        .values(data)
+        .values({
+          ...data,
+          vehicleNumberDisplay: data.truckNumber ? toDisplayNumber(data.truckNumber) : null,
+        })
         .returning();
       return result[0];
     }
@@ -6309,8 +6342,64 @@ export class DatabaseStorage implements IStorage {
     }
     return count;
   }
+
+  async backfillVehicleReferenceColumns(): Promise<void> {
+    const tables = [
+      {
+        name: 'vehicles',
+        sql: sql`UPDATE vehicles SET
+          holman_vehicle_ref = LPAD(LTRIM(vehicle_number, '0'), 6, '0'),
+          tpms_vehicle_ref = LPAD(LTRIM(vehicle_number, '0'), 6, '0'),
+          snowflake_vehicle_ref = vehicle_number,
+          vehicle_number_display = LPAD(LTRIM(vehicle_number, '0'), 5, '0')
+          WHERE holman_vehicle_ref IS NULL AND vehicle_number IS NOT NULL`,
+        countSql: sql`SELECT count(*) as count FROM vehicles WHERE holman_vehicle_ref IS NULL AND vehicle_number IS NOT NULL`,
+      },
+      {
+        name: 'holman_vehicles_cache',
+        sql: sql`UPDATE holman_vehicles_cache SET
+          holman_vehicle_ref = LPAD(LTRIM(holman_vehicle_number, '0'), 6, '0'),
+          tpms_vehicle_ref = LPAD(LTRIM(holman_vehicle_number, '0'), 6, '0'),
+          snowflake_vehicle_ref = holman_vehicle_number,
+          vehicle_number_display = LPAD(LTRIM(holman_vehicle_number, '0'), 5, '0')
+          WHERE holman_vehicle_ref IS NULL AND holman_vehicle_number IS NOT NULL`,
+        countSql: sql`SELECT count(*) as count FROM holman_vehicles_cache WHERE holman_vehicle_ref IS NULL AND holman_vehicle_number IS NOT NULL`,
+      },
+      {
+        name: 'vehicle_nexus_data',
+        sql: sql`UPDATE vehicle_nexus_data SET
+          vehicle_number_display = LPAD(LTRIM(vehicle_number, '0'), 5, '0')
+          WHERE vehicle_number_display IS NULL AND vehicle_number IS NOT NULL`,
+        countSql: sql`SELECT count(*) as count FROM vehicle_nexus_data WHERE vehicle_number_display IS NULL AND vehicle_number IS NOT NULL`,
+      },
+      {
+        name: 'offboarding_truck_overrides',
+        sql: sql`UPDATE offboarding_truck_overrides SET
+          vehicle_number_display = LPAD(LTRIM(truck_number, '0'), 5, '0')
+          WHERE vehicle_number_display IS NULL AND truck_number IS NOT NULL`,
+        countSql: sql`SELECT count(*) as count FROM offboarding_truck_overrides WHERE vehicle_number_display IS NULL AND truck_number IS NOT NULL`,
+      },
+    ];
+
+    for (const t of tables) {
+      const result = await db.execute(t.countSql);
+      const count = Number((result as any).rows?.[0]?.count ?? 0);
+      if (count > 0) {
+        console.log(`[Backfill] Populating reference columns for ${count} ${t.name} rows...`);
+        await db.execute(t.sql);
+      }
+    }
+
+    console.log('[Backfill] Vehicle reference columns up to date');
+  }
 }
 
 // Choose storage implementation based on environment variable
 const useDatabase = true; // Force database storage
 export const storage: IStorage = useDatabase ? new DatabaseStorage() : new MemStorage();
+
+if (useDatabase) {
+  (storage as DatabaseStorage).backfillVehicleReferenceColumns().catch(err => {
+    console.error('[Backfill] Error during vehicle reference column backfill:', err);
+  });
+}

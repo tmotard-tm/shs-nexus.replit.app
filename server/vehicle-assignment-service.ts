@@ -2,6 +2,7 @@ import { storage } from './storage';
 import { getTPMSService } from './tpms-service';
 import { holmanApiService } from './holman-api-service';
 import { isSnowflakeConfigured } from './snowflake-service';
+import { toCanonical } from './vehicle-number-utils';
 import type { 
   TechVehicleAssignment, 
   InsertTechVehicleAssignment,
@@ -504,7 +505,7 @@ export class VehicleAssignmentService {
   }
 
   private normalizeTruckNumber(truckNo: string): string {
-    return truckNo.replace(/^0+/, '').trim();
+    return toCanonical(truckNo);
   }
 
   private determineChangeType(

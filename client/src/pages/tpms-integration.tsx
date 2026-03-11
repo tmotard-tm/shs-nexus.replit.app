@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toTpmsRef } from "@shared/vehicle-number-utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -134,7 +135,7 @@ export default function TpmsIntegration() {
     mutationFn: async (input: string) => {
       const trimmed = input.trim();
       const isNumeric = /^\d+$/.test(trimmed);
-      const lookupId = isNumeric ? trimmed.padStart(6, "0") : trimmed;
+      const lookupId = isNumeric ? toTpmsRef(trimmed) : trimmed;
       const url = isNumeric
         ? `/api/tpms/lookup/truck/${lookupId}`
         : `/api/tpms/techinfo/${lookupId}`;

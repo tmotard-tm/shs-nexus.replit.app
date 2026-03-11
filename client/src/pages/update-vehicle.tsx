@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { toHolmanRef, toCanonical } from "@shared/vehicle-number-utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TopBar } from "@/components/layout/top-bar";
@@ -237,7 +238,7 @@ export default function UpdateVehicle() {
     if (pendingSubmissionsData?.submissions) {
       for (const sub of pendingSubmissionsData.submissions) {
         // Store by vehicle number (handle both padded and unpadded)
-        const paddedNum = sub.holmanVehicleNumber.padStart(6, '0');
+        const paddedNum = toHolmanRef(sub.holmanVehicleNumber);
         map.set(paddedNum, sub);
         map.set(sub.holmanVehicleNumber, sub);
       }
@@ -401,8 +402,8 @@ export default function UpdateVehicle() {
   const baseVehicles = holmanVehicles;
   const filteredVehicles = baseVehicles.filter(vehicle => {
     const searchLower = searchQuery.toLowerCase().trim();
-    const searchNoLeadingZeros = searchLower.replace(/^0+/, '');
-    const vehicleNumNoLeadingZeros = (vehicle.vehicleNumber || '').replace(/^0+/, '').toLowerCase();
+    const searchNoLeadingZeros = toCanonical(searchLower);
+    const vehicleNumNoLeadingZeros = toCanonical(vehicle.vehicleNumber).toLowerCase();
     
     const matchesSearch = !searchQuery || 
       (vehicle.vin || '').toLowerCase().includes(searchLower) ||
@@ -1050,7 +1051,7 @@ export default function UpdateVehicle() {
                   const hasMismatch = (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) ||
                                       (holmanId && !tpmsId);
                   const pendingSubmission = pendingSubmissionsMap.get(vehicle.vehicleNumber) || 
-                                           pendingSubmissionsMap.get(vehicle.vehicleNumber?.padStart(6, '0') || '');
+                                           pendingSubmissionsMap.get(toHolmanRef(vehicle.vehicleNumber));
                   
                   return (
                   <Card 

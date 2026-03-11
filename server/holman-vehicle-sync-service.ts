@@ -6,6 +6,7 @@ import { eq, sql, and, desc, inArray, gte, isNotNull } from "drizzle-orm";
 const ALLOWED_DIVISIONS = ['01', 'RF'];
 import { holmanApiService } from "./holman-api-service";
 import { getTPMSService } from "./tpms-service";
+import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-number-utils";
 
 interface FleetVehicle {
   id: string;
@@ -269,6 +270,10 @@ class HolmanVehicleSyncService {
         lastHolmanSyncAt: now,
         lastChangeDate: lastChangeDate,
         lastChangeRecordId: v.lastChangeRecordId?.toString(),
+        holmanVehicleRef: toHolmanRef(vehicleNumber),
+        tpmsVehicleRef: toTpmsRef(vehicleNumber),
+        snowflakeVehicleRef: vehicleNumber,
+        vehicleNumberDisplay: toDisplayNumber(vehicleNumber),
       };
       
       await db
@@ -523,6 +528,10 @@ class HolmanVehicleSyncService {
         isActive: true,
         rawData: v,
         lastHolmanSyncAt: now,
+        holmanVehicleRef: toHolmanRef(vehicleNumber),
+        tpmsVehicleRef: toTpmsRef(vehicleNumber),
+        snowflakeVehicleRef: vehicleNumber,
+        vehicleNumberDisplay: toDisplayNumber(vehicleNumber),
       };
 
       await db
@@ -709,7 +718,7 @@ class HolmanVehicleSyncService {
     if (recentUnassigns.length === 0) return 0;
 
     const vehicleNumbers = [...new Set(recentUnassigns.map(r => r.holmanVehicleNumber))];
-    const stripped = vehicleNumbers.map(vn => vn.replace(/^0+/, ''));
+    const stripped = vehicleNumbers.map(vn => toCanonical(vn));
 
     for (const vn of stripped) {
       await db
@@ -951,14 +960,12 @@ class HolmanVehicleSyncService {
     
     for (const vehicle of vehicles) {
       const originalNumber = vehicle.vehicleNumber;
-      const strippedNumber = originalNumber.replace(/^0+/, '');
+      const strippedNumber = toCanonical(originalNumber);
       
       if (!strippedNumber) continue;
       
-      // TPMS truck numbers are typically 6 digits with leading zeros
-      const paddedNumber = strippedNumber.padStart(6, '0');
+      const paddedNumber = toTpmsRef(strippedNumber);
       
-      // Track all variations to try
       const variations = [paddedNumber];
       if (strippedNumber !== paddedNumber) variations.push(strippedNumber);
       if (originalNumber !== paddedNumber && originalNumber !== strippedNumber) {
@@ -1080,7 +1087,7 @@ class HolmanVehicleSyncService {
         const chunk = vehiclesWithTPMS.slice(i, i + chunkSize);
         
         await Promise.all(chunk.map(async (vehicle) => {
-          const paddedVehicleNumber = vehicle.vehicleNumber.padStart(6, '0');
+          const paddedVehicleNumber = toHolmanRef(vehicle.vehicleNumber);
           await db
             .update(holmanVehiclesCache)
             .set({

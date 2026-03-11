@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { toHolmanRef, toDisplayNumber, toCanonical } from "@shared/vehicle-number-utils";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -284,9 +285,9 @@ export default function FleetManagement() {
     if (!poFlagsData) return m;
     for (const [rawKey, val] of Object.entries(poFlagsData)) {
       m.set(rawKey, val as PoFlag);
-      const stripped = rawKey.replace(/^0+/, '') || rawKey;
+      const stripped = toCanonical(rawKey) || rawKey;
       if (stripped !== rawKey) m.set(stripped, val as PoFlag);
-      const padded = rawKey.padStart(5, '0');
+      const padded = toDisplayNumber(rawKey);
       if (padded !== rawKey) m.set(padded, val as PoFlag);
     }
     return m;
@@ -494,8 +495,8 @@ export default function FleetManagement() {
     const searchLower = searchQuery.toLowerCase().trim();
     const pool = (searchLower && !showOos) ? allVehicles : activeVehicles;
     return pool.filter(vehicle => {
-      const searchNoLeadingZeros = searchLower.replace(/^0+/, '');
-      const vehicleNumNoLeadingZeros = (vehicle.vehicleNumber || '').replace(/^0+/, '').toLowerCase();
+      const searchNoLeadingZeros = toCanonical(searchLower);
+      const vehicleNumNoLeadingZeros = toCanonical(vehicle.vehicleNumber).toLowerCase();
       
       // Unified search: VIN, truck #, tech ID/name, license plate
       const matchesSearch = !searchQuery || 
@@ -597,7 +598,7 @@ export default function FleetManagement() {
     if (!truckLookup.trim()) return;
     const truck = allVehicles.find(v => 
       v.vehicleNumber === truckLookup.trim() || 
-      v.vehicleNumber === truckLookup.trim().padStart(6, '0')
+      v.vehicleNumber === toHolmanRef(truckLookup)
     );
     if (truck) {
       setSelectedVehicle(truck);

@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCachedAssignment } from '@shared/schema';
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
 import { sendToolAuditNotification } from './notification-service';
+import { toDisplayNumber, toCanonical, toSnowflakeRef } from './vehicle-number-utils';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -876,7 +877,7 @@ export class SnowflakeSyncService {
       await snowflake.connect();
 
       // Strip leading zeros from vehicle name (Samsara stores as "23680" not "023680")
-      const normalizedVehicleName = vehicleName.replace(/^0+/, '');
+      const normalizedVehicleName = toCanonical(vehicleName);
       console.log(`[Samsara] Looking up GPS location for vehicle: ${vehicleName} (normalized: ${normalizedVehicleName})`);
       
       const query = `
@@ -943,7 +944,7 @@ export class SnowflakeSyncService {
       await snowflake.connect();
 
       // Normalize vehicle names (strip leading zeros)
-      const normalizedNames = vehicleNames.map(v => v.replace(/^0+/, ''));
+      const normalizedNames = vehicleNames.map(v => toCanonical(v));
       const placeholders = normalizedNames.map(() => '?').join(',');
       
       console.log(`[Samsara-Batch] Looking up GPS locations for ${vehicleNames.length} vehicles`);
@@ -981,8 +982,7 @@ export class SnowflakeSyncService {
           address: row.ADDRESS || '',
           lastUpdated: row.DATE_AND_TIME || '',
         });
-        // Also store with leading zeros (5-digit format)
-        const padded = normalized.padStart(5, '0');
+        const padded = toDisplayNumber(normalized);
         results.set(padded, {
           vehicleName: normalized,
           address: row.ADDRESS || '',
@@ -2728,7 +2728,7 @@ export class SnowflakeSyncService {
       odoByVin.get(k)!.push(c);
     };
     const addByTruck = (truck: string, c: OdoCandidate) => {
-      const k = String(truck).replace(/^0+/, '') || '0';
+      const k = toCanonical(truck);
       if (!odoByTruck.has(k)) odoByTruck.set(k, []);
       odoByTruck.get(k)!.push(c);
     };
@@ -2834,7 +2834,7 @@ export class SnowflakeSyncService {
       if (vinKey && odoByVin.has(vinKey)) candidates.push(...odoByVin.get(vinKey)!);
 
       // Sources 3+4 (by truck number)
-      const truckKey = String(row.vehicleNumber).replace(/^0+/, '') || '0';
+      const truckKey = toCanonical(row.vehicleNumber);
       if (odoByTruck.has(truckKey)) candidates.push(...odoByTruck.get(truckKey)!);
 
       const best = selectBest(candidates);

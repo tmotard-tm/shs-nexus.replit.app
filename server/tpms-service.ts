@@ -1,5 +1,6 @@
 import { storage } from './storage';
 import type { InsertTpmsCachedAssignment } from '@shared/schema';
+import { toTpmsRef, toCanonical } from './vehicle-number-utils';
 
 interface TPMSToken {
   token: string;
@@ -371,8 +372,8 @@ class TPMSService {
     for (const cached of allCached) {
       if (cached.truckNo) {
         const raw = cached.truckNo;
-        const stripped = raw.replace(/^0+/, '');
-        const padded = stripped.padStart(6, '0');
+        const stripped = toCanonical(raw);
+        const padded = toTpmsRef(raw);
         cacheByTruck.set(raw, cached);
         if (!cacheByTruck.has(stripped)) cacheByTruck.set(stripped, cached);
         if (!cacheByTruck.has(padded)) cacheByTruck.set(padded, cached);
