@@ -7625,7 +7625,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (fleetOpLogId && (result.newStatus === 'completed' || result.newStatus === 'failed')) {
-        const vehicleNumber = submission.holmanVehicleNumber.padStart(6, '0');
+        const vehicleNumber = submission.holmanVehicleNumber;
         const logs = await storage.getFleetOperationLogs({ truckNumber: vehicleNumber });
         const matchingLog = logs.find(l => l.id === Number(fleetOpLogId));
         if (matchingLog) {

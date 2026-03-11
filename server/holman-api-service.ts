@@ -330,13 +330,10 @@ export class HolmanApiService {
     try {
       console.log('[Holman] Looking up vehicle by number:', vehicleNumber);
       
-      // Left-pad vehicle number to 6 characters for Holman search
-      const paddedVehicleNum = vehicleNumber.padStart(6, '0');
-      
       // Use custom-query to get garaging address fields
       const token = await this.getAccessToken();
       
-      // First try to find the vehicle using custom-query with specific properties
+      // Try to find the vehicle using custom-query with specific properties
       const customQueryUrl = `${this.apiEndpoint}/vehicles/custom-query`;
       const customQueryBody = {
         lesseeCode: '2B56',
@@ -359,13 +356,13 @@ export class HolmanApiService {
           'garagingCounty'
         ],
         filters: {
-          holmanVehicleNumber: paddedVehicleNum
+          holmanVehicleNumber: vehicleNumber
         },
         pageNumber: 1,
         pageSize: 10
       };
       
-      console.log('[Holman] Trying custom-query with filters for:', paddedVehicleNum);
+      console.log('[Holman] Trying custom-query with filters for:', vehicleNumber);
       
       const customResponse = await fetch(customQueryUrl, {
         method: 'POST',
@@ -386,7 +383,7 @@ export class HolmanApiService {
         }
       }
       
-      // If custom query didn't find it (might be clientVehicleNumber), fall back to paginated search
+      // If custom query didn't find it, fall back to paginated search
       console.log('[Holman] Custom query returned no results, falling back to paginated search');
       
       let pageNumber = 1;
@@ -414,9 +411,9 @@ export class HolmanApiService {
         
         // Check for matching vehicle in this batch
         const matchingVehicle = data.items.find((v: any) => {
-          const holmanNum = (v.holmanVehicleNumber || '').padStart(6, '0');
-          const clientNum = (v.clientVehicleNumber || '').padStart(6, '0');
-          return holmanNum === paddedVehicleNum || clientNum === paddedVehicleNum;
+          const holmanNum = (v.holmanVehicleNumber || '').trim();
+          const clientNum = (v.clientVehicleNumber || '').trim();
+          return holmanNum === vehicleNumber || clientNum === vehicleNumber;
         });
         
         if (matchingVehicle) {
@@ -445,35 +442,45 @@ export class HolmanApiService {
 
   // Lightweight check: fetch only assignedStatus for a vehicle number.
   // Used by the async verification loop to confirm Holman processed an assign/unassign.
-  // Uses basic-query GET (same approach as fleet sync) instead of custom-query POST
-  // which Holman returns HTTP 400 for when filtering by holmanVehicleNumber.
+  // Uses custom-query POST to look up a specific vehicle by holmanVehicleNumber.
+  // The basic-query GET endpoint does NOT support holmanVehicleNumbers as a filter param.
   async getVehicleAssignedStatus(vehicleNumber: string): Promise<{
     found: boolean;
     assignedStatus?: string;  // "Assigned" | "Unassigned" | ...
+    techAssigned?: string;    // clientData2 — enterprise ID of assigned tech
     rawVehicle?: any;
     error?: string;
   }> {
     try {
-      const paddedVehicleNum = vehicleNumber.padStart(6, '0');
-      const params = new URLSearchParams({
-        lesseeCodes: '2B56',
-        holmanVehicleNumbers: paddedVehicleNum,
-        pageSize: '5',
-        pageNumber: '1',
+      console.log(`[HolmanVerify] custom-query POST for vehicle ${vehicleNumber}`);
+      const data = await this.makeRequest<any>('/vehicles/custom-query', 'POST', {
+        lesseeCode: '2B56',
+        properties: [
+          'holmanVehicleNumber',
+          'clientVehicleNumber',
+          'assignedStatus',
+          'clientData2',
+          'firstName',
+          'lastName',
+        ],
+        filters: {
+          holmanVehicleNumber: vehicleNumber,
+        },
+        pageNumber: 1,
+        pageSize: 5,
       });
-      console.log(`[HolmanVerify] basic-query GET: /vehicles/basic-query?${params}`);
-      const data = await this.makeRequest<any>(`/vehicles/basic-query?${params}`, 'GET');
       const items = data?.items || [];
       const item = items.find((v: any) => {
-        const holmanNum = (v.holmanVehicleNumber || '').padStart(6, '0');
-        const clientNum = (v.clientVehicleNumber || '').padStart(6, '0');
-        return holmanNum === paddedVehicleNum || clientNum === paddedVehicleNum;
+        const holmanNum = (v.holmanVehicleNumber || '').trim();
+        const clientNum = (v.clientVehicleNumber || '').trim();
+        return holmanNum === vehicleNumber || clientNum === vehicleNumber;
       });
       if (!item) return { found: false, error: 'Vehicle not found in Holman' };
-      console.log(`[HolmanVerify] Vehicle ${vehicleNumber} raw item:`, JSON.stringify(item));
+      console.log(`[HolmanVerify] Vehicle ${vehicleNumber}: assignedStatus=${item.assignedStatus}, clientData2=${item.clientData2}`);
       return {
         found: true,
-        assignedStatus: item.assignedStatus || item.status || '',
+        assignedStatus: item.assignedStatus || '',
+        techAssigned: item.clientData2 || '',
         rawVehicle: item,
       };
     } catch (err: any) {

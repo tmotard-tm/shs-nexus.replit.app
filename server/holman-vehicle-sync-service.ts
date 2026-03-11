@@ -182,6 +182,14 @@ class HolmanVehicleSyncService {
       
       // Update cache with change tracking info
       await this.updateCacheWithChangeTracking(filteredVehicles);
+
+      // Passively verify any pending Holman submissions against fresh fleet data
+      try {
+        const { holmanSubmissionService } = await import('./holman-submission-service');
+        await holmanSubmissionService.verifyFromFleetData(filteredVehicles);
+      } catch (verifyErr) {
+        console.error('[HolmanSync] Submission verification from fleet data failed:', verifyErr);
+      }
       
       // Update sync state
       await this.updateSyncState({
@@ -360,6 +368,9 @@ class HolmanVehicleSyncService {
           await this.updateCache(filteredVehicleData);
           await this.processPendingChanges();
           await this.reapplyRecentUnassigns();
+          // Passively verify any pending Holman submissions against fresh fleet data
+          const { holmanSubmissionService } = await import('./holman-submission-service');
+          await holmanSubmissionService.verifyFromFleetData(filteredVehicleData);
           console.log('[HolmanSync] Background cache update completed');
         } catch (err) {
           console.error('[HolmanSync] Background cache update failed:', err);

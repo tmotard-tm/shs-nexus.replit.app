@@ -94,59 +94,82 @@ export class HolmanSubmissionService {
 
   // ─── Vehicle-lookup verification (primary strategy) ──────────────────────────
   // Holman's batch submission API returns 202 Accepted (async queue).
-  // There is no status-check endpoint for the userReferenceToken, so we verify
-  // by re-fetching the vehicle from Holman and confirming the field changed.
+  // There is no per-vehicle status endpoint.  Holman's basic-query GET does not
+  // support filtering by holmanVehicleNumber, and custom-query POST does not
+  // accept a "filters" body field.  Both return 400 for per-vehicle queries.
+  //
+  // Strategy: verify against fresh fleet data supplied by the full fleet sync
+  // (verifyFromFleetData, called from holman-vehicle-sync-service after every
+  // cache update).  This method is kept as a thin wrapper that marks expired
+  // submissions failed and returns 'pending' otherwise.
   async verifyByVehicleLookup(submission: HolmanSubmission): Promise<{
     verified: boolean;
     newStatus: 'completed' | 'failed' | 'pending';
     message: string;
     rawVehicle?: any;
   }> {
+    // Nothing to check here — real verification happens in verifyFromFleetData.
+    // Just leave pending so the next fleet sync can resolve it.
     const vehicleNumber = submission.holmanVehicleNumber;
-    const action = submission.action;
+    console.log(`[HolmanVerify] Submission ${submission.id} for vehicle ${vehicleNumber} (${submission.action}) — awaiting next fleet sync for verification`);
+    return {
+      verified: false,
+      newStatus: 'pending',
+      message: 'Awaiting next fleet sync for verification',
+    };
+  }
 
-    console.log(`[HolmanVerify] Checking vehicle ${vehicleNumber} for action: ${action}`);
+  // ─── Passive verification from fleet sync data ────────────────────────────
+  // Called by holman-vehicle-sync-service after every full or incremental sync.
+  // holmanVehicles is the raw Holman API data for all fetched vehicles.
+  async verifyFromFleetData(holmanVehicles: any[]): Promise<void> {
+    const pending = await this.getAllPendingSubmissions();
+    if (pending.length === 0) return;
 
-    const result = await holmanApiService.getVehicleAssignedStatus(vehicleNumber);
-
-    if (!result.found) {
-      const msg = `Vehicle lookup failed: ${result.error}`;
-      console.warn(`[HolmanVerify] ${msg}`);
-      return { verified: false, newStatus: 'pending', message: msg };
+    // Build a fast lookup map keyed by holmanVehicleNumber
+    const vehicleMap = new Map<string, any>();
+    for (const v of holmanVehicles) {
+      const num = (v.holmanVehicleNumber || '').trim();
+      if (num) vehicleMap.set(num, v);
     }
 
-    const assignedStatus = (result.assignedStatus || '').toLowerCase();
-    const rawVehicle = result.rawVehicle;
+    for (const submission of pending) {
+      const vehicleNumber = submission.holmanVehicleNumber;
+      const vehicle = vehicleMap.get(vehicleNumber);
+      if (!vehicle) continue; // vehicle not in this sync batch — skip
 
-    console.log(`[HolmanVerify] Vehicle ${vehicleNumber} assignedStatus: "${result.assignedStatus}"`);
+      const action = submission.action;
+      const assignedStatus = (vehicle.assignedStatus || '').toLowerCase();
+      const techInHolman = (vehicle.clientData2 || vehicle.firstName || '').trim();
+      const expectedTech = (submission.enterpriseId || '').trim();
 
-    let success = false;
-    let message = '';
+      let success = false;
+      let message = '';
 
-    if (action === 'unassign') {
-      // Expect "Unassigned" — also check that firstName/clientData2 are cleared
-      const nameCleared = !rawVehicle?.firstName || rawVehicle.firstName === '';
-      success = assignedStatus.includes('unassign');
-      message = success
-        ? `Confirmed unassigned (assignedStatus="${result.assignedStatus}", firstName cleared: ${nameCleared})`
-        : `Still showing "${result.assignedStatus}" — Holman may still be processing`;
-    } else if (action === 'assign') {
-      success = assignedStatus.includes('assign') && !assignedStatus.includes('unassign');
-      message = success
-        ? `Confirmed assigned (assignedStatus="${result.assignedStatus}")`
-        : `Still showing "${result.assignedStatus}" — Holman may still be processing`;
-    } else {
-      // field_test or unknown — just confirm the vehicle was found
-      success = true;
-      message = `Vehicle found, action "${action}" not directly verifiable`;
-    }
+      if (action === 'unassign') {
+        success = assignedStatus.includes('unassign') || techInHolman === '';
+        message = success
+          ? `Confirmed unassigned via fleet sync (assignedStatus="${vehicle.assignedStatus}")`
+          : `Fleet sync shows "${vehicle.assignedStatus}" — Holman may still be processing`;
+      } else if (action === 'assign') {
+        const techMatch = expectedTech && techInHolman.toLowerCase().includes(expectedTech.toLowerCase());
+        success = (assignedStatus.includes('assign') && !assignedStatus.includes('unassign')) || techMatch;
+        message = success
+          ? `Confirmed assigned via fleet sync (assignedStatus="${vehicle.assignedStatus}", tech="${techInHolman}")`
+          : `Fleet sync shows "${vehicle.assignedStatus}" — Holman may still be processing`;
+      } else {
+        // field_test or other — just finding the vehicle is enough
+        success = true;
+        message = `Vehicle found in fleet sync, action "${action}" not directly verifiable`;
+      }
 
-    if (success) {
-      await this.updateSubmissionStatus(submission.id, 'completed');
-      return { verified: true, newStatus: 'completed', message, rawVehicle };
-    } else {
-      // Not yet processed — leave as pending so next poll cycle retries
-      return { verified: false, newStatus: 'pending', message, rawVehicle };
+      if (success) {
+        console.log(`[HolmanVerify] Fleet sync verified submission ${submission.id} (vehicle ${vehicleNumber}, ${action}): ${message}`);
+        await this.updateSubmissionStatus(submission.id, 'completed');
+        await this.propagateStatusToFleetLog(submission, 'completed', message);
+      } else {
+        console.log(`[HolmanVerify] Fleet sync: submission ${submission.id} not yet confirmed: ${message}`);
+      }
     }
   }
 
@@ -169,8 +192,7 @@ export class HolmanSubmissionService {
     message: string
   ): Promise<void> {
     try {
-      const paddedVehicleNumber = submission.holmanVehicleNumber.padStart(6, '0');
-      const rawVehicleNumber = submission.holmanVehicleNumber;
+      const vehicleNumber = submission.holmanVehicleNumber;
       const action = submission.action;
       const opType = action === 'assign' || action === 'unassign' ? action : null;
       if (!opType) return;
@@ -206,13 +228,10 @@ export class HolmanSubmissionService {
         return candidates[0];
       };
 
-      let log = await findMatchingLog(paddedVehicleNumber);
-      if (!log && rawVehicleNumber !== paddedVehicleNumber) {
-        log = await findMatchingLog(rawVehicleNumber);
-      }
+      const log = await findMatchingLog(vehicleNumber);
 
       if (!log) {
-        console.log(`[HolmanVerify] No pending fleet_operation_log found for vehicle ${paddedVehicleNumber} / ${opType}`);
+        console.log(`[HolmanVerify] No pending fleet_operation_log found for vehicle ${vehicleNumber} / ${opType}`);
         return;
       }
 

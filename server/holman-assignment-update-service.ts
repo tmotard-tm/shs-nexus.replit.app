@@ -366,7 +366,7 @@ class HolmanAssignmentUpdateService {
 
     (basePayload as any)[fieldName] = actualValue;
 
-    console.log(`[FieldTest] Testing field "${fieldName}" = "${actualValue}" for vehicle ${paddedVehicleNumber}`);
+    console.log(`[FieldTest] Testing field "${fieldName}" = "${actualValue}" for vehicle ${vehicleNumber}`);
 
     try {
       const response = await holmanApiService.submitVehicleArray([basePayload]);
@@ -374,7 +374,7 @@ class HolmanAssignmentUpdateService {
       const submissionId = response?.submissionId || response?.id || null;
 
       await holmanSubmissionService.createSubmission({
-        holmanVehicleNumber: paddedVehicleNumber,
+        holmanVehicleNumber: vehicleNumber,
         action: 'field_test',
         enterpriseId: `FIELD_TEST:${fieldName}`,
         submissionId,
