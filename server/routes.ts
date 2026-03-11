@@ -7550,11 +7550,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Trigger immediate verification for a specific submission (for manual retry)
+  // Also propagates final status to fleet_operation_log when completed/failed
   app.post("/api/holman/submissions/:id/verify", requireAuth, async (req: any, res) => {
     try {
       const submission = await holmanSubmissionService.getSubmissionById(req.params.id);
       if (!submission) return res.status(404).json({ success: false, error: "Submission not found" });
       const result = await holmanSubmissionService.verifyByVehicleLookup(submission);
+      if (result.newStatus === 'completed' || result.newStatus === 'failed') {
+        await holmanSubmissionService.propagateStatusToFleetLog(submission, result.newStatus, result.message);
+      }
       res.json({ success: true, ...result });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
@@ -7595,6 +7599,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, ...result });
     } catch (error: any) {
       console.error('[API] Poll submissions error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Re-verify a stuck/failed submission and update its fleet_operation_log
+  // Optionally accepts fleetOpLogId to target a specific fleet_operation_log row
+  app.post("/api/holman/submissions/:id/reverify", requireAuth, async (req: any, res) => {
+    try {
+      const { fleetOpLogId } = req.body || {};
+      const submission = await holmanSubmissionService.getSubmissionById(req.params.id);
+      if (!submission) return res.status(404).json({ success: false, error: "Submission not found" });
+
+      if (submission.status === 'completed' || submission.status === 'failed') {
+        await holmanSubmissionService.resetForReverification(submission.id);
+      }
+
+      const refreshed = await holmanSubmissionService.getSubmissionById(submission.id);
+      if (!refreshed) return res.status(404).json({ success: false, error: "Submission not found after reset" });
+
+      const result = await holmanSubmissionService.verifyByVehicleLookup(refreshed);
+
+      if (result.newStatus === 'completed' || result.newStatus === 'failed') {
+        await holmanSubmissionService.propagateStatusToFleetLog(refreshed, result.newStatus, result.message);
+      }
+
+      if (fleetOpLogId && (result.newStatus === 'completed' || result.newStatus === 'failed')) {
+        const vehicleNumber = submission.holmanVehicleNumber.padStart(6, '0');
+        const logs = await storage.getFleetOperationLogs({ truckNumber: vehicleNumber });
+        const matchingLog = logs.find(l => l.id === Number(fleetOpLogId));
+        if (matchingLog) {
+          const holmanStatus = result.newStatus === 'completed' ? 'success' : 'failed';
+          await storage.updateFleetOperationLog(Number(fleetOpLogId), {
+            holmanStatus,
+            holmanMessage: result.message,
+          });
+        }
+      }
+
+      if (result.newStatus === 'pending') {
+        holmanSubmissionService.scheduleVerification(submission.id, 60_000, 5);
+      }
+
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error('[API] Re-verify submission error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });

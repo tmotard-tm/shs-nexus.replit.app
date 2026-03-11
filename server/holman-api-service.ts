@@ -445,6 +445,8 @@ export class HolmanApiService {
 
   // Lightweight check: fetch only assignedStatus for a vehicle number.
   // Used by the async verification loop to confirm Holman processed an assign/unassign.
+  // Uses basic-query GET (same approach as fleet sync) instead of custom-query POST
+  // which Holman returns HTTP 400 for when filtering by holmanVehicleNumber.
   async getVehicleAssignedStatus(vehicleNumber: string): Promise<{
     found: boolean;
     assignedStatus?: string;  // "Assigned" | "Unassigned" | ...
@@ -453,25 +455,20 @@ export class HolmanApiService {
   }> {
     try {
       const paddedVehicleNum = vehicleNumber.padStart(6, '0');
-      // Reuse the same query shape as lookupVehicleByNumber which is confirmed working.
-      // Only include properties known to be valid custom-query response fields.
-      // firstName/lastName/clientData2 are submit-payload field names, NOT query properties.
-      const body = {
-        lesseeCode: '2B56',
-        properties: [
-          'holmanVehicleNumber',
-          'clientVehicleNumber',
-          'vin',
-          'status',
-          'assignedStatus',
-        ],
-        filters: { holmanVehicleNumber: paddedVehicleNum },
-        pageNumber: 1,
-        pageSize: 5,
-      };
-      console.log(`[HolmanVerify] custom-query body:`, JSON.stringify(body));
-      const data = await this.makeRequest<any>('/vehicles/custom-query', 'POST', body);
-      const item = data?.items?.[0];
+      const params = new URLSearchParams({
+        lesseeCodes: '2B56',
+        holmanVehicleNumbers: paddedVehicleNum,
+        pageSize: '5',
+        pageNumber: '1',
+      });
+      console.log(`[HolmanVerify] basic-query GET: /vehicles/basic-query?${params}`);
+      const data = await this.makeRequest<any>(`/vehicles/basic-query?${params}`, 'GET');
+      const items = data?.items || [];
+      const item = items.find((v: any) => {
+        const holmanNum = (v.holmanVehicleNumber || '').padStart(6, '0');
+        const clientNum = (v.clientVehicleNumber || '').padStart(6, '0');
+        return holmanNum === paddedVehicleNum || clientNum === paddedVehicleNum;
+      });
       if (!item) return { found: false, error: 'Vehicle not found in Holman' };
       console.log(`[HolmanVerify] Vehicle ${vehicleNumber} raw item:`, JSON.stringify(item));
       return {
