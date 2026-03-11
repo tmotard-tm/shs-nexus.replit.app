@@ -20,7 +20,7 @@ import {
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
-  UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare
+  UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send
 } from "lucide-react";
 import { GiMagicLamp } from "react-icons/gi";
 import { BackButton } from "@/components/ui/back-button";
@@ -316,6 +316,23 @@ export default function FleetManagement() {
       if (!res.ok) return null;
       const json = await res.json();
       return json || null;
+    },
+  });
+
+  const [newComment, setNewComment] = useState("");
+
+  const addCommentMutation = useMutation({
+    mutationFn: async (comment: string) => {
+      const res = await apiRequest("POST", `/api/ams/vehicles/${selectedVehicle!.vin}/comments`, { comment });
+      return res.json();
+    },
+    onSuccess: () => {
+      setNewComment("");
+      queryClient.invalidateQueries({ queryKey: ["/api/ams/vehicles/comments", selectedVehicle?.vin] });
+      toast({ title: "Comment added successfully" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to add comment", description: error.message || "An error occurred", variant: "destructive" });
     },
   });
 
@@ -2119,6 +2136,29 @@ export default function FleetManagement() {
                 <p className="text-sm">{comment.Comment || comment.comment || comment.Text || comment.text || "—"}</p>
               </div>
             ))}
+          </div>
+          <div className="border-t pt-3 space-y-2">
+            <Textarea
+              placeholder="Add a comment..."
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              rows={3}
+              disabled={addCommentMutation.isPending}
+            />
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => newComment.trim() && addCommentMutation.mutate(newComment.trim())}
+                disabled={!newComment.trim() || addCommentMutation.isPending}
+              >
+                {addCommentMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4 mr-1.5" />
+                )}
+                Add Comment
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

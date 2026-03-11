@@ -11690,7 +11690,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/ams/vehicles/:vin/comments", requireAuth, async (req: any, res) => {
     try {
-      const result = await amsApiService.addComment(req.params.vin, req.body);
+      const body = { ...req.body, user: req.user.username };
+      const result = await amsApiService.addComment(req.params.vin, body);
       res.json(result);
     } catch (error: any) {
       console.error("Error adding AMS comment:", error);
