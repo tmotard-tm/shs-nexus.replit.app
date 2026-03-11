@@ -1,6 +1,9 @@
 import { getTPMSService } from './tpms-service';
 import { holmanApiService } from './holman-api-service';
 import { holmanSubmissionService } from './holman-submission-service';
+import { db } from './db';
+import { holmanVehiclesCache } from '@shared/schema';
+import { eq, or } from 'drizzle-orm';
 
 interface TechAddress {
   addressType: 'PRIMARY' | 'RE_ASSORTMENT' | 'DROP_RETURN' | 'ALTERNATE';
@@ -35,6 +38,7 @@ interface HolmanAssignmentPayload {
   email: string;
   firstName: string | null;
   lastName: string | null;
+  division?: string | null;
   clientData1: string | null;
   clientData2: string | null;
   clientData3: string;
@@ -42,6 +46,20 @@ interface HolmanAssignmentPayload {
   clientData5: string | null;
   clientData6: string | null;
   clientData7: string | null;
+  auxData1?: string | null;
+  auxData2?: string | null;
+  auxData3?: string | null;
+  auxData4?: string | null;
+  auxData5?: string | null;
+  auxData6?: string | null;
+  auxData7?: string | null;
+  auxData8?: string | null;
+  auxData9?: string | null;
+  auxData10?: string | null;
+  auxData11?: string | null;
+  auxData12?: string | null;
+  auxData13?: string | null;
+  auxData14?: string | null;
   assignedStatusCode: string;
   prefix: string | null;
   addressLine1: string | null;
@@ -126,38 +144,54 @@ class HolmanAssignmentUpdateService {
     };
   }
 
-  private buildUnassignPayload(vehicleNumber: string): HolmanAssignmentPayload {
+  private buildUnassignPayload(vehicleNumber: string, division?: string | null): HolmanAssignmentPayload {
     const paddedVehicleNumber = vehicleNumber.padStart(6, '0');
     const NULL_VAL = '^null^';
 
-    // Only clear driver identity fields with "^null^" (Holman's sentinel to erase a field).
-    // Address and phone fields are sent as JSON null, which tells Holman "don't touch this field",
-    // preserving whatever address is already on the vehicle record.
     return {
       lesseeCode: this.LESSEE_CODE,
       holmanVehicleNumber: paddedVehicleNumber,
       email: this.FLEET_EMAIL,
-      firstName: NULL_VAL,      // clear driver first name
-      lastName: NULL_VAL,       // clear driver last name
-      clientData1: NULL_VAL,    // clear last-name copy stored in clientData1
-      clientData2: NULL_VAL,    // clear Enterprise ID / LDAP stored in clientData2
-      clientData3: '890',
-      clientData4: null,
-      clientData5: null,
-      clientData6: null,
-      clientData7: null,
-      assignedStatusCode: 'D',  // mark as unassigned
-      prefix: null,             // leave district prefix as-is
-      addressLine1: null,       // leave address as-is
+      assignedStatusCode: 'U',      // "U" = Unassigned (not 'D')
+      firstName: 'UNKNOWN',          // Holman requires a name; "UNKNOWN" signals unassigned driver
+      lastName: 'UNKNOWN',
+      division: division || null,    // pass through vehicle division
+      // Clear all driver identity fields with Holman's sentinel "^null^"
+      clientData1: NULL_VAL,
+      clientData2: NULL_VAL,         // clears Enterprise ID / LDAP
+      clientData3: '890',            // constant cost-center code
+      clientData4: NULL_VAL,
+      clientData5: NULL_VAL,
+      clientData6: NULL_VAL,
+      clientData7: NULL_VAL,
+      // Clear all auxData fields
+      auxData1: NULL_VAL,
+      auxData2: NULL_VAL,
+      auxData3: NULL_VAL,
+      auxData4: NULL_VAL,
+      auxData5: NULL_VAL,
+      auxData6: NULL_VAL,
+      auxData7: NULL_VAL,
+      auxData8: NULL_VAL,
+      auxData9: NULL_VAL,
+      auxData10: NULL_VAL,
+      auxData11: NULL_VAL,
+      auxData12: NULL_VAL,
+      auxData13: NULL_VAL,
+      auxData14: NULL_VAL,
+      // Leave address fields untouched (JSON null = don't change)
+      prefix: null,
+      addressLine1: null,
       addressLine2: null,
       addressLine3: null,
       city: null,
       stateProvince: null,
       zipPostalCode: null,
-      homePhone: null,
-      workPhone: null,
-      workPhoneExtension: null,
-      cellPhone: null,
+      // Clear phone fields with sentinel
+      homePhone: NULL_VAL,
+      cellPhone: NULL_VAL,
+      workPhone: NULL_VAL,
+      workPhoneExtension: NULL_VAL,
     };
   }
 
@@ -172,7 +206,26 @@ class HolmanAssignmentUpdateService {
 
       if (!enterpriseId) {
         console.log(`[HolmanAssignmentUpdate] No enterprise ID - building unassign payload`);
-        payload = this.buildUnassignPayload(vehicleNumber);
+        // Look up the vehicle's division from our cache so it can be included in the payload
+        let division: string | null = null;
+        try {
+          const paddedNumber = vehicleNumber.padStart(6, '0');
+          const vehicleRows = await db
+            .select({ division: holmanVehiclesCache.division })
+            .from(holmanVehiclesCache)
+            .where(
+              or(
+                eq(holmanVehiclesCache.holmanVehicleNumber, paddedNumber),
+                eq(holmanVehiclesCache.holmanVehicleNumber, vehicleNumber)
+              )
+            )
+            .limit(1);
+          division = vehicleRows[0]?.division ?? null;
+          console.log(`[HolmanAssignmentUpdate] Vehicle ${vehicleNumber} division: ${division}`);
+        } catch (divErr: any) {
+          console.warn(`[HolmanAssignmentUpdate] Could not look up division for vehicle ${vehicleNumber}:`, divErr.message);
+        }
+        payload = this.buildUnassignPayload(vehicleNumber, division);
       } else {
         const tpmsService = getTPMSService();
         const techInfo = await tpmsService.getTechInfo(enterpriseId);
