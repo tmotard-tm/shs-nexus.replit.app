@@ -3,7 +3,7 @@ import { holmanApiService } from './holman-api-service';
 import { holmanSubmissionService } from './holman-submission-service';
 import { db } from './db';
 import { holmanVehiclesCache } from '@shared/schema';
-import { eq, or } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 interface TechAddress {
   addressType: 'PRIMARY' | 'RE_ASSORTMENT' | 'DROP_RETURN' | 'ALTERNATE';
@@ -112,13 +112,12 @@ class HolmanAssignmentUpdateService {
   }
 
   private buildPayload(vehicleNumber: string, techData: TPMSTechData): HolmanAssignmentPayload {
-    const paddedVehicleNumber = vehicleNumber.padStart(6, '0');
     const assignedStatusCode = this.isBYOV(vehicleNumber) ? 'D' : 'A';
     const districtPrefix = techData.districtNo ? techData.districtNo.slice(-4) : null;
 
     return {
       lesseeCode: this.LESSEE_CODE,
-      holmanVehicleNumber: paddedVehicleNumber,
+      holmanVehicleNumber: vehicleNumber,
       email: this.FLEET_EMAIL,
       firstName: this.normalizeString(techData.firstName),
       lastName: this.normalizeString(techData.lastName),
@@ -145,12 +144,11 @@ class HolmanAssignmentUpdateService {
   }
 
   private buildUnassignPayload(vehicleNumber: string, division?: string | null): HolmanAssignmentPayload {
-    const paddedVehicleNumber = vehicleNumber.padStart(6, '0');
     const NULL_VAL = '^null^';
 
     return {
       lesseeCode: this.LESSEE_CODE,
-      holmanVehicleNumber: paddedVehicleNumber,
+      holmanVehicleNumber: vehicleNumber,
       email: this.FLEET_EMAIL,
       assignedStatusCode: 'U',      // "U" = Unassigned (not 'D')
       firstName: 'UNKNOWN',          // Holman requires a name; "UNKNOWN" signals unassigned driver
@@ -209,16 +207,10 @@ class HolmanAssignmentUpdateService {
         // Look up the vehicle's division from our cache so it can be included in the payload
         let division: string | null = null;
         try {
-          const paddedNumber = vehicleNumber.padStart(6, '0');
           const vehicleRows = await db
             .select({ division: holmanVehiclesCache.division })
             .from(holmanVehiclesCache)
-            .where(
-              or(
-                eq(holmanVehiclesCache.holmanVehicleNumber, paddedNumber),
-                eq(holmanVehiclesCache.holmanVehicleNumber, vehicleNumber)
-              )
-            )
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicleNumber))
             .limit(1);
           division = vehicleRows[0]?.division ?? null;
           console.log(`[HolmanAssignmentUpdate] Vehicle ${vehicleNumber} division: ${division}`);
@@ -341,14 +333,13 @@ class HolmanAssignmentUpdateService {
     error?: string;
     response?: any;
   }> {
-    const paddedVehicleNumber = vehicleNumber.padStart(6, '0');
     const startTime = Date.now();
     
     const actualValue = useSpace && fieldValue === null ? ' ' : fieldValue;
     
     const basePayload: HolmanAssignmentPayload = {
       lesseeCode: this.LESSEE_CODE,
-      holmanVehicleNumber: paddedVehicleNumber,
+      holmanVehicleNumber: vehicleNumber,
       email: this.FLEET_EMAIL,
       firstName: null,
       lastName: null,
