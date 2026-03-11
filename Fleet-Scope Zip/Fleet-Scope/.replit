@@ -1,0 +1,56 @@
+modules = ["nodejs-20", "web", "postgresql-16"]
+run = "npm run dev"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+deploymentTarget = "autoscale"
+build = ["npm", "run", "build"]
+run = ["npm", "run", "start"]
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5904
+externalPort = 3002
+
+[env]
+PORT = "5000"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[agent]
+integrations = ["javascript_database:1.0.0"]
+
+[userenv]
+
+[userenv.shared]
+SNOWFLAKE_USER = "SVC_SCA_AUTO"
+SNOWFLAKE_ACCOUNT = "sears_hs_prod.us-east-1"
+SNOWFLAKE_DATABASE = "PARTS_SUPPLYCHAIN"
+SNOWFLAKE_SCHEMA = "SOFTEON"
+SNOWFLAKE_TABLE = "TPMS_EXTRACT"
+SNOWFLAKE_PRIVATE_KEY_PATH = "server/keys/snowflake_private_key.p8"
