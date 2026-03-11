@@ -39,10 +39,42 @@ export interface AmsVehicle {
   VehicleGrade: string | null;
   Grade: string | null;
   GradeDescription: string | null;
+  RemBookValue: number | null;
+  LeaseEndDate: string | null;
+  OutofSvcDate: string | null;
+  SaleDate: string | null;
+  UpdateDate: string | null;
+  CurLocAddress: string | null;
+  CurLocCity: string | null;
+  CurLocState: string | null;
+  CurLocZip: string | null;
+  GradeVerified: string | null;
+  LastUpdate: string | null;
+  LastUpdateUser: string | null;
+  DetailID: number | null;
   [key: string]: any;
 }
 
 export interface AmsTech {
+  LdapId: string | null;
+  TechName: string | null;
+  JobTitle: string | null;
+  Status: string | null;
+  Region: string | null;
+  District: string | null;
+  TFD: string | null;
+  TFDName: string | null;
+  DSM: string | null;
+  DSMName: string | null;
+  TM: string | null;
+  TMName: string | null;
+  Vehicle: string | null;
+  SST: string | null;
+  Printer: string | null;
+  C1K: string | null;
+  SearsC1K: string | null;
+  SearsC1KDate: string | null;
+  LastUpdate: string | null;
   [key: string]: any;
 }
 
@@ -159,6 +191,13 @@ export class AmsApiService {
     interior?: string | null;
     address?: string | null;
     zip?: string | null;
+    truckStatus?: string | null;
+    theftVerified?: string | null;
+    keyAddress?: string | null;
+    keyZip?: string | null;
+    storageCost?: number | null;
+    vehicleRuns?: string | null;
+    vehicleLooks?: string | null;
   }): Promise<any> {
     return this.request('POST', `/api/v1/vehicles/${vin}/user-updates`, data);
   }

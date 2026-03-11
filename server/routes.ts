@@ -11799,7 +11799,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validTypes = [
         'colors', 'branding', 'interior', 'sct-tune', 'grades',
         'vehicle-runs', 'vehicle-looks', 'service-reasons',
-        'repair-status', 'repair-disposition', 'disposition-reasons', 'rental-car'
+        'repair-status', 'repair-disposition', 'disposition-reasons', 'rental-car',
+        'truck-status'
       ];
       if (!validTypes.includes(req.params.type)) {
         return res.status(400).json({ message: `Invalid lookup type. Valid types: ${validTypes.join(', ')}` });

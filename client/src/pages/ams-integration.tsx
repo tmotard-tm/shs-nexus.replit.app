@@ -40,6 +40,7 @@ const LOOKUP_TYPES = [
   { key: 'repair-disposition', label: 'Repair Disposition' },
   { key: 'disposition-reasons', label: 'Disposition Reasons' },
   { key: 'rental-car', label: 'Rental Car' },
+  { key: 'truck-status', label: 'Truck Status' },
 ];
 
 export default function AmsIntegration() {

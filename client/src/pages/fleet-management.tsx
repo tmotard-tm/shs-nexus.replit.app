@@ -21,7 +21,7 @@ import {
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
-  UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send
+  UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil
 } from "lucide-react";
 import { GiMagicLamp } from "react-icons/gi";
 import { BackButton } from "@/components/ui/back-button";
@@ -245,7 +245,7 @@ export default function FleetManagement() {
   });
 
   // ─── Cross-System Fleet Operations State ───────────────────────────────────
-  type FleetModal = "assign" | "unassign" | "address" | "poHistory" | "amsComments" | null;
+  type FleetModal = "assign" | "unassign" | "address" | "poHistory" | "amsComments" | "amsEdit" | null;
   const [activeModal, setActiveModal] = useState<FleetModal>(null);
 
   // Assign form
@@ -269,6 +269,15 @@ export default function FleetManagement() {
   const [addrCity, setAddrCity] = useState("");
   const [addrState, setAddrState] = useState("");
   const [addrZip, setAddrZip] = useState("");
+
+  // AMS Edit form (user-updatable fields)
+  const [amsEditTruckStatus, setAmsEditTruckStatus] = useState("");
+  const [amsEditTheftVerified, setAmsEditTheftVerified] = useState("");
+  const [amsEditKeyAddress, setAmsEditKeyAddress] = useState("");
+  const [amsEditKeyZip, setAmsEditKeyZip] = useState("");
+  const [amsEditStorageCost, setAmsEditStorageCost] = useState("");
+  const [amsEditVehicleRuns, setAmsEditVehicleRuns] = useState("");
+  const [amsEditVehicleLooks, setAmsEditVehicleLooks] = useState("");
 
   // Operation result (per-system status returned from fleet-ops endpoint)
   const [opResult, setOpResult] = useState<any>(null);
@@ -335,6 +344,37 @@ export default function FleetManagement() {
     onError: (error: any) => {
       toast({ title: "Failed to add comment", description: error.message || "An error occurred", variant: "destructive" });
     },
+  });
+
+  const amsUserUpdateMutation = useMutation({
+    mutationFn: async (payload: Record<string, any>) => {
+      const res = await apiRequest("POST", `/api/ams/vehicles/${selectedVehicle!.vin}/user-updates`, payload);
+      return res.json();
+    },
+    onSuccess: () => {
+      setActiveModal(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/ams/vehicles", selectedVehicle?.vin] });
+      toast({ title: "AMS vehicle fields updated" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to update AMS fields", description: error.message || "An error occurred", variant: "destructive" });
+    },
+  });
+
+  const { data: truckStatusLookup } = useQuery<any[]>({
+    queryKey: ['/api/ams/lookups', 'truck-status'],
+    enabled: activeModal === "amsEdit",
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: vehicleRunsLookup } = useQuery<any[]>({
+    queryKey: ['/api/ams/lookups', 'vehicle-runs'],
+    enabled: activeModal === "amsEdit",
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: vehicleLooksLookup } = useQuery<any[]>({
+    queryKey: ['/api/ams/lookups', 'vehicle-looks'],
+    enabled: activeModal === "amsEdit",
+    staleTime: 10 * 60 * 1000,
   });
 
   // AMS comments for selected vehicle (fetched when modal opens)
@@ -1589,6 +1629,7 @@ export default function FleetManagement() {
                         <div>
                           <Label className="text-xs text-muted-foreground">Grade</Label>
                           <p className="text-sm">{amsVehicle.GradeDescription || amsVehicle.Grade || "N/A"}</p>
+                          {amsVehicle.GradeVerified && <p className="text-xs text-muted-foreground">Verified: {amsVehicle.GradeVerified}</p>}
                         </div>
                         <div>
                           <Label className="text-xs text-muted-foreground">AMS Tech</Label>
@@ -1608,10 +1649,54 @@ export default function FleetManagement() {
                           <p className="text-sm">{amsVehicle.CurOdometer ? amsVehicle.CurOdometer.toLocaleString() + " mi" : "N/A"}</p>
                           {amsVehicle.CurOdometerDate && <p className="text-xs text-muted-foreground">{amsVehicle.CurOdometerDate}</p>}
                         </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Book Value</Label>
+                          <p className="text-sm">{amsVehicle.RemBookValue != null ? `$${amsVehicle.RemBookValue.toLocaleString()}` : "N/A"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Lease End</Label>
+                          <p className="text-sm">{amsVehicle.LeaseEndDate || "N/A"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Out of Service</Label>
+                          <p className="text-sm">{amsVehicle.OutofSvcDate || "N/A"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Sale Date</Label>
+                          <p className="text-sm">{amsVehicle.SaleDate || "N/A"}</p>
+                        </div>
                       </div>
-                      <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("amsComments")} data-testid="button-ams-comments">
-                        <MessageSquare className="h-4 w-4 mr-1.5" />Comment History
-                      </Button>
+                      {(amsVehicle.CurLocAddress || amsVehicle.CurLocCity || amsVehicle.CurLocState || amsVehicle.CurLocZip) && (
+                        <div className="mt-3 p-2 bg-muted/50 rounded text-sm">
+                          <Label className="text-xs text-muted-foreground">Current Location</Label>
+                          <p className="text-sm">
+                            {[amsVehicle.CurLocAddress, amsVehicle.CurLocCity, amsVehicle.CurLocState].filter(Boolean).join(", ")}
+                            {amsVehicle.CurLocZip ? ` ${amsVehicle.CurLocZip}` : ""}
+                          </p>
+                        </div>
+                      )}
+                      {(amsVehicle.LastUpdate || amsVehicle.LastUpdateUser) && (
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          Last updated: {amsVehicle.LastUpdate || "N/A"}{amsVehicle.LastUpdateUser ? ` by ${amsVehicle.LastUpdateUser}` : ""}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" className="flex-1" onClick={() => openModal("amsComments")} data-testid="button-ams-comments">
+                          <MessageSquare className="h-4 w-4 mr-1.5" />Comments
+                        </Button>
+                        <Button size="sm" variant="outline" className="flex-1" onClick={() => {
+                          setAmsEditTruckStatus("");
+                          setAmsEditTheftVerified("");
+                          setAmsEditKeyAddress("");
+                          setAmsEditKeyZip("");
+                          setAmsEditStorageCost("");
+                          setAmsEditVehicleRuns("");
+                          setAmsEditVehicleLooks("");
+                          openModal("amsEdit");
+                        }} data-testid="button-ams-edit">
+                          <Pencil className="h-4 w-4 mr-1.5" />Edit Fields
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2098,6 +2183,101 @@ export default function FleetManagement() {
                 </>
               );
             })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* AMS Edit Fields Modal */}
+      <Dialog open={activeModal === "amsEdit"} onOpenChange={(o) => { if (!o) setActiveModal(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Pencil className="h-4 w-4" />Edit AMS Fields — {selectedVehicle?.vin}</DialogTitle>
+            <DialogDescription>Update user-editable fields in the AMS system.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Truck Status</Label>
+              <Select value={amsEditTruckStatus} onValueChange={setAmsEditTruckStatus}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Select status..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {(Array.isArray(truckStatusLookup) ? truckStatusLookup : []).map((item: any) => (
+                    <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Theft Verified</Label>
+              <Select value={amsEditTheftVerified} onValueChange={setAmsEditTheftVerified}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  <SelectItem value="Y">Yes</SelectItem>
+                  <SelectItem value="N">No</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Key Address</Label>
+                <Input className="mt-1" value={amsEditKeyAddress} onChange={e => setAmsEditKeyAddress(e.target.value)} placeholder="Key pickup address" />
+              </div>
+              <div>
+                <Label className="text-xs">Key ZIP</Label>
+                <Input className="mt-1" value={amsEditKeyZip} onChange={e => setAmsEditKeyZip(e.target.value)} placeholder="ZIP code" />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Storage Cost ($)</Label>
+              <Input className="mt-1" type="number" value={amsEditStorageCost} onChange={e => setAmsEditStorageCost(e.target.value)} placeholder="0.00" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Vehicle Runs</Label>
+                <Select value={amsEditVehicleRuns} onValueChange={setAmsEditVehicleRuns}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {(Array.isArray(vehicleRunsLookup) ? vehicleRunsLookup : []).map((item: any) => (
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Vehicle Looks</Label>
+                <Select value={amsEditVehicleLooks} onValueChange={setAmsEditVehicleLooks}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {(Array.isArray(vehicleLooksLookup) ? vehicleLooksLookup : []).map((item: any) => (
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setActiveModal(null)}>Cancel</Button>
+              <Button
+                disabled={amsUserUpdateMutation.isPending}
+                onClick={() => {
+                  const payload: Record<string, any> = { updateUser: user?.username || "nexus" };
+                  if (amsEditTruckStatus && amsEditTruckStatus !== "__none__") payload.truckStatus = amsEditTruckStatus;
+                  if (amsEditTheftVerified && amsEditTheftVerified !== "__none__") payload.theftVerified = amsEditTheftVerified;
+                  if (amsEditKeyAddress) payload.keyAddress = amsEditKeyAddress;
+                  if (amsEditKeyZip) payload.keyZip = amsEditKeyZip;
+                  if (amsEditStorageCost !== "") payload.storageCost = parseFloat(amsEditStorageCost);
+                  if (amsEditVehicleRuns && amsEditVehicleRuns !== "__none__") payload.vehicleRuns = amsEditVehicleRuns;
+                  if (amsEditVehicleLooks && amsEditVehicleLooks !== "__none__") payload.vehicleLooks = amsEditVehicleLooks;
+                  amsUserUpdateMutation.mutate(payload);
+                }}
+              >
+                {amsUserUpdateMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
+                Save Changes
+              </Button>
+            </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>
