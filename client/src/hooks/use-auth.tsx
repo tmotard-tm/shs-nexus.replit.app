@@ -116,8 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setRequiresSecurityQuestions(false);
     localStorage.removeItem("user");
-    // SAML SSO INTEGRATION - Redirect to IdP logout
-    window.location.href = "/auth/logout";
+    window.location.href = "/login";
   };
 
   const clearSecurityQuestionsRequirement = () => {

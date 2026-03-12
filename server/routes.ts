@@ -531,6 +531,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.redirect(`${idpSloUrl}?RelayState=${relayState}`);
   });
 
+  app.post("/api/auth/logout", async (req: any, res) => {
+    const cookieHeader = req.headers.cookie;
+    const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
+    if (sessionId) {
+      try { await storage.deleteSession(sessionId); } catch {}
+    }
+    res.clearCookie('sessionId', { path: '/' });
+    res.json({ ok: true });
+  });
+
   app.get("/api/auth/sso-user", requireAuth, async (req: any, res) => {
     try {
       const user = await storage.getUser(req.user.id);
