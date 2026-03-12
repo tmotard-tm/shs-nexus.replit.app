@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
 import { useDebouncedSave } from "@/hooks/use-debounced-save";
+import { AmsVehiclePanel } from "./fleet/ams-vehicle-panel";
 
 interface WorkModuleDialogProps {
   isOpen: boolean;
@@ -163,7 +164,14 @@ export function WorkModuleDialog({
     truckLu: rosterData?.found ? rosterData.truckLu : techData.truckLu,
   };
 
-  // Format phone number helper
+  const truckNumber = enrichedEmployeeData.truckLu || taskData.truckLu || taskData.truckNumber || taskData.vehicleNumber || '';
+  const { data: holmanVehicle } = useQuery<any>({
+    queryKey: ['/api/holman/vehicle', truckNumber],
+    enabled: !!truckNumber && isOpen,
+    staleTime: 5 * 60 * 1000,
+  });
+  const vehicleVin = holmanVehicle?.vehicle?.vin || holmanVehicle?.vin || taskData.vin || '';
+
   const formatPhone = (phone: string | null | undefined): string => {
     if (!phone) return 'N/A';
     const digits = phone.replace(/\D/g, '');
@@ -1198,6 +1206,8 @@ export function WorkModuleDialog({
                       </div>
                     </div>
                   </div>
+
+                  {vehicleVin && <AmsVehiclePanel vin={vehicleVin} />}
 
                   {/* Employee Info for Fleet Context */}
                   <div>

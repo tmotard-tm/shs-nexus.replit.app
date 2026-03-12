@@ -10937,7 +10937,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .from(allTechsTable)
             .where(eq(allTechsTable.techRacfid, profile.enterpriseId))
             .limit(1);
-          if (atRow?.truckLu && profile.profileTruckNo && atRow.truckLu.trim() !== profile.profileTruckNo.trim()) {
+          if (atRow?.truckLu && profile.profileTruckNo && toCanonical(atRow.truckLu) !== toCanonical(profile.profileTruckNo)) {
             driftEntries.push({ enterpriseId: profile.enterpriseId, tpmsNo: profile.profileTruckNo, snowflakeNo: atRow.truckLu });
           }
         }
@@ -10966,6 +10966,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Schedule recurring incremental sync
     setInterval(runTpmsIncrementalSync, TPMS_SYNC_INTERVAL_MS);
     console.log(`[TPMS Scheduler] Scheduled incremental sync every ${TPMS_SYNC_INTERVAL_MS / 3600000}h`);
+
+    // Operation events retry worker — retry failed system calls every 5 minutes
+    setInterval(async () => {
+      try {
+        const { retryFailedOperationEvents } = await import("./fleet-operations-service");
+        const result = await retryFailedOperationEvents();
+        if (result.retried > 0) {
+          console.log(`[OpEvents Retry] Retried ${result.retried}: ${result.succeeded} succeeded, ${result.failed} failed`);
+        }
+      } catch (err: any) {
+        console.error(`[OpEvents Retry] Error: ${err.message}`);
+      }
+    }, 5 * 60 * 1000);
+    console.log(`[OpEvents Retry] Scheduled retry worker every 5 minutes`);
 
     // ── Startup backfill: populate tpms_tech_profiles from tpms_cached_assignments ──
     // Two phases run on every startup:
@@ -14332,6 +14346,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.query.ldap) filters.ldap = req.query.ldap as string;
       const logs = await storage.getFleetOperationLogs(filters);
       res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/operation-events", requireAuth, async (req: any, res) => {
+    try {
+      const { operationEvents: opEventsTable } = await import("@shared/schema");
+      const filters: any = {};
+      const conditions: any[] = [];
+      if (req.query.fleetOpLogId) conditions.push(eq(opEventsTable.fleetOpLogId, Number(req.query.fleetOpLogId)));
+      if (req.query.system) conditions.push(eq(opEventsTable.system, req.query.system as string));
+      if (req.query.status) conditions.push(eq(opEventsTable.status, req.query.status as string));
+
+      let query = db.select().from(opEventsTable);
+      if (conditions.length > 0) {
+        query = query.where(and(...conditions)) as any;
+      }
+      const events = await (query as any).orderBy(sql`created_at DESC`).limit(100);
+      res.json(events);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/operation-events/:id/retry", requireAuth, async (req: any, res) => {
+    try {
+      const { operationEvents: opEventsTable } = await import("@shared/schema");
+      const eventId = Number(req.params.id);
+      const [event] = await db.select().from(opEventsTable).where(eq(opEventsTable.id, eventId)).limit(1);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.status === "success") return res.status(400).json({ message: "Event already succeeded" });
+
+      await db.update(opEventsTable)
+        .set({ status: "failed", nextRetryAt: new Date(), retryCount: Math.max(0, event.retryCount - 1), updatedAt: new Date() })
+        .where(eq(opEventsTable.id, eventId));
+
+      const { retryFailedOperationEvents } = await import("./fleet-operations-service");
+      const result = await retryFailedOperationEvents();
+      res.json({ message: "Retry triggered", result });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

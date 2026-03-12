@@ -1999,3 +1999,42 @@ export const insertTpmsChangeLogSchema = createInsertSchema(tpmsChangeLog).omit(
 });
 export type TpmsChangeLog = typeof tpmsChangeLog.$inferSelect;
 export type InsertTpmsChangeLog = z.infer<typeof insertTpmsChangeLogSchema>;
+
+// ===============================
+// Operation Events (granular per-system-call log with retry support)
+// ===============================
+
+export const operationEvents = pgTable("operation_events", {
+  id: serial("id").primaryKey(),
+  fleetOpLogId: integer("fleet_op_log_id"),
+  system: text("system").notNull(), // "tpms" | "holman" | "ams"
+  action: text("action").notNull(), // "assign" | "unassign" | "update_address" etc.
+  status: text("status").notNull().default("pending"), // "pending" | "success" | "failed" | "retrying"
+  truckNumber: text("truck_number"),
+  vin: text("vin"),
+  ldapId: text("ldap_id"),
+  requestPayload: text("request_payload"),
+  responsePayload: text("response_payload"),
+  errorMessage: text("error_message"),
+  retryCount: integer("retry_count").default(0).notNull(),
+  maxRetries: integer("max_retries").default(3).notNull(),
+  nextRetryAt: timestamp("next_retry_at"),
+  requestedBy: text("requested_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    fleetOpIdx: index("op_events_fleet_op_idx").on(table.fleetOpLogId),
+    systemIdx: index("op_events_system_idx").on(table.system),
+    statusIdx: index("op_events_status_idx").on(table.status),
+    retryIdx: index("op_events_retry_idx").on(table.nextRetryAt),
+  };
+});
+
+export const insertOperationEventSchema = createInsertSchema(operationEvents).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type OperationEvent = typeof operationEvents.$inferSelect;
+export type InsertOperationEvent = z.infer<typeof insertOperationEventSchema>;

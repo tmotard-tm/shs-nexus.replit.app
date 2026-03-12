@@ -1,5 +1,10 @@
 type SystemName = 'holman' | 'tpms' | 'snowflake' | 'display';
 
+export function normalizeEnterpriseId(id: string | null | undefined): string {
+  if (!id) return '';
+  return id.trim().toUpperCase();
+}
+
 export function toHolmanRef(n: string | number | null | undefined): string {
   const c = toCanonical(n);
   return c ? c.padStart(6, '0') : '';

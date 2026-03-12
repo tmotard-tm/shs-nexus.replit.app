@@ -44,6 +44,9 @@ import {
   PhoneCall,
   PhoneForwarded,
   Loader2,
+  Wifi,
+  Navigation,
+  Gauge,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -392,6 +395,13 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
     return allVehiclesData.vehicles.find(v => v.vehicleNumber === truckNum) || null;
   })();
 
+  const samsaraVehicleName = truck ? (truck.truckNumber || '').toString().replace(/^0+/, '') : '';
+  const { data: samsaraData, isLoading: samsaraLoading } = useQuery<any>({
+    queryKey: ['/api/samsara/vehicle', samsaraVehicleName],
+    enabled: !!samsaraVehicleName && open,
+    staleTime: 2 * 60 * 1000,
+  });
+
   useEffect(() => {
     if (truck) {
       setCommentValue(truck.comments || "");
@@ -622,6 +632,39 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
                       <InfoRow label="VIN" value={vehicleInfo?.vin || "N/A"} icon={<FileText className="w-3.5 h-3.5" />} testId="panel-vehicle-vin" />
                       <InfoRow label="License Plate" value={vehicleInfo?.licensePlate || "N/A"} icon={<Car className="w-3.5 h-3.5" />} testId="panel-vehicle-plate" />
                     </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+                    <Wifi className="w-4 h-4 text-muted-foreground" />
+                    Samsara Telematics
+                  </h3>
+                  <div className="rounded-md border p-3">
+                    {samsaraLoading ? (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Loading GPS data...
+                      </div>
+                    ) : samsaraData?.LAT !== undefined ? (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                        <InfoRow label="GPS Location" value={
+                          samsaraData.LAT && samsaraData.LNG
+                            ? `${Number(samsaraData.LAT).toFixed(4)}, ${Number(samsaraData.LNG).toFixed(4)}`
+                            : "N/A"
+                        } icon={<Navigation className="w-3.5 h-3.5" />} />
+                        <InfoRow label="Address" value={
+                          samsaraData.REVERSE_GEO_FULL || "N/A"
+                        } icon={<MapPin className="w-3.5 h-3.5" />} />
+                        <InfoRow label="Speed" value={
+                          samsaraData.SPEED_MPH !== null && samsaraData.SPEED_MPH !== undefined ? `${samsaraData.SPEED_MPH} mph` : "N/A"
+                        } icon={<Gauge className="w-3.5 h-3.5" />} />
+                        <InfoRow label="Last Updated" value={
+                          samsaraData.TIME ? format(new Date(samsaraData.TIME), 'MMM d, h:mm a') : "N/A"
+                        } icon={<Clock className="w-3.5 h-3.5" />} />
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No Samsara GPS data available</p>
+                    )}
                   </div>
                 </div>
 

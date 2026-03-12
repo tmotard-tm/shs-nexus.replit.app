@@ -140,7 +140,7 @@ class TpmsCacheSyncService {
                   lookupKey: enterpriseId,
                   lookupType: 'enterprise_id',
                   truckNo: techInfo.truckNo?.trim() || null,
-                  enterpriseId: techInfo.ldapId?.toUpperCase() || enterpriseId,
+                  enterpriseId: techInfo.ldapId?.trim().toUpperCase() || enterpriseId,
                   techId: techInfo.techId || null,
                   firstName: techInfo.firstName || null,
                   lastName: techInfo.lastName || null,

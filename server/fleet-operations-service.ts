@@ -1,8 +1,9 @@
 import { storage } from "./storage";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
-import { holmanVehiclesCache } from "@shared/schema";
-import type { FleetOperationLog, InsertFleetOperationLog } from "@shared/schema";
+import { eq, and, lte, or } from "drizzle-orm";
+import { holmanVehiclesCache, operationEvents } from "@shared/schema";
+import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent } from "@shared/schema";
+import { toCanonical, toHolmanRef, normalizeEnterpriseId } from "./vehicle-number-utils";
 
 interface AssignTechParams {
   truckNumber: string;
@@ -58,9 +59,10 @@ interface OperationResult {
 
 async function lookupVinByTruck(truckNumber: string): Promise<string | null> {
   try {
+    const holmanRef = toHolmanRef(truckNumber);
     const result = await db.select({ vin: holmanVehiclesCache.vin })
       .from(holmanVehiclesCache)
-      .where(eq(holmanVehiclesCache.holmanVehicleNumber, truckNumber))
+      .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanRef || truckNumber))
       .limit(1);
     return result[0]?.vin ?? null;
   } catch {
@@ -143,9 +145,10 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
       if (result.success) {
         // Optimistically update the local cache so the UI reflects the new state immediately
         try {
+          const holmanRef = toHolmanRef(params.truckNumber);
           await db.update(holmanVehiclesCache)
             .set({ holmanTechAssigned: params.ldapId, holmanTechName: params.techName || params.ldapId, lastLocalUpdateAt: new Date() })
-            .where(eq(holmanVehiclesCache.holmanVehicleNumber, params.truckNumber));
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanRef || params.truckNumber));
         } catch {}
         // Holman processes async (202 Accepted). Return pending until verification confirms.
         return { status: "pending", message: result.message || "Queued — awaiting Holman confirmation", submissionDbId: result.submissionDbId };
@@ -160,9 +163,10 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
       if (result.success) {
         // Optimistically clear the local cache so the UI reflects unassigned state immediately
         try {
+          const holmanRef = toHolmanRef(params.truckNumber);
           await db.update(holmanVehiclesCache)
             .set({ holmanTechAssigned: null, holmanTechName: null, lastLocalUpdateAt: new Date() })
-            .where(eq(holmanVehiclesCache.holmanVehicleNumber, params.truckNumber));
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanRef || params.truckNumber));
         } catch {}
         // Holman processes async (202 Accepted). Return pending until verification confirms.
         return { status: "pending", message: result.message || "Queued — awaiting Holman confirmation", submissionDbId: result.submissionDbId };
@@ -238,6 +242,51 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
   }
 }
 
+async function logOperationEvent(
+  fleetOpLogId: number,
+  system: string,
+  action: string,
+  params: Record<string, any>,
+  result: SystemResult,
+): Promise<void> {
+  try {
+    const eventData: InsertOperationEvent = {
+      fleetOpLogId,
+      system,
+      action,
+      status: result.status === "pending" ? "pending" : result.status,
+      truckNumber: params.truckNumber || null,
+      vin: params.vin || null,
+      ldapId: params.ldapId || params.toLdap || null,
+      requestPayload: JSON.stringify(params),
+      responsePayload: null,
+      errorMessage: result.status === "failed" ? result.message : null,
+      retryCount: 0,
+      maxRetries: 3,
+      nextRetryAt: result.status === "failed" ? new Date(Date.now() + 5 * 60 * 1000) : null,
+      requestedBy: params.requestedBy || null,
+    };
+    await db.insert(operationEvents).values(eventData);
+  } catch (err: any) {
+    console.error(`[FleetOps] Failed to log operation event: ${err.message}`);
+  }
+}
+
+async function logAllEvents(
+  logId: number,
+  action: string,
+  params: Record<string, any>,
+  tpms: SystemResult,
+  holman: SystemResult,
+  ams: SystemResult,
+): Promise<void> {
+  await Promise.all([
+    logOperationEvent(logId, "tpms", action, params, tpms),
+    logOperationEvent(logId, "holman", action, params, holman),
+    logOperationEvent(logId, "ams", action, params, ams),
+  ]);
+}
+
 function buildResult(log: FleetOperationLog, tpms: SystemResult, holman: SystemResult, ams: SystemResult): OperationResult {
   const anyFailed = tpms.status === "failed" || holman.status === "failed" || ams.status === "failed";
   const anySuccess = tpms.status === "success" || holman.status === "success" || ams.status === "success"
@@ -293,6 +342,8 @@ export const fleetOpsService = {
       amsMessage: ams.message,
     }) ?? log;
 
+    await logAllEvents(log.id, "assign", params, tpms, holman, ams);
+
     return buildResult(log, tpms, holman, ams);
   },
 
@@ -330,6 +381,8 @@ export const fleetOpsService = {
       amsStatus: ams.status,
       amsMessage: ams.message,
     }) ?? log;
+
+    await logAllEvents(log.id, "unassign", params, tpms, holman, ams);
 
     return buildResult(log, tpms, holman, ams);
   },
@@ -427,6 +480,74 @@ export const fleetOpsService = {
       amsMessage: ams.message,
     }) ?? log;
 
+    await logAllEvents(log.id, "update_address", params, tpms, holman, ams);
+
     return buildResult(log, tpms, holman, ams);
   },
 };
+
+export async function retryFailedOperationEvents(): Promise<{ retried: number; succeeded: number; failed: number }> {
+  const now = new Date();
+  const retryable = await db.select().from(operationEvents)
+    .where(
+      and(
+        eq(operationEvents.status, "failed"),
+        lte(operationEvents.nextRetryAt, now),
+      )
+    )
+    .limit(20);
+
+  let retried = 0, succeeded = 0, failed = 0;
+
+  for (const event of retryable) {
+    if (event.retryCount >= event.maxRetries) {
+      await db.update(operationEvents)
+        .set({ status: "failed", nextRetryAt: null, updatedAt: now })
+        .where(eq(operationEvents.id, event.id));
+      continue;
+    }
+
+    retried++;
+    let params: Record<string, any> = {};
+    try { params = JSON.parse(event.requestPayload || "{}"); } catch {}
+
+    let result: SystemResult;
+    if (event.system === "tpms") {
+      result = await callTpms(event.action, params);
+    } else if (event.system === "holman") {
+      result = await callHolman(event.action, params);
+    } else if (event.system === "ams") {
+      result = await callAms(event.action, params);
+    } else {
+      continue;
+    }
+
+    const newRetryCount = event.retryCount + 1;
+    if (result.status === "success" || result.status === "pending") {
+      succeeded++;
+      await db.update(operationEvents)
+        .set({ status: result.status, errorMessage: null, retryCount: newRetryCount, nextRetryAt: null, updatedAt: now })
+        .where(eq(operationEvents.id, event.id));
+      if (event.fleetOpLogId) {
+        const field = event.system === "tpms" ? { tpmsStatus: result.status, tpmsMessage: result.message }
+          : event.system === "holman" ? { holmanStatus: result.status, holmanMessage: result.message }
+          : { amsStatus: result.status, amsMessage: result.message };
+        await storage.updateFleetOperationLog(event.fleetOpLogId, field);
+      }
+    } else {
+      failed++;
+      const backoff = Math.min(5 * 60 * 1000 * Math.pow(2, newRetryCount), 60 * 60 * 1000);
+      await db.update(operationEvents)
+        .set({
+          status: "failed",
+          errorMessage: result.message,
+          retryCount: newRetryCount,
+          nextRetryAt: newRetryCount >= event.maxRetries ? null : new Date(Date.now() + backoff),
+          updatedAt: now,
+        })
+        .where(eq(operationEvents.id, event.id));
+    }
+  }
+
+  return { retried, succeeded, failed };
+}

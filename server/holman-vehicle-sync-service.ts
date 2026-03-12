@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { holmanVehiclesCache, vehicleChangeLog, holmanSyncState, holmanSubmissions, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus, HolmanSyncState } from "@shared/schema";
+import { trucks } from "@shared/fleet-scope-schema";
 import { eq, sql, and, desc, inArray, gte, isNotNull } from "drizzle-orm";
 
 // Only divisions 01 and RF are relevant for this application
@@ -547,6 +548,46 @@ class HolmanVehicleSyncService {
     }
 
     console.log(`[HolmanSync] Updated cache with ${holmanVehicles.length} vehicles`);
+
+    await this.reconcileFleetScopeTrucks(holmanVehicles);
+  }
+
+  private async reconcileFleetScopeTrucks(holmanVehicles: any[]): Promise<void> {
+    try {
+      const fsTrucks = await db.select({ id: trucks.id, truckNumber: trucks.truckNumber, holmanRegExpiry: trucks.holmanRegExpiry })
+        .from(trucks);
+      if (fsTrucks.length === 0) return;
+
+      const fsMap = new Map<string, typeof fsTrucks[0]>();
+      for (const t of fsTrucks) {
+        const stripped = toCanonical(t.truckNumber);
+        if (stripped) fsMap.set(stripped, t);
+      }
+
+      let updated = 0;
+      for (const v of holmanVehicles) {
+        const vehicleNumber = v.holmanVehicleNumber?.toString() || v.clientVehicleNumber?.toString() || v.vehicleNumber?.toString();
+        if (!vehicleNumber) continue;
+        const canonical = toCanonical(vehicleNumber);
+        if (!canonical) continue;
+        const fsTruck = fsMap.get(canonical);
+        if (!fsTruck) continue;
+
+        const regExpiry = v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || null;
+        if (regExpiry && regExpiry !== fsTruck.holmanRegExpiry) {
+          await db.update(trucks)
+            .set({ holmanRegExpiry: regExpiry, lastUpdatedAt: new Date(), lastUpdatedBy: 'HolmanSync' })
+            .where(eq(trucks.id, fsTruck.id));
+          updated++;
+        }
+      }
+
+      if (updated > 0) {
+        console.log(`[HolmanSync] Fleet-Scope reconciliation: updated ${updated} truck(s) with Holman reg expiry data`);
+      }
+    } catch (err: any) {
+      console.error(`[HolmanSync] Fleet-Scope reconciliation error: ${err.message}`);
+    }
   }
 
   async enqueueChange(

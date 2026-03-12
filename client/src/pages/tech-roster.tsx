@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Users, Search, Filter, ChevronDown, ChevronUp, RefreshCw, Clock, AlertCircle, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X, Check } from "lucide-react";
+import { Users, Search, Filter, ChevronDown, ChevronUp, RefreshCw, Clock, AlertCircle, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X, Check, Link2, Link2Off } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -132,6 +133,23 @@ export default function TechRoster() {
   const { data: techs = [], isLoading } = useQuery<AllTech[]>({
     queryKey: ['/api/all-techs'],
   });
+
+  const { data: holmanVehicles = [] } = useQuery<Array<{ holmanVehicleNumber: string; holmanTechAssigned: string | null }>>({
+    queryKey: ['/api/holman/fleet-vehicles'],
+    select: (data: any) => (Array.isArray(data) ? data : (data?.vehicles || [])).map((v: any) => ({
+      holmanVehicleNumber: v.holmanVehicleNumber || '',
+      holmanTechAssigned: v.holmanTechAssigned || null,
+    })),
+  });
+
+  const holmanVehicleSet = useMemo(() => {
+    const set = new Map<string, string | null>();
+    for (const v of holmanVehicles) {
+      const num = v.holmanVehicleNumber.replace(/^0+/, '');
+      if (num) set.set(num, v.holmanTechAssigned);
+    }
+    return set;
+  }, [holmanVehicles]);
 
   const { data: syncStatus } = useQuery<{
     termedTechs: { lastSync: string | null; status: string; recordCount: number };
@@ -448,6 +466,7 @@ export default function TechRoster() {
                             <th className="text-left p-2 font-medium whitespace-nowrap">Planning Area</th>
                             <th className="text-left p-2 font-medium whitespace-nowrap">Status</th>
                             <th className="text-left p-2 font-medium whitespace-nowrap">Truck LU</th>
+                            <th className="text-left p-2 font-medium whitespace-nowrap">Vehicle Match</th>
                             <th className="text-left p-2 font-medium whitespace-nowrap">Cell Phone</th>
                             <th className="text-left p-2 font-medium whitespace-nowrap">Main Phone</th>
                             <th className="text-left p-2 font-medium whitespace-nowrap min-w-[250px]">Home Address</th>
@@ -477,6 +496,46 @@ export default function TechRoster() {
                                 </Badge>
                               </td>
                               <td className="p-2 font-mono text-xs">{tech.truckLu || '-'}</td>
+                              <td className="p-2 text-xs">
+                                {tech.truckLu ? (() => {
+                                  const stripped = tech.truckLu.replace(/^0+/, '');
+                                  const holmanTech = holmanVehicleSet.get(stripped);
+                                  const inHolman = holmanVehicleSet.has(stripped);
+                                  const techMatch = holmanTech && tech.techRacfid && holmanTech.trim().toUpperCase() === tech.techRacfid.trim().toUpperCase();
+                                  return (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger>
+                                          {inHolman ? (
+                                            techMatch ? (
+                                              <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 gap-1 text-xs">
+                                                <Link2 className="h-3 w-3" /> Matched
+                                              </Badge>
+                                            ) : (
+                                              <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 gap-1 text-xs">
+                                                <Link2 className="h-3 w-3" /> Holman
+                                              </Badge>
+                                            )
+                                          ) : (
+                                            <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
+                                              <Link2Off className="h-3 w-3" /> No match
+                                            </Badge>
+                                          )}
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          {inHolman ? (
+                                            techMatch
+                                              ? `Vehicle ${tech.truckLu} found in Holman & tech assignment matches`
+                                              : `Vehicle ${tech.truckLu} found in Holman but assigned to ${holmanTech || 'no one'}`
+                                          ) : (
+                                            `Vehicle ${tech.truckLu} not found in Holman fleet`
+                                          )}
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  );
+                                })() : <span className="text-muted-foreground">-</span>}
+                              </td>
                               <td className="p-2 text-xs whitespace-nowrap">{formatPhoneNumber(tech.cellPhone)}</td>
                               <td className="p-2 text-xs whitespace-nowrap">{formatPhoneNumber(tech.mainPhone)}</td>
                               <td className="p-2 text-xs" title={[tech.homeAddr1, tech.homeAddr2, tech.homeCity, tech.homeState, tech.homePostal].filter(Boolean).join(', ')}>

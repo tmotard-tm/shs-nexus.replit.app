@@ -1,1 +1,1 @@
-export { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, toSnowflakeRef, formatForSystem } from '../shared/vehicle-number-utils';
+export { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, toSnowflakeRef, formatForSystem, normalizeEnterpriseId } from '../shared/vehicle-number-utils';
