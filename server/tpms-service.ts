@@ -220,7 +220,7 @@ class TPMSService {
         lookupKey: lookupKey.toUpperCase(),
         lookupType,
         truckNo: techInfo.truckNo?.trim() || null,
-        enterpriseId: techInfo.ldapId?.toUpperCase() || null,
+        enterpriseId: techInfo.ldapId?.trim().toUpperCase() || null,
         techId: techInfo.techId || null,
         firstName: techInfo.firstName || null,
         lastName: techInfo.lastName || null,
