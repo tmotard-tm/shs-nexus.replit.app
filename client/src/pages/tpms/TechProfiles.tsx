@@ -109,6 +109,53 @@ export default function TechProfiles() {
     enabled: searchTriggered,
   });
 
+  // Determine if this is an Enterprise ID-only search with no local results
+  const isEnterpriseIdOnlySearch = searchTriggered &&
+    !!searchParams.enterpriseId &&
+    !searchParams.district && !searchParams.lastName && !searchParams.firstName &&
+    !searchParams.techManagerId && !searchParams.pdc && !searchParams.truckNo && !searchParams.techId;
+
+  const { data: liveResult, isLoading: liveSearching } = useQuery<TechProfile | null>({
+    queryKey: ["/api/tpms/techinfo", searchParams.enterpriseId],
+    queryFn: async () => {
+      const res = await fetch(`/api/tpms/techinfo/${encodeURIComponent(searchParams.enterpriseId.trim().toUpperCase())}`, { credentials: "include" });
+      if (!res.ok) return null;
+      const json = await res.json();
+      const d = json?.data;
+      if (!d) return null;
+      // Map TPMS API TechInfoResponse → TechProfile shape
+      return {
+        id: d.ldapId || d.techId || "",
+        techId: d.techId || "",
+        enterpriseId: (d.ldapId || "").toUpperCase(),
+        firstName: d.firstName || null,
+        lastName: d.lastName || null,
+        districtNo: d.districtNo || null,
+        pdcNo: null,
+        techManagerLdapId: d.techManagerLdapId?.trim() || null,
+        techManagerName: null,
+        truckNo: d.truckNo?.trim() || null,
+        mobilePhone: d.contactNo || null,
+        email: d.email || null,
+        shippingAddresses: d.addresses || [],
+        shippingSchedule: {},
+        deMinimis: false,
+        extendedHolds: d.latestShippingHold ? [d.latestShippingHold] : [],
+        techReplenishment: d.techReplenishment || {},
+        syncedAt: new Date().toISOString(),
+        lastTpmsUpdatedAt: null,
+        _isLive: true,
+      } as TechProfile;
+    },
+    enabled: isEnterpriseIdOnlySearch && !searching && searchResults.length === 0,
+  });
+
+  // Final display list: local results, or live result as fallback
+  const displayResults: TechProfile[] = searchResults.length > 0
+    ? searchResults
+    : (liveResult ? [liveResult] : []);
+  const isLoadingAny = searching || (isEnterpriseIdOnlySearch && searchResults.length === 0 && liveSearching);
+
   const { data: changeHistoryData, isLoading: loadingHistory } = useQuery<{
     techId: string;
     cdcLog: ChangeLogEntry[];
@@ -293,15 +340,20 @@ export default function TechProfiles() {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               Results
-              <Badge variant="secondary">{searchResults.length}</Badge>
+              <Badge variant="secondary">{displayResults.length}</Badge>
+              {liveResult && searchResults.length === 0 && (
+                <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border border-blue-300">
+                  Live TPMS lookup
+                </Badge>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {searching ? (
+            {isLoadingAny ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : searchResults.length === 0 ? (
+            ) : displayResults.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">No technicians found matching your criteria.</p>
             ) : (
               <div className="border rounded-md overflow-hidden">
@@ -314,12 +366,13 @@ export default function TechProfiles() {
                       <TableHead>District</TableHead>
                       <TableHead>Truck No</TableHead>
                       <TableHead>Phone</TableHead>
+                      <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {searchResults.map((tech) => (
+                    {displayResults.map((tech) => (
                       <TableRow
-                        key={tech.id}
+                        key={tech.id || tech.techId}
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => openProfile(tech)}
                       >
@@ -331,6 +384,13 @@ export default function TechProfiles() {
                         <TableCell>{tech.districtNo}</TableCell>
                         <TableCell>{tech.truckNo || "—"}</TableCell>
                         <TableCell>{tech.mobilePhone || "—"}</TableCell>
+                        <TableCell>
+                          {tech._isLive && (
+                            <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border border-blue-300">
+                              Live
+                            </Badge>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
