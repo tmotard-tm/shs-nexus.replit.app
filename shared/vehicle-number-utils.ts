@@ -2,7 +2,7 @@ type SystemName = 'holman' | 'tpms' | 'snowflake' | 'display';
 
 export function normalizeEnterpriseId(id: string | null | undefined): string {
   if (!id) return '';
-  return id.trim().toUpperCase();
+  return id.trim().toLowerCase();
 }
 
 export function toHolmanRef(n: string | number | null | undefined): string {

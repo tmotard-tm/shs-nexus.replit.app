@@ -254,8 +254,8 @@ export class SnowflakeSyncService {
       const techsNeedingOffboarding: UnifiedTermEmployee[] = [];
 
       for (const row of termRosterRows) {
-        const eid = (row.ENTERPRISE_ID || '').toUpperCase();
-        const emplId = (row.EMPLID || '').toUpperCase();
+        const eid = (row.ENTERPRISE_ID || '').trim().toLowerCase();
+        const emplId = (row.EMPLID || '').trim().toUpperCase();
         if (!eid && !emplId) continue;
         const key = eid || emplId;
         if (seenIds.has(key)) continue;

@@ -3,7 +3,7 @@ import { db } from "./db";
 import { eq, and, lte, or } from "drizzle-orm";
 import { holmanVehiclesCache, operationEvents } from "@shared/schema";
 import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent } from "@shared/schema";
-import { toCanonical, toHolmanRef, normalizeEnterpriseId } from "./vehicle-number-utils";
+import { toCanonical, toHolmanRef, toTpmsRef, normalizeEnterpriseId } from "./vehicle-number-utils";
 
 interface AssignTechParams {
   truckNumber: string;
@@ -87,25 +87,26 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
     const updatedBy = (params.requestedBy as string | undefined)?.trim() || "NEXUS";
 
     if (action === "assign") {
+      const tpmsTruckNo = toTpmsRef(params.truckNumber);
       await tpms.updateTechInfo({
-        techLdapId: params.ldapId,
+        techLdapId: normalizeEnterpriseId(params.ldapId),
         upserts: {
-          truckNo: params.truckNumber,
+          truckNo: tpmsTruckNo,
           updatedBy,
         },
       });
       return { status: "success", message: "Assigned" };
     }
     if (action === "unassign") {
-      // Check current TPMS assignment — skip if already unassigned
-      const current = await tpms.getTechInfo(params.ldapId).catch(() => null);
+      const normalizedLdap = normalizeEnterpriseId(params.ldapId);
+      const current = await tpms.getTechInfo(normalizedLdap).catch(() => null);
       if (!current?.truckNo || current.truckNo.trim() === "") {
         return { status: "skipped", message: "Already unassigned in TPMS" };
       }
       await tpms.updateTechInfo({
-        techLdapId: params.ldapId,
+        techLdapId: normalizedLdap,
         upserts: {
-          truckNo: "",   // empty string clears the assignment per TPMS API docs
+          truckNo: "",
           updatedBy,
         },
       });
@@ -113,7 +114,7 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
     }
     if (action === "update_address") {
       await tpms.updateTechInfo({
-        techLdapId: params.ldapId,
+        techLdapId: normalizeEnterpriseId(params.ldapId),
         upserts: {
           updatedBy,
           addresses: [{
@@ -138,9 +139,10 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
   try {
     const { holmanAssignmentUpdateService } = await import("./holman-assignment-update-service");
     if (action === "assign") {
+      const holmanVehicleNum = toHolmanRef(params.truckNumber);
       const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
-        params.truckNumber,
-        params.ldapId
+        holmanVehicleNum || params.truckNumber,
+        normalizeEnterpriseId(params.ldapId)
       );
       if (result.success) {
         // Optimistically update the local cache so the UI reflects the new state immediately
@@ -156,8 +158,9 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
       return { status: "failed", message: result.message || "Holman assign failed" };
     }
     if (action === "unassign") {
+      const holmanVehicleNum = toHolmanRef(params.truckNumber);
       const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
-        params.truckNumber,
+        holmanVehicleNum || params.truckNumber,
         null
       );
       if (result.success) {
@@ -248,13 +251,17 @@ async function logOperationEvent(
   result: SystemResult,
 ): Promise<void> {
   try {
+    const isResolved = result.status === "success" || result.status === "skipped";
     const eventData: InsertOperationEvent = {
       fleetOpLogId,
+      operationType: action,
       system,
       action,
       status: result.status === "pending" ? "pending" : result.status,
+      vehicleNumber: toCanonical(params.truckNumber) || null,
       truckNumber: params.truckNumber || null,
       vin: params.vin || null,
+      enterpriseId: normalizeEnterpriseId(params.ldapId || params.toLdap) || null,
       ldapId: params.ldapId || params.toLdap || null,
       requestPayload: JSON.stringify(params),
       responsePayload: null,
@@ -262,6 +269,8 @@ async function logOperationEvent(
       retryCount: 0,
       maxRetries: 3,
       nextRetryAt: result.status === "failed" ? new Date(Date.now() + 5 * 60 * 1000) : null,
+      lastAttemptAt: new Date(),
+      resolvedAt: isResolved ? new Date() : null,
       requestedBy: params.requestedBy || null,
     };
     await db.insert(operationEvents).values(eventData);
@@ -524,10 +533,19 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
     }
 
     const newRetryCount = event.retryCount + 1;
+    const isResolved = result.status === "success" || result.status === "skipped";
     if (result.status === "success" || result.status === "pending" || result.status === "skipped") {
       succeeded++;
       await db.update(operationEvents)
-        .set({ status: result.status, errorMessage: result.status === "skipped" ? result.message : null, retryCount: newRetryCount, nextRetryAt: null, updatedAt: now })
+        .set({
+          status: result.status,
+          errorMessage: result.status === "skipped" ? result.message : null,
+          retryCount: newRetryCount,
+          nextRetryAt: null,
+          lastAttemptAt: now,
+          resolvedAt: isResolved ? now : null,
+          updatedAt: now,
+        })
         .where(eq(operationEvents.id, event.id));
       if (event.fleetOpLogId) {
         const field = event.system === "tpms" ? { tpmsStatus: result.status, tpmsMessage: result.message }
@@ -544,6 +562,7 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
           errorMessage: result.message,
           retryCount: newRetryCount,
           nextRetryAt: newRetryCount >= event.maxRetries ? null : new Date(Date.now() + backoff),
+          lastAttemptAt: now,
           updatedAt: now,
         })
         .where(eq(operationEvents.id, event.id));

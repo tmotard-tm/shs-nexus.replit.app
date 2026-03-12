@@ -2007,11 +2007,14 @@ export type InsertTpmsChangeLog = z.infer<typeof insertTpmsChangeLogSchema>;
 export const operationEvents = pgTable("operation_events", {
   id: serial("id").primaryKey(),
   fleetOpLogId: integer("fleet_op_log_id"),
-  system: text("system").notNull(), // "tpms" | "holman" | "ams"
-  action: text("action").notNull(), // "assign" | "unassign" | "update_address" etc.
-  status: text("status").notNull().default("pending"), // "pending" | "success" | "failed" | "retrying"
+  operationType: text("operation_type"),
+  system: text("system").notNull(),
+  action: text("action").notNull(),
+  status: text("status").notNull().default("pending"),
+  vehicleNumber: text("vehicle_number"),
   truckNumber: text("truck_number"),
   vin: text("vin"),
+  enterpriseId: text("enterprise_id"),
   ldapId: text("ldap_id"),
   requestPayload: text("request_payload"),
   responsePayload: text("response_payload"),
@@ -2019,6 +2022,8 @@ export const operationEvents = pgTable("operation_events", {
   retryCount: integer("retry_count").default(0).notNull(),
   maxRetries: integer("max_retries").default(3).notNull(),
   nextRetryAt: timestamp("next_retry_at"),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  resolvedAt: timestamp("resolved_at"),
   requestedBy: text("requested_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
