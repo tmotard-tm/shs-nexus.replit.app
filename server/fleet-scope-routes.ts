@@ -28,8 +28,8 @@ const upload = multer({
 });
 
 // Initialize SendGrid
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+if (process.env.FS_SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.FS_SENDGRID_API_KEY);
 }
 
 // Technician data cache (populated from TPMS_EXTRACT on startup and daily refresh)
@@ -745,7 +745,7 @@ setTimeout(() => {
 
 // Email notification for pending PO approvals
 async function sendPendingApprovalsEmail(pendingCount: number): Promise<void> {
-  if (!process.env.SENDGRID_API_KEY) {
+  if (!process.env.FS_SENDGRID_API_KEY) {
     console.log("SendGrid API key not configured, skipping email notification");
     return;
   }
@@ -807,7 +807,7 @@ async function sendPendingApprovalsEmail(pendingCount: number): Promise<void> {
 }
 
 async function sendTruckSwapEmail(truck: any): Promise<void> {
-  if (!process.env.SENDGRID_API_KEY) {
+  if (!process.env.FS_SENDGRID_API_KEY) {
     console.log("SendGrid API key not configured, skipping Truck Swap email");
     return;
   }
@@ -2322,7 +2322,7 @@ export function createFleetScopeRouter(): Router {
   // POST call repair shop via ElevenLabs outbound call
   app.post("/trucks/:id/call-repair-shop", async (req, res) => {
     try {
-      if (!process.env.ELEVENLABS_API_KEY) {
+      if (!process.env.FS_ELEVENLABS_API_KEY) {
         return res.status(500).json({ message: "ElevenLabs API key not configured" });
       }
 
@@ -2404,7 +2404,7 @@ export function createFleetScopeRouter(): Router {
         },
       };
 
-      const apiKey = (process.env.ELEVENLABS_API_KEY || "").trim();
+      const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
       console.log(`[CallRepairShop] Calling ${toNumber} for truck ${vehicleNum} (VIN: ${vin}), API key length: ${apiKey.length}, starts with: ${apiKey.substring(0, 4)}...`);
 
       const response = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
@@ -2457,7 +2457,7 @@ export function createFleetScopeRouter(): Router {
   // POST call technician for vehicle pickup via ElevenLabs outbound call
   app.post("/trucks/:id/call-technician", async (req, res) => {
     try {
-      if (!process.env.ELEVENLABS_API_KEY) {
+      if (!process.env.FS_ELEVENLABS_API_KEY) {
         return res.status(500).json({ message: "ElevenLabs API key not configured" });
       }
 
@@ -2496,7 +2496,7 @@ export function createFleetScopeRouter(): Router {
         },
       };
 
-      const apiKey = (process.env.ELEVENLABS_API_KEY || "").trim();
+      const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
       console.log(`[CallTechnician] Calling tech ${truck.techName || 'unknown'} at ${toNumber} for truck ${vehicleNum}`);
 
       const response = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
@@ -2565,7 +2565,7 @@ export function createFleetScopeRouter(): Router {
       if (!truckIds?.length || !callType) {
         return res.status(400).json({ message: "truckIds and callType are required" });
       }
-      if (!process.env.ELEVENLABS_API_KEY) {
+      if (!process.env.FS_ELEVENLABS_API_KEY) {
         return res.status(500).json({ message: "ElevenLabs API key not configured" });
       }
 
@@ -2587,7 +2587,7 @@ export function createFleetScopeRouter(): Router {
       // Process in background
       (async () => {
         const BATCH_SIZE = 2;
-        const apiKey = (process.env.ELEVENLABS_API_KEY || "").trim();
+        const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
 
         for (let i = 0; i < truckIds.length; i += BATCH_SIZE) {
           if (job.cancelled) break;
@@ -2959,7 +2959,7 @@ Respond ONLY with valid JSON, no other text.`;
               console.log(`[ElevenLabs Webhook] Auto-triggering tech call for truck ${truckForAutoCall.truckNumber}`);
               const techDigits = truckForAutoCall.techPhone.replace(/\D/g, "");
               const techToNumber = techDigits.startsWith("1") && techDigits.length === 11 ? `+${techDigits}` : `+1${techDigits}`;
-              const apiKey = (process.env.ELEVENLABS_API_KEY || "").trim();
+              const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
               try {
                 const techResponse = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
                   method: "POST",
@@ -11486,7 +11486,7 @@ Respond ONLY with valid JSON, no other text.`;
       if (authToken) {
         const twilio = await import('twilio');
         const signature = req.headers['x-twilio-signature'] as string || '';
-        const webhookUrl = `${req.protocol}://${req.get('host')}/api/webhooks/twilio-reg`;
+        const webhookUrl = `${req.protocol}://${req.get('host')}/api/fs/webhooks/twilio-reg`;
         const isValid = twilio.validateRequest(authToken, signature, webhookUrl, req.body);
         if (!isValid) {
           console.warn('[RegMsg] Invalid Twilio signature on webhook request');
