@@ -63,6 +63,7 @@ import { PublicFormRoute } from "@/components/public-form-route";
 import { RoleProtectedRoute } from "@/components/role-protected-route";
 import { RoleBasedHome } from "@/components/role-based-home";
 import { SecurityQuestionsGate } from "@/components/security-questions-gate";
+import FleetScopeLayout from "@/pages/fleet-scope/FleetScopeLayout";
 
 function AmsGate() {
   const { user } = useAuth();
@@ -434,6 +435,18 @@ function Router() {
             <TestRepairResults />
           </MainContent>
         </ProtectedRoute>
+      </Route>
+
+      <Route path="/fleet-scope/:rest*">
+        <RoleProtectedRoute>
+          <FleetScopeLayout />
+        </RoleProtectedRoute>
+      </Route>
+
+      <Route path="/fleet-scope">
+        <RoleProtectedRoute>
+          <FleetScopeLayout />
+        </RoleProtectedRoute>
       </Route>
       
       <Route component={NotFound} />

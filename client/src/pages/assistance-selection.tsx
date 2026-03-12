@@ -109,6 +109,22 @@ export default function AssistanceSelection() {
             </CardContent>
           </Card>
           )}
+
+          {/* Fleet Scope Module Card */}
+          <Card className="backdrop-blur-sm border-white/20 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 mt-4 cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setLocation("/fleet-scope")} data-testid="fleet-scope-tile">
+            <CardContent className="p-4 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-lg bg-amber-600 flex items-center justify-center flex-shrink-0">
+                <Wrench className="h-6 w-6 text-white" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">Fleet Scope</span>
+                  <span className="text-[10px] font-bold bg-amber-500 text-white px-1.5 py-0.5 rounded">NEW</span>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Vehicle tracking, repair pipeline, fleet cost & registration management</p>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </main>
 

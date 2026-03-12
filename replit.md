@@ -95,7 +95,7 @@ Preferred communication style: Simple, everyday language.
 -   **AMS (Asset Management System)**: In-Home vehicle management API - vehicle search, tech assignments, repairs, comments, and lookup data. Env vars: `AMS_API_BASE_URL`, `AMS_API_KEY`.
 -   **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments and mobile phone numbers.
 -   **PMF/PARQ AI**: Fleet vehicle availability API.
--   **Fleet Scope**: External API for posting vehicle spare status updates.
+-   **Fleet Scope Module**: Fully integrated Fleet-Scope application (21 pages, 32 DB tables, 153 API endpoints). Uses its own PostgreSQL DB via `FS_DATABASE_URL` with `fsDb` connection. Routes mounted at `/api/fs/*`, frontend at `/fleet-scope/*`. Files: `server/fleet-scope-*.ts`, `shared/fleet-scope-schema.ts`, `client/src/pages/fleet-scope/`, `client/src/components/fleet-scope/`.
 -   **SendGrid**: Email delivery for Communication Hub templates.
 
 # Current Status

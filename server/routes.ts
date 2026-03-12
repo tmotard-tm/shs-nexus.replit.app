@@ -26,6 +26,7 @@ import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
 import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
+import { createFleetScopeRouter } from "./fleet-scope-routes";
 // SAML SSO INTEGRATION
 import passport from "passport";
 import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
@@ -445,6 +446,15 @@ const upload = multer({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   console.log("=== STARTING ROUTE REGISTRATION ===");
+
+  // Mount Fleet-Scope module routes at /api/fs/*
+  if (process.env.FS_DATABASE_URL) {
+    const fsRouter = createFleetScopeRouter();
+    app.use("/api/fs", fsRouter);
+    console.log("[Fleet-Scope] Routes mounted at /api/fs/*");
+  } else {
+    console.log("[Fleet-Scope] Skipped — FS_DATABASE_URL not configured");
+  }
 
   // SAML SSO INTEGRATION - Initialize passport and SAML strategy
   const samlStrategy = createSamlStrategy();

@@ -17,6 +17,7 @@ import {
   UserMinus,
   Info,
   Mail,
+  Wrench,
   type LucideIcon
 } from "lucide-react";
 
@@ -27,7 +28,8 @@ export type PageCategory =
   | "management"
   | "activities"
   | "account"
-  | "helpAndTutorial";
+  | "helpAndTutorial"
+  | "fleetScope";
 
 export type PermissionPath = string[];
 
@@ -105,6 +107,13 @@ export const CATEGORIES: CategoryDefinition[] = [
     description: "Help documentation and onboarding",
     icon: Settings,
     permissionKey: "helpAndTutorial",
+  },
+  {
+    key: "fleetScope",
+    label: "Fleet Scope",
+    description: "Fleet tracking, repair pipeline, and registration management",
+    icon: Wrench,
+    permissionKey: "fleetScope",
   },
 ];
 
@@ -364,6 +373,15 @@ export const PAGES: PageDefinition[] = [
     icon: Info,
     category: "helpAndTutorial",
     permissionKey: "about",
+  },
+  {
+    key: "fleetScope",
+    label: "Fleet Scope",
+    description: "Fleet tracking, repair pipeline, fleet cost & registration management",
+    path: "/fleet-scope",
+    icon: Wrench,
+    category: "fleetScope",
+    permissionKey: "fleetScope",
   },
 ];
 
