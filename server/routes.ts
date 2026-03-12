@@ -17,7 +17,7 @@ import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-
 import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
-import { sql, eq, and, or, gte, lte, inArray, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
+import { sql, eq, and, or, gte, lte, lt, inArray, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
 import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService } from "./ams-api-service";
@@ -10823,6 +10823,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
               .where(eq(tpmsChangeLog.id, log.id));
             confirmed++;
           }
+        }
+
+        // CDC aging: flag entries that have been pending > 48h without confirmation
+        const CDC_AGING_WINDOW_MS = 48 * 60 * 60 * 1000;
+        const agingCutoff = new Date(Date.now() - CDC_AGING_WINDOW_MS);
+        const agedPending = await db.select().from(tpmsChangeLog)
+          .where(
+            and(
+              isNull(tpmsChangeLog.confirmedAt),
+              isNull(tpmsChangeLog.confirmedByTpms),
+              lt(tpmsChangeLog.createdAt, agingCutoff)
+            )
+          );
+
+        if (agedPending.length > 0) {
+          console.warn(`[TPMS Scheduler] ${agedPending.length} CDC entries aged >48h without TPMS confirmation — may need manual review`);
+        }
+
+        // Snowflake drift check: compare allTechs.truckLu vs tpmsTechProfiles.truckNo
+        const { allTechs: allTechsTable } = await import("@shared/schema");
+        const profiles = await db.select({
+          enterpriseId: tpmsTechProfiles.enterpriseId,
+          profileTruckNo: tpmsTechProfiles.truckNo,
+        }).from(tpmsTechProfiles).where(isNotNull(tpmsTechProfiles.enterpriseId));
+
+        let driftCount = 0;
+        for (const profile of profiles) {
+          if (!profile.enterpriseId) continue;
+          const [atRow] = await db.select({ truckLu: allTechsTable.truckLu })
+            .from(allTechsTable)
+            .where(eq(allTechsTable.techRacfid, profile.enterpriseId))
+            .limit(1);
+          if (atRow && atRow.truckLu && profile.profileTruckNo && atRow.truckLu.trim() !== profile.profileTruckNo.trim()) {
+            console.warn(`[TPMS Scheduler] Drift: ${profile.enterpriseId} — TPMS profile says ${profile.profileTruckNo}, allTechs says ${atRow.truckLu}`);
+            driftCount++;
+          }
+        }
+        if (driftCount > 0) {
+          console.warn(`[TPMS Scheduler] Snowflake drift found for ${driftCount} technician(s) — truck assignments may be out of sync`);
+        } else {
+          console.log(`[TPMS Scheduler] Snowflake drift check: no truck assignment drift detected`);
         }
 
         console.log(`[TPMS Scheduler] Scheduled incremental sync complete: ${upserted} upserted, ${confirmed} CDC entries confirmed`);

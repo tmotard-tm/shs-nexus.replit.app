@@ -108,7 +108,13 @@ export default function TechProfiles() {
     enabled: searchTriggered,
   });
 
-  const { data: changeHistory = [], isLoading: loadingHistory } = useQuery<ChangeLogEntry[]>({
+  const { data: changeHistoryData, isLoading: loadingHistory } = useQuery<{
+    techId: string;
+    cdcLog: ChangeLogEntry[];
+    currentTpmsState: any;
+    tpmsStateSource: string;
+    pendingCount: number;
+  } | ChangeLogEntry[]>({
     queryKey: ["/api/tpms/techs", selectedTech?.techId, "change-history"],
     queryFn: async () => {
       const res = await fetch(`/api/tpms/techs/${selectedTech!.techId}/change-history`);
@@ -117,6 +123,14 @@ export default function TechProfiles() {
     },
     enabled: !!selectedTech,
   });
+
+  // Handle both old (array) and new (object) response shapes
+  const changeHistory: ChangeLogEntry[] = Array.isArray(changeHistoryData)
+    ? changeHistoryData
+    : (changeHistoryData?.cdcLog ?? []);
+  const currentTpmsState = Array.isArray(changeHistoryData) ? null : changeHistoryData?.currentTpmsState;
+  const tpmsStateSource = Array.isArray(changeHistoryData) ? 'none' : (changeHistoryData?.tpmsStateSource ?? 'none');
+  const pendingCdcCount = Array.isArray(changeHistoryData) ? 0 : (changeHistoryData?.pendingCount ?? 0);
 
   const updateMutation = useMutation({
     mutationFn: async (data: { techId: string; updates: Record<string, any> }) => {
@@ -678,54 +692,92 @@ export default function TechProfiles() {
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : changeHistory.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">No change history found for this technician.</p>
               ) : (
-                <div className="border rounded-md overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>User</TableHead>
-                        <TableHead>Field</TableHead>
-                        <TableHead>Before</TableHead>
-                        <TableHead>After</TableHead>
-                        <TableHead>Source</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {changeHistory.map((entry) => (
-                        <TableRow key={entry.id}>
-                          <TableCell className="text-xs whitespace-nowrap">
-                            {new Date(entry.createdAt).toLocaleString()}
-                          </TableCell>
-                          <TableCell className="text-sm">{entry.username || entry.userId}</TableCell>
-                          <TableCell className="font-mono text-xs">{entry.fieldChanged}</TableCell>
-                          <TableCell className="text-sm max-w-32 truncate">{entry.valueBefore || "—"}</TableCell>
-                          <TableCell className="text-sm max-w-32 truncate">{entry.valueAfter || "—"}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="text-xs">{entry.source}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            {entry.confirmedByTpms ? (
-                              <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 text-xs">
-                                <CheckCircle2 className="h-3 w-3 mr-1" /> Confirmed
-                              </Badge>
-                            ) : entry.confirmedAt ? (
-                              <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 text-xs">
-                                <Clock className="h-3 w-3 mr-1" /> Reviewed
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 text-xs">
-                                <AlertCircle className="h-3 w-3 mr-1" /> Pending
-                              </Badge>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <div className="space-y-4">
+                  {/* TPMS API Current State Baseline */}
+                  {currentTpmsState && (
+                    <div className="rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 text-xs">
+                          TPMS API Baseline ({tpmsStateSource})
+                        </Badge>
+                        {pendingCdcCount > 0 && (
+                          <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 text-xs">
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            {pendingCdcCount} pending confirmation{pendingCdcCount !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                        {[
+                          ['Name', `${currentTpmsState.firstName || ''} ${currentTpmsState.lastName || ''}`.trim()],
+                          ['Tech ID', currentTpmsState.techId],
+                          ['Enterprise ID', currentTpmsState.ldapId],
+                          ['Truck No', currentTpmsState.truckNo],
+                          ['District', currentTpmsState.districtNo],
+                          ['Phone', currentTpmsState.contactNo],
+                          ['Email', currentTpmsState.email],
+                        ].map(([label, value]) => value ? (
+                          <div key={label} className="flex gap-2">
+                            <span className="text-muted-foreground shrink-0">{label}:</span>
+                            <span className="font-medium truncate">{value}</span>
+                          </div>
+                        ) : null)}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CDC Log */}
+                  {changeHistory.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-8">No local change history recorded for this technician.</p>
+                  ) : (
+                    <div className="border rounded-md overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date</TableHead>
+                            <TableHead>User</TableHead>
+                            <TableHead>Field</TableHead>
+                            <TableHead>Before</TableHead>
+                            <TableHead>After</TableHead>
+                            <TableHead>Source</TableHead>
+                            <TableHead>Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {changeHistory.map((entry) => (
+                            <TableRow key={entry.id}>
+                              <TableCell className="text-xs whitespace-nowrap">
+                                {new Date(entry.createdAt).toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-sm">{entry.username || entry.userId}</TableCell>
+                              <TableCell className="font-mono text-xs">{entry.fieldChanged}</TableCell>
+                              <TableCell className="text-sm max-w-32 truncate">{entry.valueBefore || "—"}</TableCell>
+                              <TableCell className="text-sm max-w-32 truncate">{entry.valueAfter || "—"}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="text-xs">{entry.source}</Badge>
+                              </TableCell>
+                              <TableCell>
+                                {entry.confirmedByTpms ? (
+                                  <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 text-xs">
+                                    <CheckCircle2 className="h-3 w-3 mr-1" /> Confirmed
+                                  </Badge>
+                                ) : entry.confirmedAt ? (
+                                  <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 text-xs">
+                                    <Clock className="h-3 w-3 mr-1" /> Reviewed
+                                  </Badge>
+                                ) : (
+                                  <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 text-xs">
+                                    <AlertCircle className="h-3 w-3 mr-1" /> Pending
+                                  </Badge>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </div>
               )}
             </TabsContent>
