@@ -1,4 +1,5 @@
 import memoize from 'memoizee';
+import { toHolmanRef, toCanonical } from './vehicle-number-utils';
 
 interface HolmanAuthResponse {
   access_token: string;
@@ -328,12 +329,11 @@ export class HolmanApiService {
     error?: string;
   }> {
     try {
-      console.log('[Holman] Looking up vehicle by number:', vehicleNumber);
+      const holmanRef = toHolmanRef(vehicleNumber) || vehicleNumber;
+      console.log('[Holman] Looking up vehicle by number:', holmanRef);
       
-      // Use custom-query to get garaging address fields
       const token = await this.getAccessToken();
       
-      // Try to find the vehicle using custom-query with specific properties
       const customQueryUrl = `${this.apiEndpoint}/vehicles/custom-query`;
       const customQueryBody = {
         lesseeCode: '2B56',
@@ -356,7 +356,7 @@ export class HolmanApiService {
           'garagingCounty'
         ],
         filters: {
-          holmanVehicleNumber: vehicleNumber
+          holmanVehicleNumber: holmanRef
         },
         pageNumber: 1,
         pageSize: 10
@@ -376,7 +376,12 @@ export class HolmanApiService {
       if (customResponse.ok) {
         const customData = await customResponse.json();
         if (customData.items && customData.items.length > 0) {
-          const matchingVehicle = customData.items[0];
+          const searchCanonical = toCanonical(vehicleNumber);
+          const matchingVehicle = customData.items.find((v: any) => {
+            const holmanNum = toCanonical((v.holmanVehicleNumber || '').trim());
+            const clientNum = toCanonical((v.clientVehicleNumber || '').trim());
+            return holmanNum === searchCanonical || clientNum === searchCanonical;
+          }) || customData.items[0];
           console.log('[Holman] Found via custom-query:', matchingVehicle.holmanVehicleNumber);
           
           return this.processVehicleResult(matchingVehicle);
@@ -409,11 +414,11 @@ export class HolmanApiService {
         
         if (!data.items || data.items.length === 0) break;
         
-        // Check for matching vehicle in this batch
+        const searchCanonical = toCanonical(vehicleNumber);
         const matchingVehicle = data.items.find((v: any) => {
-          const holmanNum = (v.holmanVehicleNumber || '').trim();
-          const clientNum = (v.clientVehicleNumber || '').trim();
-          return holmanNum === vehicleNumber || clientNum === vehicleNumber;
+          const holmanNum = toCanonical((v.holmanVehicleNumber || '').trim());
+          const clientNum = toCanonical((v.clientVehicleNumber || '').trim());
+          return holmanNum === searchCanonical || clientNum === searchCanonical;
         });
         
         if (matchingVehicle) {
@@ -452,7 +457,8 @@ export class HolmanApiService {
     error?: string;
   }> {
     try {
-      console.log(`[HolmanVerify] custom-query POST for vehicle ${vehicleNumber}`);
+      const holmanRef = toHolmanRef(vehicleNumber) || vehicleNumber;
+      console.log(`[HolmanVerify] custom-query POST for vehicle ${holmanRef}`);
       const data = await this.makeRequest<any>('/vehicles/custom-query', 'POST', {
         lesseeCode: '2B56',
         properties: [
@@ -464,16 +470,17 @@ export class HolmanApiService {
           'lastName',
         ],
         filters: {
-          holmanVehicleNumber: vehicleNumber,
+          holmanVehicleNumber: holmanRef,
         },
         pageNumber: 1,
         pageSize: 5,
       });
       const items = data?.items || [];
       const item = items.find((v: any) => {
-        const holmanNum = (v.holmanVehicleNumber || '').trim();
-        const clientNum = (v.clientVehicleNumber || '').trim();
-        return holmanNum === vehicleNumber || clientNum === vehicleNumber;
+        const holmanNum = toCanonical((v.holmanVehicleNumber || '').trim());
+        const clientNum = toCanonical((v.clientVehicleNumber || '').trim());
+        const searchCanonical = toCanonical(vehicleNumber);
+        return holmanNum === searchCanonical || clientNum === searchCanonical;
       });
       if (!item) return { found: false, error: 'Vehicle not found in Holman' };
       console.log(`[HolmanVerify] Vehicle ${vehicleNumber}: assignedStatus=${item.assignedStatus}, clientData2=${item.clientData2}`);

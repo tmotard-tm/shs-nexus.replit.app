@@ -446,8 +446,9 @@ export const trucks = pgTable("trucks", {
   registrationExpiryDate: text("registration_expiry_date"), // "Have Tags" column - date when tags were received
   registrationLastUpdate: text("registration_last_update"), // Date when Reg. Sticker Valid was last updated
   registrationInProgress: boolean("registration_in_progress").default(false), // Registration in process (Cheryl mailed to tech)
-  holmanRegExpiry: text("holman_reg_expiry"), // "Reg. Expiry" column - actual registration expiry date from Holman
-  repairOrSaleDecision: text("repair_or_sale_decision"), // Repair or Sale
+  holmanRegExpiry: text("holman_reg_expiry"),
+  holmanVehicleRef: text("holman_vehicle_ref"),
+  repairOrSaleDecision: text("repair_or_sale_decision"),
   
   // Sales Status
   vanInventoried: boolean("van_inventoried").default(false),

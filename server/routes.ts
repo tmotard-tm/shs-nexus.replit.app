@@ -10967,19 +10967,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     setInterval(runTpmsIncrementalSync, TPMS_SYNC_INTERVAL_MS);
     console.log(`[TPMS Scheduler] Scheduled incremental sync every ${TPMS_SYNC_INTERVAL_MS / 3600000}h`);
 
-    const OP_EVENTS_RETRY_INTERVAL_MS = 15 * 60 * 1000;
-    setInterval(async () => {
-      try {
-        const { retryFailedOperationEvents } = await import("./fleet-operations-service");
-        const result = await retryFailedOperationEvents();
-        if (result.retried > 0) {
-          console.log(`[OpEvents Retry] Retried ${result.retried}: ${result.succeeded} succeeded, ${result.failed} failed`);
-        }
-      } catch (err: any) {
-        console.error(`[OpEvents Retry] Error: ${err.message}`);
-      }
-    }, OP_EVENTS_RETRY_INTERVAL_MS);
-    console.log(`[OpEvents Retry] Scheduled retry worker every 15 minutes`);
 
     // ── Startup backfill: populate tpms_tech_profiles from tpms_cached_assignments ──
     // Two phases run on every startup:

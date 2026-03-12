@@ -559,8 +559,12 @@ class HolmanVehicleSyncService {
       return;
     }
     try {
-      const fsTrucks = await fsDb.select({ id: trucks.id, truckNumber: trucks.truckNumber, holmanRegExpiry: trucks.holmanRegExpiry })
-        .from(trucks);
+      const fsTrucks = await fsDb.select({
+        id: trucks.id,
+        truckNumber: trucks.truckNumber,
+        holmanRegExpiry: trucks.holmanRegExpiry,
+        holmanVehicleRef: trucks.holmanVehicleRef,
+      }).from(trucks);
       if (fsTrucks.length === 0) return;
 
       const fsMap = new Map<string, typeof fsTrucks[0]>();
@@ -578,17 +582,29 @@ class HolmanVehicleSyncService {
         const fsTruck = fsMap.get(canonical);
         if (!fsTruck) continue;
 
+        const holmanRef = toHolmanRef(vehicleNumber);
         const regExpiry = v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || null;
+        const updates: Record<string, any> = {};
+
         if (regExpiry && regExpiry !== fsTruck.holmanRegExpiry) {
+          updates.holmanRegExpiry = regExpiry;
+        }
+        if (holmanRef && holmanRef !== fsTruck.holmanVehicleRef) {
+          updates.holmanVehicleRef = holmanRef;
+        }
+
+        if (Object.keys(updates).length > 0) {
+          updates.lastUpdatedAt = new Date();
+          updates.lastUpdatedBy = 'HolmanSync';
           await fsDb.update(trucks)
-            .set({ holmanRegExpiry: regExpiry, lastUpdatedAt: new Date(), lastUpdatedBy: 'HolmanSync' })
+            .set(updates)
             .where(eq(trucks.id, fsTruck.id));
           updated++;
         }
       }
 
       if (updated > 0) {
-        console.log(`[HolmanSync] Fleet-Scope reconciliation: updated ${updated} truck(s) with Holman reg expiry data`);
+        console.log(`[HolmanSync] Fleet-Scope reconciliation: updated ${updated} truck(s) with Holman data`);
       }
     } catch (err: any) {
       console.error(`[HolmanSync] Fleet-Scope reconciliation error: ${err.message}`);

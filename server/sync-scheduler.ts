@@ -11,11 +11,13 @@ const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
 const ENRICH_INTERVAL_HOURS = 12; // Enrich every 12 hours
 const SEPARATION_POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for separation sync
 const NOTIFICATION_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const OP_EVENTS_RETRY_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes for operation events retry
 
 let lastSyncDate: string | null = null;
 let lastEnrichTime: number | null = null; // Timestamp of last enrichment
 let lastSeparationPollTime: number | null = null; // Sprint 0: Track separation polls
 let lastNotificationBackfillTime: number | null = null;
+let lastOpEventsRetryTime: number | null = null;
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -33,59 +35,50 @@ function getDateString(date: Date): string {
 }
 
 async function checkAndRunSync(): Promise<void> {
-  try {
-    if (!isSnowflakeConfigured()) {
-      return; // Skip if Snowflake not configured
-    }
+  if (isSnowflakeConfigured()) {
+    try {
+      const estNow = getESTDate();
+      const currentHour = estNow.getHours();
+      const currentDateStr = getDateString(estNow);
 
-    const estNow = getESTDate();
-    const currentHour = estNow.getHours();
-    const currentDateStr = getDateString(estNow);
+      if (currentHour === SYNC_HOUR_EST && lastSyncDate !== currentDateStr) {
+        console.log(`[Scheduler] Running scheduled sync at ${estNow.toISOString()} (5am EST)`);
+        
+        const syncService = getSnowflakeSyncService();
+        
+        console.log('[Scheduler] Starting termed techs sync...');
+        const termedResult = await syncService.syncTermedTechs('scheduler');
+        console.log(`[Scheduler] Termed techs sync complete: ${termedResult.recordsProcessed} processed, ${termedResult.queueItemsCreated} queue items created`);
+        
+        console.log('[Scheduler] Starting separation details enrichment...');
+        const enrichResult = await syncService.enrichOffboardingWithSeparationDetails();
+        console.log(`[Scheduler] Separation enrichment complete: ${enrichResult.enrichedCount} enriched, ${enrichResult.noMatchCount} no match`);
 
-    // Run sync at 5am EST if we haven't synced today
-    if (currentHour === SYNC_HOUR_EST && lastSyncDate !== currentDateStr) {
-      console.log(`[Scheduler] Running scheduled sync at ${estNow.toISOString()} (5am EST)`);
-      
-      const syncService = getSnowflakeSyncService();
-      
-      // Sync termed techs (creates offboarding queue items)
-      console.log('[Scheduler] Starting termed techs sync...');
-      const termedResult = await syncService.syncTermedTechs('scheduler');
-      console.log(`[Scheduler] Termed techs sync complete: ${termedResult.recordsProcessed} processed, ${termedResult.queueItemsCreated} queue items created`);
-      
-      // Enrich offboarding items with HR separation details (contact info, pickup address, etc.)
-      console.log('[Scheduler] Starting separation details enrichment...');
-      const enrichResult = await syncService.enrichOffboardingWithSeparationDetails();
-      console.log(`[Scheduler] Separation enrichment complete: ${enrichResult.enrichedCount} enriched, ${enrichResult.noMatchCount} no match`);
+        console.log('[Scheduler] Starting all techs sync...');
+        const allTechsResult = await syncService.syncAllTechs('scheduler');
+        console.log(`[Scheduler] All techs sync complete: ${allTechsResult.recordsProcessed} processed`);
 
-      // Sync all techs (roster update)
-      console.log('[Scheduler] Starting all techs sync...');
-      const allTechsResult = await syncService.syncAllTechs('scheduler');
-      console.log(`[Scheduler] All techs sync complete: ${allTechsResult.recordsProcessed} processed`);
+        console.log('[Scheduler] Starting vehicle odometer enrichment...');
+        try {
+          const odoResult = await syncService.enrichVehicleOdometerData();
+          console.log(`[Scheduler] Odometer enrichment complete: ${odoResult.vehiclesUpdated} vehicles updated`);
+        } catch (odoErr: any) {
+          console.error('[Scheduler] Odometer enrichment failed (non-fatal):', odoErr?.message);
+        }
 
-      // Enrich vehicle odometer data from all 4 sources
-      console.log('[Scheduler] Starting vehicle odometer enrichment...');
-      try {
-        const odoResult = await syncService.enrichVehicleOdometerData();
-        console.log(`[Scheduler] Odometer enrichment complete: ${odoResult.vehiclesUpdated} vehicles updated`);
-      } catch (odoErr: any) {
-        console.error('[Scheduler] Odometer enrichment failed (non-fatal):', odoErr?.message);
+        lastSyncDate = currentDateStr;
+        console.log(`[Scheduler] Scheduled sync completed successfully for ${currentDateStr}`);
       }
 
-      lastSyncDate = currentDateStr;
-      console.log(`[Scheduler] Scheduled sync completed successfully for ${currentDateStr}`);
+      await checkAndRunEnrichment();
+      await checkAndRunSeparationPoll();
+      await checkAndRunNotificationBackfill();
+    } catch (error) {
+      console.error('[Scheduler] Error during scheduled sync:', error);
     }
-
-    // Check if we need to run onboarding enrichment (every 12 hours)
-    await checkAndRunEnrichment();
-    
-    // Sprint 0: Check if we need to poll for new separation records (every 5 minutes)
-    await checkAndRunSeparationPoll();
-
-    await checkAndRunNotificationBackfill();
-  } catch (error) {
-    console.error('[Scheduler] Error during scheduled sync:', error);
   }
+
+  await checkAndRunOpEventsRetry();
 }
 
 async function checkAndRunEnrichment(): Promise<void> {
@@ -160,6 +153,23 @@ async function checkAndRunNotificationBackfill(): Promise<void> {
     }
   } catch (error) {
     console.error('[Scheduler] Error during notification backfill:', error);
+  }
+}
+
+async function checkAndRunOpEventsRetry(): Promise<void> {
+  try {
+    const now = Date.now();
+    if (lastOpEventsRetryTime !== null && (now - lastOpEventsRetryTime) < OP_EVENTS_RETRY_INTERVAL_MS) {
+      return;
+    }
+    const { retryFailedOperationEvents } = await import("./fleet-operations-service");
+    const result = await retryFailedOperationEvents();
+    lastOpEventsRetryTime = now;
+    if (result.retried > 0) {
+      console.log(`[Scheduler] OpEvents retry: ${result.retried} retried, ${result.succeeded} succeeded, ${result.failed} failed`);
+    }
+  } catch (error: any) {
+    console.error('[Scheduler] Error during operation events retry:', error?.message);
   }
 }
 
@@ -412,6 +422,8 @@ export function getSchedulerStatus(): {
   separationPollIntervalMs: number;
   lastNotificationBackfill: string | null;
   notificationBackfillIntervalMs: number;
+  lastOpEventsRetry: string | null;
+  opEventsRetryIntervalMs: number;
 } {
   const estNow = getESTDate();
   const nextSync = new Date(estNow);
@@ -429,6 +441,8 @@ export function getSchedulerStatus(): {
     separationPollIntervalMs: SEPARATION_POLL_INTERVAL_MS,
     lastNotificationBackfill: lastNotificationBackfillTime ? new Date(lastNotificationBackfillTime).toISOString() : null,
     notificationBackfillIntervalMs: NOTIFICATION_BACKFILL_INTERVAL_MS,
+    lastOpEventsRetry: lastOpEventsRetryTime ? new Date(lastOpEventsRetryTime).toISOString() : null,
+    opEventsRetryIntervalMs: OP_EVENTS_RETRY_INTERVAL_MS,
   };
 }
 
