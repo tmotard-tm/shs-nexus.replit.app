@@ -150,10 +150,12 @@ export default function TechProfiles() {
     enabled: isEnterpriseIdOnlySearch && !searching && searchResults.length === 0,
   });
 
-  // Final display list: local results, or live result as fallback
+  // Final display list: local results, or live result only when this is an Enterprise ID-only search.
+  // Gating on isEnterpriseIdOnlySearch prevents stale liveResult from bleeding into
+  // unrelated searches (useQuery caches the last live response even when disabled).
   const displayResults: TechProfile[] = searchResults.length > 0
     ? searchResults
-    : (liveResult ? [liveResult] : []);
+    : (isEnterpriseIdOnlySearch && liveResult ? [liveResult] : []);
   const isLoadingAny = searching || (isEnterpriseIdOnlySearch && searchResults.length === 0 && liveSearching);
 
   const { data: changeHistoryData, isLoading: loadingHistory } = useQuery<{
@@ -341,7 +343,7 @@ export default function TechProfiles() {
             <CardTitle className="text-lg flex items-center gap-2">
               Results
               <Badge variant="secondary">{displayResults.length}</Badge>
-              {liveResult && searchResults.length === 0 && (
+              {isEnterpriseIdOnlySearch && liveResult && searchResults.length === 0 && (
                 <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border border-blue-300">
                   Live TPMS lookup
                 </Badge>
