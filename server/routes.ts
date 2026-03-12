@@ -10167,9 +10167,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/tpms/techs/:techId", requireAuth, async (req: any, res) => {
     try {
       const { techId } = req.params;
-      const updates = req.body;
+      const rawBody = req.body;
       const userId = req.user?.id || req.user?.username || "system";
       const username = req.user?.username || "system";
+      
+      const allowedFields = ["firstName", "lastName", "mobilePhone", "email", "deMinimis", "shippingSchedule", "shippingAddresses", "extendedHolds", "techReplenishment"];
+      const updates: Record<string, any> = {};
+      for (const field of allowedFields) {
+        if (rawBody[field] !== undefined) {
+          updates[field] = rawBody[field];
+        }
+      }
+      
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No valid fields to update" });
+      }
       
       const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
       if (!existing) {
@@ -10177,9 +10189,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const changeEntries: any[] = [];
-      const trackableFields = ["firstName", "lastName", "mobilePhone", "email", "deMinimis", "shippingSchedule", "shippingAddresses", "extendedHolds", "techReplenishment"];
       
-      for (const field of trackableFields) {
+      for (const field of allowedFields) {
         if (updates[field] !== undefined) {
           const before = (existing as any)[field];
           const after = updates[field];
@@ -10209,16 +10220,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .set({ ...updates, updatedAt: new Date() })
         .where(eq(tpmsTechProfiles.techId, techId));
       
+      let tpmsApiResult = null;
       try {
         const tpmsService = getTPMSService();
         if (existing.enterpriseId) {
-          await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, ...updates });
+          tpmsApiResult = await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, ...updates });
+          if (changeEntries.length > 0) {
+            for (const entry of changeEntries) {
+              await db.update(tpmsChangeLog)
+                .set({ confirmedByTpms: true, confirmedAt: new Date() })
+                .where(and(
+                  eq(tpmsChangeLog.techId, techId),
+                  eq(tpmsChangeLog.fieldChanged, entry.fieldChanged),
+                  isNull(tpmsChangeLog.confirmedAt)
+                ));
+            }
+          }
         }
       } catch (apiErr: any) {
         console.warn(`[TPMS] API update failed for ${techId}:`, apiErr.message);
       }
       
-      res.json({ success: true, changes: changeEntries.length });
+      res.json({ success: true, changes: changeEntries.length, tpmsSync: !!tpmsApiResult });
     } catch (error: any) {
       console.error("Error updating TPMS tech profile:", error);
       res.status(500).json({ message: error.message });
@@ -10243,6 +10266,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { techId } = req.params;
       const newAddress = req.body;
+      if (!newAddress || !newAddress.addrLine1) {
+        return res.status(400).json({ message: "Address line 1 is required" });
+      }
       const userId = req.user?.id || req.user?.username || "system";
       const username = req.user?.username || "system";
       
@@ -10266,7 +10292,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         confirmedByTpms: false,
       });
       
-      res.json({ success: true });
+      let tpmsApiResult = null;
+      try {
+        const tpmsService = getTPMSService();
+        if (existing.enterpriseId) {
+          tpmsApiResult = await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, addresses });
+          await db.update(tpmsChangeLog)
+            .set({ confirmedByTpms: true, confirmedAt: new Date() })
+            .where(and(
+              eq(tpmsChangeLog.techId, techId),
+              eq(tpmsChangeLog.fieldChanged, "shippingAddresses"),
+              isNull(tpmsChangeLog.confirmedAt)
+            ));
+        }
+      } catch (apiErr: any) {
+        console.warn(`[TPMS] API address add failed for ${techId}:`, apiErr.message);
+      }
+      
+      res.json({ success: true, tpmsSync: !!tpmsApiResult });
     } catch (error: any) {
       console.error("Error adding TPMS address:", error);
       res.status(500).json({ message: error.message });
@@ -10277,6 +10320,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { techId, index } = req.params;
       const updatedAddr = req.body;
+      if (!updatedAddr || !updatedAddr.addrLine1) {
+        return res.status(400).json({ message: "Address line 1 is required" });
+      }
       const idx = parseInt(index, 10);
       const userId = req.user?.id || req.user?.username || "system";
       const username = req.user?.username || "system";
@@ -10302,7 +10348,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         confirmedByTpms: false,
       });
       
-      res.json({ success: true });
+      let tpmsApiResult = null;
+      try {
+        const tpmsService = getTPMSService();
+        if (existing.enterpriseId) {
+          tpmsApiResult = await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, addresses });
+          await db.update(tpmsChangeLog)
+            .set({ confirmedByTpms: true, confirmedAt: new Date() })
+            .where(and(
+              eq(tpmsChangeLog.techId, techId),
+              eq(tpmsChangeLog.fieldChanged, "shippingAddresses"),
+              isNull(tpmsChangeLog.confirmedAt)
+            ));
+        }
+      } catch (apiErr: any) {
+        console.warn(`[TPMS] API address edit failed for ${techId}:`, apiErr.message);
+      }
+      
+      res.json({ success: true, tpmsSync: !!tpmsApiResult });
     } catch (error: any) {
       console.error("Error updating TPMS address:", error);
       res.status(500).json({ message: error.message });
@@ -10322,7 +10385,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const addresses = [...(existing.shippingAddresses as any[] || [])];
       if (idx < 0 || idx >= addresses.length) return res.status(400).json({ message: "Invalid address index" });
       
-      const removed = addresses.splice(idx, 1);
+      addresses.splice(idx, 1);
       
       await db.update(tpmsTechProfiles)
         .set({ shippingAddresses: addresses, updatedAt: new Date() })
@@ -10337,7 +10400,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         confirmedByTpms: false,
       });
       
-      res.json({ success: true });
+      let tpmsApiResult = null;
+      try {
+        const tpmsService = getTPMSService();
+        if (existing.enterpriseId) {
+          tpmsApiResult = await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, addresses });
+          await db.update(tpmsChangeLog)
+            .set({ confirmedByTpms: true, confirmedAt: new Date() })
+            .where(and(
+              eq(tpmsChangeLog.techId, techId),
+              eq(tpmsChangeLog.fieldChanged, "shippingAddresses"),
+              isNull(tpmsChangeLog.confirmedAt)
+            ));
+        }
+      } catch (apiErr: any) {
+        console.warn(`[TPMS] API address delete failed for ${techId}:`, apiErr.message);
+      }
+      
+      res.json({ success: true, tpmsSync: !!tpmsApiResult });
     } catch (error: any) {
       console.error("Error deleting TPMS address:", error);
       res.status(500).json({ message: error.message });
@@ -10382,11 +10462,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user?.id || req.user?.username || "system";
       const username = req.user?.username || "system";
       
-      if (!techIds || !Array.isArray(techIds) || !schedule) {
+      if (!techIds || !Array.isArray(techIds) || !schedule || typeof schedule !== "object") {
         return res.status(400).json({ message: "techIds array and schedule object required" });
       }
       
       let updated = 0;
+      let tpmsSynced = 0;
+      const tpmsService = getTPMSService();
+      
       for (const tid of techIds) {
         const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, tid)).limit(1);
         if (!existing) continue;
@@ -10404,10 +10487,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
           confirmedByTpms: false,
         });
         
+        try {
+          if (existing.enterpriseId) {
+            await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, shippingSchedule: schedule });
+            await db.update(tpmsChangeLog)
+              .set({ confirmedByTpms: true, confirmedAt: new Date() })
+              .where(and(
+                eq(tpmsChangeLog.techId, tid),
+                eq(tpmsChangeLog.fieldChanged, "shippingSchedule"),
+                isNull(tpmsChangeLog.confirmedAt)
+              ));
+            tpmsSynced++;
+          }
+        } catch (apiErr: any) {
+          console.warn(`[TPMS] API schedule update failed for ${tid}:`, apiErr.message);
+        }
+        
         updated++;
       }
       
-      res.json({ success: true, updated });
+      res.json({ success: true, updated, tpmsSynced });
     } catch (error: any) {
       console.error("Error updating shipping schedules:", error);
       res.status(500).json({ message: error.message });

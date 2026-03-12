@@ -1793,120 +1793,145 @@ export default function TruckDetail() {
                           <Skeleton className="h-6 w-48" />
                           <Skeleton className="h-20 w-full" />
                         </div>
-                      ) : tpmsVehicleData?.success ? (
-                        <div className="space-y-4">
-                          {(() => {
-                            const info = tpmsVehicleData.data?.truckInfo || tpmsVehicleData.data;
-                            const techProfile = Array.isArray(tpmsTechProfile) && tpmsTechProfile.length > 0 ? tpmsTechProfile[0] : null;
-                            return (
-                              <>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                  <div>
-                                    <p className="text-xs font-medium text-muted-foreground mb-1">Assigned Technician</p>
-                                    <p className="text-sm font-medium">
-                                      {info?.techFirstName || info?.firstName || techProfile?.firstName || "—"}{" "}
-                                      {info?.techLastName || info?.lastName || techProfile?.lastName || ""}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs font-medium text-muted-foreground mb-1">Enterprise ID</p>
-                                    <p className="text-sm font-medium">{info?.ldapId || info?.enterpriseId || techProfile?.enterpriseId || techSpecialtyData?.enterpriseId || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs font-medium text-muted-foreground mb-1">District</p>
-                                    <p className="text-sm font-medium">{info?.districtNo || techProfile?.districtNo || "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs font-medium text-muted-foreground mb-1">Tech ID</p>
-                                    <p className="text-sm font-medium">{info?.techId || techProfile?.techId || "—"}</p>
+                      ) : (() => {
+                        const hasLiveData = tpmsVehicleData?.success;
+                        const info = hasLiveData ? (tpmsVehicleData.data?.truckInfo || tpmsVehicleData.data) : null;
+                        const techProfile = Array.isArray(tpmsTechProfile) && tpmsTechProfile.length > 0 ? tpmsTechProfile[0] : null;
+                        const hasAnyData = hasLiveData || techProfile;
+                        const currentEnterprise = info?.ldapId || techProfile?.enterpriseId || techSpecialtyData?.enterpriseId;
+                        
+                        if (!hasAnyData) {
+                          return (
+                            <div className="text-center py-6">
+                              <Package className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
+                              <p className="text-sm text-muted-foreground">No TPMS data available for this vehicle.</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                The vehicle may not be registered in TPMS or the service is unavailable.
+                              </p>
+                            </div>
+                          );
+                        }
+                        
+                        return (
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground mb-1">Assigned Technician</p>
+                                <p className="text-sm font-medium">
+                                  {info?.techFirstName || info?.firstName || techProfile?.firstName || "—"}{" "}
+                                  {info?.techLastName || info?.lastName || techProfile?.lastName || ""}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground mb-1">Enterprise ID</p>
+                                <p className="text-sm font-medium">{currentEnterprise || "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground mb-1">District</p>
+                                <p className="text-sm font-medium">{info?.districtNo || techProfile?.districtNo || "—"}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground mb-1">Tech ID</p>
+                                <p className="text-sm font-medium">{info?.techId || techProfile?.techId || "—"}</p>
+                              </div>
+                            </div>
+
+                            {(() => {
+                              const addrs = info?.addresses || techProfile?.shippingAddresses || [];
+                              if (!addrs || addrs.length === 0) return null;
+                              return (
+                                <div>
+                                  <p className="text-xs font-medium text-muted-foreground mb-2">Shipping Addresses ({addrs.length})</p>
+                                  <div className="space-y-2">
+                                    {addrs.map((addr: any, i: number) => (
+                                      <div key={i} className="text-sm bg-muted/50 rounded-md p-3">
+                                        <p>{addr.addrLine1 || addr.address1 || ""}</p>
+                                        {(addr.addrLine2 || addr.address2) && <p>{addr.addrLine2 || addr.address2}</p>}
+                                        <p>
+                                          {addr.city || ""}{addr.city && (addr.state || addr.stateCd) ? ", " : ""}{addr.state || addr.stateCd || ""} {addr.zipCd || addr.zip || ""}
+                                        </p>
+                                      </div>
+                                    ))}
                                   </div>
                                 </div>
+                              );
+                            })()}
 
-                                {(info?.addresses?.length > 0 || (techProfile?.shippingAddresses as any[])?.length > 0) && (
+                            {techProfile && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                {techProfile.mobilePhone && (
                                   <div>
-                                    <p className="text-xs font-medium text-muted-foreground mb-2">Shipping Address</p>
-                                    {(() => {
-                                      const addrs = info?.addresses || techProfile?.shippingAddresses || [];
-                                      const primary = addrs[0];
-                                      if (!primary) return null;
-                                      return (
-                                        <div className="text-sm bg-muted/50 rounded-md p-3">
-                                          <p>{primary.addrLine1 || primary.address1 || ""}</p>
-                                          {(primary.addrLine2 || primary.address2) && <p>{primary.addrLine2 || primary.address2}</p>}
-                                          <p>
-                                            {primary.city || ""}{primary.city && primary.state ? ", " : ""}{primary.state || primary.stateCd || ""} {primary.zipCd || primary.zip || ""}
-                                          </p>
-                                        </div>
-                                      );
-                                    })()}
+                                    <p className="text-xs font-medium text-muted-foreground mb-1">Mobile Phone</p>
+                                    <p className="text-sm">{techProfile.mobilePhone}</p>
                                   </div>
                                 )}
-
-                                {techProfile && (
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    {techProfile.mobilePhone && (
-                                      <div>
-                                        <p className="text-xs font-medium text-muted-foreground mb-1">Mobile Phone</p>
-                                        <p className="text-sm">{techProfile.mobilePhone}</p>
-                                      </div>
-                                    )}
-                                    {techProfile.email && (
-                                      <div>
-                                        <p className="text-xs font-medium text-muted-foreground mb-1">Email</p>
-                                        <p className="text-sm">{techProfile.email}</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-
-                                {techProfile?.shippingSchedule && Object.keys(techProfile.shippingSchedule).length > 0 && (
+                                {techProfile.email && (
                                   <div>
-                                    <p className="text-xs font-medium text-muted-foreground mb-2">Shipping Schedule</p>
-                                    <div className="flex gap-1.5 flex-wrap">
-                                      {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((day) => (
-                                        <Badge
-                                          key={day}
-                                          variant={(techProfile.shippingSchedule as Record<string, boolean>)?.[day] ? "default" : "outline"}
-                                          className="text-xs"
-                                        >
-                                          {day.slice(0, 3)}
-                                        </Badge>
-                                      ))}
-                                    </div>
+                                    <p className="text-xs font-medium text-muted-foreground mb-1">Email</p>
+                                    <p className="text-sm">{techProfile.email}</p>
                                   </div>
                                 )}
+                              </div>
+                            )}
 
-                                <div className="flex justify-end">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      const eid = info?.ldapId || techProfile?.enterpriseId || techSpecialtyData?.enterpriseId;
-                                      if (eid) {
-                                        window.open(`/tpms/tech-profiles?enterpriseId=${encodeURIComponent(eid)}`, "_blank");
-                                      } else {
-                                        window.open("/tpms/tech-profiles", "_blank");
-                                      }
-                                    }}
-                                  >
-                                    <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-                                    Open in TPMS
-                                  </Button>
+                            {techProfile?.shippingSchedule && Object.keys(techProfile.shippingSchedule).length > 0 && (
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground mb-2">Shipping Schedule</p>
+                                <div className="flex gap-1.5 flex-wrap">
+                                  {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((day) => (
+                                    <Badge
+                                      key={day}
+                                      variant={(techProfile.shippingSchedule as Record<string, boolean>)?.[day] ? "default" : "outline"}
+                                      className="text-xs"
+                                    >
+                                      {day.slice(0, 3)}
+                                    </Badge>
+                                  ))}
                                 </div>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      ) : (
-                        <div className="text-center py-6">
-                          <Package className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
-                          <p className="text-sm text-muted-foreground">No TPMS data available for this vehicle.</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            The vehicle may not be registered in TPMS or the service is unavailable.
-                          </p>
-                        </div>
-                      )}
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-2 justify-end flex-wrap">
+                              {currentEnterprise && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-red-600 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-800 dark:hover:bg-red-900/20"
+                                  onClick={async () => {
+                                    if (!confirm(`Unassign technician ${currentEnterprise} from truck ${truckNumberForSpecialty}?`)) return;
+                                    try {
+                                      await apiRequest("DELETE", `/api/tpms/vehicles/${encodeURIComponent(truckNumberForSpecialty)}/assign`);
+                                      toast({ title: "Unassigned", description: "Technician unassigned from vehicle in TPMS." });
+                                      queryClient.invalidateQueries({ queryKey: ["/api/tpms/lookup/truck", truckNumberForSpecialty] });
+                                      queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
+                                    } catch (err: any) {
+                                      toast({ title: "Unassign failed", description: err.message, variant: "destructive" });
+                                    }
+                                  }}
+                                >
+                                  Unassign Tech
+                                </Button>
+                              )}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  if (currentEnterprise) {
+                                    window.open(`/tpms/tech-profiles?enterpriseId=${encodeURIComponent(currentEnterprise)}`, "_blank");
+                                  } else {
+                                    window.open("/tpms/tech-profiles", "_blank");
+                                  }
+                                }}
+                              >
+                                <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                                Open in TPMS
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </AccordionContent>
                   </AccordionItem>
                 </Accordion>

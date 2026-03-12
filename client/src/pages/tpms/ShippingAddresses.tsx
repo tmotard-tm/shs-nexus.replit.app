@@ -9,7 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Search,
   RotateCcw,
@@ -19,6 +25,8 @@ import {
   ArrowRight,
   ArrowLeft,
   Check,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 type FlowType = "district" | "non-district" | null;
@@ -30,7 +38,7 @@ interface TechResult {
   firstName: string | null;
   lastName: string | null;
   districtNo: string | null;
-  addresses: any[];
+  shippingAddresses: any[];
   selected?: boolean;
 }
 
@@ -56,6 +64,9 @@ export default function ShippingAddresses() {
     zipCd: "",
   });
 
+  const [editDialog, setEditDialog] = useState<{ techId: string; index: number; address: any } | null>(null);
+  const [editingAddress, setEditingAddress] = useState<any>(null);
+
   const searchQuery = useQuery<TechResult[]>({
     queryKey: ["/api/tpms/techs", flowType === "district" ? `district=${districtNo}` : `address=${streetAddress}&zip=${zipCode}`],
     queryFn: async () => {
@@ -66,14 +77,14 @@ export default function ShippingAddresses() {
         if (streetAddress) params.set("address", streetAddress);
         if (zipCode) params.set("zip", zipCode);
       }
-      const res = await fetch(`/api/tpms/techs?${params.toString()}`);
+      const res = await fetch(`/api/tpms/techs?${params.toString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("Search failed");
       return res.json();
     },
     enabled: searchTriggered,
   });
 
-  const updateMutation = useMutation({
+  const addMutation = useMutation({
     mutationFn: async (data: { techs: TechResult[]; address: any }) => {
       const results = [];
       for (const tech of data.techs) {
@@ -88,7 +99,7 @@ export default function ShippingAddresses() {
     },
     onSuccess: (results) => {
       const successCount = results.filter(r => r.success).length;
-      toast({ title: "Addresses updated", description: `${successCount}/${results.length} technicians updated successfully.` });
+      toast({ title: "Addresses added", description: `${successCount}/${results.length} technicians updated successfully.` });
       queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
       resetAll();
     },
@@ -97,7 +108,39 @@ export default function ShippingAddresses() {
     },
   });
 
+  const editMutation = useMutation({
+    mutationFn: async (data: { techId: string; index: number; address: any }) => {
+      await apiRequest("PUT", `/api/tpms/techs/${data.techId}/addresses/${data.index}`, data.address);
+    },
+    onSuccess: () => {
+      toast({ title: "Address updated", description: "Shipping address updated and synced to TPMS." });
+      queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
+      setEditDialog(null);
+      setSearchTriggered(false);
+      setTimeout(() => setSearchTriggered(true), 100);
+    },
+    onError: (err: any) => {
+      toast({ title: "Edit failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (data: { techId: string; index: number }) => {
+      await apiRequest("DELETE", `/api/tpms/techs/${data.techId}/addresses/${data.index}`);
+    },
+    onSuccess: () => {
+      toast({ title: "Address removed", description: "Shipping address removed and synced to TPMS." });
+      queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
+      setSearchTriggered(false);
+      setTimeout(() => setSearchTriggered(true), 100);
+    },
+    onError: (err: any) => {
+      toast({ title: "Delete failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const handleSearch = () => {
+    setTechResults([]);
     setSearchTriggered(true);
   };
 
@@ -124,7 +167,22 @@ export default function ShippingAddresses() {
   }
 
   const handleConfirm = () => {
-    updateMutation.mutate({ techs: selectedTechs, address: newAddress });
+    addMutation.mutate({ techs: selectedTechs, address: newAddress });
+  };
+
+  const openEditDialog = (techId: string, index: number, address: any) => {
+    setEditingAddress({ ...address });
+    setEditDialog({ techId, index, address });
+  };
+
+  const handleEditSave = () => {
+    if (!editDialog || !editingAddress) return;
+    editMutation.mutate({ techId: editDialog.techId, index: editDialog.index, address: editingAddress });
+  };
+
+  const handleDeleteAddress = (techId: string, index: number) => {
+    if (!confirm("Remove this shipping address? This will also update TPMS.")) return;
+    deleteMutation.mutate({ techId, index });
   };
 
   if (!flowType) {
@@ -140,7 +198,7 @@ export default function ShippingAddresses() {
             <CardHeader className="text-center pb-2">
               <Building className="h-10 w-10 mx-auto text-primary mb-2" />
               <CardTitle className="text-lg">District Shipping Address</CardTitle>
-              <CardDescription>Find techs with district shipping address and update in bulk</CardDescription>
+              <CardDescription>Find techs by district and update addresses in bulk</CardDescription>
             </CardHeader>
           </Card>
 
@@ -243,32 +301,62 @@ export default function ShippingAddresses() {
                         <TableHead>District-Tech ID</TableHead>
                         <TableHead>Enterprise ID</TableHead>
                         <TableHead>Current Address</TableHead>
+                        <TableHead className="w-20">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {techResults.map((tech, idx) => (
-                        <TableRow key={tech.techId}>
-                          <TableCell>
-                            <Checkbox
-                              checked={tech.selected}
-                              onCheckedChange={() => toggleTechSelection(idx)}
-                            />
-                          </TableCell>
-                          <TableCell className="font-medium">{tech.lastName}, {tech.firstName}</TableCell>
-                          <TableCell>{tech.districtNo}-{tech.techId}</TableCell>
-                          <TableCell>{tech.enterpriseId}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
-                            {tech.addresses?.[0] ? `${tech.addresses[0].addrLine1 || ""}, ${tech.addresses[0].city || ""} ${tech.addresses[0].stateCd || ""}` : "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {techResults.map((tech, idx) => {
+                        const primaryAddr = tech.shippingAddresses?.[0];
+                        return (
+                          <TableRow key={tech.techId}>
+                            <TableCell>
+                              <Checkbox
+                                checked={tech.selected}
+                                onCheckedChange={() => toggleTechSelection(idx)}
+                              />
+                            </TableCell>
+                            <TableCell className="font-medium">{tech.lastName}, {tech.firstName}</TableCell>
+                            <TableCell>{tech.districtNo}-{tech.techId}</TableCell>
+                            <TableCell>{tech.enterpriseId}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
+                              {primaryAddr ? `${primaryAddr.addrLine1 || ""}, ${primaryAddr.city || ""} ${primaryAddr.stateCd || ""}` : "—"}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1">
+                                {primaryAddr && (
+                                  <>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7"
+                                      onClick={() => openEditDialog(tech.techId, 0, primaryAddr)}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-red-500 hover:text-red-700"
+                                      onClick={() => handleDeleteAddress(tech.techId, 0)}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
                 <div className="flex items-center justify-between mt-4">
                   <Badge variant="secondary">{selectedTechs.length} selected</Badge>
                   <Button disabled={selectedTechs.length === 0} onClick={() => setWizardStep("change")}>
-                    Next: Change Address <ArrowRight className="h-4 w-4 ml-2" />
+                    Next: Add New Address <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </div>
               </div>
@@ -371,14 +459,63 @@ export default function ShippingAddresses() {
               <Button variant="outline" onClick={() => setWizardStep("change")}>
                 <ArrowLeft className="h-4 w-4 mr-2" /> Back
               </Button>
-              <Button onClick={handleConfirm} disabled={updateMutation.isPending}>
-                {updateMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+              <Button onClick={handleConfirm} disabled={addMutation.isPending}>
+                {addMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
                 CONFIRM CHANGE
               </Button>
             </div>
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={!!editDialog} onOpenChange={(open) => { if (!open) setEditDialog(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Shipping Address</DialogTitle>
+          </DialogHeader>
+          {editingAddress && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Address Type</Label>
+                <Input value={editingAddress.addressType || ""} onChange={e => setEditingAddress((p: any) => ({ ...p, addressType: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Ship To Name</Label>
+                <Input value={editingAddress.shipToName || ""} onChange={e => setEditingAddress((p: any) => ({ ...p, shipToName: e.target.value }))} />
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label className="text-xs">Address Line 1</Label>
+                <Input value={editingAddress.addrLine1 || ""} onChange={e => setEditingAddress((p: any) => ({ ...p, addrLine1: e.target.value }))} />
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label className="text-xs">Address Line 2</Label>
+                <Input value={editingAddress.addrLine2 || ""} onChange={e => setEditingAddress((p: any) => ({ ...p, addrLine2: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">City</Label>
+                <Input value={editingAddress.city || ""} onChange={e => setEditingAddress((p: any) => ({ ...p, city: e.target.value }))} />
+              </div>
+              <div className="flex gap-4">
+                <div className="space-y-1.5 flex-1">
+                  <Label className="text-xs">State</Label>
+                  <Input value={editingAddress.stateCd || ""} onChange={e => setEditingAddress((p: any) => ({ ...p, stateCd: e.target.value }))} maxLength={2} />
+                </div>
+                <div className="space-y-1.5 flex-1">
+                  <Label className="text-xs">Zip Code</Label>
+                  <Input value={editingAddress.zipCd || ""} onChange={e => setEditingAddress((p: any) => ({ ...p, zipCd: e.target.value }))} />
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialog(null)}>Cancel</Button>
+            <Button onClick={handleEditSave} disabled={editMutation.isPending || !editingAddress?.addrLine1}>
+              {editMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
