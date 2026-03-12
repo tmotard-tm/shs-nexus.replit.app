@@ -254,10 +254,11 @@ async function logOperationEvent(
     const isResolved = result.status === "success" || result.status === "skipped";
     const eventData: InsertOperationEvent = {
       fleetOpLogId,
+      queueItemId: params.queueItemId || null,
       operationType: action,
       system,
       action,
-      status: result.status === "pending" ? "pending" : result.status,
+      outcome: result.status === "pending" ? "pending" : result.status,
       vehicleNumber: toCanonical(params.truckNumber) || null,
       truckNumber: params.truckNumber || null,
       vin: params.vin || null,
@@ -266,7 +267,7 @@ async function logOperationEvent(
       requestPayload: JSON.stringify(params),
       responsePayload: null,
       errorMessage: result.status === "failed" ? result.message : null,
-      retryCount: 0,
+      attemptCount: 1,
       maxRetries: 3,
       nextRetryAt: result.status === "failed" ? new Date(Date.now() + 5 * 60 * 1000) : null,
       lastAttemptAt: new Date(),
@@ -501,7 +502,7 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
   const retryable = await db.select().from(operationEvents)
     .where(
       and(
-        eq(operationEvents.status, "failed"),
+        eq(operationEvents.outcome, "failed"),
         lte(operationEvents.nextRetryAt, now),
       )
     )
@@ -510,9 +511,9 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
   let retried = 0, succeeded = 0, failed = 0;
 
   for (const event of retryable) {
-    if (event.retryCount >= event.maxRetries) {
+    if (event.attemptCount >= event.maxRetries) {
       await db.update(operationEvents)
-        .set({ status: "failed", nextRetryAt: null, updatedAt: now })
+        .set({ outcome: "exhausted", nextRetryAt: null, updatedAt: now })
         .where(eq(operationEvents.id, event.id));
       continue;
     }
@@ -532,15 +533,15 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
       continue;
     }
 
-    const newRetryCount = event.retryCount + 1;
+    const newAttemptCount = event.attemptCount + 1;
     const isResolved = result.status === "success" || result.status === "skipped";
     if (result.status === "success" || result.status === "pending" || result.status === "skipped") {
       succeeded++;
       await db.update(operationEvents)
         .set({
-          status: result.status,
+          outcome: result.status,
           errorMessage: result.status === "skipped" ? result.message : null,
-          retryCount: newRetryCount,
+          attemptCount: newAttemptCount,
           nextRetryAt: null,
           lastAttemptAt: now,
           resolvedAt: isResolved ? now : null,
@@ -555,13 +556,13 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
       }
     } else {
       failed++;
-      const backoff = Math.min(5 * 60 * 1000 * Math.pow(2, newRetryCount), 60 * 60 * 1000);
+      const backoff = Math.min(5 * 60 * 1000 * Math.pow(2, newAttemptCount), 60 * 60 * 1000);
       await db.update(operationEvents)
         .set({
-          status: "failed",
+          outcome: "failed",
           errorMessage: result.message,
-          retryCount: newRetryCount,
-          nextRetryAt: newRetryCount >= event.maxRetries ? null : new Date(Date.now() + backoff),
+          attemptCount: newAttemptCount,
+          nextRetryAt: newAttemptCount >= event.maxRetries ? null : new Date(Date.now() + backoff),
           lastAttemptAt: now,
           updatedAt: now,
         })

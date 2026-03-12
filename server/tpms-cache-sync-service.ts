@@ -1,5 +1,6 @@
 import { storage } from './storage';
 import { getTPMSService } from './tpms-service';
+import { normalizeEnterpriseId } from './vehicle-number-utils';
 import type { InsertTpmsCachedAssignment } from '@shared/schema';
 
 interface SyncProgress {
@@ -96,10 +97,10 @@ class TpmsCacheSyncService {
         for (const cached of existingCache) {
           if (cached.lastSuccessAt && new Date(cached.lastSuccessAt) > recentCacheThreshold) {
             if (cached.enterpriseId) {
-              recentlyCachedIds.add(cached.enterpriseId.toUpperCase());
+              recentlyCachedIds.add(normalizeEnterpriseId(cached.enterpriseId));
             }
             if (cached.lookupKey) {
-              recentlyCachedIds.add(cached.lookupKey.toUpperCase());
+              recentlyCachedIds.add(normalizeEnterpriseId(cached.lookupKey));
             }
           }
         }
@@ -118,29 +119,29 @@ class TpmsCacheSyncService {
         for (const chunk of chunks) {
           await Promise.all(
             chunk.map(async (tech) => {
-              // Use tech_racfid (LDAP ID) for TPMS lookups, not employee_id (numeric)
-              const enterpriseId = tech.techRacfid?.trim().toUpperCase();
+              const apiId = tech.techRacfid?.trim().toUpperCase();
+              const normalizedId = normalizeEnterpriseId(tech.techRacfid || '');
               
-              if (!enterpriseId) {
+              if (!apiId || !normalizedId) {
                 this.progress.skipped++;
                 this.progress.processed++;
                 return;
               }
 
-              if (skipRecentlyCached && recentlyCachedIds.has(enterpriseId)) {
+              if (skipRecentlyCached && recentlyCachedIds.has(normalizedId)) {
                 this.progress.skipped++;
                 this.progress.processed++;
                 return;
               }
 
               try {
-                const techInfo = await tpmsService.getTechInfo(enterpriseId);
+                const techInfo = await tpmsService.getTechInfo(apiId);
                 
                 const cacheData: InsertTpmsCachedAssignment = {
-                  lookupKey: enterpriseId,
+                  lookupKey: normalizedId,
                   lookupType: 'enterprise_id',
                   truckNo: techInfo.truckNo?.trim() || null,
-                  enterpriseId: techInfo.ldapId?.trim().toUpperCase() || enterpriseId,
+                  enterpriseId: normalizeEnterpriseId(techInfo.ldapId || '') || normalizedId,
                   techId: techInfo.techId || null,
                   firstName: techInfo.firstName || null,
                   lastName: techInfo.lastName || null,
@@ -161,11 +162,11 @@ class TpmsCacheSyncService {
                   this.progress.withTruck++;
                 }
 
-                this.progress.lastProcessedId = enterpriseId;
+                this.progress.lastProcessedId = normalizedId;
               } catch (error: any) {
                 this.progress.failed++;
                 if (this.progress.errors.length < 100) {
-                  this.progress.errors.push(`${enterpriseId}: ${error.message}`);
+                  this.progress.errors.push(`${normalizedId}: ${error.message}`);
                 }
               }
 

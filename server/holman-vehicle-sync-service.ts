@@ -8,7 +8,7 @@ import { eq, sql, and, desc, inArray, gte, isNotNull } from "drizzle-orm";
 const ALLOWED_DIVISIONS = ['01', 'RF'];
 import { holmanApiService } from "./holman-api-service";
 import { getTPMSService } from "./tpms-service";
-import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-number-utils";
+import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, normalizeEnterpriseId } from "./vehicle-number-utils";
 
 interface FleetVehicle {
   id: string;
@@ -264,7 +264,7 @@ class HolmanVehicleSyncService {
         branding: v.branding || 'Standard',
         interior: v.interior || 'Standard',
         tuneStatus: v.tuneStatus || 'Tuned',
-        holmanTechAssigned: v.clientData2 || '',
+        holmanTechAssigned: normalizeEnterpriseId(v.clientData2 || ''),
         holmanTechName: v.firstName && v.lastName ? `${v.firstName} ${v.lastName}`.trim() : (v.driverName || ''),
         dataSource: 'holman',
         isActive: true,
@@ -524,7 +524,7 @@ class HolmanVehicleSyncService {
         branding: v.branding || 'Standard',
         interior: v.interior || 'Standard',
         tuneStatus: v.tuneStatus || 'Tuned',
-        holmanTechAssigned: v.clientData2 || '', // Enterprise ID of Holman-assigned tech
+        holmanTechAssigned: normalizeEnterpriseId(v.clientData2 || ''),
         holmanTechName: v.firstName && v.lastName ? `${v.firstName} ${v.lastName}`.trim() : (v.driverName || ''),
         dataSource: 'holman',
         isActive: true,
@@ -929,7 +929,7 @@ class HolmanVehicleSyncService {
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',
       tuneStatus: v.tuneStatus || 'Tuned',
-      holmanTechAssigned: v.clientData2 || '', // Enterprise ID of Holman-assigned tech
+      holmanTechAssigned: normalizeEnterpriseId(v.clientData2 || ''),
       holmanTechName: v.firstName && v.lastName ? `${v.firstName} ${v.lastName}`.trim() : (v.driverName || ''),
       dataSource: 'holman',
     };
@@ -965,7 +965,7 @@ class HolmanVehicleSyncService {
       branding: v.branding || 'Standard',
       interior: v.interior || 'Standard',
       tuneStatus: v.tuneStatus || 'Tuned',
-      holmanTechAssigned: v.holmanTechAssigned || '', // Enterprise ID of Holman-assigned tech
+      holmanTechAssigned: normalizeEnterpriseId(v.holmanTechAssigned || ''),
       holmanTechName: v.holmanTechName || '', // Tech name from Holman
       dataSource: v.dataSource || 'cached',
       // Include cached TPMS data for fast loading

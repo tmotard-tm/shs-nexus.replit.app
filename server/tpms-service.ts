@@ -1,6 +1,6 @@
 import { storage } from './storage';
 import type { InsertTpmsCachedAssignment } from '@shared/schema';
-import { toTpmsRef, toCanonical } from './vehicle-number-utils';
+import { toTpmsRef, toCanonical, normalizeEnterpriseId } from './vehicle-number-utils';
 
 interface TPMSToken {
   token: string;
@@ -217,10 +217,10 @@ class TPMSService {
   private async cacheTPMSResponse(lookupKey: string, lookupType: 'enterprise_id' | 'truck_number', techInfo: TechInfoResponse): Promise<void> {
     try {
       const cacheData: InsertTpmsCachedAssignment = {
-        lookupKey: lookupKey.toUpperCase(),
+        lookupKey: normalizeEnterpriseId(lookupKey),
         lookupType,
         truckNo: techInfo.truckNo?.trim() || null,
-        enterpriseId: techInfo.ldapId?.trim().toUpperCase() || null,
+        enterpriseId: normalizeEnterpriseId(techInfo.ldapId || ''),
         techId: techInfo.techId || null,
         firstName: techInfo.firstName || null,
         lastName: techInfo.lastName || null,
@@ -244,6 +244,7 @@ class TPMSService {
   // Get tech info with caching - tries API first, falls back to cache on failure
   async getTechInfoWithCache(enterpriseId: string): Promise<CachedTechInfo | null> {
     const cleanId = enterpriseId.trim().toUpperCase();
+    const normalizedId = normalizeEnterpriseId(enterpriseId);
     
     try {
       // Try live API first
@@ -260,16 +261,14 @@ class TPMSService {
       const statusCode = (error as any).statusCode || 0;
       console.warn(`[TPMS-Cache] API failed for ${cleanId} (status: ${statusCode}), checking cache...`);
       
-      // Record the error in cache
-      const existingCache = await storage.getTpmsCachedAssignment(cleanId);
+      const existingCache = await storage.getTpmsCachedAssignment(normalizedId);
       if (existingCache) {
-        await storage.markTpmsCacheError(cleanId, statusCode, error.message);
+        await storage.markTpmsCacheError(normalizedId, statusCode, error.message);
       }
       
-      // Look for cached data - try by lookupKey first, then by enterpriseId
-      let cached = await storage.getTpmsCachedAssignment(cleanId);
+      let cached = await storage.getTpmsCachedAssignment(normalizedId);
       if (!cached) {
-        cached = await storage.getTpmsCachedAssignmentByEnterpriseId(cleanId);
+        cached = await storage.getTpmsCachedAssignmentByEnterpriseId(normalizedId);
       }
       
       if (cached && cached.rawResponse) {

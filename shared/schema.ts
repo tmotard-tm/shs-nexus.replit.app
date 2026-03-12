@@ -2007,10 +2007,11 @@ export type InsertTpmsChangeLog = z.infer<typeof insertTpmsChangeLogSchema>;
 export const operationEvents = pgTable("operation_events", {
   id: serial("id").primaryKey(),
   fleetOpLogId: integer("fleet_op_log_id"),
+  queueItemId: text("queue_item_id"),
   operationType: text("operation_type"),
   system: text("system").notNull(),
   action: text("action").notNull(),
-  status: text("status").notNull().default("pending"),
+  outcome: text("outcome").notNull().default("pending"),
   vehicleNumber: text("vehicle_number"),
   truckNumber: text("truck_number"),
   vin: text("vin"),
@@ -2019,7 +2020,7 @@ export const operationEvents = pgTable("operation_events", {
   requestPayload: text("request_payload"),
   responsePayload: text("response_payload"),
   errorMessage: text("error_message"),
-  retryCount: integer("retry_count").default(0).notNull(),
+  attemptCount: integer("attempt_count").default(0).notNull(),
   maxRetries: integer("max_retries").default(3).notNull(),
   nextRetryAt: timestamp("next_retry_at"),
   lastAttemptAt: timestamp("last_attempt_at"),
@@ -2031,8 +2032,9 @@ export const operationEvents = pgTable("operation_events", {
   return {
     fleetOpIdx: index("op_events_fleet_op_idx").on(table.fleetOpLogId),
     systemIdx: index("op_events_system_idx").on(table.system),
-    statusIdx: index("op_events_status_idx").on(table.status),
+    outcomeIdx: index("op_events_outcome_idx").on(table.outcome),
     retryIdx: index("op_events_retry_idx").on(table.nextRetryAt),
+    queueItemIdx: index("op_events_queue_item_idx").on(table.queueItemId),
   };
 });
 
