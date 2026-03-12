@@ -28,6 +28,7 @@ import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
 import { createFleetScopeRouter } from "./fleet-scope-routes";
 import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
+import { fsDb } from "./fleet-scope-db";
 // SAML SSO INTEGRATION
 import passport from "passport";
 import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
@@ -449,12 +450,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log("=== STARTING ROUTE REGISTRATION ===");
 
   // Mount Fleet-Scope module routes at /api/fs/*
-  if (process.env.FS_DATABASE_URL) {
+  if (fsDb) {
     const fsRouter = createFleetScopeRouter();
     app.use("/api/fs", fsRouter);
     console.log("[Fleet-Scope] Routes mounted at /api/fs/*");
   } else {
-    console.log("[Fleet-Scope] Skipped — FS_DATABASE_URL not configured");
+    console.log("[Fleet-Scope] Skipped — Fleet-Scope DB not configured (set FS_DATABASE_URL or FS_PGHOST/FS_PGUSER/FS_PGPASSWORD/FS_PGDATABASE)");
   }
 
   // SAML SSO INTEGRATION - Initialize passport and SAML strategy
@@ -13623,7 +13624,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const httpServer = createServer(app);
 
-  if (process.env.FS_DATABASE_URL) {
+  if (fsDb) {
     initFsWebSocket(httpServer);
     startFsScheduledMessages();
     console.log("[Fleet-Scope] WebSocket (/fs-ws) and scheduled message processor initialized");

@@ -1812,7 +1812,7 @@ export function createFleetScopeRouter(): Router {
   app.get("/public/all-vehicles", requirePublicApiKey, async (_req, res) => {
     try {
       const port = process.env.PORT || 5000;
-      const internalUrl = `http://localhost:${port}/api/all-vehicles`;
+      const internalUrl = `http://localhost:${port}/api/fs/all-vehicles`;
       const response = await fetch(internalUrl);
       if (!response.ok) throw new Error(`Internal all-vehicles endpoint returned ${response.status}`);
       const data = await response.json();
@@ -1859,7 +1859,7 @@ export function createFleetScopeRouter(): Router {
   app.get("/public/po-priority", requirePublicApiKey, async (_req, res) => {
     try {
       const port = process.env.PORT || 5000;
-      const internalUrl = `http://localhost:${port}/api/po-priority`;
+      const internalUrl = `http://localhost:${port}/api/fs/po-priority`;
       const response = await fetch(internalUrl);
       if (!response.ok) throw new Error(`Internal po-priority endpoint returned ${response.status}`);
       const data = await response.json();
@@ -1890,7 +1890,7 @@ export function createFleetScopeRouter(): Router {
   app.get("/public/fleet-cost", requirePublicApiKey, async (_req, res) => {
     try {
       const port = process.env.PORT || 5000;
-      const internalUrl = `http://localhost:${port}/api/fleet-cost/analytics`;
+      const internalUrl = `http://localhost:${port}/api/fs/fleet-cost/analytics`;
       const response = await fetch(internalUrl);
       if (!response.ok) throw new Error(`Internal fleet-cost endpoint returned ${response.status}`);
       const data = await response.json();
@@ -9203,7 +9203,7 @@ Respond ONLY with valid JSON, no other text.`;
       }
 
       const importedBy = req.body.importedBy || "Unknown";
-      const { generateJobId, createJob, saveUploadedFile, processJobInBackground } = await import('./fleet-cost-jobs');
+      const { generateJobId, createJob, saveUploadedFile, processJobInBackground } = await import('./fleet-scope-fleet-cost-jobs');
       
       const jobId = generateJobId();
       console.log(`[Fleet Cost] Created job ${jobId} for file: ${req.file.originalname} (${(req.file.size / 1024 / 1024).toFixed(2)} MB)`);
@@ -9226,7 +9226,7 @@ Respond ONLY with valid JSON, no other text.`;
 
   app.get("/fleet-cost/job/:jobId", async (req, res) => {
     try {
-      const { getJob } = await import('./fleet-cost-jobs');
+      const { getJob } = await import('./fleet-scope-fleet-cost-jobs');
       const job = getJob(req.params.jobId);
       
       if (!job) {
@@ -11065,7 +11065,7 @@ Respond ONLY with valid JSON, no other text.`;
 
   // Calculate distances (both manager and tech) for decommissioning vehicles
   async function calculateDecommissioningDistances(): Promise<{ managerCalculated: number; techCalculated: number }> {
-    const { calculateDistancesForDecommissioningVehicles } = await import("./distance-calculator");
+    const { calculateDistancesForDecommissioningVehicles } = await import("./fleet-scope-distance-calculator");
     
     const vehicles = await fleetScopeStorage.getDecommissioningVehiclesNeedingDistanceCalc();
     console.log(`[Decommissioning Distance] ${vehicles.length} vehicles need distance calculation`);
