@@ -360,6 +360,8 @@ export default function FleetManagement() {
   });
 
   const [newComment, setNewComment] = useState("");
+  const [commentDialogOpen, setCommentDialogOpen] = useState(false);
+  const [amsCommentsCollapsed, setAmsCommentsCollapsed] = useState(false);
 
   const addCommentMutation = useMutation({
     mutationFn: async (comment: string) => {
@@ -368,6 +370,7 @@ export default function FleetManagement() {
     },
     onSuccess: () => {
       setNewComment("");
+      setCommentDialogOpen(false);
       queryClient.invalidateQueries({ queryKey: ["/api/ams/vehicles/comments", selectedVehicle?.vin] });
       toast({ title: "Comment added successfully" });
     },
@@ -1963,52 +1966,108 @@ export default function FleetManagement() {
                   )}
                 </div>
 
-                {/* AMS Comments / History — inline */}
+                {/* AMS Comments / History — collapsible inline */}
                 <div className="space-y-2">
-                  <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-1.5">
-                    <MessageSquare className="h-4 w-4" />AMS Comments / History
-                  </h4>
-                  {!selectedVehicle?.vin ? (
-                    <p className="text-xs text-muted-foreground">No VIN available.</p>
-                  ) : amsCommentsLoading ? (
-                    <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading comments...</div>
-                  ) : (
-                    <div className="space-y-2">
-                      {(!amsComments || amsComments.length === 0) ? (
-                        <p className="text-xs text-muted-foreground">No AMS comments for this vehicle.</p>
-                      ) : amsComments.map((comment: any, i: number) => (
-                        <div key={i} className="p-2.5 bg-muted/40 rounded-lg space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-medium">{comment.User || comment.Author || comment.author || comment.CreatedBy || comment.UpdatedBy || comment.user || "Unknown"}</span>
-                            <span className="text-xs text-muted-foreground">{comment.Date || comment.CommentDate || comment.CreatedAt || comment.UpdateDate || comment.commentDate || comment.createdAt || comment.date || ""}</span>
-                          </div>
-                          <p className="text-xs leading-relaxed">{comment.Comment || comment.CommentText || comment.Note || comment.Text || comment.comment || comment.note || comment.text || "—"}</p>
-                        </div>
-                      ))}
-                      <div className="pt-1 space-y-2">
-                        <Textarea
-                          placeholder="Add an AMS comment..."
-                          value={newComment}
-                          onChange={(e) => setNewComment(e.target.value)}
-                          rows={2}
-                          className="text-xs resize-none"
-                          disabled={addCommentMutation.isPending}
-                          data-testid="textarea-ams-comment"
-                        />
-                        <Button
-                          size="sm"
-                          className="w-full"
-                          onClick={() => newComment.trim() && addCommentMutation.mutate(newComment.trim())}
-                          disabled={!newComment.trim() || addCommentMutation.isPending}
-                          data-testid="button-add-ams-comment"
-                        >
-                          {addCommentMutation.isPending ? <Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> : <Send className="h-3 w-3 mr-1.5" />}
-                          Add Comment
-                        </Button>
+                  {/* Header row: title + collapse toggle + Add Comment button */}
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={() => setAmsCommentsCollapsed(v => !v)}
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      AMS Comments / History
+                      {amsCommentsLoading ? (
+                        <Loader2 className="h-3 w-3 animate-spin ml-1" />
+                      ) : amsComments && amsComments.length > 0 ? (
+                        <span className="text-xs text-muted-foreground">({amsComments.length})</span>
+                      ) : null}
+                      {amsCommentsCollapsed ? <ChevronDown className="h-3.5 w-3.5 ml-0.5" /> : <ChevronUp className="h-3.5 w-3.5 ml-0.5" />}
+                    </button>
+                    {selectedVehicle?.vin && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2.5 text-xs gap-1.5"
+                        onClick={() => setCommentDialogOpen(true)}
+                        data-testid="button-open-add-comment"
+                      >
+                        <Send className="h-3 w-3" />
+                        Add Comment
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Collapsible comment list */}
+                  {!amsCommentsCollapsed && (
+                    !selectedVehicle?.vin ? (
+                      <p className="text-xs text-muted-foreground">No VIN available.</p>
+                    ) : amsCommentsLoading ? (
+                      <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading comments...</div>
+                    ) : !amsComments || amsComments.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No AMS comments for this vehicle.</p>
+                    ) : (
+                      <div className="overflow-y-auto max-h-[600px] space-y-1.5 pr-1">
+                        {[...amsComments]
+                          .sort((a, b) => {
+                            const da = new Date(a.Date || a.CommentDate || a.CreatedAt || a.UpdateDate || a.commentDate || a.createdAt || a.date || 0).getTime();
+                            const db = new Date(b.Date || b.CommentDate || b.CreatedAt || b.UpdateDate || b.commentDate || b.createdAt || b.date || 0).getTime();
+                            return db - da;
+                          })
+                          .map((comment: any, i: number) => (
+                            <div key={i} className="p-2.5 bg-muted/40 rounded-lg space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-medium">{comment.User || comment.Author || comment.author || comment.CreatedBy || comment.UpdatedBy || comment.user || "Unknown"}</span>
+                                <span className="text-xs text-muted-foreground">{comment.Date || comment.CommentDate || comment.CreatedAt || comment.UpdateDate || comment.commentDate || comment.createdAt || comment.date || ""}</span>
+                              </div>
+                              <p className="text-xs leading-relaxed">{comment.Comment || comment.CommentText || comment.Note || comment.Text || comment.comment || comment.note || comment.text || "—"}</p>
+                            </div>
+                          ))
+                        }
                       </div>
-                    </div>
+                    )
                   )}
                 </div>
+
+                {/* Add Comment popup dialog */}
+                <Dialog open={commentDialogOpen} onOpenChange={(open) => { setCommentDialogOpen(open); if (!open) setNewComment(""); }}>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-2">
+                        <MessageSquare className="h-4 w-4" />
+                        Add AMS Comment
+                      </DialogTitle>
+                      <DialogDescription>
+                        Add a comment to vehicle {selectedVehicle?.vin} in AMS.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 py-2">
+                      <Textarea
+                        placeholder="Add an AMS comment..."
+                        value={newComment}
+                        onChange={(e) => setNewComment(e.target.value)}
+                        rows={5}
+                        className="resize-none"
+                        disabled={addCommentMutation.isPending}
+                        data-testid="textarea-ams-comment"
+                        autoFocus
+                      />
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => { setCommentDialogOpen(false); setNewComment(""); }} disabled={addCommentMutation.isPending}>
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={() => newComment.trim() && addCommentMutation.mutate(newComment.trim())}
+                        disabled={!newComment.trim() || addCommentMutation.isPending}
+                        data-testid="button-add-ams-comment"
+                      >
+                        {addCommentMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+                        Add Comment
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
 
                 <Separator />
 
