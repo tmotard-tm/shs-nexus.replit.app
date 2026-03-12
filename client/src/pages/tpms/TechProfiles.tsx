@@ -47,6 +47,7 @@ interface TechProfile {
   techReplenishment: Record<string, any>;
   syncedAt: string;
   lastTpmsUpdatedAt: string | null;
+  _isLive?: boolean;
 }
 
 interface ChangeLogEntry {
