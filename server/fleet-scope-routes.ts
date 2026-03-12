@@ -1080,8 +1080,8 @@ export function registerFleetScopeRoutes(): Router {
       let finalTruckNumbers: string[];
       
       if (existing.rows && existing.rows.length > 0) {
-        const savedTruckNumbers: string[] = (existing.rows[0] as any).truck_numbers || [];
-        const savedCount: number = Number((existing.rows[0] as any).pickups_scheduled) || 0;
+        const savedTruckNumbers: string[] = ((existing.rows[0] as Record<string, unknown>)).truck_numbers || [];
+        const savedCount: number = Number(((existing.rows[0] as Record<string, unknown>)).pickups_scheduled) || 0;
         const mergedSet = new Set([...savedTruckNumbers, ...liveTruckNumbers]);
         finalTruckNumbers = Array.from(mergedSet);
         finalCount = Math.max(savedCount, finalTruckNumbers.length);
@@ -1148,7 +1148,7 @@ export function registerFleetScopeRoutes(): Router {
         return res.status(404).json({ message: "Snapshot not found" });
       }
       
-      const currentRow = existing.rows[0] as any;
+      const currentRow = existing.rows[0] as Record<string, unknown>;
       const currentTruckNumbers: string[] = currentRow.truck_numbers || [];
       
       let updatedTruckNumbers = currentTruckNumbers;
@@ -2421,7 +2421,7 @@ export function registerFleetScopeRoutes(): Router {
         console.error(`[CallRepairShop] ElevenLabs API error ${response.status}:`, errorText);
         try {
           await fleetScopeStorage.updateTruck(truck.id, {
-            lastCallDate: new Date() as any,
+            lastCallDate: new Date(),
             lastCallStatus: "Call Failed",
             lastCallSummary: `API error ${response.status}: ${errorText}`,
           });
@@ -2439,9 +2439,9 @@ export function registerFleetScopeRoutes(): Router {
 
       try {
         await fleetScopeStorage.updateTruck(truck.id, {
-          lastCallDate: new Date() as any,
+          lastCallDate: new Date(),
           lastCallConversationId: conversationId,
-          lastCallSummary: null as any,
+          lastCallSummary: null,
         });
       } catch (saveErr: any) {
         console.warn("[CallRepairShop] Could not save call metadata:", saveErr.message);
@@ -2513,7 +2513,7 @@ export function registerFleetScopeRoutes(): Router {
         console.error(`[CallTechnician] ElevenLabs API error ${response.status}:`, errorText);
         try {
           await fleetScopeStorage.updateTruck(truck.id, {
-            lastTechCallDate: new Date() as any,
+            lastTechCallDate: new Date(),
             lastTechCallStatus: "Call Failed",
             lastTechCallSummary: `API error ${response.status}: ${errorText}`,
           });
@@ -2529,9 +2529,9 @@ export function registerFleetScopeRoutes(): Router {
 
       try {
         await fleetScopeStorage.updateTruck(truck.id, {
-          lastTechCallDate: new Date() as any,
+          lastTechCallDate: new Date(),
           lastTechCallConversationId: conversationId,
-          lastTechCallSummary: null as any,
+          lastTechCallSummary: null,
         });
       } catch (saveErr: any) {
         console.warn("[CallTechnician] Could not save call metadata:", saveErr.message);
@@ -2696,9 +2696,9 @@ export function registerFleetScopeRoutes(): Router {
                 });
 
                 if (callType === "tech") {
-                  await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date() as any, lastTechCallStatus: "Call Failed", lastTechCallSummary: `Batch call API error` });
+                  await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date(), lastTechCallStatus: "Call Failed", lastTechCallSummary: `Batch call API error` });
                 } else {
-                  await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date() as any, lastCallStatus: "Call Failed", lastCallSummary: `Batch call API error` });
+                  await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallStatus: "Call Failed", lastCallSummary: `Batch call API error` });
                 }
 
                 job.results.push({ truckId, truckNumber: vehicleNum, status: "failed", error: `API ${response.status}` });
@@ -2715,9 +2715,9 @@ export function registerFleetScopeRoutes(): Router {
               });
 
               if (callType === "tech") {
-                await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date() as any, lastTechCallConversationId: conversationId, lastTechCallSummary: null as any });
+                await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date(), lastTechCallConversationId: conversationId, lastTechCallSummary: null });
               } else {
-                await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date() as any, lastCallConversationId: conversationId, lastCallSummary: null as any });
+                await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallConversationId: conversationId, lastCallSummary: null });
               }
 
               job.results.push({ truckId, truckNumber: vehicleNum, status: "in_progress", conversationId });
@@ -2988,7 +2988,7 @@ Respond ONLY with valid JSON, no other text.`;
                     callType: "tech", phoneNumber: techToNumber, elevenLabsConversationId: techConvId, status: "in_progress",
                   });
                   await fleetScopeStorage.updateTruck(truckForAutoCall.id, {
-                    lastTechCallDate: new Date() as any, lastTechCallConversationId: techConvId, lastTechCallSummary: null as any,
+                    lastTechCallDate: new Date(), lastTechCallConversationId: techConvId, lastTechCallSummary: null,
                   });
                   console.log(`[ElevenLabs Webhook] Auto-triggered tech call: ${techConvId}`);
                 }
@@ -3330,7 +3330,7 @@ Respond ONLY with valid JSON, no other text.`;
           };
           
           // Remove legacy status field from data
-          delete (sanitizedData as any).status;
+          delete ((sanitizedData as Record<string, unknown>)).status;
 
           const validated = insertTruckSchema.parse(sanitizedData);
           const truck = await fleetScopeStorage.createTruck(validated);
@@ -4240,7 +4240,7 @@ Respond ONLY with valid JSON, no other text.`;
       // Count by status
       const statusCounts: Record<string, number> = {};
       for (const row of data) {
-        const status = (row as any).ASSIGNMENT_STATUS || 'No Status';
+        const status = (row as Record<string, unknown>).ASSIGNMENT_STATUS || 'No Status';
         statusCounts[status] = (statusCounts[status] || 0) + 1;
       }
       
@@ -5818,8 +5818,8 @@ Respond ONLY with valid JSON, no other text.`;
       const pmfUnassignedByStatus: Record<string, number> = {};
       
       for (const row of data) {
-        const tpmsAssigned = (row as any).TPMS_ASSIGNED;
-        const rawVehicleNumber = (row as any).VEHICLE_NUMBER?.toString().trim() || '';
+        const tpmsAssigned = (row as Record<string, unknown>).TPMS_ASSIGNED;
+        const rawVehicleNumber = (row as Record<string, unknown>).VEHICLE_NUMBER?.toString().trim() || '';
         // Use fleet normalization (just removes leading zeros)
         const vehicleNumber = normalizeFleetId(rawVehicleNumber);
         const isAssigned = tpmsAssigned && tpmsAssigned.toLowerCase() === 'assigned';
@@ -5844,9 +5844,9 @@ Respond ONLY with valid JSON, no other text.`;
       // Build a set of normalized fleet vehicle IDs with their assignment status
       const fleetAssignmentMap = new Map<string, boolean>();
       for (const row of data) {
-        const rawVehicleNumber = (row as any).VEHICLE_NUMBER?.toString().trim() || '';
+        const rawVehicleNumber = (row as Record<string, unknown>).VEHICLE_NUMBER?.toString().trim() || '';
         const normalized = normalizeFleetId(rawVehicleNumber);
-        const tpmsAssigned = (row as any).TPMS_ASSIGNED;
+        const tpmsAssigned = (row as Record<string, unknown>).TPMS_ASSIGNED;
         const isAssigned = tpmsAssigned && tpmsAssigned.toLowerCase() === 'assigned';
         fleetAssignmentMap.set(normalized, isAssigned);
       }
@@ -6361,7 +6361,7 @@ Respond ONLY with valid JSON, no other text.`;
       // Caching ensures we don't re-geocode the same coordinates
       const gpsToGeocode: Array<{ lat: number; lon: number; vehicleId: string }> = [];
       for (const row of data) {
-        const r = row as any;
+        const r = row as Record<string, unknown>;
         const vehicleNumber = normalizeFleetId(r.VEHICLE_NUMBER?.toString().trim() || '');
         const gpsLat = r.GPS_LATITUDE;
         const gpsLon = r.GPS_LONGITUDE;
@@ -6389,7 +6389,7 @@ Respond ONLY with valid JSON, no other text.`;
       }
       
       for (const row of data) {
-        const r = row as any;
+        const r = row as Record<string, unknown>;
         const rawVehicleNumber = r.VEHICLE_NUMBER?.toString().trim() || '';
         const vehicleNumber = normalizeFleetId(rawVehicleNumber);
         
@@ -7152,7 +7152,7 @@ Respond ONLY with valid JSON, no other text.`;
       `);
       
       const daysMap: Record<string, { lockedDownSince: string; daysInStatus: number }> = {};
-      for (const row of result.rows as any[]) {
+      for (const row of result.rows as Record<string, unknown>[]) {
         daysMap[row.assetId] = {
           lockedDownSince: row.lockedDownSince,
           daysInStatus: row.daysInStatus || 0,
@@ -7176,7 +7176,7 @@ Respond ONLY with valid JSON, no other text.`;
           AND (LOWER(a.action) LIKE '%registration stickers needed%'
                OR LOWER(a.type_description) LIKE '%registration stickers needed%')
       `);
-      const assetIds = (result.rows as any[]).map(row => row.assetId);
+      const assetIds = (result.rows as Record<string, unknown>[]).map(row => row.assetId);
       res.json({ success: true, assetIds });
     } catch (error: any) {
       console.error("Error fetching PMF registration stickers needed:", error);
@@ -9610,7 +9610,7 @@ Respond ONLY with valid JSON, no other text.`;
       const annualVehicleCounts: Record<string, number> = {};
       
       // Process weekly vehicle counts
-      for (const row of weeklyVehiclesResults.rows as any[]) {
+      for (const row of weeklyVehiclesResults.rows as Record<string, unknown>[]) {
         const year = Number(row.year);
         const week = Number(row.week);
         const uniqueVehicles = Number(row.unique_vehicles) || 0;
@@ -9620,7 +9620,7 @@ Respond ONLY with valid JSON, no other text.`;
       }
       
       // Process monthly vehicle counts (true distinct counts per month)
-      for (const row of monthlyVehiclesResults.rows as any[]) {
+      for (const row of monthlyVehiclesResults.rows as Record<string, unknown>[]) {
         const year = Number(row.year);
         const month = Number(row.month);
         const uniqueVehicles = Number(row.unique_vehicles) || 0;
@@ -9655,7 +9655,7 @@ Respond ONLY with valid JSON, no other text.`;
         return { start: fmt(start), end: fmt(end) };
       };
       
-      for (const row of results.rows as any[]) {
+      for (const row of results.rows as Record<string, unknown>[]) {
         const lineType = row.line_type || 'Unknown';
         const year = Number(row.year);
         const month = Number(row.month);
@@ -9999,7 +9999,7 @@ Respond ONLY with valid JSON, no other text.`;
       const annualVehicleCounts: Record<string, number> = {};
       
       // Process weekly vehicle counts
-      for (const row of weeklyVehiclesResults.rows as any[]) {
+      for (const row of weeklyVehiclesResults.rows as Record<string, unknown>[]) {
         const year = Number(row.year);
         const week = Number(row.week);
         const uniqueVehicles = Number(row.unique_vehicles) || 0;
@@ -10009,7 +10009,7 @@ Respond ONLY with valid JSON, no other text.`;
       }
       
       // Process monthly vehicle counts
-      for (const row of monthlyVehiclesResults.rows as any[]) {
+      for (const row of monthlyVehiclesResults.rows as Record<string, unknown>[]) {
         const year = Number(row.year);
         const month = Number(row.month);
         const uniqueVehicles = Number(row.unique_vehicles) || 0;
@@ -10040,7 +10040,7 @@ Respond ONLY with valid JSON, no other text.`;
         return { start: fmt(start), end: fmt(end) };
       };
       
-      for (const row of results.rows as any[]) {
+      for (const row of results.rows as Record<string, unknown>[]) {
         const year = Number(row.year);
         const month = Number(row.month);
         const week = Number(row.week);
