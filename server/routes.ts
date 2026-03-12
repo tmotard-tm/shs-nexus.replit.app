@@ -10115,10 +10115,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/tpms/techs", requireAuth, async (req: any, res) => {
     try {
-      const { district, lastName, firstName, techManagerId, pdc, enterpriseId, truckNo, techId, address, zip } = req.query;
+      const { district, lastName, firstName, techManagerId, pdc, enterpriseId, truckNo, techId, address, zip, search, limit: limitParam } = req.query;
+      const pageLimit = Math.min(parseInt(limitParam as string || "200", 10), 500);
       
-      let query = db.select().from(tpmsTechProfiles);
       const conditions: any[] = [];
+      
+      // Generic full-text search across enterpriseId, firstName, lastName
+      if (search) {
+        const term = `%${(search as string).trim()}%`;
+        conditions.push(
+          or(
+            ilike(tpmsTechProfiles.enterpriseId, term),
+            ilike(tpmsTechProfiles.firstName, term),
+            ilike(tpmsTechProfiles.lastName, term),
+            ilike(tpmsTechProfiles.techId, term),
+          )
+        );
+      }
       
       if (district) conditions.push(eq(tpmsTechProfiles.districtNo, district as string));
       if (lastName) conditions.push(ilike(tpmsTechProfiles.lastName, `%${lastName}%`));
@@ -10131,9 +10144,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       let results;
       if (conditions.length > 0) {
-        results = await db.select().from(tpmsTechProfiles).where(and(...conditions)).limit(200);
+        results = await db.select().from(tpmsTechProfiles).where(and(...conditions)).limit(pageLimit);
       } else {
-        results = await db.select().from(tpmsTechProfiles).limit(200);
+        results = await db.select().from(tpmsTechProfiles).limit(pageLimit);
       }
       
       if (address || zip) {

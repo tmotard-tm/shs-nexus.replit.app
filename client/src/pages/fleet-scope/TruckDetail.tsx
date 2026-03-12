@@ -232,6 +232,43 @@ export default function TruckDetail() {
   });
   const pendingCdcCount = (tpmsChangeHistory || []).filter((c: any) => !c.confirmedByTpms && !c.confirmedAt).length;
 
+  // TPMS address management state
+  const [addressDialogMode, setAddressDialogMode] = useState<'add' | 'edit' | null>(null);
+  const [addressEditIndex, setAddressEditIndex] = useState<number | null>(null);
+  const [addressForm, setAddressForm] = useState({ addrLine1: "", addrLine2: "", city: "", stateCd: "", zipCd: "", addressType: "PRIMARY" });
+
+  const addAddressMutation = useMutation({
+    mutationFn: async (addr: Record<string, string>) =>
+      apiRequest("POST", `/api/tpms/techs/${encodeURIComponent(tpmsTechId!)}/addresses`, addr),
+    onSuccess: () => {
+      toast({ title: "Address added" });
+      setAddressDialogMode(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs", { truckNo: truckNumberForSpecialty }] });
+    },
+    onError: (err: any) => toast({ title: "Failed to add address", description: err.message, variant: "destructive" }),
+  });
+
+  const editAddressMutation = useMutation({
+    mutationFn: async ({ index, addr }: { index: number; addr: Record<string, string> }) =>
+      apiRequest("PUT", `/api/tpms/techs/${encodeURIComponent(tpmsTechId!)}/addresses/${index}`, addr),
+    onSuccess: () => {
+      toast({ title: "Address updated" });
+      setAddressDialogMode(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs", { truckNo: truckNumberForSpecialty }] });
+    },
+    onError: (err: any) => toast({ title: "Failed to update address", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteAddressMutation = useMutation({
+    mutationFn: async (index: number) =>
+      apiRequest("DELETE", `/api/tpms/techs/${encodeURIComponent(tpmsTechId!)}/addresses/${index}`),
+    onSuccess: () => {
+      toast({ title: "Address removed" });
+      queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs", { truckNo: truckNumberForSpecialty }] });
+    },
+    onError: (err: any) => toast({ title: "Failed to remove address", description: err.message, variant: "destructive" }),
+  });
+
   // State for adding new tracking numbers
   const [newTrackingNumber, setNewTrackingNumber] = useState("");
   const [isAddingTracking, setIsAddingTracking] = useState(false);
@@ -1909,21 +1946,82 @@ export default function TruckDetail() {
 
                             {(() => {
                               const addrs = info?.addresses || techProfile?.shippingAddresses || [];
-                              if (!addrs || addrs.length === 0) return null;
                               return (
                                 <div>
-                                  <p className="text-xs font-medium text-muted-foreground mb-2">Shipping Addresses ({addrs.length})</p>
-                                  <div className="space-y-2">
-                                    {addrs.map((addr: any, i: number) => (
-                                      <div key={i} className="text-sm bg-muted/50 rounded-md p-3">
-                                        <p>{addr.addrLine1 || addr.address1 || ""}</p>
-                                        {(addr.addrLine2 || addr.address2) && <p>{addr.addrLine2 || addr.address2}</p>}
-                                        <p>
-                                          {addr.city || ""}{addr.city && (addr.state || addr.stateCd) ? ", " : ""}{addr.state || addr.stateCd || ""} {addr.zipCd || addr.zip || ""}
-                                        </p>
-                                      </div>
-                                    ))}
+                                  <div className="flex items-center justify-between mb-2">
+                                    <p className="text-xs font-medium text-muted-foreground">Shipping Addresses ({addrs.length})</p>
+                                    {tpmsTechId && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 px-2 text-xs"
+                                        onClick={() => {
+                                          setAddressForm({ addrLine1: "", addrLine2: "", city: "", stateCd: "", zipCd: "", addressType: "PRIMARY" });
+                                          setAddressEditIndex(null);
+                                          setAddressDialogMode("add");
+                                        }}
+                                      >
+                                        <Plus className="w-3 h-3 mr-1" />
+                                        Add
+                                      </Button>
+                                    )}
                                   </div>
+                                  {addrs.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground py-2">No addresses on file.</p>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      {addrs.map((addr: any, i: number) => (
+                                        <div key={i} className="text-sm bg-muted/50 rounded-md p-3 flex items-start justify-between gap-2">
+                                          <div>
+                                            {addr.addressType && <p className="text-xs text-muted-foreground mb-0.5">{addr.addressType}</p>}
+                                            <p>{addr.addrLine1 || addr.address1 || ""}</p>
+                                            {(addr.addrLine2 || addr.address2) && <p>{addr.addrLine2 || addr.address2}</p>}
+                                            <p>
+                                              {addr.city || ""}{addr.city && (addr.state || addr.stateCd) ? ", " : ""}{addr.state || addr.stateCd || ""} {addr.zipCd || addr.zip || ""}
+                                            </p>
+                                          </div>
+                                          {tpmsTechId && (
+                                            <div className="flex gap-1 shrink-0">
+                                              <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 w-6 p-0"
+                                                onClick={() => {
+                                                  setAddressForm({
+                                                    addrLine1: addr.addrLine1 || "",
+                                                    addrLine2: addr.addrLine2 || "",
+                                                    city: addr.city || "",
+                                                    stateCd: addr.stateCd || addr.state || "",
+                                                    zipCd: addr.zipCd || addr.zip || "",
+                                                    addressType: addr.addressType || "PRIMARY",
+                                                  });
+                                                  setAddressEditIndex(i);
+                                                  setAddressDialogMode("edit");
+                                                }}
+                                              >
+                                                <RefreshCw className="w-3 h-3" />
+                                              </Button>
+                                              <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                                disabled={deleteAddressMutation.isPending}
+                                                onClick={() => {
+                                                  if (!confirm("Remove this shipping address?")) return;
+                                                  deleteAddressMutation.mutate(i);
+                                                }}
+                                              >
+                                                <Trash2 className="w-3 h-3" />
+                                              </Button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })()}
@@ -2110,6 +2208,70 @@ export default function TruckDetail() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Address Add/Edit Dialog */}
+      <Dialog open={addressDialogMode !== null} onOpenChange={(open) => { if (!open) setAddressDialogMode(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{addressDialogMode === 'add' ? 'Add Shipping Address' : 'Edit Shipping Address'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Address Type</label>
+              <Select value={addressForm.addressType} onValueChange={(v) => setAddressForm(f => ({ ...f, addressType: v }))}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PRIMARY">Primary</SelectItem>
+                  <SelectItem value="RE_ASSORTMENT">Re-Assortment</SelectItem>
+                  <SelectItem value="DROP_RETURN">Drop Return</SelectItem>
+                  <SelectItem value="ALTERNATE">Alternate</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Address Line 1</label>
+              <Input className="mt-1" value={addressForm.addrLine1} onChange={(e) => setAddressForm(f => ({ ...f, addrLine1: e.target.value }))} placeholder="Street address" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Address Line 2</label>
+              <Input className="mt-1" value={addressForm.addrLine2} onChange={(e) => setAddressForm(f => ({ ...f, addrLine2: e.target.value }))} placeholder="Apt, suite, etc. (optional)" />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-1">
+                <label className="text-xs font-medium text-muted-foreground">City</label>
+                <Input className="mt-1" value={addressForm.city} onChange={(e) => setAddressForm(f => ({ ...f, city: e.target.value }))} placeholder="City" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">State</label>
+                <Input className="mt-1" value={addressForm.stateCd} onChange={(e) => setAddressForm(f => ({ ...f, stateCd: e.target.value }))} placeholder="ST" maxLength={2} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">ZIP</label>
+                <Input className="mt-1" value={addressForm.zipCd} onChange={(e) => setAddressForm(f => ({ ...f, zipCd: e.target.value }))} placeholder="ZIP" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="ghost" onClick={() => setAddressDialogMode(null)}>Cancel</Button>
+            <Button
+              type="button"
+              disabled={!addressForm.addrLine1 || addAddressMutation.isPending || editAddressMutation.isPending}
+              onClick={() => {
+                const addr = { ...addressForm };
+                if (addressDialogMode === 'add') {
+                  addAddressMutation.mutate(addr);
+                } else if (addressDialogMode === 'edit' && addressEditIndex !== null) {
+                  editAddressMutation.mutate({ index: addressEditIndex, addr });
+                }
+              }}
+            >
+              {addressDialogMode === 'add' ? 'Add Address' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Assign Tech Modal */}
       <Dialog open={showAssignTechModal} onOpenChange={setShowAssignTechModal}>

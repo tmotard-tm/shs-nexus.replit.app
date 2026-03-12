@@ -65,6 +65,7 @@ import { RoleBasedHome } from "@/components/role-based-home";
 import { SecurityQuestionsGate } from "@/components/security-questions-gate";
 import FleetScopeLayout from "@/pages/fleet-scope/FleetScopeLayout";
 import TpmsLayout from "@/pages/tpms/TpmsLayout";
+import { TpmsGate } from "@/components/tpms/TpmsGate";
 
 function AmsGate() {
   const { user } = useAuth();
@@ -452,13 +453,17 @@ function Router() {
 
       <Route path="/tpms/:rest*">
         <ProtectedRoute>
-          <TpmsLayout />
+          <TpmsGate>
+            <TpmsLayout />
+          </TpmsGate>
         </ProtectedRoute>
       </Route>
 
       <Route path="/tpms">
         <ProtectedRoute>
-          <TpmsLayout />
+          <TpmsGate>
+            <TpmsLayout />
+          </TpmsGate>
         </ProtectedRoute>
       </Route>
       
