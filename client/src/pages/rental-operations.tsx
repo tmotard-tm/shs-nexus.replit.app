@@ -81,6 +81,13 @@ function agingBucket(days: number): string {
   return "<14 Days";
 }
 
+function rowAgingClass(days: number): string {
+  if (days >= 28) return "bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/50";
+  if (days >= 21) return "bg-orange-50 dark:bg-orange-950/30 hover:bg-orange-100 dark:hover:bg-orange-950/50";
+  if (days >= 14) return "bg-yellow-50 dark:bg-yellow-950/30 hover:bg-yellow-100 dark:hover:bg-yellow-950/50";
+  return "";
+}
+
 interface FleetOverviewStats {
   isLiveData: boolean;
   lastUpdated: string;
@@ -551,7 +558,7 @@ export default function RentalOperations() {
                           {openSearch ? "No results match your search" : "No open rental data from Snowflake pipeline table"}
                         </TableCell></TableRow>
                       ) : sortedOpen.map((r: any, i: number) => (
-                        <TableRow key={i}>
+                        <TableRow key={i} className={rowAgingClass(r.daysOpen || 0)}>
                           <TableCell className="font-mono text-sm">{r.vehicleNumber || "—"}</TableCell>
                           <TableCell className="max-w-[200px] truncate">{r.renterName || "—"}</TableCell>
                           <TableCell className="font-mono text-xs">{r.poNumber || "—"}</TableCell>
@@ -674,7 +681,7 @@ export default function RentalOperations() {
                           {ticketSearch ? "No results match your search" : "No ticket data from Snowflake pipeline table"}
                         </TableCell></TableRow>
                       ) : ticketRows.map((r: any, i: number) => (
-                        <TableRow key={i}>
+                        <TableRow key={i} className={rowAgingClass(r.daysOpen || 0)}>
                           <TableCell className="font-mono text-sm">{r.vehicleNumber || "—"}</TableCell>
                           <TableCell className="font-mono text-xs">{r.holmanPoNumber || "—"}</TableCell>
                           <TableCell className="font-mono text-xs text-muted-foreground">{r.ticketNumber || "—"}</TableCell>
@@ -741,7 +748,7 @@ export default function RentalOperations() {
                       {extensionRows.length === 0 ? (
                         <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No extension/rewrite records found</TableCell></TableRow>
                       ) : extensionRows.map((r: any, i: number) => (
-                        <TableRow key={i}>
+                        <TableRow key={i} className={rowAgingClass(r.rentalDays || 0)}>
                           <TableCell className="font-mono text-sm">{r.vehicleNumber || "—"}</TableCell>
                           <TableCell><DivisionBadge division={r.division} /></TableCell>
                           <TableCell className="max-w-[180px] truncate">{r.renterName || "—"}</TableCell>
