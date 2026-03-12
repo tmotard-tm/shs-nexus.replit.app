@@ -12,7 +12,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 export function UserProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
 
-  const currentUser = user?.name ?? null;
+  const currentUser = user?.name ?? user?.username ?? null;
 
   const setCurrentUser = (_name: string | null) => {
   };
