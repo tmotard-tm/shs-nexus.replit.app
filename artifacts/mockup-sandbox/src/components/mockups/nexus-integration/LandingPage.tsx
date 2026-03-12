@@ -26,8 +26,8 @@ export function LandingPage() {
     >
       {/* Hamburger menu button — top-left, matching Nexus */}
       <div className="fixed top-4 left-4 z-50">
-        <button className="h-10 w-10 rounded-md border border-border bg-background shadow-md flex items-center justify-center">
-          <Menu className="h-5 w-5 text-foreground" />
+        <button className="h-10 w-10 rounded-md border border-white/30 bg-white/20 backdrop-blur-sm flex items-center justify-center">
+          <Menu className="h-5 w-5 text-white/80" />
         </button>
       </div>
 
@@ -42,8 +42,8 @@ export function LandingPage() {
         }}
       />
 
-      {/* Semi-transparent overlay, matching bg-background/60 */}
-      <div className="absolute inset-0 bg-white/60" />
+      {/* Semi-transparent overlay — light enough for image to show through */}
+      <div className="absolute inset-0 bg-white/25" />
 
       {/* Centered content */}
       <div className="relative z-10 max-w-4xl mx-auto pt-10 px-4">
