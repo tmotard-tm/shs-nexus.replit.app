@@ -16,7 +16,7 @@ export function initWebSocket(server: Server) {
     ws.on("error", (err) => console.error("[WS] Error:", err));
   });
 
-  console.log("[WS] WebSocket server initialized on /ws");
+  console.log("[WS] WebSocket server initialized on /fs-ws");
 }
 
 export function broadcastMessage(truckNumber: string, payload: object) {
