@@ -1,5 +1,7 @@
 import fs from "fs";
 import path from "path";
+import os from "os";
+import zlib from "zlib";
 
 const RESET = "\x1b[0m";
 const RED = "\x1b[31m";
@@ -328,6 +330,61 @@ function getIncorporationGuidance(result: DriftResult): string[] {
   return lines;
 }
 
+function extractZip(zipPath: string, destDir: string): void {
+  const buf = fs.readFileSync(zipPath);
+  const eocdOffset = findEOCD(buf);
+  if (eocdOffset === -1) throw new Error("Invalid ZIP: End of Central Directory not found");
+
+  const cdOffset = buf.readUInt32LE(eocdOffset + 16);
+  const entryCount = buf.readUInt16LE(eocdOffset + 10);
+  let offset = cdOffset;
+
+  for (let i = 0; i < entryCount; i++) {
+    if (buf.readUInt32LE(offset) !== 0x02014b50) break;
+
+    const compressionMethod = buf.readUInt16LE(offset + 10);
+    const compressedSize = buf.readUInt32LE(offset + 20);
+    const uncompressedSize = buf.readUInt32LE(offset + 24);
+    const nameLen = buf.readUInt16LE(offset + 28);
+    const extraLen = buf.readUInt16LE(offset + 30);
+    const commentLen = buf.readUInt16LE(offset + 32);
+    const localHeaderOffset = buf.readUInt32LE(offset + 42);
+    const fileName = buf.toString("utf-8", offset + 46, offset + 46 + nameLen);
+
+    offset += 46 + nameLen + extraLen + commentLen;
+
+    if (fileName.endsWith("/")) {
+      fs.mkdirSync(path.join(destDir, fileName), { recursive: true });
+      continue;
+    }
+
+    const localNameLen = buf.readUInt16LE(localHeaderOffset + 26);
+    const localExtraLen = buf.readUInt16LE(localHeaderOffset + 28);
+    const dataOffset = localHeaderOffset + 30 + localNameLen + localExtraLen;
+    const compressedData = buf.subarray(dataOffset, dataOffset + compressedSize);
+
+    let fileData: Buffer;
+    if (compressionMethod === 0) {
+      fileData = compressedData;
+    } else if (compressionMethod === 8) {
+      fileData = zlib.inflateRawSync(compressedData);
+    } else {
+      continue;
+    }
+
+    const destPath = path.join(destDir, fileName);
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    fs.writeFileSync(destPath, fileData);
+  }
+}
+
+function findEOCD(buf: Buffer): number {
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) return i;
+  }
+  return -1;
+}
+
 function main() {
   const args = process.argv.slice(2);
   let sourcePath = "Fleet-Scope Zip/Fleet-Scope";
@@ -346,6 +403,31 @@ function main() {
     console.error(`${RED}ERROR: Fleet-Scope source not found at: ${sourcePath}${RESET}`);
     console.error(`Provide a valid path with --source <path>`);
     process.exit(1);
+  }
+
+  let tempDir: string | null = null;
+  const stat = fs.statSync(sourcePath);
+  if (!stat.isDirectory()) {
+    if (sourcePath.endsWith(".zip")) {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "fs-drift-"));
+      console.log(`${GRAY}Extracting ZIP to temporary directory...${RESET}`);
+      try {
+        extractZip(path.resolve(sourcePath), tempDir);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`${RED}ERROR: Failed to extract ZIP: ${msg}${RESET}`);
+        process.exit(1);
+      }
+      const entries = fs.readdirSync(tempDir);
+      if (entries.length === 1 && fs.statSync(path.join(tempDir, entries[0])).isDirectory()) {
+        sourcePath = path.join(tempDir, entries[0]);
+      } else {
+        sourcePath = tempDir;
+      }
+    } else {
+      console.error(`${RED}ERROR: ${sourcePath} is not a directory or ZIP file${RESET}`);
+      process.exit(1);
+    }
   }
 
   const timestamp = new Date().toISOString();
@@ -544,6 +626,10 @@ function main() {
     console.log(`${YELLOW}${BOLD}Drift detected: ${actionable.length} file(s) need attention.${RESET}\n`);
   } else {
     console.log(`${GREEN}${BOLD}No drift detected. Fleet-Scope and Nexus are in sync.${RESET}\n`);
+  }
+
+  if (tempDir) {
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
   }
 
   process.exit(driftDetected ? 1 : 0);
