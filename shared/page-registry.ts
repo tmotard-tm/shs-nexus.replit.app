@@ -18,6 +18,7 @@ import {
   Info,
   Mail,
   Wrench,
+  Package,
   type LucideIcon
 } from "lucide-react";
 
@@ -29,7 +30,8 @@ export type PageCategory =
   | "activities"
   | "account"
   | "helpAndTutorial"
-  | "fleetScope";
+  | "fleetScope"
+  | "tpms";
 
 export type PermissionPath = string[];
 
@@ -114,6 +116,13 @@ export const CATEGORIES: CategoryDefinition[] = [
     description: "Fleet tracking, repair pipeline, and registration management",
     icon: Wrench,
     permissionKey: "fleetScope",
+  },
+  {
+    key: "tpms",
+    label: "TPMS",
+    description: "Technician Profile Management System - tech profiles, shipping addresses, and schedules",
+    icon: Package,
+    permissionKey: "tpms",
   },
 ];
 
@@ -490,6 +499,42 @@ export const PAGES: PageDefinition[] = [
     icon: Wrench,
     category: "fleetScope",
     permissionKey: "fleetScope",
+  },
+  {
+    key: "tpmsModule",
+    label: "TPMS",
+    description: "Technician Profile Management System",
+    path: "/tpms",
+    icon: Package,
+    category: "tpms",
+    permissionKey: "tpms",
+  },
+  {
+    key: "tpmsTechProfiles",
+    label: "Tech Profiles",
+    description: "Search and manage technician profiles",
+    path: "/tpms/tech-profiles",
+    icon: Users,
+    category: "tpms",
+    permissionKey: "tpms",
+  },
+  {
+    key: "tpmsShippingAddresses",
+    label: "Shipping Addresses",
+    description: "Manage technician shipping addresses",
+    path: "/tpms/shipping-addresses",
+    icon: MapPin,
+    category: "tpms",
+    permissionKey: "tpms",
+  },
+  {
+    key: "tpmsShippingSchedules",
+    label: "Shipping Schedules",
+    description: "Manage part shipping schedules",
+    path: "/tpms/shipping-schedules",
+    icon: Clock,
+    category: "tpms",
+    permissionKey: "tpms",
   },
 ];
 

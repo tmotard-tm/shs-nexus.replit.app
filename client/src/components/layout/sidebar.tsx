@@ -209,6 +209,7 @@ export function Sidebar() {
       account: { name: "Account", icon: Key },
       helpAndTutorial: { name: "Help", icon: HelpCircle },
       fleetScope: { name: "Fleet Scope", icon: Wrench },
+      tpms: { name: "TPMS", icon: Database },
     };
 
     const categories: NavCategory[] = Object.entries(categoryMap)

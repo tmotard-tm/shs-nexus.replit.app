@@ -17,7 +17,7 @@ import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-
 import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
-import { sql, eq, and, or, gte, lte, inArray, desc, isNotNull, SQL } from "drizzle-orm";
+import { sql, eq, and, or, gte, lte, inArray, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
 import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService } from "./ams-api-service";
@@ -10088,6 +10088,470 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error starting TPMS fleet sync:", error);
       res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // ==================================================
+  // TPMS Tech Profiles & Change Log Routes
+  // ==================================================
+  console.log("Registering TPMS Tech Profiles API routes...");
+
+  const { tpmsTechProfiles, tpmsChangeLog } = await import("@shared/schema");
+
+  app.get("/api/tpms/techs", requireAuth, async (req: any, res) => {
+    try {
+      const { district, lastName, firstName, techManagerId, pdc, enterpriseId, truckNo, techId, address, zip } = req.query;
+      
+      let query = db.select().from(tpmsTechProfiles);
+      const conditions: any[] = [];
+      
+      if (district) conditions.push(eq(tpmsTechProfiles.districtNo, district as string));
+      if (lastName) conditions.push(ilike(tpmsTechProfiles.lastName, `%${lastName}%`));
+      if (firstName) conditions.push(ilike(tpmsTechProfiles.firstName, `%${firstName}%`));
+      if (techManagerId) conditions.push(eq(tpmsTechProfiles.techManagerLdapId, (techManagerId as string).toUpperCase()));
+      if (pdc) conditions.push(eq(tpmsTechProfiles.pdcNo, pdc as string));
+      if (enterpriseId) conditions.push(ilike(tpmsTechProfiles.enterpriseId, `%${enterpriseId}%`));
+      if (truckNo) conditions.push(ilike(tpmsTechProfiles.truckNo, `%${truckNo}%`));
+      if (techId) conditions.push(ilike(tpmsTechProfiles.techId, `%${techId}%`));
+      
+      let results;
+      if (conditions.length > 0) {
+        results = await db.select().from(tpmsTechProfiles).where(and(...conditions)).limit(200);
+      } else {
+        results = await db.select().from(tpmsTechProfiles).limit(200);
+      }
+      
+      if (address || zip) {
+        results = results.filter((r: any) => {
+          const addrs = r.shippingAddresses || [];
+          return addrs.some((a: any) => {
+            if (address && !a.addrLine1?.toLowerCase().includes((address as string).toLowerCase())) return false;
+            if (zip && !a.zipCd?.startsWith(zip as string)) return false;
+            return true;
+          });
+        });
+      }
+      
+      res.json(results);
+    } catch (error: any) {
+      console.error("Error searching TPMS tech profiles:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tpms/techs/:techId/profile", requireAuth, async (req: any, res) => {
+    try {
+      const { techId } = req.params;
+      const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
+      
+      if (!profile) {
+        return res.status(404).json({ message: "Tech profile not found" });
+      }
+      
+      let liveData = null;
+      try {
+        const tpmsService = getTPMSService();
+        if (profile.enterpriseId) {
+          const result = await tpmsService.getTechInfoWithCache(profile.enterpriseId);
+          if (result) liveData = result.techInfo;
+        }
+      } catch (e) {}
+      
+      res.json({ profile, liveData });
+    } catch (error: any) {
+      console.error("Error getting TPMS tech profile:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/tpms/techs/:techId", requireAuth, async (req: any, res) => {
+    try {
+      const { techId } = req.params;
+      const updates = req.body;
+      const userId = req.user?.id || req.user?.username || "system";
+      const username = req.user?.username || "system";
+      
+      const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
+      if (!existing) {
+        return res.status(404).json({ message: "Tech profile not found" });
+      }
+      
+      const changeEntries: any[] = [];
+      const trackableFields = ["firstName", "lastName", "mobilePhone", "email", "deMinimis", "shippingSchedule", "shippingAddresses", "extendedHolds", "techReplenishment"];
+      
+      for (const field of trackableFields) {
+        if (updates[field] !== undefined) {
+          const before = (existing as any)[field];
+          const after = updates[field];
+          const beforeStr = typeof before === "object" ? JSON.stringify(before) : String(before ?? "");
+          const afterStr = typeof after === "object" ? JSON.stringify(after) : String(after ?? "");
+          if (beforeStr !== afterStr) {
+            changeEntries.push({
+              userId,
+              username,
+              techId,
+              enterpriseId: existing.enterpriseId,
+              fieldChanged: field,
+              valueBefore: beforeStr,
+              valueAfter: afterStr,
+              source: "nexus-profile-edit",
+              confirmedByTpms: false,
+            });
+          }
+        }
+      }
+      
+      if (changeEntries.length > 0) {
+        await db.insert(tpmsChangeLog).values(changeEntries);
+      }
+      
+      await db.update(tpmsTechProfiles)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(tpmsTechProfiles.techId, techId));
+      
+      try {
+        const tpmsService = getTPMSService();
+        if (existing.enterpriseId) {
+          await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, ...updates });
+        }
+      } catch (apiErr: any) {
+        console.warn(`[TPMS] API update failed for ${techId}:`, apiErr.message);
+      }
+      
+      res.json({ success: true, changes: changeEntries.length });
+    } catch (error: any) {
+      console.error("Error updating TPMS tech profile:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tpms/techs/:techId/change-history", requireAuth, async (req: any, res) => {
+    try {
+      const { techId } = req.params;
+      const history = await db.select().from(tpmsChangeLog)
+        .where(eq(tpmsChangeLog.techId, techId))
+        .orderBy(desc(tpmsChangeLog.createdAt))
+        .limit(100);
+      res.json(history);
+    } catch (error: any) {
+      console.error("Error getting TPMS change history:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/tpms/techs/:techId/addresses", requireAuth, async (req: any, res) => {
+    try {
+      const { techId } = req.params;
+      const newAddress = req.body;
+      const userId = req.user?.id || req.user?.username || "system";
+      const username = req.user?.username || "system";
+      
+      const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
+      if (!existing) {
+        return res.status(404).json({ message: "Tech profile not found" });
+      }
+      
+      const addresses = [...(existing.shippingAddresses as any[] || []), newAddress];
+      
+      await db.update(tpmsTechProfiles)
+        .set({ shippingAddresses: addresses, updatedAt: new Date() })
+        .where(eq(tpmsTechProfiles.techId, techId));
+      
+      await db.insert(tpmsChangeLog).values({
+        userId, username, techId, enterpriseId: existing.enterpriseId,
+        fieldChanged: "shippingAddresses",
+        valueBefore: JSON.stringify(existing.shippingAddresses),
+        valueAfter: JSON.stringify(addresses),
+        source: "nexus-address-add",
+        confirmedByTpms: false,
+      });
+      
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error adding TPMS address:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/tpms/techs/:techId/addresses/:index", requireAuth, async (req: any, res) => {
+    try {
+      const { techId, index } = req.params;
+      const updatedAddr = req.body;
+      const idx = parseInt(index, 10);
+      const userId = req.user?.id || req.user?.username || "system";
+      const username = req.user?.username || "system";
+      
+      const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
+      if (!existing) return res.status(404).json({ message: "Tech profile not found" });
+      
+      const addresses = [...(existing.shippingAddresses as any[] || [])];
+      if (idx < 0 || idx >= addresses.length) return res.status(400).json({ message: "Invalid address index" });
+      
+      addresses[idx] = updatedAddr;
+      
+      await db.update(tpmsTechProfiles)
+        .set({ shippingAddresses: addresses, updatedAt: new Date() })
+        .where(eq(tpmsTechProfiles.techId, techId));
+      
+      await db.insert(tpmsChangeLog).values({
+        userId, username, techId, enterpriseId: existing.enterpriseId,
+        fieldChanged: "shippingAddresses",
+        valueBefore: JSON.stringify(existing.shippingAddresses),
+        valueAfter: JSON.stringify(addresses),
+        source: "nexus-address-edit",
+        confirmedByTpms: false,
+      });
+      
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error updating TPMS address:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/tpms/techs/:techId/addresses/:index", requireAuth, async (req: any, res) => {
+    try {
+      const { techId, index } = req.params;
+      const idx = parseInt(index, 10);
+      const userId = req.user?.id || req.user?.username || "system";
+      const username = req.user?.username || "system";
+      
+      const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
+      if (!existing) return res.status(404).json({ message: "Tech profile not found" });
+      
+      const addresses = [...(existing.shippingAddresses as any[] || [])];
+      if (idx < 0 || idx >= addresses.length) return res.status(400).json({ message: "Invalid address index" });
+      
+      const removed = addresses.splice(idx, 1);
+      
+      await db.update(tpmsTechProfiles)
+        .set({ shippingAddresses: addresses, updatedAt: new Date() })
+        .where(eq(tpmsTechProfiles.techId, techId));
+      
+      await db.insert(tpmsChangeLog).values({
+        userId, username, techId, enterpriseId: existing.enterpriseId,
+        fieldChanged: "shippingAddresses",
+        valueBefore: JSON.stringify(existing.shippingAddresses),
+        valueAfter: JSON.stringify(addresses),
+        source: "nexus-address-delete",
+        confirmedByTpms: false,
+      });
+      
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting TPMS address:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tpms/shipping-schedules", requireAuth, async (req: any, res) => {
+    try {
+      const { district, pdc, techId, deMinimis, shippingDay } = req.query;
+      
+      const conditions: any[] = [];
+      if (district) conditions.push(eq(tpmsTechProfiles.districtNo, district as string));
+      if (pdc) conditions.push(eq(tpmsTechProfiles.pdcNo, pdc as string));
+      if (techId) conditions.push(ilike(tpmsTechProfiles.techId, `%${techId}%`));
+      if (deMinimis === "YES") conditions.push(eq(tpmsTechProfiles.deMinimis, true));
+      if (deMinimis === "NO") conditions.push(eq(tpmsTechProfiles.deMinimis, false));
+      
+      let results;
+      if (conditions.length > 0) {
+        results = await db.select().from(tpmsTechProfiles).where(and(...conditions)).limit(200);
+      } else {
+        results = await db.select().from(tpmsTechProfiles).limit(200);
+      }
+      
+      if (shippingDay && shippingDay !== "ALL") {
+        results = results.filter((r: any) => {
+          const schedule = r.shippingSchedule || {};
+          return schedule[shippingDay as string] === true;
+        });
+      }
+      
+      res.json(results);
+    } catch (error: any) {
+      console.error("Error searching shipping schedules:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/tpms/shipping-schedules", requireAuth, async (req: any, res) => {
+    try {
+      const { techIds, schedule } = req.body;
+      const userId = req.user?.id || req.user?.username || "system";
+      const username = req.user?.username || "system";
+      
+      if (!techIds || !Array.isArray(techIds) || !schedule) {
+        return res.status(400).json({ message: "techIds array and schedule object required" });
+      }
+      
+      let updated = 0;
+      for (const tid of techIds) {
+        const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, tid)).limit(1);
+        if (!existing) continue;
+        
+        await db.update(tpmsTechProfiles)
+          .set({ shippingSchedule: schedule, updatedAt: new Date() })
+          .where(eq(tpmsTechProfiles.techId, tid));
+        
+        await db.insert(tpmsChangeLog).values({
+          userId, username, techId: tid, enterpriseId: existing.enterpriseId,
+          fieldChanged: "shippingSchedule",
+          valueBefore: JSON.stringify(existing.shippingSchedule),
+          valueAfter: JSON.stringify(schedule),
+          source: "nexus-schedule-bulk-update",
+          confirmedByTpms: false,
+        });
+        
+        updated++;
+      }
+      
+      res.json({ success: true, updated });
+    } catch (error: any) {
+      console.error("Error updating shipping schedules:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/tpms/vehicles/:truckNo/assign", requireAuth, async (req: any, res) => {
+    try {
+      const { truckNo } = req.params;
+      const { enterpriseId, districtNo } = req.body;
+      const userId = req.user?.id || req.user?.username || "system";
+      const username = req.user?.username || "system";
+      
+      const tpmsService = getTPMSService();
+      const result = await tpmsService.tempTruckAssign(enterpriseId, districtNo || "", truckNo);
+      
+      const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.enterpriseId, enterpriseId.toUpperCase())).limit(1);
+      if (profile) {
+        await db.update(tpmsTechProfiles)
+          .set({ truckNo, updatedAt: new Date() })
+          .where(eq(tpmsTechProfiles.enterpriseId, enterpriseId.toUpperCase()));
+        
+        await db.insert(tpmsChangeLog).values({
+          userId, username, techId: profile.techId, enterpriseId: profile.enterpriseId,
+          fieldChanged: "truckNo",
+          valueBefore: profile.truckNo || "",
+          valueAfter: truckNo,
+          source: "nexus-vehicle-assign",
+          confirmedByTpms: false,
+        });
+      }
+      
+      res.json({ success: true, result });
+    } catch (error: any) {
+      console.error("Error assigning tech to vehicle:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/tpms/vehicles/:truckNo/assign", requireAuth, async (req: any, res) => {
+    try {
+      const { truckNo } = req.params;
+      const userId = req.user?.id || req.user?.username || "system";
+      const username = req.user?.username || "system";
+      
+      const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.truckNo, truckNo)).limit(1);
+      if (profile) {
+        await db.update(tpmsTechProfiles)
+          .set({ truckNo: null, updatedAt: new Date() })
+          .where(eq(tpmsTechProfiles.truckNo, truckNo));
+        
+        await db.insert(tpmsChangeLog).values({
+          userId, username, techId: profile.techId, enterpriseId: profile.enterpriseId,
+          fieldChanged: "truckNo",
+          valueBefore: truckNo,
+          valueAfter: "",
+          source: "nexus-vehicle-unassign",
+          confirmedByTpms: false,
+        });
+      }
+      
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error unassigning tech from vehicle:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/tpms/sync", requireAuth, async (req: any, res) => {
+    try {
+      const tpmsService = getTPMSService();
+      
+      const latestProfile = await db.select({ lastTpmsUpdatedAt: tpmsTechProfiles.lastTpmsUpdatedAt })
+        .from(tpmsTechProfiles)
+        .orderBy(desc(tpmsTechProfiles.lastTpmsUpdatedAt))
+        .limit(1);
+      
+      const sinceTimestamp = latestProfile[0]?.lastTpmsUpdatedAt 
+        ? new Date(latestProfile[0].lastTpmsUpdatedAt).toISOString()
+        : null;
+      
+      if (!sinceTimestamp) {
+        return res.json({ success: true, message: "No existing profiles. Run a full fleet sync first.", mode: "none" });
+      }
+      
+      const updatedTechs = await tpmsService.getTechsUpdatedAfter(sinceTimestamp);
+      const techList = updatedTechs?.techInfoList || [];
+      
+      let upserted = 0;
+      for (const tech of techList) {
+        const data = {
+          techId: tech.techId?.trim() || "",
+          enterpriseId: (tech.ldapId?.trim() || "").toUpperCase(),
+          firstName: tech.firstName || null,
+          lastName: tech.lastName || null,
+          districtNo: tech.districtNo || null,
+          techManagerLdapId: tech.techManagerLdapId?.trim() || null,
+          truckNo: tech.truckNo?.trim() || null,
+          mobilePhone: tech.contactNo || null,
+          email: tech.email || null,
+          shippingAddresses: tech.addresses || [],
+          shippingSchedule: {},
+          techReplenishment: tech.techReplenishment || {},
+          rawResponse: JSON.stringify(tech),
+          lastTpmsUpdatedAt: new Date(),
+          syncedAt: new Date(),
+        };
+        
+        if (!data.enterpriseId) continue;
+        
+        const [existing] = await db.select().from(tpmsTechProfiles)
+          .where(eq(tpmsTechProfiles.enterpriseId, data.enterpriseId)).limit(1);
+        
+        if (existing) {
+          await db.update(tpmsTechProfiles)
+            .set({ ...data, updatedAt: new Date() })
+            .where(eq(tpmsTechProfiles.enterpriseId, data.enterpriseId));
+        } else {
+          await db.insert(tpmsTechProfiles).values(data);
+        }
+        upserted++;
+      }
+      
+      let confirmed = 0;
+      const pendingLogs = await db.select().from(tpmsChangeLog).where(isNull(tpmsChangeLog.confirmedAt));
+      for (const log of pendingLogs) {
+        const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, log.techId)).limit(1);
+        if (!profile) continue;
+        
+        const currentValue = (profile as any)[log.fieldChanged];
+        const currentStr = typeof currentValue === "object" ? JSON.stringify(currentValue) : String(currentValue ?? "");
+        
+        if (currentStr === log.valueAfter) {
+          await db.update(tpmsChangeLog)
+            .set({ confirmedAt: new Date(), confirmedByTpms: true })
+            .where(eq(tpmsChangeLog.id, log.id));
+          confirmed++;
+        }
+      }
+      
+      res.json({ success: true, mode: "incremental", since: sinceTimestamp, upserted, confirmed });
+    } catch (error: any) {
+      console.error("Error running TPMS sync:", error);
+      res.status(500).json({ message: error.message });
     }
   });
 

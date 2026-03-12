@@ -93,7 +93,7 @@ Preferred communication style: Simple, everyday language.
 -   **Snowflake**: Data warehouse for technician rosters, TPMS data, and HR separation data.
 -   **Holman**: Vehicle fleet details and assignment updates.
 -   **AMS (Asset Management System)**: In-Home vehicle management API - vehicle search, tech assignments, repairs, comments, and lookup data. Env vars: `AMS_API_BASE_URL`, `AMS_API_KEY`.
--   **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments and mobile phone numbers.
+-   **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments and mobile phone numbers. Full TPMS module at `/tpms/*` with Tech Profiles search/edit, Shipping Addresses wizard, and Shipping Schedules bulk management. Backend routes at `/api/tpms/techs/*`, `/api/tpms/shipping-schedules`, `/api/tpms/sync`. DB tables: `tpms_tech_profiles` (with jsonb fields for addresses/schedule/holds), `tpms_change_log` (CDC audit trail). TPMS panel also embedded in Fleet Scope TruckDetail page as an accordion section.
 -   **PMF/PARQ AI**: Fleet vehicle availability API.
 -   **Fleet Scope Module**: Fully integrated Fleet-Scope application (21 pages, 32 DB tables, 153 API endpoints). Uses its own PostgreSQL DB via `FS_DATABASE_URL` with `fsDb` connection. Routes mounted at `/api/fs/*`, frontend at `/fleet-scope/*`. Files: `server/fleet-scope-*.ts`, `shared/fleet-scope-schema.ts`, `client/src/pages/fleet-scope/`, `client/src/components/fleet-scope/`.
 -   **SendGrid**: Email delivery for Communication Hub templates.

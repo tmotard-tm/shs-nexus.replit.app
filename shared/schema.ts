@@ -1918,3 +1918,83 @@ export const insertFleetOperationLogSchema = createInsertSchema(fleetOperationLo
 });
 export type FleetOperationLog = typeof fleetOperationLog.$inferSelect;
 export type InsertFleetOperationLog = z.infer<typeof insertFleetOperationLogSchema>;
+
+// ===============================
+// TPMS Tech Profiles (local snapshot of TPMS technician data)
+// ===============================
+
+export const tpmsTechProfiles = pgTable("tpms_tech_profiles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  techId: varchar("tech_id", { length: 20 }).notNull(),
+  enterpriseId: varchar("enterprise_id", { length: 20 }).notNull().unique(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  districtNo: varchar("district_no", { length: 10 }),
+  pdcNo: varchar("pdc_no", { length: 10 }),
+  techManagerLdapId: varchar("tech_manager_ldap_id", { length: 20 }),
+  techManagerName: text("tech_manager_name"),
+  truckNo: varchar("truck_no", { length: 20 }),
+  mobilePhone: varchar("mobile_phone", { length: 30 }),
+  email: text("email"),
+  shippingAddresses: jsonb("shipping_addresses").default([]),
+  shippingSchedule: jsonb("shipping_schedule").default({}),
+  deMinimis: boolean("de_minimis").default(false),
+  extendedHolds: jsonb("extended_holds").default([]),
+  techReplenishment: jsonb("tech_replenishment").default({}),
+  rawResponse: text("raw_response"),
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  lastTpmsUpdatedAt: timestamp("last_tpms_updated_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    techIdIdx: index("tpms_tp_tech_id_idx").on(table.techId),
+    enterpriseIdIdx: index("tpms_tp_enterprise_id_idx").on(table.enterpriseId),
+    districtNoIdx: index("tpms_tp_district_no_idx").on(table.districtNo),
+    truckNoIdx: index("tpms_tp_truck_no_idx").on(table.truckNo),
+    lastTpmsUpdatedAtIdx: index("tpms_tp_last_updated_idx").on(table.lastTpmsUpdatedAt),
+  };
+});
+
+export const insertTpmsTechProfileSchema = createInsertSchema(tpmsTechProfiles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  syncedAt: true,
+});
+export type TpmsTechProfile = typeof tpmsTechProfiles.$inferSelect;
+export type InsertTpmsTechProfile = z.infer<typeof insertTpmsTechProfileSchema>;
+
+// ===============================
+// TPMS Change Log (CDC record of Nexus-originated writes)
+// ===============================
+
+export const tpmsChangeLog = pgTable("tpms_change_log", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id", { length: 100 }).notNull(),
+  username: text("username"),
+  techId: varchar("tech_id", { length: 20 }).notNull(),
+  enterpriseId: varchar("enterprise_id", { length: 20 }),
+  fieldChanged: text("field_changed").notNull(),
+  valueBefore: text("value_before"),
+  valueAfter: text("value_after"),
+  source: text("source").notNull().default("nexus-profile-edit"),
+  confirmedAt: timestamp("confirmed_at"),
+  confirmedByTpms: boolean("confirmed_by_tpms").default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    techIdIdx: index("tpms_cl_tech_id_idx").on(table.techId),
+    enterpriseIdIdx: index("tpms_cl_enterprise_id_idx").on(table.enterpriseId),
+    confirmedAtIdx: index("tpms_cl_confirmed_at_idx").on(table.confirmedAt),
+    createdAtIdx: index("tpms_cl_created_at_idx").on(table.createdAt),
+  };
+});
+
+export const insertTpmsChangeLogSchema = createInsertSchema(tpmsChangeLog).omit({
+  id: true,
+  createdAt: true,
+  confirmedAt: true,
+});
+export type TpmsChangeLog = typeof tpmsChangeLog.$inferSelect;
+export type InsertTpmsChangeLog = z.infer<typeof insertTpmsChangeLogSchema>;

@@ -159,6 +159,26 @@ export default function TruckDetail() {
     enabled: !!truckNumberForSpecialty,
   });
 
+  const { data: tpmsVehicleData, isLoading: tpmsLoading } = useQuery<any>({
+    queryKey: ["/api/tpms/lookup/truck", truckNumberForSpecialty],
+    queryFn: async () => {
+      const res = await fetch(`/api/tpms/lookup/truck/${encodeURIComponent(truckNumberForSpecialty)}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!truckNumberForSpecialty,
+  });
+
+  const { data: tpmsTechProfile } = useQuery<any>({
+    queryKey: ["/api/tpms/techs", { truckNo: truckNumberForSpecialty }],
+    queryFn: async () => {
+      const res = await fetch(`/api/tpms/techs?truckNo=${encodeURIComponent(truckNumberForSpecialty)}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!truckNumberForSpecialty,
+  });
+
   // State for adding new tracking numbers
   const [newTrackingNumber, setNewTrackingNumber] = useState("");
   const [isAddingTracking, setIsAddingTracking] = useState(false);
@@ -1746,6 +1766,147 @@ export default function TruckDetail() {
                           )}
                         />
                       </div>
+                    </AccordionContent>
+                  </AccordionItem>
+
+                  {/* TPMS Integration */}
+                  <AccordionItem value="tpms" className="border rounded-lg px-4">
+                    <AccordionTrigger className="hover:no-underline py-4" data-testid="accordion-tpms">
+                      <div className="flex items-center gap-2 flex-1">
+                        <Package className="w-5 h-5 text-muted-foreground" />
+                        <span className="font-semibold">TPMS</span>
+                        {tpmsVehicleData?.success && (
+                          <Badge variant="outline" className="ml-2 text-xs bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">
+                            Connected
+                          </Badge>
+                        )}
+                        {!tpmsLoading && !tpmsVehicleData?.success && (
+                          <Badge variant="outline" className="ml-2 text-xs bg-gray-50 text-gray-500 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700">
+                            No Data
+                          </Badge>
+                        )}
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-4">
+                      {tpmsLoading ? (
+                        <div className="space-y-3">
+                          <Skeleton className="h-6 w-48" />
+                          <Skeleton className="h-20 w-full" />
+                        </div>
+                      ) : tpmsVehicleData?.success ? (
+                        <div className="space-y-4">
+                          {(() => {
+                            const info = tpmsVehicleData.data?.truckInfo || tpmsVehicleData.data;
+                            const techProfile = Array.isArray(tpmsTechProfile) && tpmsTechProfile.length > 0 ? tpmsTechProfile[0] : null;
+                            return (
+                              <>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  <div>
+                                    <p className="text-xs font-medium text-muted-foreground mb-1">Assigned Technician</p>
+                                    <p className="text-sm font-medium">
+                                      {info?.techFirstName || info?.firstName || techProfile?.firstName || "—"}{" "}
+                                      {info?.techLastName || info?.lastName || techProfile?.lastName || ""}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-muted-foreground mb-1">Enterprise ID</p>
+                                    <p className="text-sm font-medium">{info?.ldapId || info?.enterpriseId || techProfile?.enterpriseId || techSpecialtyData?.enterpriseId || "—"}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-muted-foreground mb-1">District</p>
+                                    <p className="text-sm font-medium">{info?.districtNo || techProfile?.districtNo || "—"}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-muted-foreground mb-1">Tech ID</p>
+                                    <p className="text-sm font-medium">{info?.techId || techProfile?.techId || "—"}</p>
+                                  </div>
+                                </div>
+
+                                {(info?.addresses?.length > 0 || (techProfile?.shippingAddresses as any[])?.length > 0) && (
+                                  <div>
+                                    <p className="text-xs font-medium text-muted-foreground mb-2">Shipping Address</p>
+                                    {(() => {
+                                      const addrs = info?.addresses || techProfile?.shippingAddresses || [];
+                                      const primary = addrs[0];
+                                      if (!primary) return null;
+                                      return (
+                                        <div className="text-sm bg-muted/50 rounded-md p-3">
+                                          <p>{primary.addrLine1 || primary.address1 || ""}</p>
+                                          {(primary.addrLine2 || primary.address2) && <p>{primary.addrLine2 || primary.address2}</p>}
+                                          <p>
+                                            {primary.city || ""}{primary.city && primary.state ? ", " : ""}{primary.state || primary.stateCd || ""} {primary.zipCd || primary.zip || ""}
+                                          </p>
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
+                                )}
+
+                                {techProfile && (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {techProfile.mobilePhone && (
+                                      <div>
+                                        <p className="text-xs font-medium text-muted-foreground mb-1">Mobile Phone</p>
+                                        <p className="text-sm">{techProfile.mobilePhone}</p>
+                                      </div>
+                                    )}
+                                    {techProfile.email && (
+                                      <div>
+                                        <p className="text-xs font-medium text-muted-foreground mb-1">Email</p>
+                                        <p className="text-sm">{techProfile.email}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {techProfile?.shippingSchedule && Object.keys(techProfile.shippingSchedule).length > 0 && (
+                                  <div>
+                                    <p className="text-xs font-medium text-muted-foreground mb-2">Shipping Schedule</p>
+                                    <div className="flex gap-1.5 flex-wrap">
+                                      {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((day) => (
+                                        <Badge
+                                          key={day}
+                                          variant={(techProfile.shippingSchedule as Record<string, boolean>)?.[day] ? "default" : "outline"}
+                                          className="text-xs"
+                                        >
+                                          {day.slice(0, 3)}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="flex justify-end">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      const eid = info?.ldapId || techProfile?.enterpriseId || techSpecialtyData?.enterpriseId;
+                                      if (eid) {
+                                        window.open(`/tpms/tech-profiles?enterpriseId=${encodeURIComponent(eid)}`, "_blank");
+                                      } else {
+                                        window.open("/tpms/tech-profiles", "_blank");
+                                      }
+                                    }}
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                                    Open in TPMS
+                                  </Button>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      ) : (
+                        <div className="text-center py-6">
+                          <Package className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
+                          <p className="text-sm text-muted-foreground">No TPMS data available for this vehicle.</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            The vehicle may not be registered in TPMS or the service is unavailable.
+                          </p>
+                        </div>
+                      )}
                     </AccordionContent>
                   </AccordionItem>
                 </Accordion>

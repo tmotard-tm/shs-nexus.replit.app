@@ -64,6 +64,7 @@ import { RoleProtectedRoute } from "@/components/role-protected-route";
 import { RoleBasedHome } from "@/components/role-based-home";
 import { SecurityQuestionsGate } from "@/components/security-questions-gate";
 import FleetScopeLayout from "@/pages/fleet-scope/FleetScopeLayout";
+import TpmsLayout from "@/pages/tpms/TpmsLayout";
 
 function AmsGate() {
   const { user } = useAuth();
@@ -447,6 +448,18 @@ function Router() {
         <RoleProtectedRoute>
           <FleetScopeLayout />
         </RoleProtectedRoute>
+      </Route>
+
+      <Route path="/tpms/:rest*">
+        <ProtectedRoute>
+          <TpmsLayout />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/tpms">
+        <ProtectedRoute>
+          <TpmsLayout />
+        </ProtectedRoute>
       </Route>
       
       <Route component={NotFound} />
