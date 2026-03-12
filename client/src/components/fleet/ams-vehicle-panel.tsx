@@ -2,15 +2,16 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Car, MapPin, Gauge, Calendar, Wrench, User, DollarSign } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { Car, MapPin, Gauge, Calendar, Wrench, User, DollarSign, MessageSquare } from "lucide-react";
 
 interface AmsVehiclePanelProps {
   vin: string;
 }
 
 export function AmsVehiclePanel({ vin }: AmsVehiclePanelProps) {
-  const { data: vehicle, isLoading, error } = useQuery<any>({
-    queryKey: ['/api/ams/vehicles', vin],
+  const { data, isLoading, error } = useQuery<any>({
+    queryKey: ['/api/ams/vehicles', vin, 'summary'],
     enabled: !!vin,
   });
 
@@ -32,6 +33,9 @@ export function AmsVehiclePanel({ vin }: AmsVehiclePanelProps) {
       </Card>
     );
   }
+
+  const vehicle = data?.vehicle;
+  const recentComments: any[] = data?.recentComments || [];
 
   if (error || !vehicle) {
     return (
@@ -91,6 +95,25 @@ export function AmsVehiclePanel({ vin }: AmsVehiclePanelProps) {
             <Badge variant="secondary" className="text-xs">{vehicle.ColorName}</Badge>
             {vehicle.BrandingName && <Badge variant="secondary" className="text-xs">{vehicle.BrandingName}</Badge>}
           </div>
+        )}
+        {recentComments.length > 0 && (
+          <>
+            <Separator className="my-3" />
+            <div>
+              <p className="text-xs font-medium flex items-center gap-1.5 mb-2">
+                <MessageSquare className="h-3 w-3" /> Recent Comments
+              </p>
+              <div className="space-y-1.5">
+                {recentComments.map((c: any, i: number) => (
+                  <div key={i} className="text-xs p-2 bg-muted/30 rounded">
+                    <span className="text-muted-foreground">{c.CommentDate || c.CreatedDate || ''}</span>
+                    {' — '}
+                    <span>{c.CommentText || c.Comment || c.Notes || ''}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

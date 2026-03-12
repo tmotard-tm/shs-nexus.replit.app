@@ -1207,7 +1207,9 @@ export function WorkModuleDialog({
                     </div>
                   </div>
 
-                  {vehicleVin && <AmsVehiclePanel vin={vehicleVin} />}
+                  {vehicleVin && (
+                    <AmsVehiclePanel vin={vehicleVin} />
+                  )}
 
                   {/* Employee Info for Fleet Context */}
                   <div>

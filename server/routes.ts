@@ -12739,6 +12739,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/ams/vehicles/:vin/summary", requireAuth, async (req: any, res) => {
+    try {
+      const [vehicleResult, commentsResult] = await Promise.allSettled([
+        amsApiService.getVehicleByVin(req.params.vin),
+        amsApiService.getComments(req.params.vin),
+      ]);
+      const vehicle = vehicleResult.status === 'fulfilled' ? vehicleResult.value : null;
+      const allComments = commentsResult.status === 'fulfilled' ? commentsResult.value : [];
+      const recentComments = Array.isArray(allComments) ? allComments.slice(0, 5) : [];
+      res.json({ vehicle, recentComments });
+    } catch (error: any) {
+      console.error("Error fetching AMS vehicle summary:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch vehicle summary" });
+    }
+  });
+
   app.post("/api/ams/vehicles/:vin/user-updates", requireAuth, async (req: any, res) => {
     try {
       const result = await amsApiService.updateUserFields(req.params.vin, req.body);
@@ -14373,6 +14389,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/operation-events/:id/retry", requireAuth, async (req: any, res) => {
     try {
+      const currentUser = req.user;
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Insufficient permissions to retry operations" });
+      }
       const { operationEvents: opEventsTable } = await import("@shared/schema");
       const eventId = Number(req.params.id);
       const [event] = await db.select().from(opEventsTable).where(eq(opEventsTable.id, eventId)).limit(1);

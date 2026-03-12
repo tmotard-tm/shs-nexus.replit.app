@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { fsDb } from "./fleet-scope-db";
 import { holmanVehiclesCache, vehicleChangeLog, holmanSyncState, holmanSubmissions, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus, HolmanSyncState } from "@shared/schema";
 import { trucks } from "@shared/fleet-scope-schema";
 import { eq, sql, and, desc, inArray, gte, isNotNull } from "drizzle-orm";
@@ -553,8 +554,12 @@ class HolmanVehicleSyncService {
   }
 
   private async reconcileFleetScopeTrucks(holmanVehicles: any[]): Promise<void> {
+    if (!fsDb) {
+      console.log(`[HolmanSync] Fleet-Scope DB not configured, skipping reconciliation`);
+      return;
+    }
     try {
-      const fsTrucks = await db.select({ id: trucks.id, truckNumber: trucks.truckNumber, holmanRegExpiry: trucks.holmanRegExpiry })
+      const fsTrucks = await fsDb.select({ id: trucks.id, truckNumber: trucks.truckNumber, holmanRegExpiry: trucks.holmanRegExpiry })
         .from(trucks);
       if (fsTrucks.length === 0) return;
 
@@ -575,7 +580,7 @@ class HolmanVehicleSyncService {
 
         const regExpiry = v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || null;
         if (regExpiry && regExpiry !== fsTruck.holmanRegExpiry) {
-          await db.update(trucks)
+          await fsDb.update(trucks)
             .set({ holmanRegExpiry: regExpiry, lastUpdatedAt: new Date(), lastUpdatedBy: 'HolmanSync' })
             .where(eq(trucks.id, fsTruck.id));
           updated++;

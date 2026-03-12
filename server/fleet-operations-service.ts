@@ -214,16 +214,14 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       }
       try {
         await ams.updateTechAssignment(vin, {
-          techEnterpriseId: null as any,
+          techEnterpriseId: "",
           updateUser: params.requestedBy || "nexus",
         });
         return { status: "success", message: "Unassigned" };
       } catch (unassignErr: any) {
-        const msg = unassignErr.message || "";
-        if (msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("tech")) {
-          // AMS /tech-update endpoint requires a valid enterprise ID — it does not support
-          // clearing via null/empty. Return skipped so it shows as amber (not a hard failure).
-          return { status: "skipped", message: "AMS tech-update does not accept null — manual clear required in AMS" };
+        const msg = (unassignErr.message || "").toLowerCase();
+        if (msg.includes("not found") || msg.includes("tech not found") || msg.includes("invalid tech") || msg.includes("cannot clear") || msg.includes("empty tech")) {
+          return { status: "skipped", message: "AMS tech-update does not support clearing — manual clear required in AMS" };
         }
         throw unassignErr;
       }
@@ -308,6 +306,7 @@ function buildResult(log: FleetOperationLog, tpms: SystemResult, holman: SystemR
 
 export const fleetOpsService = {
   async assignTech(params: AssignTechParams): Promise<OperationResult> {
+    params = { ...params, ldapId: normalizeEnterpriseId(params.ldapId) };
     const logData: InsertFleetOperationLog = {
       operationType: "assign",
       truckNumber: params.truckNumber,
@@ -348,6 +347,7 @@ export const fleetOpsService = {
   },
 
   async unassignTech(params: UnassignTechParams): Promise<OperationResult> {
+    params = { ...params, ldapId: normalizeEnterpriseId(params.ldapId) };
     const logData: InsertFleetOperationLog = {
       operationType: "unassign",
       truckNumber: params.truckNumber,
@@ -388,6 +388,7 @@ export const fleetOpsService = {
   },
 
   async transferTech(params: TransferTechParams): Promise<OperationResult> {
+    params = { ...params, fromLdap: normalizeEnterpriseId(params.fromLdap), toLdap: normalizeEnterpriseId(params.toLdap) };
     const logData: InsertFleetOperationLog = {
       operationType: "transfer",
       truckNumber: params.truckNumber,
@@ -523,10 +524,10 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
     }
 
     const newRetryCount = event.retryCount + 1;
-    if (result.status === "success" || result.status === "pending") {
+    if (result.status === "success" || result.status === "pending" || result.status === "skipped") {
       succeeded++;
       await db.update(operationEvents)
-        .set({ status: result.status, errorMessage: null, retryCount: newRetryCount, nextRetryAt: null, updatedAt: now })
+        .set({ status: result.status, errorMessage: result.status === "skipped" ? result.message : null, retryCount: newRetryCount, nextRetryAt: null, updatedAt: now })
         .where(eq(operationEvents.id, event.id));
       if (event.fleetOpLogId) {
         const field = event.system === "tpms" ? { tpmsStatus: result.status, tpmsMessage: result.message }
