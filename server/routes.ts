@@ -10966,6 +10966,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Schedule recurring incremental sync
     setInterval(runTpmsIncrementalSync, TPMS_SYNC_INTERVAL_MS);
     console.log(`[TPMS Scheduler] Scheduled incremental sync every ${TPMS_SYNC_INTERVAL_MS / 3600000}h`);
+
+    // ── Startup backfill: populate tpms_tech_profiles from tpms_cached_assignments ──
+    // Runs whenever the profiles table is empty but cached assignments exist.
+    // This handles the case where the initial sync populated the cache but the
+    // post-sync profile migration step was never executed (e.g., server restarted).
+    (async () => {
+      try {
+        const { tpmsCachedAssignments: cacheTable } = await import("@shared/schema");
+        const [profileCount] = await db.select({ count: sql<number>`count(*)` }).from(tpmsTechProfiles);
+        const [cacheCount] = await db.select({ count: sql<number>`count(*)` }).from(cacheTable).where(
+          and(isNotNull(cacheTable.enterpriseId), isNotNull(cacheTable.techId))
+        );
+        const profiles = Number(profileCount?.count || 0);
+        const cached = Number(cacheCount?.count || 0);
+
+        if (profiles < cached * 0.5) {
+          // profiles table is significantly behind — run full backfill
+          console.log(`[TPMS Backfill] tpms_tech_profiles (${profiles}) lags cache (${cached}) — running backfill...`);
+          const rows = await db.select().from(cacheTable)
+            .where(and(isNotNull(cacheTable.enterpriseId), isNotNull(cacheTable.techId)));
+          const syncTime = new Date();
+          let populated = 0;
+          for (const row of rows) {
+            if (!row.enterpriseId || !row.techId) continue;
+            let raw: any = {};
+            try { raw = row.rawResponse ? JSON.parse(row.rawResponse) : {}; } catch {}
+            const data = {
+              techId: row.techId,
+              enterpriseId: row.enterpriseId.toUpperCase(),
+              firstName: row.firstName || raw.firstName || null,
+              lastName: row.lastName || raw.lastName || null,
+              districtNo: row.districtNo || raw.districtNo || null,
+              techManagerLdapId: raw.techManagerLdapId?.trim() || null,
+              truckNo: row.truckNo || raw.truckNo || null,
+              mobilePhone: row.contactNo || raw.contactNo || null,
+              email: row.email || raw.email || null,
+              shippingAddresses: raw.addresses || [],
+              shippingSchedule: raw.shippingSchedule || {},
+              techReplenishment: raw.techReplenishment || {},
+              rawResponse: row.rawResponse || null,
+              lastTpmsUpdatedAt: row.lastSuccessAt || syncTime,
+              syncedAt: syncTime,
+            };
+            try {
+              await db.insert(tpmsTechProfiles)
+                .values(data)
+                .onConflictDoUpdate({
+                  target: tpmsTechProfiles.enterpriseId,
+                  set: { ...data, updatedAt: new Date() },
+                });
+              populated++;
+            } catch (e: any) {
+              // skip individual row errors (e.g., duplicate techId)
+            }
+          }
+          console.log(`[TPMS Backfill] Complete — ${populated}/${rows.length} profiles populated`);
+        } else {
+          console.log(`[TPMS Backfill] tpms_tech_profiles already populated (${profiles} profiles, ${cached} cached) — skipping`);
+        }
+      } catch (err: any) {
+        console.error('[TPMS Backfill] Error during startup backfill:', err.message);
+      }
+    })();
   })();
 
   // ==================================================
