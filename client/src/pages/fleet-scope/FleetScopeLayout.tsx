@@ -27,7 +27,7 @@ export default function FleetScopeLayout() {
   return (
     <UserProvider>
       <SidebarProvider>
-        <div className="min-h-screen flex w-full">
+        <div className="fleet-scope-layout min-h-screen flex w-full">
           <AppSidebar />
           <main className="flex-1 overflow-auto">
             <Switch>

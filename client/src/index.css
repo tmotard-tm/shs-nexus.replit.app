@@ -227,6 +227,29 @@
   filter: none !important;
 }
 
+/* Fleet Scope — neutral sidebar in light mode, inherits dark sidebar from global dark vars */
+.fleet-scope-layout {
+  --sidebar: hsl(210, 25%, 97%);
+  --sidebar-foreground: hsl(210, 15%, 20%);
+  --sidebar-primary: hsl(208, 100%, 47%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(208, 30%, 93%);
+  --sidebar-accent-foreground: hsl(208, 100%, 40%);
+  --sidebar-border: hsl(208, 20%, 88%);
+  --sidebar-ring: hsl(208, 80%, 55%);
+}
+
+.dark .fleet-scope-layout {
+  --sidebar: hsl(210, 18%, 20%);
+  --sidebar-foreground: hsl(0, 0%, 95%);
+  --sidebar-primary: hsl(208, 100%, 55%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(210, 12%, 26%);
+  --sidebar-accent-foreground: hsl(208, 100%, 70%);
+  --sidebar-border: hsl(210, 12%, 40%);
+  --sidebar-ring: hsl(208, 100%, 55%);
+}
+
 /* Development Banner */
 .dev-banner {
   background: linear-gradient(90deg, hsl(208, 100%, 47%), hsl(200, 85%, 55%));
