@@ -43,7 +43,7 @@ export function AssignmentHistoryDialog({
       case 'unassigned':
         return <Badge className="bg-red-100 text-red-800">Unassigned</Badge>;
       case 'transfer':
-        return <Badge className="bg-blue-100 text-blue-800">Transferred</Badge>;
+        return <Badge className="bg-gray-100 text-gray-800">Reassigned</Badge>;
       case 'sync':
         return <Badge className="bg-purple-100 text-purple-800">Synced</Badge>;
       default:

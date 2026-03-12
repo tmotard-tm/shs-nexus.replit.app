@@ -14330,21 +14330,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/fleet-ops/transfer", requireAuth, async (req: any, res) => {
-    try {
-      const { truckNumber, fromLdap, toLdap, districtNo, newTechName, notes } = req.body;
-      if (!truckNumber || !fromLdap || !toLdap || !districtNo) {
-        return res.status(400).json({ message: "truckNumber, fromLdap, toLdap, and districtNo are required" });
-      }
-      const requestedBy = req.user?.username || "unknown";
-      const result = await fleetOpsService.transferTech({ truckNumber, fromLdap, toLdap, districtNo, newTechName: newTechName || toLdap, requestedBy, notes });
-      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
-      res.status(statusCode).json(result);
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
   app.post("/api/fleet-ops/update-address", requireAuth, async (req: any, res) => {
     try {
       const { truckNumber, ldapId, address, city, state, zip } = req.body;

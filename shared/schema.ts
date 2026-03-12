@@ -1889,7 +1889,7 @@ export type InsertHolmanPoCache = z.infer<typeof insertHolmanPoCacheSchema>;
 
 export const fleetOperationLog = pgTable("fleet_operation_log", {
   id: serial("id").primaryKey(),
-  operationType: text("operation_type").notNull(), // "assign" | "unassign" | "transfer" | "update_address"
+  operationType: text("operation_type").notNull(), // "assign" | "unassign" | "update_address"
   truckNumber: text("truck_number"),
   fromLdap: text("from_ldap"),
   toLdap: text("to_ldap"),
@@ -2008,7 +2008,7 @@ export const operationEvents = pgTable("operation_events", {
   id: serial("id").primaryKey(),
   fleetOpLogId: integer("fleet_op_log_id"),
   queueItemId: text("queue_item_id"),
-  operationType: text("operation_type"),
+  operationType: text("operation_type"), // "assign" | "unassign" | "update_address"
   system: text("system").notNull(),
   action: text("action").notNull(),
   outcome: text("outcome").notNull().default("pending"),

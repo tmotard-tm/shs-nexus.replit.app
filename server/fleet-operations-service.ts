@@ -21,16 +21,6 @@ interface UnassignTechParams {
   notes?: string;
 }
 
-interface TransferTechParams {
-  truckNumber: string;
-  fromLdap: string;
-  toLdap: string;
-  districtNo: string;
-  newTechName: string;
-  requestedBy: string;
-  notes?: string;
-}
-
 interface UpdateAddressParams {
   truckNumber: string;
   ldapId: string;
@@ -393,66 +383,6 @@ export const fleetOpsService = {
     }) ?? log;
 
     await logAllEvents(log.id, "unassign", params, tpms, holman, ams);
-
-    return buildResult(log, tpms, holman, ams);
-  },
-
-  async transferTech(params: TransferTechParams): Promise<OperationResult> {
-    params = { ...params, fromLdap: normalizeEnterpriseId(params.fromLdap), toLdap: normalizeEnterpriseId(params.toLdap) };
-    const logData: InsertFleetOperationLog = {
-      operationType: "transfer",
-      truckNumber: params.truckNumber,
-      fromLdap: params.fromLdap,
-      toLdap: params.toLdap,
-      toTechName: params.newTechName,
-      districtNo: params.districtNo,
-      tpmsStatus: "pending",
-      holmanStatus: "pending",
-      amsStatus: "pending",
-      requestedBy: params.requestedBy,
-      notes: params.notes || null,
-      tpmsMessage: null,
-      holmanMessage: null,
-      amsMessage: null,
-      completedAt: null,
-    };
-    let log = await storage.createFleetOperationLog(logData);
-
-    const unassignResult = await this.unassignTech({
-      truckNumber: params.truckNumber,
-      ldapId: params.fromLdap,
-      requestedBy: params.requestedBy,
-    });
-
-    const assignResult = await this.assignTech({
-      truckNumber: params.truckNumber,
-      ldapId: params.toLdap,
-      districtNo: params.districtNo,
-      techName: params.newTechName,
-      requestedBy: params.requestedBy,
-    });
-
-    const tpms: SystemResult = {
-      status: assignResult.tpms.status === "success" ? "success" : (unassignResult.tpms.status === "success" ? "failed" : assignResult.tpms.status),
-      message: `Unassign: ${unassignResult.tpms.message} | Assign: ${assignResult.tpms.message}`,
-    };
-    const holman: SystemResult = {
-      status: assignResult.holman.status === "success" ? "success" : (unassignResult.holman.status === "success" ? "failed" : assignResult.holman.status),
-      message: `Unassign: ${unassignResult.holman.message} | Assign: ${assignResult.holman.message}`,
-    };
-    const ams: SystemResult = {
-      status: assignResult.ams.status === "success" ? "success" : (unassignResult.ams.status === "success" ? "failed" : assignResult.ams.status),
-      message: `Unassign: ${unassignResult.ams.message} | Assign: ${assignResult.ams.message}`,
-    };
-
-    log = await storage.updateFleetOperationLog(log.id, {
-      tpmsStatus: tpms.status,
-      tpmsMessage: tpms.message,
-      holmanStatus: holman.status,
-      holmanMessage: holman.message,
-      amsStatus: ams.status,
-      amsMessage: ams.message,
-    }) ?? log;
 
     return buildResult(log, tpms, holman, ams);
   },
