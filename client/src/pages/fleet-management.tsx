@@ -77,6 +77,16 @@ interface TpmsSyncState {
   initialSyncCompletedAt?: string | null;
 }
 
+function getAmsLookupLabel(item: any): string {
+  if (!item) return "Unknown";
+  const skip = new Set(['UniqueID', 'uniqueID', 'Id', 'id']);
+  for (const [key, val] of Object.entries(item)) {
+    if (skip.has(key)) continue;
+    if (typeof val === 'string' && val.trim()) return val.trim();
+  }
+  return String(item.UniqueID);
+}
+
 export default function FleetManagement() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -412,7 +422,7 @@ export default function FleetManagement() {
     staleTime: 10 * 60 * 1000,
   });
   const { data: repairReasonLookup } = useQuery<any[]>({
-    queryKey: ['/api/ams/lookups', 'repair-reason'],
+    queryKey: ['/api/ams/lookups', 'service-reasons'],
     enabled: activeModal === "amsRepair",
     staleTime: 10 * 60 * 1000,
   });
@@ -422,12 +432,17 @@ export default function FleetManagement() {
     staleTime: 10 * 60 * 1000,
   });
   const { data: dispositionLookup } = useQuery<any[]>({
-    queryKey: ['/api/ams/lookups', 'disposition'],
+    queryKey: ['/api/ams/lookups', 'repair-disposition'],
     enabled: activeModal === "amsRepair",
     staleTime: 10 * 60 * 1000,
   });
   const { data: dispositionReasonLookup } = useQuery<any[]>({
-    queryKey: ['/api/ams/lookups', 'disposition-reason'],
+    queryKey: ['/api/ams/lookups', 'disposition-reasons'],
+    enabled: activeModal === "amsRepair",
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: rentalCarLookup } = useQuery<any[]>({
+    queryKey: ['/api/ams/lookups', 'rental-car'],
     enabled: activeModal === "amsRepair",
     staleTime: 10 * 60 * 1000,
   });
@@ -460,7 +475,13 @@ export default function FleetManagement() {
       const res = await fetch(`/api/ams/vehicles/${selectedVehicle!.vin}/comments`, { credentials: "include" });
       if (!res.ok) return [];
       const json = await res.json();
-      return Array.isArray(json) ? json : (json.data || []);
+      if (Array.isArray(json)) return json;
+      if (json && typeof json === 'object') {
+        const arr = json.data || json.comments || json.rows || json.items || json.records || json.CommentList || json.Comments || json.Notes || json.notes;
+        if (Array.isArray(arr)) return arr;
+        if (typeof arr === 'object' && arr !== null) return Object.values(arr);
+      }
+      return [];
     },
   });
 
@@ -1958,10 +1979,10 @@ export default function FleetManagement() {
                       ) : amsComments.map((comment: any, i: number) => (
                         <div key={i} className="p-2.5 bg-muted/40 rounded-lg space-y-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-medium">{comment.Author || comment.author || comment.CreatedBy || "Unknown"}</span>
-                            <span className="text-xs text-muted-foreground">{comment.CommentDate || comment.commentDate || comment.CreatedAt || comment.createdAt || ""}</span>
+                            <span className="text-xs font-medium">{comment.User || comment.Author || comment.author || comment.CreatedBy || comment.UpdatedBy || comment.user || "Unknown"}</span>
+                            <span className="text-xs text-muted-foreground">{comment.Date || comment.CommentDate || comment.CreatedAt || comment.UpdateDate || comment.commentDate || comment.createdAt || comment.date || ""}</span>
                           </div>
-                          <p className="text-xs leading-relaxed">{comment.Comment || comment.comment || comment.Text || comment.text || "—"}</p>
+                          <p className="text-xs leading-relaxed">{comment.Comment || comment.CommentText || comment.Note || comment.Text || comment.comment || comment.note || comment.text || "—"}</p>
                         </div>
                       ))}
                       <div className="pt-1 space-y-2">
@@ -2493,7 +2514,7 @@ export default function FleetManagement() {
                   <SelectContent>
                     <SelectItem value="__none__">— No change —</SelectItem>
                     {(Array.isArray(colorLookup) ? colorLookup : []).map((item: any) => (
-                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -2505,7 +2526,7 @@ export default function FleetManagement() {
                   <SelectContent>
                     <SelectItem value="__none__">— No change —</SelectItem>
                     {(Array.isArray(brandingLookup) ? brandingLookup : []).map((item: any) => (
-                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -2518,7 +2539,7 @@ export default function FleetManagement() {
                 <SelectContent>
                   <SelectItem value="__none__">— No change —</SelectItem>
                   {(Array.isArray(interiorLookup) ? interiorLookup : []).map((item: any) => (
-                    <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                    <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -2547,7 +2568,7 @@ export default function FleetManagement() {
                   <SelectContent>
                     <SelectItem value="__none__">— No change —</SelectItem>
                     {(Array.isArray(truckStatusLookup) ? truckStatusLookup : []).map((item: any) => (
-                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -2592,7 +2613,7 @@ export default function FleetManagement() {
                   <SelectContent>
                     <SelectItem value="__none__">— No change —</SelectItem>
                     {(Array.isArray(vehicleRunsLookup) ? vehicleRunsLookup : []).map((item: any) => (
-                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -2604,7 +2625,7 @@ export default function FleetManagement() {
                   <SelectContent>
                     <SelectItem value="__none__">— No change —</SelectItem>
                     {(Array.isArray(vehicleLooksLookup) ? vehicleLooksLookup : []).map((item: any) => (
-                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -2672,7 +2693,7 @@ export default function FleetManagement() {
                     <SelectContent>
                       <SelectItem value="__none__">— Select —</SelectItem>
                       {(Array.isArray(repairReasonLookup) ? repairReasonLookup : []).map((item: any) => (
-                        <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                        <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -2684,7 +2705,7 @@ export default function FleetManagement() {
                     <SelectContent>
                       <SelectItem value="__none__">— Select —</SelectItem>
                       {(Array.isArray(repairStatusLookup) ? repairStatusLookup : []).map((item: any) => (
-                        <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                        <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -2703,8 +2724,14 @@ export default function FleetManagement() {
                     <SelectTrigger className="mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">— Select —</SelectItem>
-                      <SelectItem value="1">Yes — Rental</SelectItem>
-                      <SelectItem value="0">No Rental</SelectItem>
+                      {(Array.isArray(rentalCarLookup) && rentalCarLookup.length > 0) ? rentalCarLookup.map((item: any) => (
+                        <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                      )) : (
+                        <>
+                          <SelectItem value="1">Yes — Rental</SelectItem>
+                          <SelectItem value="0">No Rental</SelectItem>
+                        </>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -2733,7 +2760,7 @@ export default function FleetManagement() {
                   <SelectContent>
                     <SelectItem value="__none__">— Not closing —</SelectItem>
                     {(Array.isArray(dispositionLookup) ? dispositionLookup : []).map((item: any) => (
-                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -2747,7 +2774,7 @@ export default function FleetManagement() {
                       <SelectContent>
                         <SelectItem value="__none__">— Select —</SelectItem>
                         {(Array.isArray(dispositionReasonLookup) ? dispositionReasonLookup : []).map((item: any) => (
-                          <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{item.Description || item.Name || item.UniqueID}</SelectItem>
+                          <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

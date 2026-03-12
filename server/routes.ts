@@ -11774,6 +11774,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/ams/vehicles/:vin/comments", requireAuth, async (req: any, res) => {
     try {
       const result = await amsApiService.getComments(req.params.vin);
+      console.log(`[AMS-Comments] VIN=${req.params.vin} response type=${typeof result} isArray=${Array.isArray(result)} keys=${result && typeof result === 'object' ? Object.keys(result).join(',') : 'N/A'} firstItem=${JSON.stringify(result && (Array.isArray(result) ? result[0] : Object.values(result)[0]))?.slice(0,200)}`);
       res.json(result);
     } catch (error: any) {
       console.error("Error fetching AMS comments:", error);
