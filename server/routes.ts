@@ -10192,6 +10192,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/tpms/techs/:techId - merged profile (local snapshot + live TPMS API detail)
+  app.get("/api/tpms/techs/:techId", requireAuth, async (req: any, res) => {
+    try {
+      const { techId } = req.params;
+      const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
+      
+      if (!profile) {
+        return res.status(404).json({ message: "Tech profile not found" });
+      }
+      
+      let liveData: any = null;
+      let liveSource: 'api' | 'cache' | 'none' = 'none';
+      try {
+        const tpmsService = getTPMSService();
+        if (profile.enterpriseId) {
+          const result = await tpmsService.getTechInfoWithCache(profile.enterpriseId);
+          if (result) {
+            liveData = result.techInfo;
+            liveSource = result.source === 'live' ? 'api' : 'cache';
+          }
+        }
+      } catch (e: any) {
+        console.warn(`[TPMS] Failed to fetch live data for ${techId}:`, e.message);
+      }
+      
+      // Merge: local snapshot takes precedence for editable fields, live data provides supplemental detail
+      const merged = {
+        ...profile,
+        liveData,
+        liveSource,
+        // Supplemental fields from live TPMS when present
+        liveDistrictNo: liveData?.districtNo ?? null,
+        liveTruckNo: liveData?.truckNo ?? null,
+        liveManagerLdapId: liveData?.techManagerLdapId ?? null,
+      };
+      
+      res.json(merged);
+    } catch (error: any) {
+      console.error("Error getting TPMS tech merged profile:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.put("/api/tpms/techs/:techId", requireAuth, async (req: any, res) => {
     try {
       const { techId } = req.params;
@@ -10269,11 +10312,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tpms/techs/:techId/change-history", requireAuth, async (req: any, res) => {
     try {
       const { techId } = req.params;
+      const limit = Math.min(parseInt(req.query.limit as string || "100", 10), 500);
+      
+      // Local CDC log entries
       const history = await db.select().from(tpmsChangeLog)
         .where(eq(tpmsChangeLog.techId, techId))
         .orderBy(desc(tpmsChangeLog.createdAt))
-        .limit(100);
-      res.json(history);
+        .limit(limit);
+      
+      // Merge with current TPMS API state — provides a "latest from source" baseline
+      // so consumers can diff local CDC against what the TPMS API currently reports
+      let currentTpmsState: any = null;
+      let tpmsStateSource: 'api' | 'cache' | 'none' = 'none';
+      try {
+        const [profile] = await db.select({ enterpriseId: tpmsTechProfiles.enterpriseId })
+          .from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
+        if (profile?.enterpriseId) {
+          const tpmsService = getTPMSService();
+          const result = await tpmsService.getTechInfoWithCache(profile.enterpriseId);
+          if (result) {
+            currentTpmsState = result.techInfo;
+            tpmsStateSource = result.source === 'live' ? 'api' : 'cache';
+          }
+        }
+      } catch (e: any) {
+        console.warn(`[TPMS] Could not fetch live state for change-history ${techId}:`, e.message);
+      }
+      
+      res.json({
+        techId,
+        cdcLog: history,
+        currentTpmsState,
+        tpmsStateSource,
+        pendingCount: history.filter(h => !h.confirmedByTpms && !h.confirmedAt).length,
+      });
     } catch (error: any) {
       console.error("Error getting TPMS change history:", error);
       res.status(500).json({ message: error.message });
@@ -10571,6 +10643,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/tpms/sync", requireAuth, async (req: any, res) => {
     try {
       const tpmsService = getTPMSService();
+      const { full } = req.query;
       
       const latestProfile = await db.select({ lastTpmsUpdatedAt: tpmsTechProfiles.lastTpmsUpdatedAt })
         .from(tpmsTechProfiles)
@@ -10581,8 +10654,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? new Date(latestProfile[0].lastTpmsUpdatedAt).toISOString()
         : null;
       
-      if (!sinceTimestamp) {
-        return res.json({ success: true, message: "No existing profiles. Run a full fleet sync first.", mode: "none" });
+      // Full-sync fallback: bootstrap from fleet cache when no profiles exist or ?full=1 requested
+      if (!sinceTimestamp || full === '1') {
+        const { holmanVehiclesCache } = await import("@shared/schema");
+        const cachedVehicles = await db.select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
+          .from(holmanVehiclesCache)
+          .where(eq(holmanVehiclesCache.isActive, true));
+        
+        if (cachedVehicles.length === 0) {
+          return res.json({ success: false, message: "No fleet vehicles found in cache. Please refresh fleet data first.", mode: "none" });
+        }
+        
+        const truckNumbers = cachedVehicles
+          .map((v) => toHolmanRef(v.holmanVehicleNumber))
+          .filter(Boolean) as string[];
+        
+        console.log(`[TPMS Sync] No existing profiles — bootstrapping full sync for ${truckNumbers.length} vehicles`);
+        
+        tpmsService.runInitialSync(truckNumbers).catch(err => {
+          console.error('[TPMS Sync] Full-sync bootstrap error:', err);
+        });
+        
+        return res.json({
+          success: true,
+          mode: "full",
+          message: `Full TPMS sync started for ${truckNumbers.length} vehicles. Check /api/tpms/fleet-sync/state for progress.`,
+          totalVehicles: truckNumbers.length,
+        });
       }
       
       // Capture timestamp BEFORE the API call so our watermark precedes the response.
@@ -10649,6 +10747,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: error.message });
     }
   });
+
+  // ==================================================
+  // TPMS Incremental Sync Scheduler (every 6 hours)
+  // Runs automatic incremental sync to pull changes from the TPMS API,
+  // update local profiles, and confirm pending CDC log entries.
+  // ==================================================
+  (() => {
+    const TPMS_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+    const runTpmsIncrementalSync = async () => {
+      try {
+        console.log('[TPMS Scheduler] Running scheduled incremental sync...');
+        const tpmsService = getTPMSService();
+
+        const latestProfile = await db.select({ lastTpmsUpdatedAt: tpmsTechProfiles.lastTpmsUpdatedAt })
+          .from(tpmsTechProfiles)
+          .orderBy(desc(tpmsTechProfiles.lastTpmsUpdatedAt))
+          .limit(1);
+
+        const sinceTimestamp = latestProfile[0]?.lastTpmsUpdatedAt
+          ? new Date(latestProfile[0].lastTpmsUpdatedAt).toISOString()
+          : null;
+
+        if (!sinceTimestamp) {
+          console.log('[TPMS Scheduler] No existing profiles — skipping scheduled incremental sync (run a full sync first).');
+          return;
+        }
+
+        const syncStartTime = new Date();
+        const updatedTechs = await tpmsService.getTechsUpdatedAfter(sinceTimestamp);
+        const techList = updatedTechs?.techInfoList || [];
+
+        let upserted = 0;
+        for (const tech of techList) {
+          const data = {
+            techId: tech.techId?.trim() || "",
+            enterpriseId: (tech.ldapId?.trim() || "").toUpperCase(),
+            firstName: tech.firstName || null,
+            lastName: tech.lastName || null,
+            districtNo: tech.districtNo || null,
+            techManagerLdapId: tech.techManagerLdapId?.trim() || null,
+            truckNo: tech.truckNo?.trim() || null,
+            mobilePhone: tech.contactNo || null,
+            email: tech.email || null,
+            shippingAddresses: tech.addresses || [],
+            shippingSchedule: {},
+            techReplenishment: tech.techReplenishment || {},
+            rawResponse: JSON.stringify(tech),
+            lastTpmsUpdatedAt: syncStartTime,
+            syncedAt: syncStartTime,
+          };
+          if (!data.enterpriseId) continue;
+          const [existing] = await db.select().from(tpmsTechProfiles)
+            .where(eq(tpmsTechProfiles.enterpriseId, data.enterpriseId)).limit(1);
+          if (existing) {
+            await db.update(tpmsTechProfiles)
+              .set({ ...data, updatedAt: new Date() })
+              .where(eq(tpmsTechProfiles.enterpriseId, data.enterpriseId));
+          } else {
+            await db.insert(tpmsTechProfiles).values(data);
+          }
+          upserted++;
+        }
+
+        let confirmed = 0;
+        const pendingLogs = await db.select().from(tpmsChangeLog).where(isNull(tpmsChangeLog.confirmedAt));
+        for (const log of pendingLogs) {
+          const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, log.techId)).limit(1);
+          if (!profile) continue;
+          const currentValue = (profile as any)[log.fieldChanged];
+          const currentStr = typeof currentValue === "object" ? JSON.stringify(currentValue) : String(currentValue ?? "");
+          if (currentStr === log.valueAfter) {
+            await db.update(tpmsChangeLog)
+              .set({ confirmedAt: new Date(), confirmedByTpms: true })
+              .where(eq(tpmsChangeLog.id, log.id));
+            confirmed++;
+          }
+        }
+
+        console.log(`[TPMS Scheduler] Scheduled incremental sync complete: ${upserted} upserted, ${confirmed} CDC entries confirmed`);
+      } catch (err: any) {
+        console.error('[TPMS Scheduler] Scheduled incremental sync error:', err.message);
+      }
+    };
+
+    // Schedule recurring incremental sync
+    setInterval(runTpmsIncrementalSync, TPMS_SYNC_INTERVAL_MS);
+    console.log(`[TPMS Scheduler] Scheduled incremental sync every ${TPMS_SYNC_INTERVAL_MS / 3600000}h`);
+  })();
 
   // ==================================================
   // Vehicle Assignment Routes - Aggregated Data from Snowflake, TPMS, Holman

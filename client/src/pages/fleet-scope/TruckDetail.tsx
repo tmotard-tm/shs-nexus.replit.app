@@ -221,16 +221,17 @@ export default function TruckDetail() {
 
   // CDC pending changes for this truck's tech
   const tpmsTechId = Array.isArray(tpmsTechProfile) && tpmsTechProfile.length > 0 ? tpmsTechProfile[0]?.techId : null;
-  const { data: tpmsChangeHistory } = useQuery<any[]>({
+  const { data: tpmsChangeHistoryData } = useQuery<{ techId: string; cdcLog: any[]; currentTpmsState: any; tpmsStateSource: string; pendingCount: number }>({
     queryKey: ["/api/tpms/techs", tpmsTechId, "change-history"],
     queryFn: async () => {
       const res = await fetch(`/api/tpms/techs/${encodeURIComponent(tpmsTechId!)}/change-history`);
-      if (!res.ok) return [];
+      if (!res.ok) return { techId: tpmsTechId!, cdcLog: [], currentTpmsState: null, tpmsStateSource: 'none', pendingCount: 0 };
       return res.json();
     },
     enabled: !!tpmsTechId,
   });
-  const pendingCdcCount = (tpmsChangeHistory || []).filter((c: any) => !c.confirmedByTpms && !c.confirmedAt).length;
+  const tpmsChangeHistory = tpmsChangeHistoryData?.cdcLog || [];
+  const pendingCdcCount = tpmsChangeHistoryData?.pendingCount ?? tpmsChangeHistory.filter((c: any) => !c.confirmedByTpms && !c.confirmedAt).length;
 
   // TPMS address management state
   const [addressDialogMode, setAddressDialogMode] = useState<'add' | 'edit' | null>(null);
