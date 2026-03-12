@@ -289,7 +289,7 @@ function buildAllMappings(sourcePath: string): FileMapping[] {
   const mappings = [...FILE_MAPPINGS];
 
   addDirMappings(mappings, sourcePath, PAGE_DIR_FS, PAGE_DIR_NEXUS);
-  addDirMappings(mappings, sourcePath, COMPONENT_DIR_FS, COMPONENT_DIR_NEXUS, ["ui"]);
+  addDirMappings(mappings, sourcePath, COMPONENT_DIR_FS, COMPONENT_DIR_NEXUS);
   addDirMappings(mappings, sourcePath, HOOK_DIR_FS, "client/src/hooks/fleet-scope");
 
   return mappings;
@@ -354,7 +354,11 @@ function extractZip(zipPath: string, destDir: string): void {
     offset += 46 + nameLen + extraLen + commentLen;
 
     if (fileName.endsWith("/")) {
-      fs.mkdirSync(path.join(destDir, fileName), { recursive: true });
+      const dirPath = path.resolve(destDir, fileName);
+      if (!dirPath.startsWith(path.resolve(destDir) + path.sep) && dirPath !== path.resolve(destDir)) {
+        continue;
+      }
+      fs.mkdirSync(dirPath, { recursive: true });
       continue;
     }
 
@@ -372,7 +376,10 @@ function extractZip(zipPath: string, destDir: string): void {
       continue;
     }
 
-    const destPath = path.join(destDir, fileName);
+    const destPath = path.resolve(destDir, fileName);
+    if (!destPath.startsWith(path.resolve(destDir) + path.sep)) {
+      continue;
+    }
     fs.mkdirSync(path.dirname(destPath), { recursive: true });
     fs.writeFileSync(destPath, fileData);
   }
