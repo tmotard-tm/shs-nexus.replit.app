@@ -12,9 +12,11 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
     weeklyOnboarding: true,
     weeklyOffboarding: true,
     createVehicle: true,
+    fleetScope: true,
   },
   sidebar: {
     enabled: true,
+    fleetScope: true,
     dashboards: {
       enabled: true,
       dashboard: true,
@@ -137,9 +139,11 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
     weeklyOnboarding: true,
     weeklyOffboarding: true,
     createVehicle: true,
+    fleetScope: true,
   },
   sidebar: {
     enabled: true,
+    fleetScope: true,
     dashboards: {
       enabled: true,
       dashboard: true,
@@ -261,9 +265,11 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
     weeklyOnboarding: false,
     weeklyOffboarding: false,
     createVehicle: false,
+    fleetScope: false,
   },
   sidebar: {
     enabled: true,
+    fleetScope: false,
     dashboards: {
       enabled: false,
       dashboard: false,

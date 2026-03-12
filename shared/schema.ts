@@ -49,9 +49,11 @@ export interface RolePermissionSettings {
     weeklyOnboarding: boolean;
     weeklyOffboarding: boolean;
     createVehicle: boolean;
+    fleetScope: boolean;
   };
   sidebar: {
     enabled: boolean;
+    fleetScope: boolean;
     dashboards: {
       enabled: boolean;
       dashboard: boolean;

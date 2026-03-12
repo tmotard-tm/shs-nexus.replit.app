@@ -43,7 +43,8 @@ import {
   Shield,
   Eye,
   User as UserIcon,
-  Search
+  Search,
+  Wrench
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PAGES, CATEGORIES, getPagesByCategory, type PageCategory } from "@shared/page-registry";
@@ -207,6 +208,7 @@ export function Sidebar() {
       activities: { name: "Activity", icon: Activity },
       account: { name: "Account", icon: Key },
       helpAndTutorial: { name: "Help", icon: HelpCircle },
+      fleetScope: { name: "Fleet Scope", icon: Wrench },
     };
 
     const categories: NavCategory[] = Object.entries(categoryMap)
