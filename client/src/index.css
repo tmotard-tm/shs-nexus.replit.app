@@ -114,6 +114,12 @@
   --shadow-2xl: 0px 2px 0px 0px hsl(202.8169, 89.1213%, 53.1373%, 0.00);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
+  --status-green: hsl(142, 71%, 45%);
+  --status-green-fg: hsl(0, 0%, 100%);
+  --status-amber: hsl(38, 92%, 50%);
+  --status-amber-fg: hsl(0, 0%, 100%);
+  --status-red: hsl(0, 84%, 55%);
+  --status-red-fg: hsl(0, 0%, 100%);
 }
 
 .dark {
@@ -163,6 +169,12 @@
   --shadow-lg: 0px 2px 0px 0px hsl(202.8169, 89.1213%, 53.1373%, 0.00), 0px 4px 6px -1px hsl(202.8169, 89.1213%, 53.1373%, 0.00);
   --shadow-xl: 0px 2px 0px 0px hsl(202.8169, 89.1213%, 53.1373%, 0.00), 0px 8px 10px -1px hsl(202.8169, 89.1213%, 53.1373%, 0.00);
   --shadow-2xl: 0px 2px 0px 0px hsl(202.8169, 89.1213%, 53.1373%, 0.00);
+  --status-green: hsl(142, 71%, 42%);
+  --status-green-fg: hsl(0, 0%, 100%);
+  --status-amber: hsl(38, 92%, 48%);
+  --status-amber-fg: hsl(0, 0%, 100%);
+  --status-red: hsl(0, 84%, 52%);
+  --status-red-fg: hsl(0, 0%, 100%);
 }
 
 @layer base {

@@ -61,6 +61,12 @@ export default {
           border: "var(--sidebar-border)",
           ring: "var(--sidebar-ring)",
         },
+        "status-green": "var(--status-green)",
+        "status-green-fg": "var(--status-green-fg)",
+        "status-amber": "var(--status-amber)",
+        "status-amber-fg": "var(--status-amber-fg)",
+        "status-red": "var(--status-red)",
+        "status-red-fg": "var(--status-red-fg)",
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
