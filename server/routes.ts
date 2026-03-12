@@ -10630,6 +10630,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.truckNo, truckNo)).limit(1);
       if (profile) {
+        // Call TPMS API to unassign the vehicle before updating local state
+        let tpmsApiSuccess = false;
+        let tpmsApiError: string | null = null;
+        if (profile.enterpriseId) {
+          try {
+            const { getTpmsApiService } = await import("./tpms-api-service");
+            await getTpmsApiService().unassignVehicle(profile.enterpriseId, profile.districtNo ?? undefined);
+            tpmsApiSuccess = true;
+          } catch (apiErr: any) {
+            tpmsApiError = apiErr.message;
+            console.warn(`[TPMS Unassign] TPMS API call failed for ${profile.enterpriseId}: ${apiErr.message}. Proceeding with local update.`);
+          }
+        }
+
+        // Update local profile regardless (sync will reconcile any mismatch)
         await db.update(tpmsTechProfiles)
           .set({ truckNo: null, updatedAt: new Date() })
           .where(eq(tpmsTechProfiles.truckNo, truckNo));
@@ -10640,11 +10655,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           valueBefore: truckNo,
           valueAfter: "",
           source: "nexus-vehicle-unassign",
-          confirmedByTpms: false,
+          confirmedByTpms: tpmsApiSuccess,
+          ...(tpmsApiSuccess ? { confirmedAt: new Date() } : {}),
         });
+
+        return res.json({ success: true, tpmsApiSuccess, tpmsApiError });
       }
       
-      res.json({ success: true });
+      res.json({ success: true, tpmsApiSuccess: false, message: "No tech profile found for this truck" });
     } catch (error: any) {
       console.error("Error unassigning tech from vehicle:", error);
       res.status(500).json({ message: error.message });
@@ -10682,9 +10700,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         console.log(`[TPMS Sync] No existing profiles — bootstrapping full sync for ${truckNumbers.length} vehicles`);
         
-        tpmsService.runInitialSync(truckNumbers).catch(err => {
-          console.error('[TPMS Sync] Full-sync bootstrap error:', err);
-        });
+        // Run initial sync and then populate tpms_tech_profiles from the cache
+        tpmsService.runInitialSync(truckNumbers)
+          .then(async () => {
+            console.log('[TPMS Sync] Initial sync done — populating tpms_tech_profiles from cache');
+            const { tpmsCachedAssignments: cacheTable } = await import("@shared/schema");
+            const cached = await db.select().from(cacheTable)
+              .where(and(isNotNull(cacheTable.enterpriseId), isNotNull(cacheTable.techId)));
+            let populated = 0;
+            const syncTime = new Date();
+            for (const row of cached) {
+              if (!row.enterpriseId || !row.techId) continue;
+              let raw: any = {};
+              try { raw = row.rawResponse ? JSON.parse(row.rawResponse) : {}; } catch {}
+              const data = {
+                techId: row.techId,
+                enterpriseId: row.enterpriseId.toUpperCase(),
+                firstName: row.firstName || raw.firstName || null,
+                lastName: row.lastName || raw.lastName || null,
+                districtNo: row.districtNo || raw.districtNo || null,
+                techManagerLdapId: raw.techManagerLdapId || null,
+                truckNo: row.truckNo || raw.truckNo || null,
+                mobilePhone: row.contactNo || raw.contactNo || null,
+                email: row.email || raw.email || null,
+                shippingAddresses: raw.addresses || [],
+                shippingSchedule: {},
+                techReplenishment: raw.techReplenishment || {},
+                rawResponse: row.rawResponse || null,
+                lastTpmsUpdatedAt: syncTime,
+                syncedAt: syncTime,
+              };
+              const [existing] = await db.select({ id: tpmsTechProfiles.id })
+                .from(tpmsTechProfiles).where(eq(tpmsTechProfiles.enterpriseId, data.enterpriseId)).limit(1);
+              if (existing) {
+                await db.update(tpmsTechProfiles).set({ ...data, updatedAt: new Date() })
+                  .where(eq(tpmsTechProfiles.enterpriseId, data.enterpriseId));
+              } else {
+                await db.insert(tpmsTechProfiles).values(data);
+              }
+              populated++;
+            }
+            console.log(`[TPMS Sync] tpms_tech_profiles populated: ${populated} records`);
+          })
+          .catch(err => {
+            console.error('[TPMS Sync] Full-sync bootstrap error:', err);
+          });
         
         return res.json({
           success: true,
