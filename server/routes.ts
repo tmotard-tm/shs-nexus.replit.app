@@ -13650,9 +13650,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       // Query all 3 pipeline tables in parallel — they are all appended daily together
+      // Use COUNT(DISTINCT VEHICLE_NUMBER) for open/ticket so counts match the deduplicated
+      // business-logic view instead of raw PO-line counts.
       const [ticketRows, openRows, closedRows] = await Promise.all([
-        sf.executeQuery(`SELECT FILE_DATE, SOURCE_FILENAME, LOADED_TS, COUNT(*) as ROW_COUNT FROM ${RENTAL_TICKET_TABLE} GROUP BY FILE_DATE, SOURCE_FILENAME, LOADED_TS ORDER BY FILE_DATE DESC LIMIT 60`).catch(() => []) as Promise<any[]>,
-        sf.executeQuery(`SELECT FILE_DATE, SOURCE_FILENAME, LOADED_TS, COUNT(*) as ROW_COUNT FROM ${RENTAL_OPEN_TABLE} GROUP BY FILE_DATE, SOURCE_FILENAME, LOADED_TS ORDER BY FILE_DATE DESC LIMIT 60`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT FILE_DATE, SOURCE_FILENAME, LOADED_TS, COUNT(DISTINCT VEHICLE_NUMBER) as ROW_COUNT FROM ${RENTAL_TICKET_TABLE} WHERE TICKET_STATUS='OPEN' GROUP BY FILE_DATE, SOURCE_FILENAME, LOADED_TS ORDER BY FILE_DATE DESC LIMIT 60`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT FILE_DATE, SOURCE_FILENAME, LOADED_TS, COUNT(DISTINCT VEHICLE_NUMBER) as ROW_COUNT FROM ${RENTAL_OPEN_TABLE} GROUP BY FILE_DATE, SOURCE_FILENAME, LOADED_TS ORDER BY FILE_DATE DESC LIMIT 60`).catch(() => []) as Promise<any[]>,
         sf.executeQuery(`SELECT FILE_DATE, SOURCE_FILENAME, LOADED_TS, COUNT(*) as ROW_COUNT FROM ${RENTAL_CLOSED_TABLE} GROUP BY FILE_DATE, SOURCE_FILENAME, LOADED_TS ORDER BY FILE_DATE DESC LIMIT 60`).catch(() => []) as Promise<any[]>,
       ]);
 
