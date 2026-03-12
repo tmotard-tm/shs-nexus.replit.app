@@ -17,6 +17,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
   sidebar: {
     enabled: true,
     fleetScope: true,
+    tpms: true,
     dashboards: {
       enabled: true,
       dashboard: true,
@@ -144,6 +145,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
   sidebar: {
     enabled: true,
     fleetScope: true,
+    tpms: true,
     dashboards: {
       enabled: true,
       dashboard: true,
@@ -270,6 +272,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
   sidebar: {
     enabled: true,
     fleetScope: false,
+    tpms: true,
     dashboards: {
       enabled: false,
       dashboard: false,

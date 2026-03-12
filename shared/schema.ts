@@ -54,6 +54,7 @@ export interface RolePermissionSettings {
   sidebar: {
     enabled: boolean;
     fleetScope: boolean;
+    tpms: boolean;
     dashboards: {
       enabled: boolean;
       dashboard: boolean;
