@@ -238,57 +238,57 @@ function analyzeContent(content: string): { touchesRoutes: boolean; touchesDb: b
   };
 }
 
+function walkDir(dir: string, skipDirs: string[] = []): string[] {
+  const results: string[] = [];
+  if (!fs.existsSync(dir)) return results;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (skipDirs.includes(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...walkDir(full, skipDirs));
+    } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+function addDirMappings(
+  mappings: FileMapping[],
+  sourcePath: string,
+  fsDirRel: string,
+  nexusDirRel: string,
+  skipDirs: string[] = []
+): void {
+  const fsDir = path.join(sourcePath, fsDirRel);
+  const fsFiles = walkDir(fsDir, skipDirs);
+  for (const absFile of fsFiles) {
+    const relFromFsDir = path.relative(fsDir, absFile);
+    const fsRel = `${fsDirRel}/${relFromFsDir}`;
+    const nexusRel = `${nexusDirRel}/${relFromFsDir}`;
+    if (!mappings.some(m => m.fsPath === fsRel)) {
+      mappings.push({ fsPath: fsRel, nexusPath: nexusRel });
+    }
+  }
+
+  const nexusDir = path.resolve(nexusDirRel);
+  const nexusFiles = walkDir(nexusDir, skipDirs);
+  for (const absFile of nexusFiles) {
+    const relFromNexusDir = path.relative(nexusDir, absFile);
+    const nexusRel = `${nexusDirRel}/${relFromNexusDir}`;
+    const fsRel = `${fsDirRel}/${relFromNexusDir}`;
+    if (!mappings.some(m => m.nexusPath === nexusRel)) {
+      mappings.push({ fsPath: fsRel, nexusPath: nexusRel });
+    }
+  }
+}
+
 function buildAllMappings(sourcePath: string): FileMapping[] {
   const mappings = [...FILE_MAPPINGS];
 
-  const fsPagesDir = path.join(sourcePath, PAGE_DIR_FS);
-  if (fs.existsSync(fsPagesDir)) {
-    for (const file of fs.readdirSync(fsPagesDir)) {
-      if (!file.endsWith(".tsx") && !file.endsWith(".ts")) continue;
-      const fsRel = `${PAGE_DIR_FS}/${file}`;
-      const nexusRel = `${PAGE_DIR_NEXUS}/${file}`;
-      if (!mappings.some(m => m.fsPath === fsRel)) {
-        mappings.push({ fsPath: fsRel, nexusPath: nexusRel });
-      }
-    }
-  }
-
-  const nexusPagesDir = path.resolve(PAGE_DIR_NEXUS);
-  if (fs.existsSync(nexusPagesDir)) {
-    for (const file of fs.readdirSync(nexusPagesDir)) {
-      if (!file.endsWith(".tsx") && !file.endsWith(".ts")) continue;
-      const nexusRel = `${PAGE_DIR_NEXUS}/${file}`;
-      const fsRel = `${PAGE_DIR_FS}/${file}`;
-      if (!mappings.some(m => m.nexusPath === nexusRel)) {
-        mappings.push({ fsPath: fsRel, nexusPath: nexusRel });
-      }
-    }
-  }
-
-  const fsComponentsDir = path.join(sourcePath, COMPONENT_DIR_FS);
-  if (fs.existsSync(fsComponentsDir)) {
-    for (const file of fs.readdirSync(fsComponentsDir)) {
-      if (file === "ui") continue;
-      if (!file.endsWith(".tsx") && !file.endsWith(".ts")) continue;
-      const fsRel = `${COMPONENT_DIR_FS}/${file}`;
-      const nexusRel = `${COMPONENT_DIR_NEXUS}/${file}`;
-      if (!mappings.some(m => m.fsPath === fsRel)) {
-        mappings.push({ fsPath: fsRel, nexusPath: nexusRel });
-      }
-    }
-  }
-
-  const nexusComponentsDir = path.resolve(COMPONENT_DIR_NEXUS);
-  if (fs.existsSync(nexusComponentsDir)) {
-    for (const file of fs.readdirSync(nexusComponentsDir)) {
-      if (!file.endsWith(".tsx") && !file.endsWith(".ts")) continue;
-      const nexusRel = `${COMPONENT_DIR_NEXUS}/${file}`;
-      const fsRel = `${COMPONENT_DIR_FS}/${file}`;
-      if (!mappings.some(m => m.nexusPath === nexusRel)) {
-        mappings.push({ fsPath: fsRel, nexusPath: nexusRel });
-      }
-    }
-  }
+  addDirMappings(mappings, sourcePath, PAGE_DIR_FS, PAGE_DIR_NEXUS);
+  addDirMappings(mappings, sourcePath, COMPONENT_DIR_FS, COMPONENT_DIR_NEXUS, ["ui"]);
+  addDirMappings(mappings, sourcePath, HOOK_DIR_FS, "client/src/hooks/fleet-scope");
 
   return mappings;
 }
@@ -310,7 +310,14 @@ function getIncorporationGuidance(result: DriftResult): string[] {
     if (result.touchesEnvVars) lines.push(`  [!] Change touches env vars — verify FS_ prefix on all Fleet-Scope vars`);
   } else if (result.category === "added") {
     lines.push(`Create: ${result.nexusPath}`);
-    lines.push(`Copy the file from Fleet-Scope and apply the import substitutions listed above.`);
+    lines.push(`Copy the file from Fleet-Scope and apply these import substitutions:`);
+    lines.push(`  @shared/schema       -> @shared/fleet-scope-schema`);
+    lines.push(`  /api/                 -> /api/fs/`);
+    lines.push(`  ./db                  -> ./fleet-scope-db`);
+    lines.push(`  ./storage             -> ./fleet-scope-storage`);
+    lines.push(`  ./snowflake           -> ./fleet-scope-snowflake`);
+    lines.push(`  registerRoutes        -> registerFleetScopeRoutes`);
+    lines.push(`  process.env.XXX       -> process.env.FS_XXX (for Fleet-Scope env vars)`);
     if (result.touchesRoutes) lines.push(`  [!] New file has API routes — add with /api/fs/ prefix`);
     if (result.touchesDb) lines.push(`  [!] New file uses database — ensure it uses fsDb connection`);
     if (result.touchesEnvVars) lines.push(`  [!] New file uses env vars — apply FS_ prefix`);
@@ -475,12 +482,8 @@ function main() {
         if (r.touchesEnvVars) console.log(`  ${RED}[!] Contains environment variables${RESET}`);
         console.log();
         if (r.fullContent) {
-          const previewLines = r.fullContent.split("\n").slice(0, 50);
-          for (const line of previewLines) {
+          for (const line of r.fullContent.split("\n")) {
             console.log(`  ${GREEN}+ ${line}${RESET}`);
-          }
-          if (r.linesChanged! > 50) {
-            console.log(`  ${GRAY}... (${r.linesChanged! - 50} more lines)${RESET}`);
           }
         }
         console.log();
