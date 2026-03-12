@@ -10572,6 +10572,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ success: true, message: "No existing profiles. Run a full fleet sync first.", mode: "none" });
       }
       
+      // Capture timestamp BEFORE the API call so our watermark precedes the response.
+      // Using a post-call new Date() would risk missing changes that arrived during the request.
+      const syncStartTime = new Date();
       const updatedTechs = await tpmsService.getTechsUpdatedAfter(sinceTimestamp);
       const techList = updatedTechs?.techInfoList || [];
       
@@ -10591,8 +10594,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           shippingSchedule: {},
           techReplenishment: tech.techReplenishment || {},
           rawResponse: JSON.stringify(tech),
-          lastTpmsUpdatedAt: new Date(),
-          syncedAt: new Date(),
+          lastTpmsUpdatedAt: syncStartTime,
+          syncedAt: syncStartTime,
         };
         
         if (!data.enterpriseId) continue;

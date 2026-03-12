@@ -24,6 +24,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -178,6 +185,52 @@ export default function TruckDetail() {
     },
     enabled: !!truckNumberForSpecialty,
   });
+
+  // TPMS Assign Tech modal state
+  const [showAssignTechModal, setShowAssignTechModal] = useState(false);
+  const [techSearchInput, setTechSearchInput] = useState("");
+  const [techSearchQuery, setTechSearchQuery] = useState("");
+
+  const { data: techSearchResults, isFetching: isSearchingTechs } = useQuery<any[]>({
+    queryKey: ["/api/tpms/techs", { search: techSearchQuery }],
+    queryFn: async () => {
+      if (!techSearchQuery.trim()) return [];
+      const res = await fetch(`/api/tpms/techs?search=${encodeURIComponent(techSearchQuery)}&limit=10`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!techSearchQuery,
+  });
+
+  const assignTechMutation = useMutation({
+    mutationFn: async ({ enterpriseId, districtNo }: { enterpriseId: string; districtNo: string }) => {
+      return apiRequest("POST", `/api/tpms/vehicles/${encodeURIComponent(truckNumberForSpecialty)}/assign`, { enterpriseId, districtNo });
+    },
+    onSuccess: () => {
+      toast({ title: "Technician Assigned", description: "Tech assigned to vehicle in TPMS." });
+      setShowAssignTechModal(false);
+      setTechSearchInput("");
+      setTechSearchQuery("");
+      queryClient.invalidateQueries({ queryKey: ["/api/tpms/lookup/truck", truckNumberForSpecialty] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Assignment failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // CDC pending changes for this truck's tech
+  const tpmsTechId = Array.isArray(tpmsTechProfile) && tpmsTechProfile.length > 0 ? tpmsTechProfile[0]?.techId : null;
+  const { data: tpmsChangeHistory } = useQuery<any[]>({
+    queryKey: ["/api/tpms/techs", tpmsTechId, "change-history"],
+    queryFn: async () => {
+      const res = await fetch(`/api/tpms/techs/${encodeURIComponent(tpmsTechId!)}/change-history`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!tpmsTechId,
+  });
+  const pendingCdcCount = (tpmsChangeHistory || []).filter((c: any) => !c.confirmedByTpms && !c.confirmedAt).length;
 
   // State for adding new tracking numbers
   const [newTrackingNumber, setNewTrackingNumber] = useState("");
@@ -1785,6 +1838,11 @@ export default function TruckDetail() {
                             No Data
                           </Badge>
                         )}
+                        {pendingCdcCount > 0 && (
+                          <Badge className="ml-1 text-xs bg-amber-500/20 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700" variant="outline">
+                            {pendingCdcCount} pending
+                          </Badge>
+                        )}
                       </div>
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">
@@ -1802,12 +1860,25 @@ export default function TruckDetail() {
                         
                         if (!hasAnyData) {
                           return (
-                            <div className="text-center py-6">
+                            <div className="text-center py-6 space-y-3">
                               <Package className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
                               <p className="text-sm text-muted-foreground">No TPMS data available for this vehicle.</p>
                               <p className="text-xs text-muted-foreground mt-1">
                                 The vehicle may not be registered in TPMS or the service is unavailable.
                               </p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setTechSearchInput("");
+                                  setTechSearchQuery("");
+                                  setShowAssignTechModal(true);
+                                }}
+                              >
+                                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                                Assign Tech
+                              </Button>
                             </div>
                           );
                         }
@@ -1892,6 +1963,19 @@ export default function TruckDetail() {
                             )}
 
                             <div className="flex items-center gap-2 justify-end flex-wrap">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setTechSearchInput("");
+                                  setTechSearchQuery("");
+                                  setShowAssignTechModal(true);
+                                }}
+                              >
+                                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                                {currentEnterprise ? "Reassign Tech" : "Assign Tech"}
+                              </Button>
                               {currentEnterprise && (
                                 <Button
                                   type="button"
@@ -2026,6 +2110,79 @@ export default function TruckDetail() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Assign Tech Modal */}
+      <Dialog open={showAssignTechModal} onOpenChange={setShowAssignTechModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Assign Technician to Truck {truckNumberForSpecialty}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Input
+                placeholder="Search by enterprise ID or name…"
+                value={techSearchInput}
+                onChange={(e) => setTechSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setTechSearchQuery(techSearchInput);
+                }}
+                data-testid="input-tpms-tech-search"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setTechSearchQuery(techSearchInput)}
+                disabled={isSearchingTechs}
+              >
+                <Search className="h-4 w-4" />
+              </Button>
+            </div>
+            {isSearchingTechs && (
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            )}
+            {!isSearchingTechs && techSearchResults && techSearchResults.length === 0 && techSearchQuery && (
+              <p className="text-sm text-muted-foreground text-center py-4">No technicians found.</p>
+            )}
+            {!isSearchingTechs && techSearchResults && techSearchResults.length > 0 && (
+              <div className="border rounded-md divide-y max-h-64 overflow-y-auto">
+                {techSearchResults.map((tech: any) => (
+                  <div
+                    key={tech.enterpriseId || tech.techId}
+                    className="flex items-center justify-between px-3 py-2 hover:bg-muted/50 cursor-pointer"
+                    onClick={() => {
+                      if (assignTechMutation.isPending) return;
+                      assignTechMutation.mutate({
+                        enterpriseId: tech.enterpriseId,
+                        districtNo: tech.districtNo || "",
+                      });
+                    }}
+                  >
+                    <div>
+                      <p className="text-sm font-medium">
+                        {tech.firstName} {tech.lastName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {tech.enterpriseId} · District {tech.districtNo || "—"}
+                      </p>
+                    </div>
+                    <Button type="button" size="sm" variant="outline" disabled={assignTechMutation.isPending}>
+                      Assign
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setShowAssignTechModal(false)}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
