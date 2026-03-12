@@ -970,7 +970,7 @@ function trackChanges(existing: any, updates: any): string[] {
   return changes;
 }
 
-export function createFleetScopeRouter(): Router {
+export function registerFleetScopeRoutes(): Router {
   const app = Router();
 
   // Ensure MANUAL_EDIT_TIMESTAMP column exists in Snowflake SPARE_VEHICLE_ASSIGNMENT_STATUS
@@ -1281,7 +1281,7 @@ export function createFleetScopeRouter(): Router {
 
   app.get("/public/registrations", async (req, res) => {
     try {
-      const internalUrl = `${req.protocol}://${req.get('host')}/api/registration`;
+      const internalUrl = `${req.protocol}://${req.get('host')}/api/fs/registration`;
       const response = await fetch(internalUrl);
       if (!response.ok) {
         throw new Error(`Internal registration endpoint returned ${response.status}`);
@@ -1319,7 +1319,7 @@ export function createFleetScopeRouter(): Router {
       const { truckNumber } = req.params;
       const normalized = truckNumber.padStart(6, '0');
 
-      const internalUrl = `${req.protocol}://${req.get('host')}/api/registration`;
+      const internalUrl = `${req.protocol}://${req.get('host')}/api/fs/registration`;
       const response = await fetch(internalUrl);
       if (!response.ok) {
         throw new Error(`Internal registration endpoint returned ${response.status}`);
@@ -11371,7 +11371,7 @@ Respond ONLY with valid JSON, no other text.`;
 
       if (!phone) {
         // Look up from TPMS via registration endpoint
-        const internalUrl = `${req.protocol}://${req.get('host')}/api/registration`;
+        const internalUrl = `${req.protocol}://${req.get('host')}/api/fs/registration`;
         try {
           const regResp = await fetch(internalUrl);
           if (regResp.ok) {

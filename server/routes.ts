@@ -26,7 +26,7 @@ import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
 import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
-import { createFleetScopeRouter } from "./fleet-scope-routes";
+import { registerFleetScopeRoutes } from "./fleet-scope-routes";
 import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
 import { fsDb } from "./fleet-scope-db";
 // SAML SSO INTEGRATION
@@ -451,7 +451,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Mount Fleet-Scope module routes at /api/fs/*
   if (fsDb) {
-    const fsRouter = createFleetScopeRouter();
+    const fsRouter = registerFleetScopeRoutes();
     app.use("/api/fs", fsRouter);
     console.log("[Fleet-Scope] Routes mounted at /api/fs/*");
   } else {

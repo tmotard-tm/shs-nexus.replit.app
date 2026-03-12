@@ -438,15 +438,15 @@ function Router() {
       </Route>
 
       <Route path="/fleet-scope/:rest*">
-        <RoleProtectedRoute>
+        <ProtectedRoute>
           <FleetScopeLayout />
-        </RoleProtectedRoute>
+        </ProtectedRoute>
       </Route>
 
       <Route path="/fleet-scope">
-        <RoleProtectedRoute>
+        <ProtectedRoute>
           <FleetScopeLayout />
-        </RoleProtectedRoute>
+        </ProtectedRoute>
       </Route>
       
       <Route component={NotFound} />
