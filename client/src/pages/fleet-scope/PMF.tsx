@@ -136,12 +136,12 @@ export default function PMF() {
 
   // Fetch days in status data
   const { data: daysInStatusData } = useQuery<{ success: boolean; data: Record<string, DaysInStatusData> }>({
-    queryKey: ['/api/pmf/days-in-status'],
+    queryKey: ['/api/fs/pmf/days-in-status'],
   });
 
   // Fetch activity sync metadata
   const { data: activitySyncMeta } = useQuery<{ success: boolean; meta: ActivitySyncMeta | null }>({
-    queryKey: ['/api/pmf/activity-sync-meta'],
+    queryKey: ['/api/fs/pmf/activity-sync-meta'],
   });
 
   const { data: pmfSummary } = useQuery<{
@@ -149,17 +149,17 @@ export default function PMF() {
     byStatus: Record<string, number>;
     pipelineFlow: { status: string; count: number; filterStatuses?: string[] }[];
   }>({
-    queryKey: ['/api/pmf/summary'],
+    queryKey: ['/api/fs/pmf/summary'],
   });
 
   // Sync activity logs mutation
   const syncActivityMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/pmf/sync-activity-logs', {});
+      const response = await apiRequest('POST', '/api/fs/pmf/sync-activity-logs', {});
       return response.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/pmf/activity-sync-meta'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/pmf/activity-sync-meta'] });
       // Clear cached logs so they'll be refetched
       setActivityLogs({});
       toast({
@@ -188,7 +188,7 @@ export default function PMF() {
         description: "This may take a few minutes for all vehicles...",
       });
 
-      const response = await fetch('/api/pmf/tool-audit/bulk-export');
+      const response = await fetch('/api/fs/pmf/tool-audit/bulk-export');
       const result = await response.json();
 
       if (!result.success) {
@@ -292,7 +292,7 @@ export default function PMF() {
         const { [assetId]: _, ...rest } = prev;
         return rest;
       });
-      const response = await fetch(`/api/pmf/activity-logs/${encodeURIComponent(assetId)}`);
+      const response = await fetch(`/api/fs/pmf/activity-logs/${encodeURIComponent(assetId)}`);
       const data = await response.json();
       if (data.success) {
         setActivityLogs(prev => ({ ...prev, [assetId]: data.logs }));
@@ -311,7 +311,7 @@ export default function PMF() {
   const fetchToolAudit = async (assetId: string, vehicleId: number) => {
     try {
       setLoadingToolAudit(true);
-      const response = await fetch(`/api/pmf/conditionreport/${vehicleId}`);
+      const response = await fetch(`/api/fs/pmf/conditionreport/${vehicleId}`);
       const data = await response.json();
       
       if (data.success && data.conditionreport?.length > 0) {
@@ -426,7 +426,7 @@ export default function PMF() {
 
   // Fetch persisted PMF data on load
   const { data: persistedData, isLoading: isLoadingPersistedData } = useQuery<PersistedPmfData | null>({
-    queryKey: ['/api/pmf'],
+    queryKey: ['/api/fs/pmf'],
     retry: false,
   });
 
@@ -439,11 +439,11 @@ export default function PMF() {
       rows: Array<{ assetId: string; status: string; rawRow: Record<string, string> }>;
       importedBy?: string;
     }) => {
-      const response = await apiRequest('POST', '/api/pmf/import', payload);
+      const response = await apiRequest('POST', '/api/fs/pmf/import', payload);
       return response.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/pmf'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/pmf'] });
       if (data.uniqueStatuses) {
         setUniqueStatuses(data.uniqueStatuses);
       }
@@ -460,13 +460,13 @@ export default function PMF() {
   // PARQ API sync mutation
   const syncParqMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/pmf/parq/sync', {
+      const response = await apiRequest('POST', '/api/fs/pmf/parq/sync', {
         importedBy: currentUser || "PARQ API",
       });
       return response.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/pmf'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/pmf'] });
       if (data.uniqueStatuses) {
         setUniqueStatuses(data.uniqueStatuses);
       }

@@ -124,7 +124,7 @@ export default function EditTruck() {
         return res.json();
       } else {
         // Send full payload - server will compute diff
-        const res = await apiRequest("PUT", `/api/trucks/${id}`, data);
+        const res = await apiRequest("PUT", `/api/fs/trucks/${id}`, data);
         return res.json();
       }
     },

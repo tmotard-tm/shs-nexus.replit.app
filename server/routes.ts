@@ -27,6 +27,7 @@ import { segnoApiService } from "./segno-api-service";
 import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
 import { createFleetScopeRouter } from "./fleet-scope-routes";
+import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
 // SAML SSO INTEGRATION
 import passport from "passport";
 import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
@@ -13621,5 +13622,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
 
   const httpServer = createServer(app);
+
+  if (process.env.FS_DATABASE_URL) {
+    initFsWebSocket(httpServer);
+    startFsScheduledMessages();
+    console.log("[Fleet-Scope] WebSocket (/fs-ws) and scheduled message processor initialized");
+  }
+
   return httpServer;
 }

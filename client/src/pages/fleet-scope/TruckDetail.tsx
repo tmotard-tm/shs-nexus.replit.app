@@ -155,7 +155,7 @@ export default function TruckDetail() {
 
   const truckNumberForSpecialty = truck?.truckNumber || "";
   const { data: techSpecialtyData } = useQuery<{ jobTitle: string | null; enterpriseId: string | null }>({
-    queryKey: [`/api/tech-specialty?truckNumber=${encodeURIComponent(truckNumberForSpecialty)}`],
+    queryKey: [`/api/fs/tech-specialty?truckNumber=${encodeURIComponent(truckNumberForSpecialty)}`],
     enabled: !!truckNumberForSpecialty,
   });
 
@@ -306,7 +306,7 @@ export default function TruckDetail() {
 
   const mutation = useMutation({
     mutationFn: async (data: any) => {
-      const response = await apiRequest("PATCH", `/api/trucks/${id}`, {
+      const response = await apiRequest("PATCH", `/api/fs/trucks/${id}`, {
         ...data,
         lastUpdatedBy: currentUser || "Unknown User",
       });
@@ -368,7 +368,7 @@ export default function TruckDetail() {
   const refreshTrackingMutation = useMutation({
     mutationFn: async (trackingId: string) => {
       setRefreshingTrackingId(trackingId);
-      const response = await apiRequest("POST", `/api/tracking/${trackingId}/refresh`, {});
+      const response = await apiRequest("POST", `/api/fs/tracking/${trackingId}/refresh`, {});
       return response.json();
     },
     onSuccess: () => {
@@ -392,7 +392,7 @@ export default function TruckDetail() {
   // Delete tracking record mutation
   const deleteTrackingMutation = useMutation({
     mutationFn: async (trackingId: string) => {
-      const response = await apiRequest("DELETE", `/api/tracking/${trackingId}`, {});
+      const response = await apiRequest("DELETE", `/api/fs/tracking/${trackingId}`, {});
       return response;
     },
     onSuccess: () => {

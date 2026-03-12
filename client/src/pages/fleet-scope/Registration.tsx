@@ -255,7 +255,7 @@ export default function Registration() {
 
   const trackingMutation = useMutation({
     mutationFn: async ({ truckNumber, ...data }: { truckNumber: string; initialTextSent?: boolean; timeSlotConfirmed?: boolean; timeSlotValue?: string; submittedToHolman?: boolean; alreadySent?: boolean; comments?: string }) => {
-      const response = await apiRequest("PATCH", `/api/registration/tracking/${truckNumber}`, data);
+      const response = await apiRequest("PATCH", `/api/fs/registration/tracking/${truckNumber}`, data);
       return response.json();
     },
     onMutate: async (variables) => {

@@ -151,7 +151,7 @@ export default function Decommissioning() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, updates }: { id: number; updates: Partial<DecommissioningVehicle> }) => {
-      return apiRequest("PATCH", `/api/decommissioning/${id}`, updates);
+      return apiRequest("PATCH", `/api/fs/decommissioning/${id}`, updates);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/decommissioning"] });
@@ -167,7 +167,7 @@ export default function Decommissioning() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      return apiRequest("DELETE", `/api/decommissioning/${id}`);
+      return apiRequest("DELETE", `/api/fs/decommissioning/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/decommissioning"] });

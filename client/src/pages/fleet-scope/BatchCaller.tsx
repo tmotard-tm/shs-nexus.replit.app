@@ -178,7 +178,7 @@ export default function BatchCaller() {
   const pollBatch = async (batchId: string) => {
     const poll = async () => {
       try {
-        const res = await fetch(`/api/batch-call/status/${batchId}`);
+        const res = await fetch(`/api/fs/batch-call/status/${batchId}`);
         const status: BatchStatus = await res.json();
         setBatchStatus(status);
         if (!status.done) {
@@ -197,7 +197,7 @@ export default function BatchCaller() {
   const cancelBatch = async () => {
     if (!activeBatchId) return;
     try {
-      await apiRequest("POST", `/api/batch-call/cancel/${activeBatchId}`);
+      await apiRequest("POST", `/api/fs/batch-call/cancel/${activeBatchId}`);
       toast({ title: "Batch cancelled" });
     } catch (err: any) {
       toast({ title: "Cancel failed", description: err.message, variant: "destructive" });

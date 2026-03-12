@@ -194,7 +194,7 @@ export default function FleetCost() {
     
     while (polls < maxPolls) {
       try {
-        const response = await fetch(`/api/fleet-cost/job/${jobId}`);
+        const response = await fetch(`/api/fs/fleet-cost/job/${jobId}`);
         if (!response.ok) {
           throw new Error('Failed to check job status');
         }
@@ -255,7 +255,7 @@ export default function FleetCost() {
       setUploadProgress(20);
       setUploadStatus("Uploading file to server...");
 
-      const response = await fetch('/api/fleet-cost/upload-file', {
+      const response = await fetch('/api/fs/fleet-cost/upload-file', {
         method: 'POST',
         body: formData,
       });
@@ -342,7 +342,7 @@ export default function FleetCost() {
       setUploadProgress(50);
       setUploadStatus(`Processing ${jsonData.length.toLocaleString()} rows...`);
 
-      const response = await fetch('/api/approved-cost/upload', {
+      const response = await fetch('/api/fs/approved-cost/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

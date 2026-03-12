@@ -1198,11 +1198,11 @@ export default function Dashboard() {
   // Sync declined repairs mutation - updates trucks with "Decline and Submit for Sale" POs to "Declined Repair" status
   const syncDeclinedMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/pos/sync-declined-repairs', {});
+      const response = await apiRequest('POST', '/api/fs/pos/sync-declined-repairs', {});
       return response.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/trucks'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/trucks'] });
       
       const skippedNote = data.skippedApprovedForSale > 0 
         ? ` (${data.skippedApprovedForSale} skipped - already "Approved for sale")` 
@@ -1237,7 +1237,7 @@ export default function Dashboard() {
   // Inline edit mutation
   const inlineEditMutation = useMutation({
     mutationFn: async ({ truckId, field, value }: { truckId: string; field: string; value: any }) => {
-      const res = await apiRequest("PATCH", `/api/trucks/${truckId}`, { 
+      const res = await apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { 
         [field]: value,
         lastUpdatedBy: currentUser || "User"
       });
@@ -1266,7 +1266,7 @@ export default function Dashboard() {
   const saveEdit = (truckId: string, field: string, value: any) => {
     // When mainStatus changes to "Approved for sale", auto-set subStatus to "Clearing Softeon Inventory" and owner to "Jenn D."
     if (field === "mainStatus" && value === "Approved for sale") {
-      apiRequest("PATCH", `/api/trucks/${truckId}`, { 
+      apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { 
         mainStatus: value,
         subStatus: "Clearing Softeon Inventory",
         shsOwner: "Jenn D.",
@@ -1290,7 +1290,7 @@ export default function Dashboard() {
       const truck = trucks?.find(t => t.id === truckId);
       const currentMainStatus = truck?.mainStatus || "Confirming Status";
       
-      apiRequest("PATCH", `/api/trucks/${truckId}`, { 
+      apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { 
         registrationStickerValid: value,
         mainStatus: currentMainStatus, // Include current mainStatus to satisfy validation
         subStatus: "Ordering duplicate tags",
@@ -1347,7 +1347,7 @@ export default function Dashboard() {
       }
     }
     
-    apiRequest("PATCH", `/api/trucks/${truckId}`, { 
+    apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { 
       ...updates,
       lastUpdatedBy: currentUser || "User"
     }).then(() => {
@@ -1500,7 +1500,7 @@ export default function Dashboard() {
   const handleCallRepairShop = async (truckId: string) => {
     setCallingTruckId(truckId);
     try {
-      await apiRequest("POST", `/api/trucks/${truckId}/call-repair-shop`, {});
+      await apiRequest("POST", `/api/fs/trucks/${truckId}/call-repair-shop`, {});
       toast({
         title: "Call initiated",
         description: "The repair shop is being called now.",
@@ -1519,7 +1519,7 @@ export default function Dashboard() {
   const handleCallTechnician = async (truckId: string) => {
     setCallingTechTruckId(truckId);
     try {
-      await apiRequest("POST", `/api/trucks/${truckId}/call-technician`, {});
+      await apiRequest("POST", `/api/fs/trucks/${truckId}/call-technician`, {});
       toast({
         title: "Call initiated",
         description: "The technician is being called now.",

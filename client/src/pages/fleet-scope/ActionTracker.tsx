@@ -502,7 +502,7 @@ export default function ActionTracker() {
   // Inline edit mutation for status changes
   const inlineEditMutation = useMutation({
     mutationFn: async ({ truckId, updates }: { truckId: string; updates: Record<string, any> }) => {
-      const res = await apiRequest("PATCH", `/api/trucks/${truckId}`, { 
+      const res = await apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { 
         ...updates,
         lastUpdatedBy: currentUser || "User"
       });

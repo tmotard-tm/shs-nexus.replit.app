@@ -242,7 +242,7 @@ export default function RawPOs() {
   const { data, isLoading, error } = useQuery<ScraperVehicleData>({
     queryKey: ["/api/fs/trucks/scraper-detail", truckNumber],
     queryFn: async () => {
-      const res = await fetch(`/api/trucks/scraper-detail/${truckNumber}`);
+      const res = await fetch(`/api/fs/trucks/scraper-detail/${truckNumber}`);
       if (!res.ok) throw new Error("Vehicle not found in scraper");
       return res.json();
     },

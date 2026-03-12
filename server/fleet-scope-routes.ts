@@ -1206,7 +1206,7 @@ export function createFleetScopeRouter(): Router {
   // PUBLIC API: Rental summary (must be before :truckNumber route)
   app.get("/public/rentals/summary", async (req, res) => {
     const apiKey = req.headers['x-api-key'];
-    const expectedApiKey = process.env.PUBLIC_SPARES_API_KEY;
+    const expectedApiKey = process.env.FS_PUBLIC_SPARES_API_KEY;
     if (!expectedApiKey) return res.status(503).json({ success: false, message: "API not configured." });
     if (!apiKey || apiKey !== expectedApiKey) return res.status(401).json({ success: false, message: "Unauthorized. Valid X-API-Key header required." });
     try {
@@ -1358,7 +1358,7 @@ export function createFleetScopeRouter(): Router {
     try {
       // API Key authentication
       const apiKey = req.headers['x-api-key'];
-      const expectedApiKey = process.env.PUBLIC_SPARES_API_KEY;
+      const expectedApiKey = process.env.FS_PUBLIC_SPARES_API_KEY;
       
       if (!expectedApiKey) {
         console.error("[Public API Spares] PUBLIC_SPARES_API_KEY not configured");
@@ -1667,7 +1667,7 @@ export function createFleetScopeRouter(): Router {
     try {
       // API Key authentication
       const apiKey = req.headers['x-api-key'];
-      const expectedApiKey = process.env.PUBLIC_SPARES_API_KEY;
+      const expectedApiKey = process.env.FS_PUBLIC_SPARES_API_KEY;
       
       if (!expectedApiKey) {
         console.error("[Public API Spares] PUBLIC_SPARES_API_KEY not configured");
@@ -1718,7 +1718,7 @@ export function createFleetScopeRouter(): Router {
     try {
       // API Key authentication
       const apiKey = req.headers['x-api-key'];
-      const expectedApiKey = process.env.PUBLIC_SPARES_API_KEY;
+      const expectedApiKey = process.env.FS_PUBLIC_SPARES_API_KEY;
       
       if (!expectedApiKey) {
         console.error("[Public API Spares] PUBLIC_SPARES_API_KEY not configured");
@@ -1773,7 +1773,7 @@ export function createFleetScopeRouter(): Router {
 
   const requirePublicApiKey = (req: any, res: any, next: any) => {
     const apiKey = req.headers['x-api-key'];
-    const expectedApiKey = process.env.PUBLIC_SPARES_API_KEY;
+    const expectedApiKey = process.env.FS_PUBLIC_SPARES_API_KEY;
     if (!expectedApiKey) {
       return res.status(503).json({ success: false, message: "API not configured. Please contact administrator." });
     }
@@ -5457,7 +5457,7 @@ Respond ONLY with valid JSON, no other text.`;
         return res.json(enrollmentMap);
       }
 
-      const apiKey = process.env.BYOV_API_KEY;
+      const apiKey = process.env.FS_BYOV_API_KEY;
       if (!apiKey) {
         console.warn("[BYOV Enrollment] BYOV_API_KEY not set");
         return res.json(enrollmentMap);
@@ -11482,7 +11482,7 @@ Respond ONLY with valid JSON, no other text.`;
   app.post("/webhooks/twilio-reg", async (req, res) => {
     try {
       // Validate Twilio signature if auth token is configured
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
+      const authToken = process.env.FS_TWILIO_AUTH_TOKEN;
       if (authToken) {
         const twilio = await import('twilio');
         const signature = req.headers['x-twilio-signature'] as string || '';

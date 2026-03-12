@@ -8,7 +8,7 @@ import { eq, and, lte } from "drizzle-orm";
 let wss: WebSocketServer | null = null;
 
 export function initWebSocket(server: Server) {
-  wss = new WebSocketServer({ server, path: "/ws" });
+  wss = new WebSocketServer({ server, path: "/fs-ws" });
 
   wss.on("connection", (ws) => {
     console.log("[WS] Client connected");

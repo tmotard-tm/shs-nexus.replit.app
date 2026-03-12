@@ -133,7 +133,7 @@ export function RegConversations({ registrationData, initialTruckNumber }: RegCo
   // Mark messages read when opening a conversation
   const markReadMutation = useMutation({
     mutationFn: (truckNumber: string) =>
-      apiRequest("PATCH", `/api/reg-messages/read/${truckNumber}`),
+      apiRequest("PATCH", `/api/fs/reg-messages/read/${truckNumber}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/reg-conversations"] });
     },
@@ -183,7 +183,7 @@ export function RegConversations({ registrationData, initialTruckNumber }: RegCo
   // WebSocket for real-time updates — connect once, reconnect with backoff
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const wsUrl = `${protocol}//${window.location.host}/fs-ws`;
     let retryDelay = 2000;
     let destroyed = false;
 

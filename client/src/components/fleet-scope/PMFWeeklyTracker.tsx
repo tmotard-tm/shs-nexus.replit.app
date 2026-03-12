@@ -105,9 +105,9 @@ export function PMFWeeklyTracker({ aggregatedAssets }: PMFWeeklyTrackerProps) {
   // Fetch status events for the past 30 days
   const thirtyDaysAgo = startOfDay(subDays(new Date(), 30));
   const { data: statusEvents = [] } = useQuery<PmfStatusEvent[]>({
-    queryKey: ['/api/pmf/status-events', thirtyDaysAgo.toISOString()],
+    queryKey: ['/api/fs/pmf/status-events', thirtyDaysAgo.toISOString()],
     queryFn: async () => {
-      const res = await fetch(`/api/pmf/status-events?startDate=${thirtyDaysAgo.toISOString()}`);
+      const res = await fetch(`/api/fs/pmf/status-events?startDate=${thirtyDaysAgo.toISOString()}`);
       if (!res.ok) return [];
       return res.json();
     },

@@ -124,12 +124,12 @@ function FinalApprovalCell({
 
   const updateMutation = useMutation({
     mutationFn: async (finalApproval: string) => {
-      const response = await apiRequest('PATCH', `/api/pos/${order.id}/final-approval`, { finalApproval });
+      const response = await apiRequest('PATCH', `/api/fs/pos/${order.id}/final-approval`, { finalApproval });
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/pos'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/pos/final-approval-options'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/pos'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/pos/final-approval-options'] });
       setIsOpen(false);
       setShowCustomInput(false);
       setCustomValue("");
@@ -263,11 +263,11 @@ function SubmittedInHolmanCell({ order }: { order: PORecord }) {
 
   const updateMutation = useMutation({
     mutationFn: async (submittedInHolman: string) => {
-      const response = await apiRequest('PATCH', `/api/pos/${order.id}/submitted-in-holman`, { submittedInHolman });
+      const response = await apiRequest('PATCH', `/api/fs/pos/${order.id}/submitted-in-holman`, { submittedInHolman });
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/pos'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/pos'] });
       setIsOpen(false);
     },
     onError: (error: Error) => {
@@ -384,7 +384,7 @@ function POPriorityView() {
   const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set());
 
   const { data: prioData, isLoading: prioLoading, error: prioError } = useQuery<POPriorityResponse>({
-    queryKey: ['/api/po-priority'],
+    queryKey: ['/api/fs/po-priority'],
   });
 
   const displayColumns = useMemo(() => {
@@ -683,12 +683,12 @@ export default function POs() {
   const { toast } = useToast();
 
   const { data: poData, isLoading } = useQuery<POApiResponse>({
-    queryKey: ['/api/pos'],
+    queryKey: ['/api/fs/pos'],
     retry: false,
   });
 
   const { data: approvalOptions = [] } = useQuery<string[]>({
-    queryKey: ['/api/pos/final-approval-options'],
+    queryKey: ['/api/fs/pos/final-approval-options'],
     retry: false,
   });
 
@@ -699,12 +699,12 @@ export default function POs() {
       poNumberColumn: string;
       importedBy?: string;
     }) => {
-      const response = await apiRequest('POST', '/api/pos/import', payload);
+      const response = await apiRequest('POST', '/api/fs/pos/import', payload);
       return response.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/pos'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/pos/final-approval-options'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/pos'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/pos/final-approval-options'] });
       
       let message = `${data.created} records imported`;
       if (data.preservedApprovals > 0) {
@@ -732,11 +732,11 @@ export default function POs() {
 
   const syncDeclinedMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/pos/sync-declined-repairs', {});
+      const response = await apiRequest('POST', '/api/fs/pos/sync-declined-repairs', {});
       return response.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/trucks'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/fs/trucks'] });
       
       const skippedNote = data.skippedApprovedForSale > 0 
         ? ` (${data.skippedApprovedForSale} skipped - already "Approved for sale")` 

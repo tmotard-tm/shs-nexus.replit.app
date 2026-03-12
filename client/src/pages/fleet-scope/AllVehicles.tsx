@@ -277,7 +277,7 @@ export default function AllVehicles() {
 
   const updateSnapshotMutation = useMutation({
     mutationFn: async ({ id, pickupsScheduled }: { id: string; pickupsScheduled: number }) => {
-      await apiRequest("PATCH", `/api/pickup-weekly-snapshots/${id}`, { pickupsScheduled });
+      await apiRequest("PATCH", `/api/fs/pickup-weekly-snapshots/${id}`, { pickupsScheduled });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/pickup-weekly-snapshots"] });

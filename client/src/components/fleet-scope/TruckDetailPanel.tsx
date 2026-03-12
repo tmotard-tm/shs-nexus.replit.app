@@ -131,7 +131,7 @@ function EditableInfoRow({
 
   const mutation = useMutation({
     mutationFn: async (newValue: string) => {
-      await apiRequest("PATCH", `/api/trucks/${truckId}`, { [fieldName]: newValue });
+      await apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { [fieldName]: newValue });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks", truckId] });
@@ -259,7 +259,7 @@ function EditableBoolRow({
 
   const mutation = useMutation({
     mutationFn: async (newValue: boolean) => {
-      await apiRequest("PATCH", `/api/trucks/${truckId}`, { [fieldName]: newValue });
+      await apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { [fieldName]: newValue });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks", truckId] });
@@ -401,7 +401,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
 
   const commentMutation = useMutation({
     mutationFn: async (comments: string) => {
-      await apiRequest("PATCH", `/api/trucks/${truckId}`, { comments });
+      await apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { comments });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks", truckId] });

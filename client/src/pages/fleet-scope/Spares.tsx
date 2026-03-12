@@ -709,7 +709,7 @@ export default function Spares() {
     
     setIsCheckingAssignment(true);
     try {
-      const response = await fetch(`/api/spares/check-assigned/${truckNum.trim()}`, {
+      const response = await fetch(`/api/fs/spares/check-assigned/${truckNum.trim()}`, {
         signal: abortController.signal
       });
       const data = await response.json();

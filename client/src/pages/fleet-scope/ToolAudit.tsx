@@ -113,7 +113,7 @@ export default function ToolAudit() {
       setLoading(true);
       setError(null);
       
-      const response = await fetch(`/api/pmf/conditionreport/${id}`);
+      const response = await fetch(`/api/fs/pmf/conditionreport/${id}`);
       const data = await response.json();
       
       if (data.success && data.conditionreport) {
