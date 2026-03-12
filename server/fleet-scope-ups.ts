@@ -45,8 +45,8 @@ export interface UPSTrackingResult {
 }
 
 async function getAccessToken(): Promise<string> {
-  const clientId = process.env.UPS_CLIENT_ID;
-  const clientSecret = process.env.UPS_API_CLIENT_SECRET;
+  const clientId = process.env.FS_UPS_CLIENT_ID;
+  const clientSecret = process.env.FS_UPS_API_CLIENT_SECRET;
   
   if (!clientId || !clientSecret) {
     throw new Error("UPS API credentials not configured. Please set UPS_CLIENT_ID and UPS_API_CLIENT_SECRET environment variables.");

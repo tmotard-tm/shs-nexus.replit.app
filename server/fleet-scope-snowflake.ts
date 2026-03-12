@@ -16,7 +16,7 @@ interface SnowflakeConfig {
 }
 
 function getPrivateKey(): string {
-  const keyPath = process.env.SNOWFLAKE_PRIVATE_KEY_PATH;
+  const keyPath = process.env.FS_SNOWFLAKE_PRIVATE_KEY_PATH;
   if (!keyPath) {
     throw new Error('SNOWFLAKE_PRIVATE_KEY_PATH environment variable is not set');
   }
@@ -30,10 +30,10 @@ function getPrivateKey(): string {
 }
 
 export function getSnowflakeConfig(): SnowflakeConfig {
-  const account = process.env.SNOWFLAKE_ACCOUNT;
-  const username = process.env.SNOWFLAKE_USER;
-  const database = process.env.SNOWFLAKE_DATABASE;
-  const schema = process.env.SNOWFLAKE_SCHEMA;
+  const account = process.env.FS_SNOWFLAKE_ACCOUNT;
+  const username = process.env.FS_SNOWFLAKE_USER;
+  const database = process.env.FS_SNOWFLAKE_DATABASE;
+  const schema = process.env.FS_SNOWFLAKE_SCHEMA;
 
   if (!account || !username || !database || !schema) {
     throw new Error('Missing required Snowflake environment variables');
@@ -176,7 +176,7 @@ export async function testConnection(): Promise<boolean> {
 }
 
 export async function getTableData(tableName?: string, limit: number = 100): Promise<any[]> {
-  const table = tableName || process.env.SNOWFLAKE_TABLE;
+  const table = tableName || process.env.FS_SNOWFLAKE_TABLE;
   if (!table) {
     throw new Error('No table name provided');
   }
@@ -186,7 +186,7 @@ export async function getTableData(tableName?: string, limit: number = 100): Pro
 }
 
 export async function getTableSchema(tableName?: string): Promise<any[]> {
-  const table = tableName || process.env.SNOWFLAKE_TABLE;
+  const table = tableName || process.env.FS_SNOWFLAKE_TABLE;
   if (!table) {
     throw new Error('No table name provided');
   }

@@ -2838,7 +2838,7 @@ export function createFleetScopeRouter(): Router {
       }
 
       // Generate summary with OpenAI
-      if (!process.env.OPENAI_API_KEY) {
+      if (!process.env.FS_OPENAI_API_KEY) {
         console.warn("[ElevenLabs Webhook] No OPENAI_API_KEY, skipping summary");
         return res.status(200).json({ received: true, matched: true, summarized: false });
       }
@@ -2864,7 +2864,7 @@ Respond ONLY with valid JSON, no other text.`;
       const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${process.env.FS_OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
