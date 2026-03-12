@@ -36,8 +36,9 @@ export function AmsVehiclePanel({ vin }: AmsVehiclePanelProps) {
 
   const vehicle = data?.vehicle;
   const recentComments: any[] = data?.recentComments || [];
+  const found = data?.found !== false;
 
-  if (error || !vehicle) {
+  if (error || !found || !vehicle) {
     return (
       <Card>
         <CardHeader className="pb-3">
@@ -47,7 +48,7 @@ export function AmsVehiclePanel({ vin }: AmsVehiclePanelProps) {
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground">
-            {error ? 'Unable to load AMS data' : 'No AMS data available'}
+            {error ? 'Unable to load AMS data' : (data?.reason || 'No AMS data available')}
           </p>
         </CardContent>
       </Card>
@@ -107,6 +108,9 @@ export function AmsVehiclePanel({ vin }: AmsVehiclePanelProps) {
                 {recentComments.map((c: any, i: number) => (
                   <div key={i} className="text-xs p-2 bg-muted/30 rounded">
                     <span className="text-muted-foreground">{c.CommentDate || c.CreatedDate || ''}</span>
+                    {(c.Author || c.CreatedBy || c.User) && (
+                      <span className="text-muted-foreground font-medium"> by {c.Author || c.CreatedBy || c.User}</span>
+                    )}
                     {' — '}
                     <span>{c.CommentText || c.Comment || c.Notes || ''}</span>
                   </div>

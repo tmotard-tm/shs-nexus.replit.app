@@ -8394,6 +8394,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/samsara/vehicles/by-vin/:vin", requireAuth, async (req, res) => {
+    try {
+      const { vin } = req.params;
+      const samsaraService = getSamsaraService();
+      const data = await samsaraService.getVehicles();
+      const vehicle = data.find((v: any) => v.VIN === vin || v.vin === vin);
+      if (!vehicle) return res.json({ found: false, vehicle: null, reason: "Vehicle not found in Samsara" });
+      res.json({ found: true, vehicle });
+    } catch (error: any) {
+      res.json({ found: false, vehicle: null, reason: error.message });
+    }
+  });
+
   app.get("/api/samsara/vehicles/:vehicleId", requireAuth, async (req, res) => {
     try {
       const { vehicleId } = req.params;
@@ -12728,17 +12741,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/ams/vehicles/:vin/summary", requireAuth, async (req: any, res) => {
     try {
+      if (!amsApiService.isConfigured()) {
+        return res.json({ found: false, vehicle: null, recentComments: [], reason: "AMS not configured" });
+      }
       const [vehicleResult, commentsResult] = await Promise.allSettled([
         amsApiService.getVehicleByVin(req.params.vin),
         amsApiService.getComments(req.params.vin),
       ]);
       const vehicle = vehicleResult.status === 'fulfilled' ? vehicleResult.value : null;
+      if (!vehicle) {
+        return res.json({ found: false, vehicle: null, recentComments: [], reason: "Vehicle not found in AMS" });
+      }
       const allComments = commentsResult.status === 'fulfilled' ? commentsResult.value : [];
       const recentComments = Array.isArray(allComments) ? allComments.slice(0, 5) : [];
-      res.json({ vehicle, recentComments });
+      res.json({ found: true, vehicle, recentComments });
     } catch (error: any) {
       console.error("Error fetching AMS vehicle summary:", error);
-      res.status(500).json({ message: error.message || "Failed to fetch vehicle summary" });
+      res.json({ found: false, vehicle: null, recentComments: [], reason: error.message });
     }
   });
 
@@ -14361,7 +14380,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const conditions: any[] = [];
       if (req.query.fleetOpLogId) conditions.push(eq(opEventsTable.fleetOpLogId, Number(req.query.fleetOpLogId)));
       if (req.query.system) conditions.push(eq(opEventsTable.system, req.query.system as string));
-      if (req.query.status) conditions.push(eq(opEventsTable.status, req.query.status as string));
+      if (req.query.outcome) conditions.push(eq(opEventsTable.outcome, req.query.outcome as string));
+      if (req.query.status) conditions.push(eq(opEventsTable.outcome, req.query.status as string));
+      if (req.query.from) conditions.push(sql`${opEventsTable.createdAt} >= ${new Date(req.query.from as string)}`);
+      if (req.query.to) conditions.push(sql`${opEventsTable.createdAt} <= ${new Date(req.query.to as string)}`);
 
       let query = db.select().from(opEventsTable);
       if (conditions.length > 0) {
@@ -14384,10 +14406,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const eventId = Number(req.params.id);
       const [event] = await db.select().from(opEventsTable).where(eq(opEventsTable.id, eventId)).limit(1);
       if (!event) return res.status(404).json({ message: "Event not found" });
-      if (event.status === "success") return res.status(400).json({ message: "Event already succeeded" });
+      if (event.outcome === "success") return res.status(400).json({ message: "Event already succeeded" });
 
       await db.update(opEventsTable)
-        .set({ status: "failed", nextRetryAt: new Date(), retryCount: Math.max(0, event.retryCount - 1), updatedAt: new Date() })
+        .set({ outcome: "failed", nextRetryAt: new Date(), attemptCount: Math.max(0, event.attemptCount - 1), updatedAt: new Date() })
         .where(eq(opEventsTable.id, eventId));
 
       const { retryFailedOperationEvents } = await import("./fleet-operations-service");
