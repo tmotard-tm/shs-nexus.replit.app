@@ -111,6 +111,7 @@ export default function TechProfiles() {
   const { data: changeHistoryData, isLoading: loadingHistory } = useQuery<{
     techId: string;
     cdcLog: ChangeLogEntry[];
+    tpmsApiHistory: Array<{ entryDate: string; fieldChanged: string; valueBefore?: string; valueAfter?: string; changedBy?: string; source: string }>;
     currentTpmsState: any;
     tpmsStateSource: string;
     pendingCount: number;
@@ -128,6 +129,7 @@ export default function TechProfiles() {
   const changeHistory: ChangeLogEntry[] = Array.isArray(changeHistoryData)
     ? changeHistoryData
     : (changeHistoryData?.cdcLog ?? []);
+  const tpmsApiHistory = Array.isArray(changeHistoryData) ? [] : (changeHistoryData?.tpmsApiHistory ?? []);
   const currentTpmsState = Array.isArray(changeHistoryData) ? null : changeHistoryData?.currentTpmsState;
   const tpmsStateSource = Array.isArray(changeHistoryData) ? 'none' : (changeHistoryData?.tpmsStateSource ?? 'none');
   const pendingCdcCount = Array.isArray(changeHistoryData) ? 0 : (changeHistoryData?.pendingCount ?? 0);
@@ -724,6 +726,39 @@ export default function TechProfiles() {
                           </div>
                         ) : null)}
                       </div>
+                    </div>
+                  )}
+
+                  {/* TPMS API History entries (from getTechsUpdatedAfter) */}
+                  {tpmsApiHistory.length > 0 && (
+                    <div className="border rounded-md overflow-hidden">
+                      <div className="px-3 py-2 bg-muted/50 border-b text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        TPMS API History ({tpmsApiHistory.length})
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Field</TableHead>
+                            <TableHead>Before</TableHead>
+                            <TableHead>After</TableHead>
+                            <TableHead>Changed By</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {tpmsApiHistory.map((entry, i) => (
+                            <TableRow key={i}>
+                              <TableCell className="text-xs whitespace-nowrap">
+                                {new Date(entry.entryDate).toLocaleString()}
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">{entry.fieldChanged}</TableCell>
+                              <TableCell className="text-sm max-w-32 truncate">{entry.valueBefore || "—"}</TableCell>
+                              <TableCell className="text-sm max-w-32 truncate">{entry.valueAfter || "—"}</TableCell>
+                              <TableCell className="text-sm">{entry.changedBy || "TPMS"}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
                     </div>
                   )}
 

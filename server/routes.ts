@@ -10320,19 +10320,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .orderBy(desc(tpmsChangeLog.createdAt))
         .limit(limit);
       
-      // Merge with current TPMS API state — provides a "latest from source" baseline
-      // so consumers can diff local CDC against what the TPMS API currently reports
+      // Fetch current TPMS API state + TPMS-side history entries
       let currentTpmsState: any = null;
       let tpmsStateSource: 'api' | 'cache' | 'none' = 'none';
+      let tpmsApiHistory: any[] = [];
       try {
         const [profile] = await db.select({ enterpriseId: tpmsTechProfiles.enterpriseId })
           .from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
         if (profile?.enterpriseId) {
           const tpmsService = getTPMSService();
-          const result = await tpmsService.getTechInfoWithCache(profile.enterpriseId);
-          if (result) {
-            currentTpmsState = result.techInfo;
-            tpmsStateSource = result.source === 'live' ? 'api' : 'cache';
+          const { getTpmsApiService } = await import("./tpms-api-service");
+          const tpmsApiService = getTpmsApiService();
+
+          const [profileResult, apiHistory] = await Promise.allSettled([
+            tpmsService.getTechInfoWithCache(profile.enterpriseId),
+            tpmsApiService.getChangeHistory(profile.enterpriseId, techId),
+          ]);
+
+          if (profileResult.status === 'fulfilled' && profileResult.value) {
+            currentTpmsState = profileResult.value.techInfo;
+            tpmsStateSource = profileResult.value.source === 'live' ? 'api' : 'cache';
+          }
+          if (apiHistory.status === 'fulfilled') {
+            tpmsApiHistory = apiHistory.value;
           }
         }
       } catch (e: any) {
@@ -10342,6 +10352,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         techId,
         cdcLog: history,
+        tpmsApiHistory,
         currentTpmsState,
         tpmsStateSource,
         pendingCount: history.filter(h => !h.confirmedByTpms && !h.confirmedAt).length,
@@ -10825,43 +10836,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        // CDC aging: flag entries that have been pending > 48h without confirmation
+        // CDC aging: flag entries that have been unconfirmed > 48h
+        // confirmedByTpms is a non-nullable boolean (default false), so use eq(..., false)
         const CDC_AGING_WINDOW_MS = 48 * 60 * 60 * 1000;
         const agingCutoff = new Date(Date.now() - CDC_AGING_WINDOW_MS);
+        const { activityLogs: activityLogsTable, allTechs: allTechsTable } = await import("@shared/schema");
         const agedPending = await db.select().from(tpmsChangeLog)
           .where(
             and(
               isNull(tpmsChangeLog.confirmedAt),
-              isNull(tpmsChangeLog.confirmedByTpms),
+              eq(tpmsChangeLog.confirmedByTpms, false),
               lt(tpmsChangeLog.createdAt, agingCutoff)
             )
           );
 
         if (agedPending.length > 0) {
-          console.warn(`[TPMS Scheduler] ${agedPending.length} CDC entries aged >48h without TPMS confirmation — may need manual review`);
+          console.warn(`[TPMS Scheduler] ${agedPending.length} CDC entries aged >48h without TPMS confirmation — flagging in activity log`);
+          await db.insert(activityLogsTable).values({
+            userId: "system",
+            action: "tpms_cdc_aging_alert",
+            entityType: "tpms",
+            details: JSON.stringify({
+              count: agedPending.length,
+              techIds: [...new Set(agedPending.map(e => e.techId).filter(Boolean))],
+              agingWindowHours: 48,
+            }),
+          });
         }
 
         // Snowflake drift check: compare allTechs.truckLu vs tpmsTechProfiles.truckNo
-        const { allTechs: allTechsTable } = await import("@shared/schema");
         const profiles = await db.select({
           enterpriseId: tpmsTechProfiles.enterpriseId,
           profileTruckNo: tpmsTechProfiles.truckNo,
         }).from(tpmsTechProfiles).where(isNotNull(tpmsTechProfiles.enterpriseId));
 
-        let driftCount = 0;
+        const driftEntries: Array<{ enterpriseId: string; tpmsNo: string; snowflakeNo: string }> = [];
         for (const profile of profiles) {
           if (!profile.enterpriseId) continue;
           const [atRow] = await db.select({ truckLu: allTechsTable.truckLu })
             .from(allTechsTable)
             .where(eq(allTechsTable.techRacfid, profile.enterpriseId))
             .limit(1);
-          if (atRow && atRow.truckLu && profile.profileTruckNo && atRow.truckLu.trim() !== profile.profileTruckNo.trim()) {
-            console.warn(`[TPMS Scheduler] Drift: ${profile.enterpriseId} — TPMS profile says ${profile.profileTruckNo}, allTechs says ${atRow.truckLu}`);
-            driftCount++;
+          if (atRow?.truckLu && profile.profileTruckNo && atRow.truckLu.trim() !== profile.profileTruckNo.trim()) {
+            driftEntries.push({ enterpriseId: profile.enterpriseId, tpmsNo: profile.profileTruckNo, snowflakeNo: atRow.truckLu });
           }
         }
-        if (driftCount > 0) {
-          console.warn(`[TPMS Scheduler] Snowflake drift found for ${driftCount} technician(s) — truck assignments may be out of sync`);
+
+        if (driftEntries.length > 0) {
+          console.warn(`[TPMS Scheduler] Snowflake drift found for ${driftEntries.length} technician(s) — logging to activity log`);
+          await db.insert(activityLogsTable).values({
+            userId: "system",
+            action: "tpms_snowflake_drift",
+            entityType: "tpms",
+            details: JSON.stringify({
+              count: driftEntries.length,
+              entries: driftEntries.slice(0, 50),
+            }),
+          });
         } else {
           console.log(`[TPMS Scheduler] Snowflake drift check: no truck assignment drift detected`);
         }
