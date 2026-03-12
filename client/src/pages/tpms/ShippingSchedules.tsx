@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -105,9 +105,11 @@ export default function ShippingSchedules() {
     setNewSchedule({ Su: false, Mo: false, Tu: false, We: false, Th: false, Fr: false, Sa: false });
   };
 
-  if (searchQuery.data && results.length === 0 && searchQuery.data.length > 0) {
-    setResults(searchQuery.data.map(t => ({ ...t, selected: false })));
-  }
+  useEffect(() => {
+    if (searchQuery.data && searchQuery.data.length > 0) {
+      setResults(searchQuery.data.map(t => ({ ...t, selected: false })));
+    }
+  }, [searchQuery.data]);
 
   const toggleSelection = (idx: number) => {
     setResults(prev => prev.map((t, i) => i === idx ? { ...t, selected: !t.selected } : t));

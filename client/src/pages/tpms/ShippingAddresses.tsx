@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -162,9 +162,11 @@ export default function ShippingAddresses() {
 
   const selectedTechs = techResults.filter(t => t.selected);
 
-  if (searchQuery.data && techResults.length === 0 && searchQuery.data.length > 0) {
-    setTechResults(searchQuery.data.map(t => ({ ...t, selected: false })));
-  }
+  useEffect(() => {
+    if (searchQuery.data && searchQuery.data.length > 0) {
+      setTechResults(searchQuery.data.map(t => ({ ...t, selected: false })));
+    }
+  }, [searchQuery.data]);
 
   const handleConfirm = () => {
     addMutation.mutate({ techs: selectedTechs, address: newAddress });
@@ -300,13 +302,15 @@ export default function ShippingAddresses() {
                         <TableHead>Name</TableHead>
                         <TableHead>District-Tech ID</TableHead>
                         <TableHead>Enterprise ID</TableHead>
+                        <TableHead>Address Type</TableHead>
                         <TableHead>Current Address</TableHead>
                         <TableHead className="w-20">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {techResults.map((tech, idx) => {
-                        const primaryAddr = tech.shippingAddresses?.[0];
+                        const addresses: any[] = tech.shippingAddresses || [];
+                        const primaryAddr = addresses.find(a => a.addressType === "PRIMARY") || addresses[0];
                         return (
                           <TableRow key={tech.techId}>
                             <TableCell>
@@ -318,8 +322,13 @@ export default function ShippingAddresses() {
                             <TableCell className="font-medium">{tech.lastName}, {tech.firstName}</TableCell>
                             <TableCell>{tech.districtNo}-{tech.techId}</TableCell>
                             <TableCell>{tech.enterpriseId}</TableCell>
+                            <TableCell>
+                              {primaryAddr ? (
+                                <Badge variant="outline" className="text-xs font-mono">{primaryAddr.addressType}</Badge>
+                              ) : <span className="text-muted-foreground text-xs">—</span>}
+                            </TableCell>
                             <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
-                              {primaryAddr ? `${primaryAddr.addrLine1 || ""}, ${primaryAddr.city || ""} ${primaryAddr.stateCd || ""}` : "—"}
+                              {primaryAddr ? `${primaryAddr.addrLine1 || ""}, ${primaryAddr.city || ""} ${primaryAddr.stateCd || ""}`.trim().replace(/^,\s*/, "") : "—"}
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1">
