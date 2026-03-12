@@ -14296,7 +14296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // =====================================================================
-  // Fleet Operations (T004) — cross-system assign/unassign/transfer/address
+  // Fleet Operations (T004) — cross-system assign/unassign/address
   // =====================================================================
   const { fleetOpsService } = await import("./fleet-operations-service");
 
