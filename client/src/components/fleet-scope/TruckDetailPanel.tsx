@@ -455,7 +455,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
                       data-testid="button-raw-pos"
                       onClick={() => {
                         const num = (truck.truckNumber || '').toString().replace(/^0+/, '');
-                        window.open(`/raw-pos/${num}`, '_blank', 'noopener,noreferrer');
+                        window.open(`/fleet-scope/raw-pos/${num}`, '_blank', 'noopener,noreferrer');
                       }}
                     >
                       <FileText className="w-3.5 h-3.5 mr-1.5" />
@@ -463,7 +463,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
                     </Button>
                   )}
                 </div>
-                <Link href={`/trucks/${truck.id}?from=dashboard`}>
+                <Link href={`/fleet-scope/trucks/${truck.id}?from=dashboard`}>
                   <Button variant="outline" size="sm" data-testid="button-open-full-detail">
                     <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
                     Full Details
