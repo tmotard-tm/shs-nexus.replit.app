@@ -45,7 +45,7 @@ export function AssignmentHistoryDialog({
       case 'sync':
         return <Badge className="bg-purple-100 text-purple-800">Synced</Badge>;
       default:
-        return <Badge className="bg-gray-100 text-gray-800">{action === 'transfer' ? 'Reassigned' : action}</Badge>;
+        return <Badge className="bg-gray-100 text-gray-800">{action?.toLowerCase() === 'transfer' ? 'Reassigned' : action}</Badge>;
     }
   };
 
