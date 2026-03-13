@@ -13850,7 +13850,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Cross-system integrity analysis: Enterprise (renter-centric) vs Holman (truck/PO-centric)
   // Uses same transformation logic as the /open endpoint to ensure consistent comparison
-  app.get("/api/rental-ops/integrity", requireAuth, async (_req, res) => {
+  app.get("/api/rental-ops/integrity", requireAuth, async (req, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });

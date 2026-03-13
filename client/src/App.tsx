@@ -64,6 +64,10 @@ import { RoleProtectedRoute } from "@/components/role-protected-route";
 import { RoleBasedHome } from "@/components/role-based-home";
 import { SecurityQuestionsGate } from "@/components/security-questions-gate";
 import FleetScopeLayout from "@/pages/fleet-scope/FleetScopeLayout";
+import RawPOs from "@/pages/fleet-scope/RawPOs";
+import TruckDetail from "@/pages/fleet-scope/TruckDetail";
+import EditTruck from "@/pages/fleet-scope/EditTruck";
+import { UserProvider as FleetScopeUserProvider } from "@/context/FleetScopeUserContext";
 import TpmsLayout from "@/pages/tpms/TpmsLayout";
 import { TpmsGate } from "@/components/tpms/TpmsGate";
 
@@ -437,6 +441,28 @@ function Router() {
             <TestRepairResults />
           </MainContent>
         </ProtectedRoute>
+      </Route>
+
+      <Route path="/fleet-scope/raw-pos/:truckNumber">
+        <RoleProtectedRoute>
+          <RawPOs />
+        </RoleProtectedRoute>
+      </Route>
+
+      <Route path="/fleet-scope/trucks/new">
+        <RoleProtectedRoute>
+          <FleetScopeUserProvider>
+            <EditTruck />
+          </FleetScopeUserProvider>
+        </RoleProtectedRoute>
+      </Route>
+
+      <Route path="/fleet-scope/trucks/:id">
+        <RoleProtectedRoute>
+          <FleetScopeUserProvider>
+            <TruckDetail />
+          </FleetScopeUserProvider>
+        </RoleProtectedRoute>
       </Route>
 
       <Route path="/fleet-scope/:rest*">

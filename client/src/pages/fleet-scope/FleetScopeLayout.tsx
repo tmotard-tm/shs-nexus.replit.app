@@ -20,9 +20,6 @@ import Registration from "./Registration";
 import Decommissioning from "./Decommissioning";
 import ToolAudit from "./ToolAudit";
 import BatchCaller from "./BatchCaller";
-import RawPOs from "./RawPOs";
-import TruckDetail from "./TruckDetail";
-import EditTruck from "./EditTruck";
 import { TodaysQueue, VehicleSearch, DiscrepancyFinder } from "./PlaceholderPages";
 import NotFound from "@/pages/not-found";
 
@@ -62,12 +59,6 @@ export default function FleetScopeLayout() {
                 <Route path="/fleet-scope/queue" component={TodaysQueue} />
                 <Route path="/fleet-scope/vehicle-search" component={VehicleSearch} />
                 <Route path="/fleet-scope/discrepancies" component={DiscrepancyFinder} />
-                <Route path="/fleet-scope/raw-pos/:truckNumber" component={RawPOs} />
-                <Route path="/raw-pos/:truckNumber" component={RawPOs} />
-                <Route path="/fleet-scope/trucks/new" component={EditTruck} />
-                <Route path="/trucks/new" component={EditTruck} />
-                <Route path="/fleet-scope/trucks/:id" component={TruckDetail} />
-                <Route path="/trucks/:id" component={TruckDetail} />
                 <Route component={NotFound} />
               </Switch>
             </main>
