@@ -454,12 +454,12 @@ export default function RentalOperations() {
 
         {/* Summary Cards */}
         {loadingSummary ? (
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-            {[...Array(6)].map((_, i) => <Card key={i}><CardContent className="pt-4 pb-3 px-4 h-16 animate-pulse bg-muted/40" /></Card>)}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+            {[...Array(5)].map((_, i) => <Card key={i}><CardContent className="pt-4 pb-3 px-4 h-16 animate-pulse bg-muted/40" /></Card>)}
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
               <SummaryCard
                 label="Total Open Rentals"
                 value={summary?.totalOpen}
@@ -468,6 +468,12 @@ export default function RentalOperations() {
               />
               <SummaryCard label="Total Closed" value={summary?.totalClosed} />
               <SummaryCard label="Extensions" value={summary?.extensions} color="text-amber-600 dark:text-amber-400" />
+              <SummaryCard
+                label="Open > 14 Days"
+                value={loadingOpen ? undefined : totalOver14}
+                sub={loadingOpen ? undefined : totalOpen > 0 ? `${Math.round(pctOver14 * 100)}% of open rentals` : undefined}
+                color="text-yellow-600 dark:text-yellow-400"
+              />
               <SummaryCard label="Avg Days Open" value={summary?.avgDaysOpen !== undefined ? `${summary.avgDaysOpen}d` : "—"} />
             </div>
             {summary?.divisionBreakdown && Object.keys(summary.divisionBreakdown).length > 0 && (
