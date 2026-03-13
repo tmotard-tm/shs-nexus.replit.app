@@ -14097,10 +14097,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
       const sf = getSnowflakeService();
       await sf.connect();
-      const [openRows, closedRows] = await Promise.all([
-        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(req.query?.fileDate as string)} LIMIT 2000`).catch(() => []) as Promise<any[]>,
+      const normVeh = (v: string) => v ? toDisplayNumber(v) : "";
+
+      const [ticketRows, holmanRows, closedRows] = await Promise.all([
+        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(req.query?.fileDate as string)} LIMIT 5000`).catch(() => []) as Promise<any[]>,
         sf.executeQuery(`SELECT * FROM ${RENTAL_CLOSED_TABLE} WHERE ${closedDateFilter(req.query?.fileDate as string)} LIMIT 5000`).catch(() => []) as Promise<any[]>,
       ]);
+
+      const allEntVns = new Set<string>();
+      for (const r of ticketRows) {
+        const vn = normVeh(r.VEHICLE_NUMBER || "");
+        if (vn) allEntVns.add(vn);
+      }
+
+      const entByVehicle = new Map<string, any>();
+      for (const r of ticketRows) {
+        const vn = normVeh(r.VEHICLE_NUMBER || "");
+        if (!vn) continue;
+        const existing = entByVehicle.get(vn);
+        const rDate = new Date(r.RENTAL_START_DATE || "2000-01-01").getTime();
+        const eDate = existing ? new Date(existing.RENTAL_START_DATE || "2000-01-01").getTime() : 0;
+        if (!existing || rDate > eDate) entByVehicle.set(vn, r);
+      }
+
+      const enterpriseSegment = Array.from(entByVehicle.entries()).map(([vn, r]) => {
+        const originalStartDate = entOriginalStart(r);
+        const { holmanPo } = parseClaimNumber(r.CLAIM_NUMBER || "");
+        return {
+          vehicleNumber: vn,
+          division: "",
+          renterName: (r.RENTER_NAME || "").trim(),
+          poNumber: holmanPo || "",
+          rentalStartDate: originalStartDate || "",
+          daysOpen: calcDaysOpen(originalStartDate),
+          rewriteFlag: r.NUMBER_OF_EXTENSIONS && parseInt(String(r.NUMBER_OF_EXTENSIONS)) > 0 ? "Y" : "",
+        };
+      });
+
+      const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
+      const holmanByVehicle = new Map<string, any[]>();
+      for (const r of holmanRows) {
+        const vn = normVeh(r.VEHICLE_NUMBER || "");
+        if (!vn) continue;
+        if (isEntVendor(r.RENTAL_VENDOR)) continue;
+        if (allEntVns.has(vn)) continue;
+        if (!holmanByVehicle.has(vn)) holmanByVehicle.set(vn, []);
+        holmanByVehicle.get(vn)!.push(r);
+      }
+
+      const holmanSegment = Array.from(holmanByVehicle.entries()).map(([vn, group]) => {
+        const sorted = group.sort((a: any, b: any) =>
+          new Date(b.PO_DATE || "2000-01-01").getTime() - new Date(a.PO_DATE || "2000-01-01").getTime()
+        );
+        const r = sorted[0];
+        const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE);
+        return {
+          vehicleNumber: vn,
+          division: mapDivision(r.DIVISION),
+          renterName: `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
+          poNumber: (r.PO_NUMBER || "").replace(/^'/, "").trim(),
+          rentalStartDate: startDate || "",
+          daysOpen: calcDaysOpen(startDate),
+          rewriteFlag: "",
+        };
+      });
+
+      let openData = [...enterpriseSegment, ...holmanSegment];
+      const oosVehicles = await getOosVehicleSet();
+      if (oosVehicles.size > 0) {
+        openData = openData.filter(v => !oosVehicles.has(toDisplayNumber(v.vehicleNumber || "")));
+      }
 
       const workbook = new ExcelJS.Workbook();
       workbook.creator = "Nexus Fleet Operations";
@@ -14123,16 +14190,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         for (const row of rowData) ws.addRow(row);
         ws.autoFilter = { from: "A1", to: `${String.fromCharCode(64 + cols.length)}1` };
       }
-
-      const openData = openRows.map((r: any) => ({
-        vehicleNumber: r.VEHICLE_NUMBER || r.UNIT_NUMBER || "",
-        division: r.DIVISION || "",
-        renterName: (r.RENTER_NAME || "").trim(),
-        poNumber: (r.PO_NUMBER || "").replace(/^'/, "").trim(),
-        rentalStartDate: r.RENTAL_START_DATE || "",
-        daysOpen: calcDaysOpen(r.RENTAL_START_DATE || r.START_DATE),
-        rewriteFlag: r.REWRITE_FLAG || "",
-      }));
 
       addSheet("Position Report", [
         { header: "Vehicle #", key: "vehicleNumber", width: 14 },
