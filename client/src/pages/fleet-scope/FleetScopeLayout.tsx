@@ -63,8 +63,11 @@ export default function FleetScopeLayout() {
                 <Route path="/fleet-scope/vehicle-search" component={VehicleSearch} />
                 <Route path="/fleet-scope/discrepancies" component={DiscrepancyFinder} />
                 <Route path="/fleet-scope/raw-pos/:truckNumber" component={RawPOs} />
+                <Route path="/raw-pos/:truckNumber" component={RawPOs} />
                 <Route path="/fleet-scope/trucks/new" component={EditTruck} />
+                <Route path="/trucks/new" component={EditTruck} />
                 <Route path="/fleet-scope/trucks/:id" component={TruckDetail} />
+                <Route path="/trucks/:id" component={TruckDetail} />
                 <Route component={NotFound} />
               </Switch>
             </main>
