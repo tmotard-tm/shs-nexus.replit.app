@@ -13709,7 +13709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const normVehicleNum = (v: string) => String(parseInt(v, 10) || v).trim();
         const knownVehicles = new Set<string>();
         try {
-          const vcRows = await db.select({ num: holmanVehiclesCache.holmanVehicleNumber }).from(holmanVehiclesCache).limit(5000);
+          const vcRows = await db.select({ num: holmanVehiclesCache.holmanVehicleNumber }).from(holmanVehiclesCache);
           for (const v of vcRows) if (v.num) knownVehicles.add(normVehicleNum(v.num));
         } catch {}
 
