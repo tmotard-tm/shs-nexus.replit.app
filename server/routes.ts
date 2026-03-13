@@ -14100,8 +14100,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const normVeh = (v: string) => v ? toDisplayNumber(v) : "";
 
       const [ticketRows, holmanRows, closedRows] = await Promise.all([
-        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`).catch(() => []) as Promise<any[]>,
-        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(req.query?.fileDate as string)} LIMIT 5000`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
+        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(req.query?.fileDate as string)} LIMIT 5000`) as Promise<any[]>,
         sf.executeQuery(`SELECT * FROM ${RENTAL_CLOSED_TABLE} WHERE ${closedDateFilter(req.query?.fileDate as string)} LIMIT 5000`).catch(() => []) as Promise<any[]>,
       ]);
 
