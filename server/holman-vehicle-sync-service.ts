@@ -309,46 +309,60 @@ class HolmanVehicleSyncService {
 
     try {
       console.log('[HolmanSync] Attempting live fetch from Holman API (all pages)');
-      
-      // Fetch ALL pages from Holman API
-      let allVehicleData: any[] = [];
-      let currentPage = 1;
-      let totalCount = 0;
-      let hasMorePages = true;
-      
-      while (hasMorePages) {
-        console.log(`[HolmanSync] Fetching page ${currentPage}...`);
-        
-        const apiResponse = await holmanApiService.getVehicles(
-          '2B56',           // lesseeCode
-          '0,1,2,3',        // statusCodes - all vehicle lifecycle states
-          '5',              // soldDateCode 5 = all sold vehicles regardless of sale date
-          currentPage,
-          pageSize
-        );
-        
-        const vehicleData = (apiResponse as any)?.items || apiResponse?.data || [];
-        totalCount = apiResponse?.totalCount || 0;
-        
-        if (currentPage === 1) {
-          console.log('[HolmanSync] First page response:', {
-            count: vehicleData.length,
-            totalCount: totalCount,
-            firstVehicleKeys: vehicleData[0] ? Object.keys(vehicleData[0]).slice(0, 10).join(', ') + '...' : 'N/A',
-          });
+
+      // Helper: fetch all pages for a given statusCodes + optional soldDateCode
+      const fetchAllPages = async (statusCodes: string, soldDateCode?: string): Promise<any[]> => {
+        const results: any[] = [];
+        let currentPage = 1;
+        let hasMorePages = true;
+        let totalCount = 0;
+
+        while (hasMorePages) {
+          console.log(`[HolmanSync] Fetching statusCodes=${statusCodes} page ${currentPage}...`);
+          const apiResponse = await holmanApiService.getVehicles(
+            '2B56',
+            statusCodes,
+            soldDateCode,
+            currentPage,
+            pageSize
+          );
+
+          const vehicleData = (apiResponse as any)?.items || apiResponse?.data || [];
+          totalCount = apiResponse?.totalCount || 0;
+
+          if (currentPage === 1) {
+            console.log(`[HolmanSync] statusCodes=${statusCodes} first page:`, {
+              count: vehicleData.length,
+              totalCount,
+              firstVehicleKeys: vehicleData[0] ? Object.keys(vehicleData[0]).slice(0, 10).join(', ') + '...' : 'N/A',
+            });
+          }
+
+          if (!vehicleData || vehicleData.length === 0) {
+            hasMorePages = false;
+          } else {
+            results.push(...vehicleData);
+            const totalPages = Math.ceil(totalCount / pageSize);
+            hasMorePages = currentPage < totalPages;
+            currentPage++;
+          }
         }
-        
-        if (!vehicleData || vehicleData.length === 0) {
-          hasMorePages = false;
-        } else {
-          allVehicleData = allVehicleData.concat(vehicleData);
-          const totalPages = Math.ceil(totalCount / pageSize);
-          hasMorePages = currentPage < totalPages;
-          currentPage++;
-        }
-      }
-      
-      console.log(`[HolmanSync] Fetched ${allVehicleData.length} total vehicles from ${currentPage - 1} pages (API total: ${totalCount})`);
+
+        console.log(`[HolmanSync] statusCodes=${statusCodes} total fetched: ${results.length} (API total: ${totalCount})`);
+        return results;
+      };
+
+      // Query 1: active/new/out-of-service vehicles (status 0,1,2) — no soldDateCode needed
+      // Query 2: sold vehicles (status 3) — soldDateCode=5 returns all regardless of sale date
+      // Must be two separate calls; combining them in one request causes the API to ignore status 3
+      const [activeVehicleData, soldVehicleData] = await Promise.all([
+        fetchAllPages('0,1,2'),
+        fetchAllPages('3', '5'),
+      ]);
+
+      const allVehicleData = [...activeVehicleData, ...soldVehicleData];
+
+      console.log(`[HolmanSync] Total fetched: ${allVehicleData.length} (${activeVehicleData.length} active/new/oos + ${soldVehicleData.length} sold)`);
       
       if (allVehicleData.length === 0) {
         console.log('[HolmanSync] No vehicles returned from API, falling back to cache');
