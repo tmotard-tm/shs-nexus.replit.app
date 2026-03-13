@@ -62,4 +62,4 @@ TOOL_AUDIT_TEST_EMAIL = "stephen.wong@transformco.com"
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 60000
+timeoutMs = 20000

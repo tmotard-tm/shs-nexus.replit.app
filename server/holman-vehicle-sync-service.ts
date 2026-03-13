@@ -322,7 +322,7 @@ class HolmanVehicleSyncService {
         const apiResponse = await holmanApiService.getVehicles(
           '2B56',           // lesseeCode
           '0,1,2,3',        // statusCodes - all vehicle lifecycle states
-          undefined,        // soldDateCode
+          '5',              // soldDateCode 5 = all sold vehicles regardless of sale date
           currentPage,
           pageSize
         );
