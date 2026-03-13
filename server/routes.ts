@@ -14087,7 +14087,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/rental-ops/export.xlsx", requireAuth, async (_req, res) => {
+  app.get("/api/rental-ops/export.xlsx", requireAuth, async (req, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
