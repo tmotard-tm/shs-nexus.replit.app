@@ -764,7 +764,7 @@ export function WorkModuleDialog({
                       </CardHeader>
                       <CardContent>
                         <RadioGroup value={assetsRouting} onValueChange={handleAssetsRoutingChange} disabled={currentQueueItem?.status === "completed"}>
-                          {["PMF", "Pep Boys", "Transfer", "Pending"].map((option) => (
+                          {["PMF", "Pep Boys", "Pending"].map((option) => (
                             <div key={option} className="flex items-center gap-3 p-2 rounded hover:bg-muted/50">
                               <RadioGroupItem value={option} id={`assets-routing-${currentQueueItem?.id}-${option}`} />
                               <Label htmlFor={`assets-routing-${currentQueueItem?.id}-${option}`} className="text-sm font-medium cursor-pointer">
