@@ -6,9 +6,12 @@ export default {
   theme: {
     extend: {
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        sm: "3px",
+        md: "6px",
+        lg: "9px",
+        xl: "12px",
+        "2xl": "16px",
+        "3xl": "24px",
       },
       colors: {
         background: "var(--background)",
@@ -67,6 +70,14 @@ export default {
         "status-amber-fg": "var(--status-amber-fg)",
         "status-red": "var(--status-red)",
         "status-red-fg": "var(--status-red-fg)",
+        "status-blue": "var(--status-blue)",
+        "status-blue-fg": "var(--status-blue-fg)",
+        "status-indigo": "var(--status-indigo)",
+        "status-indigo-fg": "var(--status-indigo-fg)",
+        "status-orange": "var(--status-orange)",
+        "status-orange-fg": "var(--status-orange-fg)",
+        "status-gray": "var(--status-gray)",
+        "status-gray-fg": "var(--status-gray-fg)",
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
