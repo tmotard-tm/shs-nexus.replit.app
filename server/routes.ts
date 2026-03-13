@@ -3875,7 +3875,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const holmanByState: Record<string, number> = {};
     const holmanByFuel: Record<string, number> = {};
     for (const h of holmanVehicles) {
-      const status = h.statusCode === 1 ? 'active' : 'inactive';
+      const status = h.statusCode === 0 ? 'new'
+        : h.statusCode === 1 ? 'active'
+        : h.statusCode === 2 ? 'out-of-service'
+        : h.statusCode === 3 ? 'sold'
+        : 'unknown';
       holmanByStatus[status] = (holmanByStatus[status] || 0) + 1;
       if (h.makeName) holmanByMake[h.makeName] = (holmanByMake[h.makeName] || 0) + 1;
       if (h.state) holmanByState[h.state] = (holmanByState[h.state] || 0) + 1;

@@ -107,6 +107,9 @@ const getHolmanStatusInfo = (status: string | undefined): { label: string; color
   const statusCode = status?.toString().toUpperCase() || '';
   
   switch (statusCode) {
+    case '0':
+    case 'NEW':
+      return { label: 'New', color: 'text-blue-600 bg-blue-50 border-blue-200', icon: 'pending' };
     case '1':
     case 'ACTIVE':
     case 'A':
@@ -115,7 +118,7 @@ const getHolmanStatusInfo = (status: string | undefined): { label: string; color
     case 'PENDING':
     case 'ON ORDER':
     case 'P':
-      return { label: 'Pending/On Order', color: 'text-yellow-600 bg-yellow-50 border-yellow-200', icon: 'pending' };
+      return { label: 'Out of Service', color: 'text-yellow-600 bg-yellow-50 border-yellow-200', icon: 'pending' };
     case '3':
     case 'SOLD':
     case 'TERMINATED':

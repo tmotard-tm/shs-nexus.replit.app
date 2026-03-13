@@ -321,7 +321,7 @@ class HolmanVehicleSyncService {
         
         const apiResponse = await holmanApiService.getVehicles(
           '2B56',           // lesseeCode
-          '1,2',            // statusCodes - matches what integrations page uses
+          '0,1,2,3',        // statusCodes - all vehicle lifecycle states
           undefined,        // soldDateCode
           currentPage,
           pageSize
