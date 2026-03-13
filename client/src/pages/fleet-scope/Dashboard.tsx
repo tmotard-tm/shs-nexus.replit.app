@@ -3320,7 +3320,7 @@ export default function Dashboard() {
                                   return (
                                     <div data-testid={`call-actions-${index}`}>
                                       <div className="flex items-center justify-center gap-1">
-                                        <Link href={`/trucks/${truck.id}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                                        <Link href={`/fleet-scope/trucks/${truck.id}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                                           <Button variant="ghost" size="sm" data-testid={`button-view-${index}`}>
                                             <ExternalLink className="w-4 h-4 mr-1" />
                                             <span className="hidden sm:inline">View</span>

@@ -1316,7 +1316,7 @@ export default function ActionTracker() {
                             </span>
                           </TableCell>
                           <TableCell className="text-center">
-                            <Link href={`/trucks/${truck.id}?from=action-tracker`}>
+                            <Link href={`/fleet-scope/trucks/${truck.id}?from=action-tracker`}>
                               <Button 
                                 variant="ghost" 
                                 size="icon"

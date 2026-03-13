@@ -424,7 +424,7 @@ export default function HolmanResearch() {
                           </Select>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Link href={`/trucks/${truck.id}`}>
+                          <Link href={`/fleet-scope/trucks/${truck.id}`}>
                             <Button variant="ghost" size="sm" data-testid={`button-view-${truck.id}`}>
                               <ExternalLink className="w-4 h-4 mr-1" />
                               View Details

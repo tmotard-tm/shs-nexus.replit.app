@@ -184,7 +184,7 @@ export default function EditTruck() {
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 lg:px-6">
           <div className="flex h-16 items-center gap-3">
-            <Link href={isNew ? "/" : `/trucks/${id}`}>
+            <Link href={isNew ? "/fleet-scope" : `/fleet-scope/trucks/${id}`}>
               <Button variant="ghost" size="icon" data-testid="button-back">
                 <ArrowLeft className="w-4 h-4" />
               </Button>
@@ -787,7 +787,7 @@ export default function EditTruck() {
             </Card>
 
             <div className="flex justify-end gap-3">
-              <Link href={isNew ? "/" : `/trucks/${id}`}>
+              <Link href={isNew ? "/fleet-scope" : `/fleet-scope/trucks/${id}`}>
                 <Button 
                   variant="outline" 
                   type="button" 
