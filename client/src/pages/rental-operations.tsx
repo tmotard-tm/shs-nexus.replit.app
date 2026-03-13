@@ -216,7 +216,11 @@ export default function RentalOperations() {
   });
 
   function handleExport() {
-    window.open("/api/rental-ops/export.xlsx", "_blank");
+    const params = new URLSearchParams();
+    if (showOos) params.set("includeOos", "true");
+    if (effectiveDate) params.set("fileDate", effectiveDate);
+    const qs = params.toString();
+    window.open(`/api/rental-ops/export.xlsx${qs ? `?${qs}` : ""}`, "_blank");
   }
 
   function handleRefresh() {

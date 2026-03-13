@@ -14164,9 +14164,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       let openData = [...enterpriseSegment, ...holmanSegment];
-      const oosVehicles = await getOosVehicleSet();
-      if (oosVehicles.size > 0) {
-        openData = openData.filter(v => !oosVehicles.has(toDisplayNumber(v.vehicleNumber || "")));
+      const includeOos = req.query?.includeOos === "true";
+      if (!includeOos) {
+        const oosVehicles = await getOosVehicleSet();
+        if (oosVehicles.size > 0) {
+          openData = openData.filter(v => !oosVehicles.has(toDisplayNumber(v.vehicleNumber || "")));
+        }
       }
 
       const workbook = new ExcelJS.Workbook();
