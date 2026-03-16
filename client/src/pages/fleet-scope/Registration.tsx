@@ -202,6 +202,15 @@ export default function Registration() {
     queryKey: ["/api/fs/pmf/registration-stickers-needed"],
   });
 
+  const { data: rentalVehicleData } = useQuery<{ vehicleNumbers: string[] }>({
+    queryKey: ["/api/rental-ops/open-vehicle-numbers"],
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const rentalVehicleSet = useMemo(() => {
+    return new Set(rentalVehicleData?.vehicleNumbers ?? []);
+  }, [rentalVehicleData]);
+
   const pmfStickerAssetIds = useMemo(() => {
     if (!pmfStickersData?.assetIds) return new Set<string>();
     return new Set(pmfStickersData.assetIds.map(id => String(id)));
@@ -1369,9 +1378,11 @@ export default function Registration() {
                                 </button>
                                 <span>{truck.truckNumber}</span>
                               </div>
-                              {(DECLINED_TRUCKS.has(truck.truckNumber) || data?.declinedTrucks?.includes(truck.truckNumber)) && (
+                              {(DECLINED_TRUCKS.has(truck.truckNumber) || data?.declinedTrucks?.includes(truck.truckNumber)) ? (
                                 <span className="text-xs text-red-600 dark:text-red-400 font-normal">Declined</span>
-                              )}
+                              ) : rentalVehicleSet.has((truck.truckNumber.replace(/^0+/, '') || '0').padStart(5, '0')) ? (
+                                <span className="text-xs text-blue-600 dark:text-blue-400 font-normal">Rental</span>
+                              ) : null}
                             </div>
                           </TableCell>
                           <TableCell className="text-sm">

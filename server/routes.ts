@@ -13537,6 +13537,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/rental-ops/open-vehicle-numbers", requireAuth, async (req: any, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured", vehicleNumbers: [] });
+      const sf = getSnowflakeService();
+      await sf.connect();
+      const normV = (v: string) => v ? toDisplayNumber(v) : "";
+      const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
+
+      const [ticketRows, holmanRows] = await Promise.all([
+        sf.executeQuery(`SELECT VEHICLE_NUMBER FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTAL_VENDOR FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(req.query?.fileDate as string)} LIMIT 5000`).catch(() => []) as Promise<any[]>,
+      ]);
+
+      const entVns = new Set<string>();
+      for (const r of ticketRows as any[]) {
+        const vn = normV(r.VEHICLE_NUMBER || "");
+        if (vn) entVns.add(vn);
+      }
+
+      const holmanNonEntVns = new Set<string>();
+      for (const r of holmanRows as any[]) {
+        const vn = normV(r.VEHICLE_NUMBER || "");
+        if (!vn || isEntVendor(r.RENTAL_VENDOR)) continue;
+        if (entVns.has(vn)) continue;
+        holmanNonEntVns.add(vn);
+      }
+
+      const oosVehicles = await getOosVehicleSet();
+      const allVns: string[] = [];
+      for (const vn of entVns) {
+        if (!oosVehicles.has(vn)) allVns.push(vn);
+      }
+      for (const vn of holmanNonEntVns) {
+        if (!oosVehicles.has(vn)) allVns.push(vn);
+      }
+
+      res.json({ vehicleNumbers: allVns });
+    } catch (err: any) {
+      return handleSnowflakeError(err, res);
+    }
+  });
+
   app.get("/api/rental-ops/summary", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
