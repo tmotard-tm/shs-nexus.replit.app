@@ -1545,6 +1545,15 @@ export class DatabaseStorage implements IStorage {
     return vehicle;
   }
 
+  async getDecommissioningVehicleById(id: number): Promise<DecommissioningVehicle | undefined> {
+    const [vehicle] = await getDb()
+      .select()
+      .from(decommissioningVehicles)
+      .where(eq(decommissioningVehicles.id, id))
+      .limit(1);
+    return vehicle;
+  }
+
   async upsertDecommissioningVehicle(data: InsertDecommissioningVehicle): Promise<DecommissioningVehicle> {
     const [vehicle] = await getDb()
       .insert(decommissioningVehicles)

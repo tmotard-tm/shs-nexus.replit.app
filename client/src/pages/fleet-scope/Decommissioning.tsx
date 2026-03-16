@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download } from "lucide-react";
+import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip } from "lucide-react";
 import * as XLSX from "xlsx";
 
 interface DecommissioningVehicle {
@@ -63,6 +63,8 @@ interface DecommissioningVehicle {
   partsSpace: number | null; // CURRENT_TRUCK_CUFT from NTAO_FIELD_VIEW_ASSORTMENT
   partsCountSyncedAt: string | null;
   techDataSyncedAt: string | null;
+  termRequestFileName: string | null;
+  termRequestStorageKey: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,7 +77,11 @@ export default function Decommissioning() {
   const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+  const [termDialogVehicle, setTermDialogVehicle] = useState<DecommissioningVehicle | null>(null);
+  const [termUploading, setTermUploading] = useState(false);
+  const [termSending, setTermSending] = useState(false);
+  const termFileInputRef = useRef<HTMLInputElement>(null);
+
   // Column filters
   const [dateFilter, setDateFilter] = useState<string>("");
   const [techDistanceFilter, setTechDistanceFilter] = useState<boolean>(false);
@@ -373,6 +379,44 @@ export default function Decommissioning() {
       id,
       updates: { sentToProcurement: !currentValue },
     });
+  };
+
+  const handleTermFileUpload = async (file: File) => {
+    if (!termDialogVehicle) return;
+    setTermUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/fs/decommissioning/${termDialogVehicle.id}/term-request-file`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Upload failed");
+      }
+      const updated = await res.json();
+      setTermDialogVehicle({ ...termDialogVehicle, termRequestFileName: updated.termRequestFileName, termRequestStorageKey: updated.termRequestStorageKey });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/decommissioning"] });
+      toast({ title: "File Uploaded", description: `${file.name} saved for truck ${termDialogVehicle.truckNumber}` });
+    } catch (error: any) {
+      toast({ title: "Upload Error", description: error.message, variant: "destructive" });
+    } finally {
+      setTermUploading(false);
+    }
+  };
+
+  const handleSendTermEmail = async () => {
+    if (!termDialogVehicle) return;
+    setTermSending(true);
+    try {
+      await apiRequest("POST", `/api/fs/decommissioning/${termDialogVehicle.id}/send-termination-email`);
+      toast({ title: "Email Sent", description: `Termination request email sent for truck ${termDialogVehicle.truckNumber}` });
+    } catch (error: any) {
+      toast({ title: "Email Error", description: error.message, variant: "destructive" });
+    } finally {
+      setTermSending(false);
+    }
   };
 
   const handleExport = () => {
@@ -854,15 +898,26 @@ export default function Decommissioning() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => deleteMutation.mutate(vehicle.id)}
-                          disabled={deleteMutation.isPending}
-                          data-testid={`button-delete-${vehicle.id}`}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Send Termination Request"
+                            onClick={() => setTermDialogVehicle(vehicle)}
+                            data-testid={`button-term-request-${vehicle.id}`}
+                          >
+                            <Send className={`h-4 w-4 ${vehicle.termRequestFileName ? 'text-blue-600' : 'text-muted-foreground'}`} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => deleteMutation.mutate(vehicle.id)}
+                            disabled={deleteMutation.isPending}
+                            data-testid={`button-delete-${vehicle.id}`}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -872,6 +927,70 @@ export default function Decommissioning() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!termDialogVehicle} onOpenChange={(open) => { if (!open) setTermDialogVehicle(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Termination Request — Truck {termDialogVehicle?.truckNumber}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-md border p-3">
+              <p className="text-sm font-medium mb-1">Stored File</p>
+              {termDialogVehicle?.termRequestFileName ? (
+                <div className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+                  <Paperclip className="h-4 w-4" />
+                  <span>{termDialogVehicle.termRequestFileName}</span>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No file uploaded yet</p>
+              )}
+            </div>
+
+            <div>
+              <input
+                ref={termFileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleTermFileUpload(file);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => termFileInputRef.current?.click()}
+                disabled={termUploading}
+              >
+                {termUploading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4 mr-2" />
+                )}
+                {termDialogVehicle?.termRequestFileName ? "Replace File" : "Upload XLSX"}
+              </Button>
+            </div>
+
+            <Button
+              className="w-full"
+              onClick={handleSendTermEmail}
+              disabled={termSending || !termDialogVehicle?.termRequestStorageKey}
+            >
+              {termSending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4 mr-2" />
+              )}
+              Send Termination Email
+            </Button>
+            {!termDialogVehicle?.termRequestStorageKey && (
+              <p className="text-xs text-muted-foreground text-center">Upload a file first to enable sending</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

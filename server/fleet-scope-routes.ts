@@ -10618,6 +10618,102 @@ Respond ONLY with valid JSON, no other text.`;
     }
   });
 
+  app.post("/decommissioning/:id/term-request-file", upload.single('file'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const vehicle = await fleetScopeStorage.getDecommissioningVehicleById(parseInt(id));
+      if (!vehicle) {
+        return res.status(404).json({ message: "Vehicle not found" });
+      }
+
+      const { Client } = await import("@replit/object-storage");
+      const client = new Client();
+      const storageKey = `decommission/term-${vehicle.truckNumber}.xlsx`;
+
+      await client.uploadFromBytes(storageKey, file.buffer);
+
+      const updated = await fleetScopeStorage.updateDecommissioningVehicle(parseInt(id), {
+        termRequestFileName: file.originalname,
+        termRequestStorageKey: storageKey,
+      });
+
+      console.log(`[Decommissioning] Term request file uploaded for truck ${vehicle.truckNumber}: ${file.originalname}`);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[Decommissioning] Error uploading term request file:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/decommissioning/:id/send-termination-email", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const vehicle = await fleetScopeStorage.getDecommissioningVehicleById(parseInt(id));
+      if (!vehicle) {
+        return res.status(404).json({ message: "Vehicle not found" });
+      }
+
+      if (!vehicle.termRequestStorageKey) {
+        return res.status(400).json({ message: "No term request file uploaded for this vehicle. Please upload a file first." });
+      }
+
+      if (!process.env.FS_SENDGRID_API_KEY) {
+        return res.status(503).json({ message: "SendGrid API key not configured (FS_SENDGRID_API_KEY)" });
+      }
+
+      const { Client } = await import("@replit/object-storage");
+      const client = new Client();
+      const result = await client.downloadAsBytes(vehicle.termRequestStorageKey);
+      if (!result.ok) {
+        return res.status(404).json({ message: "Stored file not found in object storage. Please re-upload." });
+      }
+      const fileBuffer = Buffer.from(result.value);
+      const base64Content = fileBuffer.toString("base64");
+
+      sgMail.setApiKey(process.env.FS_SENDGRID_API_KEY);
+
+      const truckNum = vehicle.truckNumber;
+      const msg = {
+        to: "pranab.dutta@transformco.com",
+        from: "notifications@shs.com",
+        subject: `Vehicle Termination Request ${truckNum}`,
+        text: `Attached term request for a vehicle not economical to repair or keep road worthy. Please approve and process for termination. Please note that approvals should be routed to Rob Gerlach.\n\nThanks!`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <p>Attached term request for a vehicle not economical to repair or keep road worthy. Please approve and process for termination. Please note that approvals should be routed to Rob Gerlach.</p>
+            <p>Thanks!</p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+            <p style="color: #666; font-size: 12px;">This is an automated notification from Fleet Scope.</p>
+          </div>
+        `,
+        attachments: [
+          {
+            content: base64Content,
+            filename: vehicle.termRequestFileName || `term-request-${truckNum}.xlsx`,
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            disposition: "attachment",
+          },
+        ],
+      };
+
+      await sgMail.send(msg);
+      console.log(`[Decommissioning] Termination email sent for truck ${truckNum} to pranab.dutta@transformco.com`);
+      res.json({ success: true, message: `Termination request email sent for truck ${truckNum}` });
+    } catch (error: any) {
+      console.error("[Decommissioning] Error sending termination email:", error.message);
+      if (error.response) {
+        console.error("SendGrid error details:", error.response.body);
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Bulk import decommissioning vehicles (paste import)
   app.post("/decommissioning/import", async (req, res) => {
     try {

@@ -1250,6 +1250,8 @@ export const decommissioningVehicles = pgTable("decommissioning_vehicles", {
   partsSpace: real("parts_space"), // CURRENT_TRUCK_CUFT from NTAO_FIELD_VIEW_ASSORTMENT for latest CURR_DATE
   partsCountSyncedAt: timestamp("parts_count_synced_at"),
   techDataSyncedAt: timestamp("tech_data_synced_at"),
+  termRequestFileName: varchar("term_request_file_name", { length: 255 }),
+  termRequestStorageKey: varchar("term_request_storage_key", { length: 500 }),
   createdAt: timestamp("created_at").default(sql`now()`),
   updatedAt: timestamp("updated_at").default(sql`now()`),
 });
