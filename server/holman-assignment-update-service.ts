@@ -115,6 +115,9 @@ class HolmanAssignmentUpdateService {
   private buildPayload(vehicleNumber: string, techData: TPMSTechData): HolmanAssignmentPayload {
     const assignedStatusCode = this.isBYOV(vehicleNumber) ? 'D' : 'A';
     const districtPrefix = techData.districtNo ? techData.districtNo.slice(-4) : null;
+    const NULL_VAL = '^null^';
+    const cityValue = this.normalizeString(techData.primaryAddress?.city)?.toUpperCase() || null;
+    const zipValue = this.normalizeString(techData.primaryAddress?.zipCd);
 
     return {
       lesseeCode: this.LESSEE_CODE,
@@ -125,18 +128,32 @@ class HolmanAssignmentUpdateService {
       clientData1: techData.lastName ? techData.lastName.substring(0, 12) : null,
       clientData2: this.normalizeString(techData.enterpriseId),
       clientData3: '890',
-      clientData4: null,
-      clientData5: null,
-      clientData6: null,
-      clientData7: null,
+      clientData4: this.normalizeString(techData.enterpriseId),
+      clientData5: NULL_VAL,
+      clientData6: NULL_VAL,
+      clientData7: NULL_VAL,
+      auxData1: NULL_VAL,
+      auxData2: NULL_VAL,
+      auxData3: NULL_VAL,
+      auxData4: NULL_VAL,
+      auxData5: NULL_VAL,
+      auxData6: cityValue,
+      auxData7: zipValue,
+      auxData8: NULL_VAL,
+      auxData9: NULL_VAL,
+      auxData10: NULL_VAL,
+      auxData11: NULL_VAL,
+      auxData12: NULL_VAL,
+      auxData13: NULL_VAL,
+      auxData14: NULL_VAL,
       assignedStatusCode,
       prefix: districtPrefix,
       addressLine1: this.cleanAddressString(techData.primaryAddress?.addrLine1),
       addressLine2: this.cleanAddressString(techData.primaryAddress?.addrLine2),
       addressLine3: null,
-      city: this.normalizeString(techData.primaryAddress?.city)?.toUpperCase() || null,
+      city: cityValue,
       stateProvince: this.normalizeString(techData.primaryAddress?.stateCd)?.toUpperCase() || null,
-      zipPostalCode: this.normalizeString(techData.primaryAddress?.zipCd),
+      zipPostalCode: zipValue,
       homePhone: null,
       workPhone: this.normalizeString(techData.mobilePhone),
       workPhoneExtension: null,
