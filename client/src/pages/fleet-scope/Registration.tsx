@@ -162,6 +162,7 @@ export default function Registration() {
   const [statusFilter, setStatusFilter] = useState<"all" | "Assigned" | "Unassigned">("all");
   const [ownerFilter, setOwnerFilter] = useState<"all" | string>("all");
   const [stateFilters, setStateFilters] = useState<Set<string> | null>(null); // null = all selected (initial state)
+  const [tagStateFilters, setTagStateFilters] = useState<Set<string> | null>(null);
   const [expiryMonthFilter, setExpiryMonthFilter] = useState<string | null>(null);
   const [daysToExpirySort, setDaysToExpirySort] = useState<"none" | "asc" | "desc">("none");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -381,6 +382,17 @@ export default function Registration() {
     return Array.from(states).sort();
   }, [data?.trucks]);
 
+  const uniqueTagStates = useMemo(() => {
+    if (!data?.trucks) return [];
+    const states = new Set<string>();
+    data.trucks.forEach(truck => {
+      if (truck.tagState && truck.tagState.trim() !== "") {
+        states.add(truck.tagState.trim());
+      }
+    });
+    return Array.from(states).sort();
+  }, [data?.trucks]);
+
   const filteredTrucks = useMemo(() => {
     if (!data?.trucks) return [];
     
@@ -399,8 +411,8 @@ export default function Registration() {
       
       const matchesOwner = ownerFilter === "all" || getOwnerFromDistrict(truck.district) === ownerFilter;
       
-      // null means all selected, otherwise check if state is in the selected set
       const matchesState = stateFilters === null || stateFilters.has(truck.state);
+      const matchesTagState = tagStateFilters === null || tagStateFilters.has(truck.tagState?.trim() || "");
       
       // Filter out trucks starting with "088"
       if (truck.truckNumber.startsWith('088')) {
@@ -425,7 +437,7 @@ export default function Registration() {
         matchesExpiryMonth = false;
       }
       
-      return matchesSearch && matchesTruckNumber && matchesStatus && matchesOwner && matchesState && matchesExpiryMonth;
+      return matchesSearch && matchesTruckNumber && matchesStatus && matchesOwner && matchesState && matchesTagState && matchesExpiryMonth;
     });
     
     // Apply Days to Expiry sort
@@ -444,7 +456,7 @@ export default function Registration() {
     }
     
     return result;
-  }, [data?.trucks, searchTerm, truckNumberFilter, statusFilter, ownerFilter, stateFilters, expiryMonthFilter, daysToExpirySort]);
+  }, [data?.trucks, searchTerm, truckNumberFilter, statusFilter, ownerFilter, stateFilters, tagStateFilters, expiryMonthFilter, daysToExpirySort]);
 
   const toggleStateFilter = (state: string, allStates: string[]) => {
     setStateFilters(prev => {
@@ -470,7 +482,32 @@ export default function Registration() {
   };
   
   const clearStateFilters = () => {
-    setStateFilters(new Set()); // empty set means none selected
+    setStateFilters(new Set());
+  };
+
+  const toggleTagStateFilter = (state: string, allStates: string[]) => {
+    setTagStateFilters(prev => {
+      if (prev === null) {
+        const next = new Set(allStates);
+        next.delete(state);
+        return next;
+      }
+      const next = new Set(prev);
+      if (next.has(state)) {
+        next.delete(state);
+      } else {
+        next.add(state);
+      }
+      return next;
+    });
+  };
+
+  const selectAllTagStates = () => {
+    setTagStateFilters(null);
+  };
+
+  const clearTagStateFilters = () => {
+    setTagStateFilters(new Set());
   };
 
   // Calculate monthly expiry counts for assigned trucks
@@ -1114,7 +1151,64 @@ export default function Registration() {
                         </PopoverContent>
                       </Popover>
                     </TableHead>
-                    <TableHead className="w-[80px]">Tag State</TableHead>
+                    <TableHead className="w-[120px]">
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 p-0 font-medium hover:bg-muted/50"
+                            data-testid="button-tag-state-header-filter"
+                          >
+                            <Filter className={`h-3 w-3 mr-1 ${tagStateFilters !== null && tagStateFilters.size < uniqueTagStates.length ? "text-primary" : ""}`} />
+                            <span>Tag State</span>
+                            {tagStateFilters !== null && tagStateFilters.size < uniqueTagStates.length && (
+                              <Badge variant="secondary" className="ml-1 text-xs">
+                                {tagStateFilters.size}/{uniqueTagStates.length}
+                              </Badge>
+                            )}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-48 p-2" align="start">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between pb-2 border-b">
+                              <span className="text-sm font-medium">Filter by Tag State</span>
+                            </div>
+                            <div className="max-h-[200px] overflow-y-auto space-y-1">
+                              <label
+                                className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted cursor-pointer border-b pb-1 mb-1"
+                              >
+                                <Checkbox
+                                  checked={tagStateFilters === null || (tagStateFilters.size > 0 && tagStateFilters.size === uniqueTagStates.length)}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      selectAllTagStates();
+                                    } else {
+                                      clearTagStateFilters();
+                                    }
+                                  }}
+                                  data-testid="checkbox-select-all-tag-states"
+                                />
+                                <span className="text-sm font-medium">Select All</span>
+                              </label>
+                              {uniqueTagStates.map(state => (
+                                <label
+                                  key={state}
+                                  className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted cursor-pointer"
+                                >
+                                  <Checkbox
+                                    checked={tagStateFilters === null || tagStateFilters.has(state)}
+                                    onCheckedChange={() => toggleTagStateFilter(state, uniqueTagStates)}
+                                    data-testid={`checkbox-tag-state-${state}`}
+                                  />
+                                  <span className="text-sm">{state}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </TableHead>
                     <TableHead className="w-[100px]">District</TableHead>
                     <TableHead className="w-[160px]">
                       <Select
