@@ -10626,6 +10626,11 @@ Respond ONLY with valid JSON, no other text.`;
         return res.status(400).json({ message: "No file uploaded" });
       }
 
+      const ext = (file.originalname || "").toLowerCase();
+      if (!ext.endsWith(".xlsx") && !ext.endsWith(".xls")) {
+        return res.status(400).json({ message: "Only .xlsx or .xls files are accepted" });
+      }
+
       const vehicle = await fleetScopeStorage.getDecommissioningVehicleById(parseInt(id));
       if (!vehicle) {
         return res.status(404).json({ message: "Vehicle not found" });
@@ -10682,7 +10687,7 @@ Respond ONLY with valid JSON, no other text.`;
       const msg = {
         to: "pranab.dutta@transformco.com",
         from: "notifications@shs.com",
-        subject: `Vehicle Termination Request ${truckNum}`,
+        subject: `Vehicle Termination Request [${truckNum}]`,
         text: `Attached term request for a vehicle not economical to repair or keep road worthy. Please approve and process for termination. Please note that approvals should be routed to Rob Gerlach.\n\nThanks!`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
