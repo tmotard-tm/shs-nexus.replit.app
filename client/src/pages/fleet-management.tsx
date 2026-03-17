@@ -608,27 +608,37 @@ export default function FleetManagement() {
       }
       queryClient.invalidateQueries({ queryKey: ["/api/vehicle-assignments/status"] });
 
-      // Optimistically update selectedVehicle so the detail panel reflects the
-      // new assignment immediately — without waiting for the 25s fleet refetch.
+      // Immediately patch both selectedVehicle AND the fleet vehicles query cache
+      // so that the vehicle card and detail sheet update without waiting for the
+      // 25-second background fleet refetch.
       const { endpoint, body } = variables;
-      if (selectedVehicle) {
-        if (endpoint.includes("/unassign")) {
-          setSelectedVehicle(prev => prev ? {
-            ...prev,
-            tpmsAssignedTechId: "",
-            tpmsAssignedTechName: "",
-            holmanTechAssigned: "",
-            holmanTechName: "",
-          } : prev);
-        } else if (endpoint.includes("/assign")) {
-          setSelectedVehicle(prev => prev ? {
-            ...prev,
-            tpmsAssignedTechId: body.ldapId ?? prev.tpmsAssignedTechId,
-            tpmsAssignedTechName: body.techName ?? prev.tpmsAssignedTechName,
-            holmanTechAssigned: body.ldapId ?? prev.holmanTechAssigned,
-            holmanTechName: body.techName ?? prev.holmanTechName,
-          } : prev);
-        }
+      const vNum = selectedVehicle?.vehicleNumber;
+      if (vNum) {
+        const applyPatch = (v: FleetVehicle): FleetVehicle => {
+          if (v.vehicleNumber !== vNum) return v;
+          if (endpoint.includes("/unassign")) {
+            return { ...v, tpmsAssignedTechId: "", tpmsAssignedTechName: "", holmanTechAssigned: "", holmanTechName: "" };
+          }
+          if (endpoint.includes("/assign")) {
+            return {
+              ...v,
+              tpmsAssignedTechId: body.ldapId ?? v.tpmsAssignedTechId,
+              tpmsAssignedTechName: body.techName ?? v.tpmsAssignedTechName,
+              holmanTechAssigned: body.ldapId ?? v.holmanTechAssigned,
+              holmanTechName: body.techName ?? v.holmanTechName,
+            };
+          }
+          return v;
+        };
+
+        // Patch the in-memory query cache so every card in the grid updates now
+        queryClient.setQueryData<FleetVehiclesResponse>(['/api/holman/fleet-vehicles'], (old) => {
+          if (!old) return old;
+          return { ...old, vehicles: old.vehicles.map(applyPatch) };
+        });
+
+        // Also update the standalone selectedVehicle state (drives the Sheet panel)
+        setSelectedVehicle(prev => prev ? applyPatch(prev) : prev);
       }
     },
     onError: (err: any) => {
