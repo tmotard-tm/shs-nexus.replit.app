@@ -158,14 +158,11 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
     return { status: "skipped", message: "Unknown TPMS action" };
   } catch (err: any) {
     const msg: string = err.message ?? "";
-    // TPMS ldapId validation errors on unassign mean the tech/truck aren't
-    // registered in TPMS — treat as skipped rather than a hard failure.
-    if (
-      action === "unassign" &&
-      (msg.includes("ldapId is required") || msg.includes("ldapId must be between"))
-    ) {
-      console.log(`[FleetOps-TPMS] Unassign treated as skipped due to TPMS validation error: ${msg}`);
-      return { status: "skipped", message: "Not registered in TPMS" };
+    // TPMS ldapId validation errors mean the tech isn't registered in TPMS —
+    // treat as skipped for both assign and unassign rather than a hard failure.
+    if (msg.includes("ldapId is required") || msg.includes("ldapId must be between")) {
+      console.log(`[FleetOps-TPMS] ${action} treated as skipped — tech not registered in TPMS: ${msg}`);
+      return { status: "skipped", message: "Tech not registered in TPMS" };
     }
     return { status: "failed", message: `TPMS error: ${msg}` };
   }
@@ -229,11 +226,22 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       return { status: "skipped", message: "VIN not found for truck" };
     }
     if (action === "assign") {
-      await ams.updateTechAssignment(vin, {
-        techEnterpriseId: params.ldapId,
-        updateUser: params.requestedBy || "nexus",
-      });
-      return { status: "success", message: "Assigned" };
+      try {
+        await ams.updateTechAssignment(vin, {
+          techEnterpriseId: params.ldapId,
+          updateUser: params.requestedBy || "nexus",
+        });
+        return { status: "success", message: "Assigned" };
+      } catch (assignErr: any) {
+        const msg = (assignErr.message || "").toLowerCase();
+        // AMS returns "not found in tech database" when the tech ID doesn't exist in AMS.
+        // This is not an error in our system — skip gracefully.
+        if (msg.includes("not found in tech database") || msg.includes("tech") && msg.includes("not found")) {
+          console.log(`[FleetOps-AMS] Assign skipped — tech not in AMS database: ${assignErr.message}`);
+          return { status: "skipped", message: "Tech not registered in AMS" };
+        }
+        throw assignErr;
+      }
     }
     if (action === "unassign") {
       let currentTech: string | null = null;
