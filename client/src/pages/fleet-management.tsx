@@ -1893,20 +1893,6 @@ export default function FleetManagement() {
                     <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("unassign")} disabled={!selectedVehicle.tpmsAssignedTechId && !selectedVehicle.holmanTechAssigned} data-testid="button-fleet-unassign">
                       <UserX className="h-4 w-4 mr-1.5" />Unassign Tech
                     </Button>
-                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("address")} data-testid="button-fleet-address">
-                      <Home className="h-4 w-4 mr-1.5" />Update Address
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => syncToHolmanMutation.mutate({ vehicleNumber: selectedVehicle.vehicleNumber, enterpriseId: selectedVehicle.tpmsAssignedTechId })}
-                      disabled={syncToHolmanMutation.isPending}
-                      data-testid="button-sync-holman"
-                    >
-                      {syncToHolmanMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1.5" />}
-                      Sync to Holman
-                    </Button>
                     <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("poHistory")} data-testid="button-po-history">
                       <FileText className="h-4 w-4 mr-1.5" />
                       PO History{vehiclePOs && vehiclePOs.length > 0 ? ` (${vehiclePOs.length})` : ""}
