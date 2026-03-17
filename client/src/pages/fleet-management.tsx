@@ -599,10 +599,37 @@ export default function FleetManagement() {
       const json = await res.json();
       return json;
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data: any, variables: { endpoint: string; body: any }) => {
       setOpResult(data);
       queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/logs", selectedVehicle?.vehicleNumber] });
       queryClient.invalidateQueries({ queryKey: ["/api/holman/fleet-vehicles"] });
+      if (selectedVehicle?.vehicleNumber) {
+        queryClient.invalidateQueries({ queryKey: ["/api/vehicle-nexus-data", selectedVehicle.vehicleNumber] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicle-assignments/status"] });
+
+      // Optimistically update selectedVehicle so the detail panel reflects the
+      // new assignment immediately — without waiting for the 25s fleet refetch.
+      const { endpoint, body } = variables;
+      if (selectedVehicle) {
+        if (endpoint.includes("/unassign")) {
+          setSelectedVehicle(prev => prev ? {
+            ...prev,
+            tpmsAssignedTechId: "",
+            tpmsAssignedTechName: "",
+            holmanTechAssigned: "",
+            holmanTechName: "",
+          } : prev);
+        } else if (endpoint.includes("/assign")) {
+          setSelectedVehicle(prev => prev ? {
+            ...prev,
+            tpmsAssignedTechId: body.ldapId ?? prev.tpmsAssignedTechId,
+            tpmsAssignedTechName: body.techName ?? prev.tpmsAssignedTechName,
+            holmanTechAssigned: body.ldapId ?? prev.holmanTechAssigned,
+            holmanTechName: body.techName ?? prev.holmanTechName,
+          } : prev);
+        }
+      }
     },
     onError: (err: any) => {
       toast({ title: "Operation failed", description: err.message, variant: "destructive" });
