@@ -108,7 +108,15 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       return { status: "success", message: "Assigned" };
     }
     if (action === "unassign") {
-      const tpmsLdap = params.ldapId.trim().toUpperCase();
+      // Look up by truck number first so we use TPMS's own ldapId for the tech,
+      // not whatever Holman may have stored. If the truck isn't in the TPMS cache
+      // it was never assigned there — skip immediately.
+      const truckLookup = await tpms.lookupByTruckNumber(params.truckNumber);
+      if (!truckLookup.success || !truckLookup.data?.ldapId) {
+        return { status: "skipped", message: "Not assigned in TPMS" };
+      }
+      const tpmsLdap = truckLookup.data.ldapId.trim().toUpperCase();
+      // Verify the tech's truckNo still matches before clearing
       const current = await tpms.getTechInfo(tpmsLdap).catch(() => null);
       if (!current?.truckNo || current.truckNo.trim() === "") {
         return { status: "skipped", message: "Already unassigned in TPMS" };
