@@ -2086,18 +2086,19 @@ export default function FleetManagement() {
                       {/* Action buttons */}
                       <div className="flex gap-2">
                         <Button size="sm" variant="outline" className="flex-1" onClick={() => {
-                          setAmsEditColor("");
-                          setAmsEditBranding("");
-                          setAmsEditInterior("");
-                          setAmsEditAddress("");
-                          setAmsEditAddressZip("");
-                          setAmsEditTruckStatus("");
-                          setAmsEditTheftVerified("");
-                          setAmsEditKeyAddress("");
-                          setAmsEditKeyZip("");
-                          setAmsEditStorageCost("");
-                          setAmsEditVehicleRuns("");
-                          setAmsEditVehicleLooks("");
+                          setAmsEditColor(amsVehicle?.Color != null ? String(amsVehicle.Color) : "");
+                          setAmsEditBranding(amsVehicle?.Branding != null ? String(amsVehicle.Branding) : "");
+                          setAmsEditInterior(amsVehicle?.Interior != null ? String(amsVehicle.Interior) : "");
+                          setAmsEditAddress(amsVehicle?.CurLocAddress || "");
+                          setAmsEditAddressZip(amsVehicle?.CurLocZip || "");
+                          setAmsEditTruckStatus(amsVehicle?.TruckStatus != null ? String(amsVehicle.TruckStatus) : "");
+                          const tv = amsVehicle?.TheftVerified;
+                          setAmsEditTheftVerified(tv === true || tv === "Y" ? "Y" : tv === false || tv === "N" ? "N" : "");
+                          setAmsEditKeyAddress(amsVehicle?.KeyAddress || "");
+                          setAmsEditKeyZip(amsVehicle?.KeyZip || "");
+                          setAmsEditStorageCost(amsVehicle?.StorageCost != null ? String(amsVehicle.StorageCost) : "");
+                          setAmsEditVehicleRuns(amsVehicle?.VehicleRuns != null ? String(amsVehicle.VehicleRuns) : "");
+                          setAmsEditVehicleLooks(amsVehicle?.VehicleLooks != null ? String(amsVehicle.VehicleLooks) : "");
                           openModal("amsEdit");
                         }} data-testid="button-ams-edit">
                           <Pencil className="h-4 w-4 mr-1.5" />Edit Fields
