@@ -423,8 +423,14 @@ export const fleetOpsService = {
     };
     let log = await storage.createFleetOperationLog(logData);
 
+    // If TPMS already shows this tech on this truck, skip the TPMS assign call.
+    // Calling it anyway causes a TPMS 400 validation error.
+    const tpmsAlreadyCurrent = currentTruckCanonical !== null && currentTruckCanonical === targetTruck;
+
     const [tpms, holman, ams] = await Promise.all([
-      callTpms("assign", params),
+      tpmsAlreadyCurrent
+        ? Promise.resolve<SystemResult>({ status: "skipped", message: "Already assigned in TPMS" })
+        : callTpms("assign", params),
       callHolman("assign", params),
       callAms("assign", params),
     ]);
