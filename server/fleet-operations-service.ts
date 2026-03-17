@@ -108,14 +108,21 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       return { status: "success", message: "Assigned" };
     }
     if (action === "unassign") {
-      // Look up by truck number first so we use TPMS's own ldapId for the tech,
-      // not whatever Holman may have stored. If the truck isn't in the TPMS cache
-      // it was never assigned there — skip immediately.
-      const truckLookup = await tpms.lookupByTruckNumber(params.truckNumber);
+      // Look up by truck number (try both the raw number and the TPMS-padded 6-digit form)
+      // so we use TPMS's own ldapId for the tech, not whatever Holman may have stored.
+      const tpmsPaddedTruck = toTpmsRef(params.truckNumber);
+      const truckLookup =
+        await tpms.lookupByTruckNumber(params.truckNumber).then(r => r.success ? r : tpms.lookupByTruckNumber(tpmsPaddedTruck));
       if (!truckLookup.success || !truckLookup.data?.ldapId) {
         return { status: "skipped", message: "Not assigned in TPMS" };
       }
       const tpmsLdap = truckLookup.data.ldapId.trim().toUpperCase();
+      // Guard: TPMS PUT requires ldapId to be 2–9 chars; if not, the truck isn't
+      // properly registered and we should skip rather than produce a 400 error.
+      if (!tpmsLdap || tpmsLdap.length < 2 || tpmsLdap.length > 9) {
+        console.log(`[FleetOps-TPMS] Skipping unassign — cached ldapId "${tpmsLdap}" is not valid TPMS length`);
+        return { status: "skipped", message: "No valid TPMS tech ID found for this truck" };
+      }
       // Verify the tech's truckNo still matches before clearing
       const current = await tpms.getTechInfo(tpmsLdap).catch(() => null);
       if (!current?.truckNo || current.truckNo.trim() === "") {
@@ -150,7 +157,17 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
     }
     return { status: "skipped", message: "Unknown TPMS action" };
   } catch (err: any) {
-    return { status: "failed", message: `TPMS error: ${err.message}` };
+    const msg: string = err.message ?? "";
+    // TPMS ldapId validation errors on unassign mean the tech/truck aren't
+    // registered in TPMS — treat as skipped rather than a hard failure.
+    if (
+      action === "unassign" &&
+      (msg.includes("ldapId is required") || msg.includes("ldapId must be between"))
+    ) {
+      console.log(`[FleetOps-TPMS] Unassign treated as skipped due to TPMS validation error: ${msg}`);
+      return { status: "skipped", message: "Not registered in TPMS" };
+    }
+    return { status: "failed", message: `TPMS error: ${msg}` };
   }
 }
 
