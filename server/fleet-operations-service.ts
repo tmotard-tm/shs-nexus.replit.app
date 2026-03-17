@@ -95,44 +95,41 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
 
     if (action === "assign") {
       const tpmsTruckNo = toTpmsRef(params.truckNumber);
+      // TPMS PUT /techinfo requires: ldapId (UPPERCASE), truckNo, districtNo flat in body
       await tpms.updateTechInfo({
-        techLdapId: normalizeEnterpriseId(params.ldapId),
-        upserts: {
-          truckNo: tpmsTruckNo,
-          updatedBy,
-        },
+        ldapId: params.ldapId.trim().toUpperCase(),
+        truckNo: tpmsTruckNo,
+        districtNo: params.districtNo ?? "",
+        updatedBy,
       });
       return { status: "success", message: "Assigned" };
     }
     if (action === "unassign") {
-      const normalizedLdap = normalizeEnterpriseId(params.ldapId);
-      const current = await tpms.getTechInfo(normalizedLdap).catch(() => null);
+      const tpmsLdap = params.ldapId.trim().toUpperCase();
+      const current = await tpms.getTechInfo(tpmsLdap).catch(() => null);
       if (!current?.truckNo || current.truckNo.trim() === "") {
         return { status: "skipped", message: "Already unassigned in TPMS" };
       }
       await tpms.updateTechInfo({
-        techLdapId: normalizedLdap,
-        upserts: {
-          truckNo: "",
-          updatedBy,
-        },
+        ldapId: tpmsLdap,
+        truckNo: "",
+        districtNo: current.districtNo ?? "",
+        updatedBy,
       });
       return { status: "success", message: "Unassigned" };
     }
     if (action === "update_address") {
       await tpms.updateTechInfo({
-        techLdapId: normalizeEnterpriseId(params.ldapId),
-        upserts: {
-          updatedBy,
-          addresses: [{
-            addressType: ADDRESS_TYPE_CODE["PRIMARY"],
-            addrLine1: params.address,
-            addrLine2: params.address2 || "",
-            city: params.city,
-            stateCd: params.state,
-            zipCd: params.zip,
-          }],
-        },
+        ldapId: params.ldapId.trim().toUpperCase(),
+        updatedBy,
+        addresses: [{
+          addressType: ADDRESS_TYPE_CODE["PRIMARY"],
+          addrLine1: params.address,
+          addrLine2: params.address2 || "",
+          city: params.city,
+          stateCd: params.state,
+          zipCd: params.zip,
+        }],
       });
       return { status: "success", message: "Address updated" };
     }
