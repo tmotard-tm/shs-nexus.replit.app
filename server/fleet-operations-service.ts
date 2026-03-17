@@ -96,11 +96,14 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
     if (action === "assign") {
       const tpmsTruckNo = toTpmsRef(params.truckNumber);
       // TPMS PUT /techinfo requires: ldapId (UPPERCASE), truckNo, districtNo flat in body
+      // TPMS PUT /techinfo: ldapId (UPPERCASE) at top level; truck/district/updatedBy inside upserts
       await tpms.updateTechInfo({
         ldapId: params.ldapId.trim().toUpperCase(),
-        truckNo: tpmsTruckNo,
-        districtNo: params.districtNo ?? "",
-        updatedBy,
+        upserts: {
+          truckNo: tpmsTruckNo,
+          districtNo: params.districtNo ?? "",
+          updatedBy,
+        },
       });
       return { status: "success", message: "Assigned" };
     }
@@ -112,24 +115,28 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       }
       await tpms.updateTechInfo({
         ldapId: tpmsLdap,
-        truckNo: "",
-        districtNo: current.districtNo ?? "",
-        updatedBy,
+        upserts: {
+          truckNo: "",
+          districtNo: current.districtNo ?? "",
+          updatedBy,
+        },
       });
       return { status: "success", message: "Unassigned" };
     }
     if (action === "update_address") {
       await tpms.updateTechInfo({
         ldapId: params.ldapId.trim().toUpperCase(),
-        updatedBy,
-        addresses: [{
-          addressType: ADDRESS_TYPE_CODE["PRIMARY"],
-          addrLine1: params.address,
-          addrLine2: params.address2 || "",
-          city: params.city,
-          stateCd: params.state,
-          zipCd: params.zip,
-        }],
+        upserts: {
+          updatedBy,
+          addresses: [{
+            addressType: ADDRESS_TYPE_CODE["PRIMARY"],
+            addrLine1: params.address,
+            addrLine2: params.address2 || "",
+            city: params.city,
+            stateCd: params.state,
+            zipCd: params.zip,
+          }],
+        },
       });
       return { status: "success", message: "Address updated" };
     }
