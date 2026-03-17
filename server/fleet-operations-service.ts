@@ -229,7 +229,7 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       try {
         await ams.updateTechAssignment(vin, {
           techEnterpriseId: params.ldapId,
-          updateUser: params.requestedBy || "nexus",
+          updateUser: (params.requestedBy || "nexus").slice(0, 8),
         });
         return { status: "success", message: "Assigned" };
       } catch (assignErr: any) {
@@ -261,7 +261,7 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       try {
         await ams.updateTechAssignment(vin, {
           techEnterpriseId: "",
-          updateUser: params.requestedBy || "nexus",
+          updateUser: (params.requestedBy || "nexus").slice(0, 8),
         });
         return { status: "success", message: "Unassigned" };
       } catch (unassignErr: any) {
@@ -274,7 +274,7 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
     }
     if (action === "update_address") {
       await ams.updateUserFields(vin, {
-        updateUser: params.requestedBy || "nexus",
+        updateUser: (params.requestedBy || "nexus").slice(0, 8),
         address: params.address,
         zip: params.zip,
       });
