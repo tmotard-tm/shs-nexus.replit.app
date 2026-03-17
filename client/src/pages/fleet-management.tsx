@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { toHolmanRef, toDisplayNumber, toCanonical } from "@shared/vehicle-number-utils";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
@@ -263,6 +263,98 @@ export default function FleetManagement() {
   const [assignTechName, setAssignTechName] = useState("");
   const [assignDistrict, setAssignDistrict] = useState("");
   const [assignNotes, setAssignNotes] = useState("");
+
+  // Assign form — tech lookup / typeahead
+  const [assignLookupStatus, setAssignLookupStatus] = useState<"idle" | "loading" | "found" | "notfound">("idle");
+  const [techNameSuggestions, setTechNameSuggestions] = useState<any[]>([]);
+  const [showNameDropdown, setShowNameDropdown] = useState(false);
+  const nameDropdownRef = useRef<HTMLDivElement>(null);
+  const assignAutoFilledRef = useRef(false); // prevents search firing when we auto-fill name
+
+  // Reset lookup state when assign modal opens
+  useEffect(() => {
+    if (activeModal === "assign") {
+      setAssignLookupStatus("idle");
+      setTechNameSuggestions([]);
+      setShowNameDropdown(false);
+    }
+  }, [activeModal]);
+
+  // Close name dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (nameDropdownRef.current && !nameDropdownRef.current.contains(e.target as Node)) {
+        setShowNameDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Debounced LDAP ID → auto-fill name & district
+  useEffect(() => {
+    if (!assignLdap || assignLdap.length < 3) {
+      setAssignLookupStatus("idle");
+      return;
+    }
+    setAssignLookupStatus("loading");
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/all-techs/lookup/${encodeURIComponent(assignLdap.trim())}`, { credentials: "include" });
+        const json = await res.json();
+        if (json.found) {
+          setAssignLookupStatus("found");
+          if (!assignTechName) {
+            assignAutoFilledRef.current = true;
+            setAssignTechName(json.techName || `${json.firstName ?? ""} ${json.lastName ?? ""}`.trim());
+          }
+          if (!assignDistrict && json.districtNo) {
+            setAssignDistrict(String(json.districtNo));
+          }
+        } else {
+          setAssignLookupStatus("notfound");
+        }
+      } catch {
+        setAssignLookupStatus("idle");
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [assignLdap]);
+
+  // Debounced Tech Name → search for suggestions
+  useEffect(() => {
+    if (assignAutoFilledRef.current) {
+      assignAutoFilledRef.current = false;
+      return;
+    }
+    if (!assignTechName || assignTechName.length < 2) {
+      setTechNameSuggestions([]);
+      setShowNameDropdown(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/vehicle-assignments/search/technicians?q=${encodeURIComponent(assignTechName)}`, { credentials: "include" });
+        const json = await res.json();
+        const results = json.data ?? json.technicians ?? [];
+        setTechNameSuggestions(results);
+        setShowNameDropdown(results.length > 0);
+      } catch {
+        setTechNameSuggestions([]);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [assignTechName]);
+
+  function selectTechSuggestion(tech: any) {
+    assignAutoFilledRef.current = true;
+    setAssignLdap(tech.techRacfid || tech.racfId || tech.ldapId || "");
+    setAssignTechName(tech.techName || `${tech.firstName ?? ""} ${tech.lastName ?? ""}`.trim());
+    setAssignDistrict(tech.districtNo ? String(tech.districtNo) : "");
+    setAssignLookupStatus("found");
+    setShowNameDropdown(false);
+    setTechNameSuggestions([]);
+  }
 
 
   // Unassign form
@@ -2268,16 +2360,48 @@ export default function FleetManagement() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Enterprise / LDAP ID *</Label>
-                  <Input className="mt-1" value={assignLdap} onChange={e => setAssignLdap(e.target.value)} placeholder="e.g. JSMITH01" />
+                  <div className="relative mt-1">
+                    <Input
+                      value={assignLdap}
+                      onChange={e => { setAssignLdap(e.target.value.toUpperCase()); setAssignLookupStatus("idle"); }}
+                      placeholder="e.g. JSMITH01"
+                      className={assignLookupStatus === "found" ? "border-green-500 pr-7" : assignLookupStatus === "notfound" ? "border-amber-400 pr-7" : ""}
+                    />
+                    {assignLookupStatus === "loading" && <Loader2 className="absolute right-2 top-2.5 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                    {assignLookupStatus === "found" && <CheckCircle className="absolute right-2 top-2.5 h-3.5 w-3.5 text-green-500" />}
+                    {assignLookupStatus === "notfound" && <span className="absolute right-2 top-2 text-[10px] text-amber-600">Not found</span>}
+                  </div>
                 </div>
                 <div>
                   <Label className="text-xs">District #</Label>
                   <Input className="mt-1" value={assignDistrict} onChange={e => setAssignDistrict(e.target.value)} placeholder="e.g. 123" />
                 </div>
               </div>
-              <div>
+              <div ref={nameDropdownRef} className="relative">
                 <Label className="text-xs">Tech Name (for log)</Label>
-                <Input className="mt-1" value={assignTechName} onChange={e => setAssignTechName(e.target.value)} placeholder="First Last" />
+                <Input
+                  className="mt-1"
+                  value={assignTechName}
+                  onChange={e => { setAssignTechName(e.target.value); setShowNameDropdown(true); }}
+                  onFocus={() => techNameSuggestions.length > 0 && setShowNameDropdown(true)}
+                  placeholder="First Last"
+                  autoComplete="off"
+                />
+                {showNameDropdown && techNameSuggestions.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 rounded-md border bg-popover shadow-lg max-h-48 overflow-y-auto">
+                    {techNameSuggestions.slice(0, 8).map((tech, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground flex items-center justify-between gap-2"
+                        onMouseDown={e => { e.preventDefault(); selectTechSuggestion(tech); }}
+                      >
+                        <span className="font-medium">{tech.techName || `${tech.firstName ?? ""} ${tech.lastName ?? ""}`.trim()}</span>
+                        <span className="text-xs text-muted-foreground font-mono shrink-0">{tech.techRacfid || tech.racfId || ""}{tech.districtNo ? ` · D${tech.districtNo}` : ""}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <Label className="text-xs">Notes</Label>
