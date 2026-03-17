@@ -3,7 +3,7 @@ import { db } from "./db";
 import { eq, and, lte, or } from "drizzle-orm";
 import { holmanVehiclesCache, operationEvents } from "@shared/schema";
 import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent } from "@shared/schema";
-import { toCanonical, toHolmanRef, toTpmsRef, normalizeEnterpriseId } from "./vehicle-number-utils";
+import { toCanonical, toHolmanRef, toTpmsRef, toDisplayNumber, normalizeEnterpriseId } from "./vehicle-number-utils";
 
 interface AssignTechParams {
   truckNumber: string;
@@ -47,17 +47,34 @@ interface OperationResult {
   partialSuccess: boolean;
 }
 
-async function lookupVinByTruck(truckNumber: string): Promise<string | null> {
-  try {
-    const holmanRef = toHolmanRef(truckNumber);
-    const result = await db.select({ vin: holmanVehiclesCache.vin })
-      .from(holmanVehiclesCache)
-      .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanRef || truckNumber))
-      .limit(1);
-    return result[0]?.vin ?? null;
-  } catch {
-    return null;
+/**
+ * Looks up a vehicle's exact holman_vehicle_number from the cache, trying
+ * several format variants so that non-6-digit numbers (e.g. "06321") are found
+ * even though toHolmanRef() would produce "006321".
+ */
+async function lookupHolmanVehicleRef(truckNumber: string): Promise<{ holmanVehicleNumber: string; vin: string | null } | null> {
+  const candidates = Array.from(new Set([
+    toHolmanRef(truckNumber),   // 6-digit padded (e.g. "006321")
+    toDisplayNumber(truckNumber), // 5-digit padded (e.g. "06321")
+    truckNumber.trim(),          // as-is input
+    toCanonical(truckNumber),    // stripped (e.g. "6321")
+  ])).filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      const rows = await db.select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber, vin: holmanVehiclesCache.vin })
+        .from(holmanVehiclesCache)
+        .where(eq(holmanVehiclesCache.holmanVehicleNumber, candidate))
+        .limit(1);
+      if (rows[0]) return { holmanVehicleNumber: rows[0].holmanVehicleNumber, vin: rows[0].vin ?? null };
+    } catch {}
   }
+  return null;
+}
+
+async function lookupVinByTruck(truckNumber: string): Promise<string | null> {
+  const row = await lookupHolmanVehicleRef(truckNumber);
+  return row?.vin ?? null;
 }
 
 async function callTpms(action: string, params: Record<string, any>): Promise<SystemResult> {
@@ -128,40 +145,39 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
 async function callHolman(action: string, params: Record<string, any>): Promise<SystemResult> {
   try {
     const { holmanAssignmentUpdateService } = await import("./holman-assignment-update-service");
+
+    // Resolve the exact holman_vehicle_number from the cache first.
+    // toHolmanRef() pads to 6 digits (e.g. "006321") but many vehicles are stored
+    // with their native length (e.g. "06321"), so we must use the cached value.
+    const cacheRow = await lookupHolmanVehicleRef(params.truckNumber);
+    const holmanVehicleNum = cacheRow?.holmanVehicleNumber || toHolmanRef(params.truckNumber) || params.truckNumber;
+
     if (action === "assign") {
-      const holmanVehicleNum = toHolmanRef(params.truckNumber);
       const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
-        holmanVehicleNum || params.truckNumber,
+        holmanVehicleNum,
         normalizeEnterpriseId(params.ldapId)
       );
       if (result.success) {
-        // Optimistically update the local cache so the UI reflects the new state immediately
         try {
-          const holmanRef = toHolmanRef(params.truckNumber);
           await db.update(holmanVehiclesCache)
             .set({ holmanTechAssigned: params.ldapId, holmanTechName: params.techName || params.ldapId, lastLocalUpdateAt: new Date() })
-            .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanRef || params.truckNumber));
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanVehicleNum));
         } catch {}
-        // Holman processes async (202 Accepted). Return pending until verification confirms.
         return { status: "pending", message: result.message || "Queued — awaiting Holman confirmation", submissionDbId: result.submissionDbId };
       }
       return { status: "failed", message: result.message || "Holman assign failed" };
     }
     if (action === "unassign") {
-      const holmanVehicleNum = toHolmanRef(params.truckNumber);
       const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
-        holmanVehicleNum || params.truckNumber,
+        holmanVehicleNum,
         null
       );
       if (result.success) {
-        // Optimistically clear the local cache so the UI reflects unassigned state immediately
         try {
-          const holmanRef = toHolmanRef(params.truckNumber);
           await db.update(holmanVehiclesCache)
             .set({ holmanTechAssigned: null, holmanTechName: null, lastLocalUpdateAt: new Date() })
-            .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanRef || params.truckNumber));
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanVehicleNum));
         } catch {}
-        // Holman processes async (202 Accepted). Return pending until verification confirms.
         return { status: "pending", message: result.message || "Queued — awaiting Holman confirmation", submissionDbId: result.submissionDbId };
       }
       return { status: "failed", message: result.message || "Holman unassign failed" };
