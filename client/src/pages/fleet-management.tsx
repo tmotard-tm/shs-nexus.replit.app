@@ -517,14 +517,19 @@ export default function FleetManagement() {
     },
   });
 
-  // Poll Holman submission status while it's pending verification (202 async queue)
+  // Poll Holman submission status while it's pending verification (202 async queue).
+  // Holman uses async 202 responses — "pending" means accepted, not failed.
+  // We poll for up to 30s; if still pending, we show "Accepted" (safe to close).
   const holmanPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holmanPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const submissionId = opResult?.holmanSubmissionDbId;
     const isHolmanPending = opResult?.holman?.status === "pending";
 
     if (submissionId && isHolmanPending) {
       if (holmanPollRef.current) clearInterval(holmanPollRef.current);
+      if (holmanPollTimeoutRef.current) clearTimeout(holmanPollTimeoutRef.current);
+
       holmanPollRef.current = setInterval(async () => {
         try {
           const res = await fetch(`/api/holman/submissions/${submissionId}`, { credentials: "include" });
@@ -535,6 +540,7 @@ export default function FleetManagement() {
 
           if (sub.status === "completed" || sub.status === "failed") {
             if (holmanPollRef.current) clearInterval(holmanPollRef.current);
+            if (holmanPollTimeoutRef.current) clearTimeout(holmanPollTimeoutRef.current);
             setOpResult((prev: any) => ({
               ...prev,
               holman: {
@@ -551,15 +557,38 @@ export default function FleetManagement() {
           // ignore poll errors silently
         }
       }, 5_000);
+
+      // After 30s, Holman verification happens via background fleet sync (not real-time).
+      // Transition to "accepted" so the dialog doesn't show a spinner indefinitely.
+      holmanPollTimeoutRef.current = setTimeout(() => {
+        if (holmanPollRef.current) clearInterval(holmanPollRef.current);
+        setOpResult((prev: any) => {
+          if (prev?.holman?.status !== "pending") return prev;
+          return {
+            ...prev,
+            holman: {
+              ...prev.holman,
+              status: "accepted",
+              message: "Accepted by Holman — confirmation happens via background sync",
+            },
+          };
+        });
+      }, 30_000);
+
     } else {
       if (holmanPollRef.current) {
         clearInterval(holmanPollRef.current);
         holmanPollRef.current = null;
       }
+      if (holmanPollTimeoutRef.current) {
+        clearTimeout(holmanPollTimeoutRef.current);
+        holmanPollTimeoutRef.current = null;
+      }
     }
 
     return () => {
       if (holmanPollRef.current) clearInterval(holmanPollRef.current);
+      if (holmanPollTimeoutRef.current) clearTimeout(holmanPollTimeoutRef.current);
     };
   }, [opResult?.holmanSubmissionDbId, opResult?.holman?.status]);
 
@@ -583,7 +612,8 @@ export default function FleetManagement() {
     if (status === "success") return <Badge className="bg-green-600 text-white text-xs"><CheckCircle className="h-3 w-3 mr-1 inline" />Success</Badge>;
     if (status === "failed") return <Badge className="bg-red-600 text-white text-xs"><XCircle className="h-3 w-3 mr-1 inline" />Failed</Badge>;
     if (status === "skipped") return <Badge variant="secondary" className="text-xs">Skipped</Badge>;
-    if (status === "pending") return <Badge variant="outline" className="text-xs"><Loader2 className="h-3 w-3 mr-1 inline animate-spin" />Pending</Badge>;
+    if (status === "pending") return <Badge variant="outline" className="text-xs border-amber-400 text-amber-700 dark:text-amber-400"><Loader2 className="h-3 w-3 mr-1 inline animate-spin" />Pending</Badge>;
+    if (status === "accepted") return <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 text-xs border border-amber-300"><CheckCircle className="h-3 w-3 mr-1 inline" />Accepted</Badge>;
     return <Badge variant="secondary" className="text-xs">{status || "—"}</Badge>;
   }
 
