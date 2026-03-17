@@ -304,9 +304,84 @@ function buildResult(log: FleetOperationLog, tpms: SystemResult, holman: SystemR
   };
 }
 
+async function resolveCurrentTechTruck(ldapId: string): Promise<string | null> {
+  const normalizedLdap = normalizeEnterpriseId(ldapId);
+
+  // 1. Check TPMS (most authoritative live source)
+  try {
+    const { getTPMSService } = await import("./tpms-service");
+    const tpms = getTPMSService();
+    if (tpms.isConfigured()) {
+      const info = await tpms.getTechInfo(normalizedLdap).catch(() => null);
+      const tpmsTruck = info?.truckNo?.trim() || null;
+      if (tpmsTruck) {
+        console.log(`[FleetOps] resolveCurrentTechTruck(${normalizedLdap}): TPMS reports truck ${tpmsTruck}`);
+        return tpmsTruck;
+      }
+    }
+  } catch {}
+
+  // 2. Fall back to internal DB
+  try {
+    const existing = await storage.getTechVehicleAssignmentByTechRacfid(normalizedLdap);
+    const dbTruck = existing?.truckNo?.trim() || null;
+    if (dbTruck) {
+      console.log(`[FleetOps] resolveCurrentTechTruck(${normalizedLdap}): internal DB reports truck ${dbTruck}`);
+      return dbTruck;
+    }
+  } catch {}
+
+  return null;
+}
+
 export const fleetOpsService = {
   async assignTech(params: AssignTechParams): Promise<OperationResult> {
     params = { ...params, ldapId: normalizeEnterpriseId(params.ldapId) };
+
+    // ── Pre-assignment check: auto-unassign from any existing truck ──────────
+    const targetTruck = toCanonical(params.truckNumber);
+    const currentTruck = await resolveCurrentTechTruck(params.ldapId);
+    const currentTruckCanonical = currentTruck ? toCanonical(currentTruck) : null;
+
+    if (currentTruckCanonical && currentTruckCanonical !== targetTruck) {
+      console.log(`[FleetOps] Tech ${params.ldapId} is already on truck ${currentTruck} — auto-unassigning before new assignment to ${params.truckNumber}`);
+      const preUnassignParams = { truckNumber: currentTruck!, ldapId: params.ldapId, requestedBy: params.requestedBy, notes: `Auto-unassign: reassigned to ${params.truckNumber}` };
+      const preLogData: InsertFleetOperationLog = {
+        operationType: "unassign",
+        truckNumber: currentTruck!,
+        fromLdap: params.ldapId,
+        toLdap: null,
+        toTechName: null,
+        districtNo: null,
+        tpmsStatus: "pending",
+        holmanStatus: "pending",
+        amsStatus: "pending",
+        requestedBy: params.requestedBy,
+        notes: `Auto-unassign (reassignment to ${params.truckNumber})`,
+        tpmsMessage: null,
+        holmanMessage: null,
+        amsMessage: null,
+        completedAt: null,
+      };
+      const preLog = await storage.createFleetOperationLog(preLogData);
+      const [preTpms, preHolman, preAms] = await Promise.all([
+        callTpms("unassign", preUnassignParams),
+        callHolman("unassign", preUnassignParams),
+        callAms("unassign", preUnassignParams),
+      ]);
+      await storage.updateFleetOperationLog(preLog.id, {
+        tpmsStatus: preTpms.status,
+        tpmsMessage: preTpms.message,
+        holmanStatus: preHolman.status,
+        holmanMessage: preHolman.message,
+        amsStatus: preAms.status,
+        amsMessage: preAms.message,
+      });
+      await logAllEvents(preLog.id, "unassign", preUnassignParams, preTpms, preHolman, preAms);
+      console.log(`[FleetOps] Auto-unassign from ${currentTruck}: TPMS=${preTpms.status}, Holman=${preHolman.status}, AMS=${preAms.status}`);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const logData: InsertFleetOperationLog = {
       operationType: "assign",
       truckNumber: params.truckNumber,
@@ -317,7 +392,9 @@ export const fleetOpsService = {
       holmanStatus: "pending",
       amsStatus: "pending",
       requestedBy: params.requestedBy,
-      notes: params.notes || null,
+      notes: currentTruckCanonical && currentTruckCanonical !== targetTruck
+        ? `${params.notes ? params.notes + '; ' : ''}Reassigned from truck ${currentTruck}`
+        : (params.notes || null),
       fromLdap: null,
       tpmsMessage: null,
       holmanMessage: null,
