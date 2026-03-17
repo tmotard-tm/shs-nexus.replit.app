@@ -446,8 +446,47 @@ const upload = multer({
   }
 });
 
+// In-memory cache for ZIP code coordinates (per server session)
+const zipCoordsCache = new Map<string, { lat: number; lng: number } | null>();
+
 export async function registerRoutes(app: Express): Promise<Server> {
   console.log("=== STARTING ROUTE REGISTRATION ===");
+
+  // Lightweight ZIP → lat/lng lookup using the Zippopotam API (same as fleet-scope-distance-calculator)
+  app.get("/api/zip-coords/:zip", async (req, res) => {
+    const cleanZip = req.params.zip.replace(/\D/g, '').slice(0, 5);
+    if (cleanZip.length !== 5) {
+      return res.status(400).json({ error: "Invalid ZIP code" });
+    }
+
+    if (zipCoordsCache.has(cleanZip)) {
+      const cached = zipCoordsCache.get(cleanZip);
+      if (cached) return res.json(cached);
+      return res.status(404).json({ error: "ZIP code not found" });
+    }
+
+    try {
+      const response = await fetch(`https://api.zippopotam.us/us/${cleanZip}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        zipCoordsCache.set(cleanZip, null);
+        return res.status(404).json({ error: "ZIP code not found" });
+      }
+      const data = await response.json();
+      if (data.places && data.places.length > 0) {
+        const place = data.places[0];
+        const coords = { lat: parseFloat(place.latitude), lng: parseFloat(place.longitude) };
+        zipCoordsCache.set(cleanZip, coords);
+        return res.json(coords);
+      }
+      zipCoordsCache.set(cleanZip, null);
+      return res.status(404).json({ error: "ZIP code not found" });
+    } catch (err) {
+      console.error(`[zip-coords] Error fetching ZIP ${cleanZip}:`, err);
+      return res.status(500).json({ error: "Failed to fetch coordinates" });
+    }
+  });
 
   // Mount Fleet-Scope module routes at /api/fs/*
   if (fsDb) {

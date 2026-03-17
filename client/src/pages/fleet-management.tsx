@@ -32,7 +32,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { type FleetVehicle } from "@/data/fleetData";
 import { getVehicleOwnership } from "@/lib/vehicle-utils";
-import { DataSourceIndicator, calculateZipDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
+import { DataSourceIndicator, calculateZipDistance, fetchZipCoords, haversineDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
 import { LicensePlate } from "@/components/license-plate";
 
 interface FleetVehiclesResponse {
@@ -95,6 +95,9 @@ export default function FleetManagement() {
   // Search and filters state
   const [searchQuery, setSearchQuery] = useState("");
   const [targetZipcode, setTargetZipcode] = useState("");
+  const [zipSortLoading, setZipSortLoading] = useState(false);
+  const [zipSortedVehicles, setZipSortedVehicles] = useState<(FleetVehicle & { distanceScore: number })[] | null>(null);
+  const zipDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Vehicle Details filters
   const [makeFilter, setMakeFilter] = useState("all");
@@ -871,14 +874,67 @@ export default function FleetManagement() {
       stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
       holmanTechFilter, tpmsTechFilter, mismatchFilter]);
 
-  // Sort by zip distance if target provided
-  const sortedVehicles = useMemo(() => {
-    if (!targetZipcode.trim()) return filteredVehicles;
-    
-    return [...filteredVehicles]
-      .map(v => ({ ...v, distanceScore: calculateZipDistance(v.zip || '', targetZipcode.trim()) }))
-      .sort((a, b) => a.distanceScore - b.distanceScore);
+  // Async zip-distance sort: fetch real coordinates and sort by haversine distance
+  useEffect(() => {
+    if (zipDebounceRef.current) clearTimeout(zipDebounceRef.current);
+
+    const zip = targetZipcode.trim();
+    if (!zip) {
+      setZipSortedVehicles(null);
+      setZipSortLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    zipDebounceRef.current = setTimeout(async () => {
+      setZipSortLoading(true);
+      try {
+        const targetCoords = await fetchZipCoords(zip);
+        if (cancelled) return;
+
+        // Gather unique vehicle zips
+        const uniqueZips = [...new Set(filteredVehicles.map(v => v.zip || '').filter(Boolean))];
+        const coordsMap = new Map<string, { lat: number; lng: number } | null>();
+        await Promise.all(
+          uniqueZips.map(async vZip => {
+            const coords = await fetchZipCoords(vZip);
+            coordsMap.set(vZip, coords);
+          })
+        );
+
+        if (cancelled) return;
+
+        const withScores = filteredVehicles.map(v => {
+          const vZip = v.zip || '';
+          let score = 9999;
+          if (targetCoords && vZip && coordsMap.get(vZip)) {
+            const vc = coordsMap.get(vZip)!;
+            score = haversineDistance(targetCoords.lat, targetCoords.lng, vc.lat, vc.lng);
+          } else if (vZip) {
+            // Fallback to numerical difference if geocoding failed
+            score = calculateZipDistance(vZip, zip);
+          }
+          return { ...v, distanceScore: score };
+        });
+
+        withScores.sort((a, b) => a.distanceScore - b.distanceScore);
+        setZipSortedVehicles(withScores);
+      } finally {
+        if (!cancelled) setZipSortLoading(false);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      if (zipDebounceRef.current) clearTimeout(zipDebounceRef.current);
+    };
   }, [filteredVehicles, targetZipcode]);
+
+  // Use async-sorted list when zip filter is active, otherwise use plain filtered list
+  const sortedVehicles = targetZipcode.trim()
+    ? (zipSortedVehicles ?? filteredVehicles)
+    : filteredVehicles;
 
   // Quick lookup handlers
   const handleTechLookup = async () => {
@@ -1159,9 +1215,12 @@ export default function FleetManagement() {
                           placeholder="Sort by zip distance..."
                           value={targetZipcode}
                           onChange={(e) => setTargetZipcode(e.target.value)}
-                          className="pl-9"
+                          className="pl-9 pr-9"
                           data-testid="input-zipcode"
                         />
+                        {zipSortLoading && (
+                          <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                        )}
                       </div>
                     </div>
                     <Collapsible open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
@@ -1552,7 +1611,7 @@ export default function FleetManagement() {
                     const assignStatus = getAssignmentStatus(vehicle);
                     const ownership = getVehicleOwnership(vehicle.vehicleNumber);
                     const distanceScore = (vehicle as any).distanceScore;
-                    const distanceInfo = distanceScore ? getDistanceLabel(distanceScore) : null;
+                    const distanceInfo = typeof distanceScore === 'number' && Number.isFinite(distanceScore) ? getDistanceLabel(distanceScore) : null;
                     const hasMismatch = assignStatus.status === 'mismatch';
                     const poFlags = poFlagsMap.get(vehicle.vehicleNumber);
                     
