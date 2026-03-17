@@ -601,8 +601,16 @@ export default function FleetManagement() {
     },
     onSuccess: (data: any, variables: { endpoint: string; body: any }) => {
       setOpResult(data);
+      const { endpoint, body } = variables;
+      const isAssignOrUnassign = endpoint.includes("/assign") || endpoint.includes("/unassign");
+
       queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/logs", selectedVehicle?.vehicleNumber] });
-      queryClient.invalidateQueries({ queryKey: ["/api/holman/fleet-vehicles"] });
+      // For assign/unassign, DON'T immediately invalidate fleet-vehicles — the Holman live API
+      // still returns the old data until the 202 is confirmed, which would overwrite the
+      // optimistic setQueryData patch below. Only invalidate for other operations.
+      if (!isAssignOrUnassign) {
+        queryClient.invalidateQueries({ queryKey: ["/api/holman/fleet-vehicles"] });
+      }
       if (selectedVehicle?.vehicleNumber) {
         queryClient.invalidateQueries({ queryKey: ["/api/vehicle-nexus-data", selectedVehicle.vehicleNumber] });
       }
@@ -610,10 +618,9 @@ export default function FleetManagement() {
 
       // Immediately patch both selectedVehicle AND the fleet vehicles query cache
       // so that the vehicle card and detail sheet update without waiting for the
-      // 25-second background fleet refetch.
-      const { endpoint, body } = variables;
+      // Holman confirmation (202 async queue).
       const vNum = selectedVehicle?.vehicleNumber;
-      if (vNum) {
+      if (vNum && isAssignOrUnassign) {
         const applyPatch = (v: FleetVehicle): FleetVehicle => {
           if (v.vehicleNumber !== vNum) return v;
           if (endpoint.includes("/unassign")) {
