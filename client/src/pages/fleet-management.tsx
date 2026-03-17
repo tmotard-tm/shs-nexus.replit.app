@@ -488,32 +488,32 @@ export default function FleetManagement() {
 
   const { data: truckStatusLookup } = useQuery<any[]>({
     queryKey: ['/api/ams/lookups', 'truck-status'],
-    enabled: activeModal === "amsEdit",
+    enabled: !!selectedVehicle?.vin,
     staleTime: 10 * 60 * 1000,
   });
   const { data: vehicleRunsLookup } = useQuery<any[]>({
     queryKey: ['/api/ams/lookups', 'vehicle-runs'],
-    enabled: activeModal === "amsEdit",
+    enabled: !!selectedVehicle?.vin,
     staleTime: 10 * 60 * 1000,
   });
   const { data: vehicleLooksLookup } = useQuery<any[]>({
     queryKey: ['/api/ams/lookups', 'vehicle-looks'],
-    enabled: activeModal === "amsEdit",
+    enabled: !!selectedVehicle?.vin,
     staleTime: 10 * 60 * 1000,
   });
   const { data: colorLookup } = useQuery<any[]>({
     queryKey: ['/api/ams/lookups', 'colors'],
-    enabled: activeModal === "amsEdit",
+    enabled: !!selectedVehicle?.vin,
     staleTime: 10 * 60 * 1000,
   });
   const { data: brandingLookup } = useQuery<any[]>({
     queryKey: ['/api/ams/lookups', 'branding'],
-    enabled: activeModal === "amsEdit",
+    enabled: !!selectedVehicle?.vin,
     staleTime: 10 * 60 * 1000,
   });
   const { data: interiorLookup } = useQuery<any[]>({
     queryKey: ['/api/ams/lookups', 'interior'],
-    enabled: activeModal === "amsEdit",
+    enabled: !!selectedVehicle?.vin,
     staleTime: 10 * 60 * 1000,
   });
   const { data: repairReasonLookup } = useQuery<any[]>({
@@ -2086,19 +2086,28 @@ export default function FleetManagement() {
                       {/* Action buttons */}
                       <div className="flex gap-2">
                         <Button size="sm" variant="outline" className="flex-1" onClick={() => {
-                          setAmsEditColor(amsVehicle?.Color != null ? String(amsVehicle.Color) : "");
-                          setAmsEditBranding(amsVehicle?.Branding != null ? String(amsVehicle.Branding) : "");
-                          setAmsEditInterior(amsVehicle?.Interior != null ? String(amsVehicle.Interior) : "");
+                          // Match a raw AMS value (text label or numeric ID) to a lookup UniqueID
+                          const matchLookup = (lookup: any[] | undefined, raw: any): string => {
+                            if (raw == null || !lookup?.length) return "";
+                            const s = String(raw);
+                            const byId = lookup.find(item => String(item.UniqueID) === s);
+                            if (byId) return s;
+                            const byLabel = lookup.find(item => getAmsLookupLabel(item).toLowerCase() === s.toLowerCase());
+                            return byLabel ? String(byLabel.UniqueID) : "";
+                          };
+                          setAmsEditColor(matchLookup(colorLookup, amsVehicle?.Color));
+                          setAmsEditBranding(matchLookup(brandingLookup, amsVehicle?.Branding));
+                          setAmsEditInterior(matchLookup(interiorLookup, amsVehicle?.Interior));
                           setAmsEditAddress(amsVehicle?.CurLocAddress || "");
                           setAmsEditAddressZip(amsVehicle?.CurLocZip || "");
-                          setAmsEditTruckStatus(amsVehicle?.TruckStatus != null ? String(amsVehicle.TruckStatus) : "");
+                          setAmsEditTruckStatus(matchLookup(truckStatusLookup, amsVehicle?.TruckStatus));
                           const tv = amsVehicle?.TheftVerified;
                           setAmsEditTheftVerified(tv === true || tv === "Y" ? "Y" : tv === false || tv === "N" ? "N" : "");
                           setAmsEditKeyAddress(amsVehicle?.KeyAddress || "");
                           setAmsEditKeyZip(amsVehicle?.KeyZip || "");
                           setAmsEditStorageCost(amsVehicle?.StorageCost != null ? String(amsVehicle.StorageCost) : "");
-                          setAmsEditVehicleRuns(amsVehicle?.VehicleRuns != null ? String(amsVehicle.VehicleRuns) : "");
-                          setAmsEditVehicleLooks(amsVehicle?.VehicleLooks != null ? String(amsVehicle.VehicleLooks) : "");
+                          setAmsEditVehicleRuns(matchLookup(vehicleRunsLookup, amsVehicle?.VehicleRuns));
+                          setAmsEditVehicleLooks(matchLookup(vehicleLooksLookup, amsVehicle?.VehicleLooks));
                           openModal("amsEdit");
                         }} data-testid="button-ams-edit">
                           <Pencil className="h-4 w-4 mr-1.5" />Edit Fields
