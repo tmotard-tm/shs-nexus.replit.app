@@ -1,4 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { toCanonical, toDisplayNumber } from '@shared/vehicle-number-utils';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -230,7 +232,27 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
   const [categoryFilters, setCategoryFilters] = useState<Set<string>>(new Set());
   const [samsaraStatusFilters, setSamsaraStatusFilters] = useState<Set<string>>(new Set());
   const [rentalFilter, setRentalFilter] = useState<string>('');
-  
+
+  // Rental Ops open vehicle set — cross-references Rental Operations page open rentals (Snowflake)
+  const { data: rentalOpsData } = useQuery<{ vehicleNumbers: string[] }>({
+    queryKey: ['/api/rental-ops/open-vehicle-numbers'],
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const rentalOpsVehicleSet = useMemo(() => {
+    const s = new Set<string>();
+    if (!rentalOpsData?.vehicleNumbers) return s;
+    for (const vn of rentalOpsData.vehicleNumbers) {
+      s.add(vn);
+      const canonical = toCanonical(vn);
+      if (canonical) s.add(canonical);
+      const display = toDisplayNumber(vn);
+      if (display) s.add(display);
+    }
+    return s;
+  }, [rentalOpsData]);
+
   // Sorting state
   const [sortColumn, setSortColumn] = useState<SortColumn>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
@@ -663,6 +685,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                     testIdPrefix="assignment"
                   />
                 </TableHead>
+                <TableHead className="whitespace-nowrap bg-muted">Rental</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">
                   <ColumnFilterPopover
                     title="General Status"
@@ -794,7 +817,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
             <TableBody>
               {filteredVehicles.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={18} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={19} className="text-center py-8 text-muted-foreground">
                     No vehicles found matching your filters
                   </TableCell>
                 </TableRow>
@@ -812,6 +835,13 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                           <Badge className={getAssignmentBadgeColor(vehicle.assignmentStatus)}>
                             {vehicle.assignmentStatus}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {(rentalOpsVehicleSet.has(vehicle.vehicleNumber)
+                            || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
+                            || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber))) && (
+                            <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
+                          )}
                         </TableCell>
                         <TableCell>
                           {vehicle.generalStatus && (
