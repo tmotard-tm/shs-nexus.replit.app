@@ -352,7 +352,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
     queryKey: ["/api/fs/trucks/scraper-status"],
     queryFn: async () => {
       try {
-        const directRes = await fetch("https://web-scraper-tool-seanchen37.replit.app/api/public/vehicles", {
+        const directRes = await fetch("https://web-scraper-tool-searchten37.replit.app/api/public/vehicles", {
           signal: AbortSignal.timeout(15000),
         });
         if (directRes.ok) {

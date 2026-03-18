@@ -8294,7 +8294,7 @@ Respond ONLY with valid JSON, no other text.`;
   });
 
   // ===== Holman Scraper Integration =====
-  const SCRAPER_BASE_URL = "https://web-scraper-tool-seanchen37.replit.app";
+  const SCRAPER_BASE_URL = "https://web-scraper-tool-searchten37.replit.app";
   let scraperCache: { data: Record<string, any>; timestamp: number } | null = null;
   const SCRAPER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
