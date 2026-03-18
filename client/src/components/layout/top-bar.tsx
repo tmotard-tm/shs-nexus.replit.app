@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Bell, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
 interface TopBarProps {
   title: string;
@@ -23,24 +22,12 @@ export function TopBar({ title, breadcrumbs = ["Home"], onNewRequest }: TopBarPr
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" className="relative" data-testid="button-notifications">
-            <Bell className="h-4 w-4" />
-            <Badge 
-              variant="destructive" 
-              className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
-              data-testid="badge-notification-count"
-            >
-              3
-            </Badge>
+        {onNewRequest && (
+          <Button onClick={onNewRequest} data-testid="button-new-request">
+            <Plus className="h-4 w-4 mr-2" />
+            New Request
           </Button>
-          {onNewRequest && (
-            <Button onClick={onNewRequest} data-testid="button-new-request">
-              <Plus className="h-4 w-4 mr-2" />
-              New Request
-            </Button>
-          )}
-        </div>
+        )}
       </div>
     </header>
   );
