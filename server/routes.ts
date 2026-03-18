@@ -12790,6 +12790,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/ams/vehicles/:vin", requireAuth, async (req: any, res) => {
     try {
       const result = await amsApiService.getVehicleByVin(req.params.vin);
+      const keyFields = Object.keys(result || {}).filter(k => k.toLowerCase().includes('key'));
+      if (keyFields.length > 0) {
+        console.log(`[AMS] Key-related fields in response for ${req.params.vin}:`, keyFields.map(k => `${k}=${JSON.stringify(result[k])}`).join(', '));
+      } else {
+        console.log(`[AMS] No key-related fields found in response for ${req.params.vin}. All fields: ${Object.keys(result || {}).join(', ')}`);
+      }
       res.json(result);
     } catch (error: any) {
       console.error("Error fetching AMS vehicle:", error);

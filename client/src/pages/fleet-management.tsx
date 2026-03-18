@@ -2143,12 +2143,12 @@ export default function FleetManagement() {
                               {amsVehicle.DeliveryDate && <p className="text-xs text-muted-foreground">Delivered: {amsVehicle.DeliveryDate}</p>}
                             </div>
                           )}
-                          {(amsVehicle.KeyAddress || amsVehicle.KeyZip) && (
+                          {((amsVehicle.KeyAddress || amsVehicle.keyAddress) || (amsVehicle.KeyZip || amsVehicle.keyZip)) && (
                             <div>
                               <Label className="text-xs text-muted-foreground">Key Location</Label>
                               <p className="text-xs">
-                                {[amsVehicle.KeyAddress].filter(Boolean).join(", ")}
-                                {amsVehicle.KeyZip ? ` ${amsVehicle.KeyZip}` : ""}
+                                {[(amsVehicle.KeyAddress || amsVehicle.keyAddress)].filter(Boolean).join(", ")}
+                                {(amsVehicle.KeyZip || amsVehicle.keyZip) ? ` ${amsVehicle.KeyZip || amsVehicle.keyZip}` : ""}
                               </p>
                             </div>
                           )}
@@ -2181,8 +2181,8 @@ export default function FleetManagement() {
                           setAmsEditTruckStatus(matchLookup(truckStatusLookup, amsVehicle?.TruckStatus));
                           const tv = amsVehicle?.TheftVerified;
                           setAmsEditTheftVerified(tv === true || tv === "Y" ? "Y" : tv === false || tv === "N" ? "N" : "");
-                          setAmsEditKeyAddress(amsVehicle?.KeyAddress || "");
-                          setAmsEditKeyZip(amsVehicle?.KeyZip || "");
+                          setAmsEditKeyAddress(amsVehicle?.KeyAddress || amsVehicle?.keyAddress || "");
+                          setAmsEditKeyZip(amsVehicle?.KeyZip || amsVehicle?.keyZip || "");
                           setAmsEditStorageCost(amsVehicle?.StorageCost != null ? String(amsVehicle.StorageCost) : "");
                           setAmsEditVehicleRuns(matchLookup(vehicleRunsLookup, amsVehicle?.VehicleRuns));
                           setAmsEditVehicleLooks(matchLookup(vehicleLooksLookup, amsVehicle?.VehicleLooks));
