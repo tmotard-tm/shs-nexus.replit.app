@@ -368,12 +368,14 @@ class TPMSService {
     const allCached = await storage.getAllTpmsCachedAssignments();
     const cacheByTruck = new Map<string, typeof allCached[0]>();
     
+    // allCached is ordered lastSuccessAt DESC — most recent entry wins for every key variant.
+    // Use has() on ALL keys so the first-seen (most recent) is never overwritten by older entries.
     for (const cached of allCached) {
       if (cached.truckNo) {
         const raw = cached.truckNo;
         const stripped = toCanonical(raw);
         const padded = toTpmsRef(raw);
-        cacheByTruck.set(raw, cached);
+        if (!cacheByTruck.has(raw)) cacheByTruck.set(raw, cached);
         if (!cacheByTruck.has(stripped)) cacheByTruck.set(stripped, cached);
         if (!cacheByTruck.has(padded)) cacheByTruck.set(padded, cached);
       }

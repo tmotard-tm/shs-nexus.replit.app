@@ -113,6 +113,12 @@ Preferred communication style: Simple, everyday language.
 - **Backfill**: `POST /api/phone-recovery/backfill` creates tasks from existing Assets Management data
 - **Inventory "All Tasks" view**: Phone recovery tasks filtered out; remaining tasks grouped by technician
 
+## Recent Bug Fixes (2026-03-18)
+- **TPMS cache write padding bug**: `updateCacheTPMSAssignments` was calling `toHolmanRef(vehicle.vehicleNumber)` to build the WHERE clause, which pads 5-digit truck numbers to 6 digits (e.g., `'36182'` → `'036182'`). Since `holman_vehicles_cache.holman_vehicle_number` stores the raw Holman value (5 digits for many trucks), the WHERE never matched and TPMS data was never persisted. Fixed by using `vehicle.vehicleNumber` directly.
+- **TPMS batch lookup collision bug**: `batchLookupByTruckNumbers` always overwrote the raw key unconditionally, so the last-processed entry for duplicate `truck_no` values won the raw slot. Since the function iterates in `lastSuccessAt DESC` order, the most recent entry (e.g., CHARWEL 2026-03-12) set the raw key, but the next stale entry (e.g., NBENSON 2025-12-30) then overwrote it. Fixed by using `has()` on all three key variants so the first-seen (most recent) entry always wins.
+- **DB bulk fix**: Both bugs together meant `tpms_assigned_tech_id` was empty for all 5-digit truck numbers. A one-time SQL UPDATE backfilled the correct TPMS tech from `tpms_cached_assignments` (most recent per truck) into `holman_vehicles_cache` for all affected rows.
+- **AMS 8-char field limit**: `updateUser` field in AMS has an 8-character max. All three AMS callsites now `.slice(0, 8)` the field. Script identifier changed from `"mismatch-fix-script"` (19 chars) to `"SYSFIX"` (6 chars).
+
 ## Known Blockers
 - SendGrid credits exceeded — email delivery disabled; security questions used as alternative for password reset
 - SAML SSO requires IdP admin to register SP ACS URL and Entity ID (printed in server logs on startup)

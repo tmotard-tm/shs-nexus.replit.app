@@ -1163,7 +1163,8 @@ class HolmanVehicleSyncService {
         const chunk = vehiclesWithTPMS.slice(i, i + chunkSize);
         
         await Promise.all(chunk.map(async (vehicle) => {
-          const paddedVehicleNumber = toHolmanRef(vehicle.vehicleNumber);
+          // Use vehicle.vehicleNumber directly — it equals holmanVehicleNumber in the DB
+          // (do NOT pad with toHolmanRef: '36182' → '036182' would never match the DB row)
           await db
             .update(holmanVehiclesCache)
             .set({
@@ -1171,7 +1172,7 @@ class HolmanVehicleSyncService {
               tpmsAssignedTechName: vehicle.tpmsAssignedTechName,
               updatedAt: new Date(),
             })
-            .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicleNumber));
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicle.vehicleNumber));
         }));
       }
 
