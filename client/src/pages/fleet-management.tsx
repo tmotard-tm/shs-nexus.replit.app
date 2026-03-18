@@ -2080,30 +2080,39 @@ export default function FleetManagement() {
                             {amsVehicle.GradeDescription && <p className="text-xs text-muted-foreground">{amsVehicle.GradeDescription}</p>}
                             {amsVehicle.GradeVerified && <p className="text-xs text-muted-foreground">Verified: {amsVehicle.GradeVerified}</p>}
                           </div>
-                          {amsVehicle.TruckStatus != null && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Truck Status</Label>
-                              <p>{amsVehicle.TruckStatus}</p>
-                            </div>
-                          )}
+                          {amsVehicle.TruckStatus != null && (() => {
+                            const match = Array.isArray(truckStatusLookup) ? truckStatusLookup.find((item: any) => String(item.UniqueID) === String(amsVehicle.TruckStatus)) : undefined;
+                            return (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Truck Status</Label>
+                                <p>{match ? getAmsLookupLabel(match) : String(amsVehicle.TruckStatus)}</p>
+                              </div>
+                            );
+                          })()}
                           {amsVehicle.TheftVerified != null && (
                             <div>
                               <Label className="text-xs text-muted-foreground">Theft Verified</Label>
                               <p>{amsVehicle.TheftVerified === "Y" || amsVehicle.TheftVerified === true ? "Yes" : "No"}</p>
                             </div>
                           )}
-                          {amsVehicle.VehicleRuns != null && (
-                            <div className="col-span-2">
-                              <Label className="text-xs text-muted-foreground">How Vehicle Runs</Label>
-                              <p className="text-xs">{amsVehicle.VehicleRuns}</p>
-                            </div>
-                          )}
-                          {amsVehicle.VehicleLooks != null && (
-                            <div className="col-span-2">
-                              <Label className="text-xs text-muted-foreground">How Vehicle Looks</Label>
-                              <p className="text-xs">{amsVehicle.VehicleLooks}</p>
-                            </div>
-                          )}
+                          {amsVehicle.VehicleRuns != null && (() => {
+                            const match = Array.isArray(vehicleRunsLookup) ? vehicleRunsLookup.find((item: any) => String(item.UniqueID) === String(amsVehicle.VehicleRuns)) : undefined;
+                            return (
+                              <div className="col-span-2">
+                                <Label className="text-xs text-muted-foreground">How Vehicle Runs</Label>
+                                <p className="text-xs">{match ? getAmsLookupLabel(match) : String(amsVehicle.VehicleRuns)}</p>
+                              </div>
+                            );
+                          })()}
+                          {amsVehicle.VehicleLooks != null && (() => {
+                            const match = Array.isArray(vehicleLooksLookup) ? vehicleLooksLookup.find((item: any) => String(item.UniqueID) === String(amsVehicle.VehicleLooks)) : undefined;
+                            return (
+                              <div className="col-span-2">
+                                <Label className="text-xs text-muted-foreground">How Vehicle Looks</Label>
+                                <p className="text-xs">{match ? getAmsLookupLabel(match) : String(amsVehicle.VehicleLooks)}</p>
+                              </div>
+                            );
+                          })()}
                           {amsVehicle.InRepair != null && (
                             <div>
                               <Label className="text-xs text-muted-foreground">In Repair</Label>
