@@ -4995,6 +4995,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         details: `Updated vehicle: ${updatedVehicle.modelYear} ${updatedVehicle.makeName} ${updatedVehicle.modelName}`,
       });
 
+      // Log assignment history if this vehicle is assigned to a technician
+      if (updatedVehicle.vehicleNumber) {
+        try {
+          const { vehicleAssignmentService } = await import("./vehicle-assignment-service");
+          const changedByUser = (req as any).user?.username || (req as any).user?.name || undefined;
+          await vehicleAssignmentService.logVehicleInfoUpdate(
+            updatedVehicle.vehicleNumber,
+            changedByUser,
+            `Vehicle info updated: ${updatedVehicle.modelYear} ${updatedVehicle.makeName} ${updatedVehicle.modelName}`
+          );
+        } catch (historyErr) {
+          console.error("[Routes] Failed to log assignment history for vehicle update:", historyErr);
+        }
+      }
+
       res.json(updatedVehicle);
     } catch (error) {
       if (error instanceof z.ZodError) {

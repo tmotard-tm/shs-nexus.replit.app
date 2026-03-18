@@ -579,7 +579,7 @@ export const techVehicleAssignmentHistory = pgTable("tech_vehicle_assignment_his
   techRacfid: varchar("tech_racfid", { length: 20 }).notNull(),
   truckNo: varchar("truck_no", { length: 20 }),
   previousTruckNo: varchar("previous_truck_no", { length: 20 }),
-  changeType: text("change_type").notNull(), // assigned, unassigned, changed
+  changeType: text("change_type").notNull(), // assigned, unassigned, changed, status_changed, updated
   changeSource: text("change_source").notNull(), // tpms_sync, manual, offboarding
   changedBy: text("changed_by"),
   notes: text("notes"),

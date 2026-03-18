@@ -269,6 +269,31 @@ export class VehicleAssignmentService {
           changedBy,
           notes
         );
+      } else {
+        // Truck number is unchanged — log status_changed or updated based on whether status changed
+        const previousStatus = existingAssignment.assignmentStatus;
+        if (previousStatus !== assignmentStatus) {
+          await this.logAssignmentChange(
+            techRacfid,
+            truckNo,
+            previousTruckNo,
+            'status_changed',
+            'manual',
+            changedBy,
+            notes || `Status changed from ${previousStatus} to ${assignmentStatus}`
+          );
+        } else {
+          // Truck and status both unchanged — still log as a generic update
+          await this.logAssignmentChange(
+            techRacfid,
+            truckNo,
+            previousTruckNo,
+            'updated',
+            'manual',
+            changedBy,
+            notes || 'Assignment saved'
+          );
+        }
       }
       
       if (updated) {
@@ -341,6 +366,49 @@ export class VehicleAssignmentService {
     }
     
     return null;
+  }
+
+  async logTruckInfoUpdate(
+    truckNo: string,
+    changedBy?: string,
+    notes?: string
+  ): Promise<void> {
+    const assignment = await storage.getTechVehicleAssignmentByTruckNo(truckNo);
+    if (!assignment) return;
+    await this.logAssignmentChange(
+      assignment.techRacfid,
+      truckNo,
+      truckNo,
+      'updated',
+      'manual',
+      changedBy,
+      notes || 'Truck details manually edited'
+    );
+  }
+
+  async logVehicleInfoUpdate(
+    vehicleNumber: string,
+    changedBy?: string,
+    notes?: string
+  ): Promise<void> {
+    // Try matching by the raw vehicleNumber first, then by TPMS-padded format
+    let assignment = await storage.getTechVehicleAssignmentByTruckNo(vehicleNumber);
+    if (!assignment) {
+      const tpmsRef = vehicleNumber.replace(/^0+/, '').padStart(6, '0');
+      if (tpmsRef !== vehicleNumber) {
+        assignment = await storage.getTechVehicleAssignmentByTruckNo(tpmsRef);
+      }
+    }
+    if (!assignment) return;
+    await this.logAssignmentChange(
+      assignment.techRacfid,
+      assignment.truckNo,
+      assignment.truckNo,
+      'updated',
+      'manual',
+      changedBy,
+      notes || 'Vehicle info manually updated'
+    );
   }
 
   async searchTechnicians(query: string): Promise<AllTech[]> {
@@ -525,7 +593,7 @@ export class VehicleAssignmentService {
     techRacfid: string,
     truckNo: string | null | undefined,
     previousTruckNo: string | null | undefined,
-    changeType: 'assigned' | 'unassigned' | 'changed',
+    changeType: 'assigned' | 'unassigned' | 'changed' | 'status_changed' | 'updated',
     changeSource: 'manual' | 'tpms_sync' | 'offboarding',
     changedBy?: string,
     notes?: string

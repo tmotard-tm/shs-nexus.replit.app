@@ -3162,6 +3162,18 @@ Respond ONLY with valid JSON, no other text.`;
         }
       }
 
+      // Log assignment history entry for this truck edit
+      try {
+        const { vehicleAssignmentService } = await import("./vehicle-assignment-service");
+        await vehicleAssignmentService.logTruckInfoUpdate(
+          truck.truckNumber,
+          validated.lastUpdatedBy || undefined,
+          `Truck details edited in Fleet-Scope: ${changes.join("; ")}`
+        );
+      } catch (historyErr) {
+        console.error("[FleetScope] Failed to log assignment history for truck edit:", historyErr);
+      }
+
       res.json(truck);
     } catch (error: any) {
       console.error("Error updating truck:", error);

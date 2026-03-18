@@ -8,7 +8,10 @@ interface AssignmentHistoryEntry {
   id: number;
   techRacfid: string;
   truckNo: string;
-  action: string;
+  changeType: string;
+  action?: string;
+  changeSource?: string;
+  changedBy?: string;
   notes?: string;
   performedBy?: string;
   createdAt: string;
@@ -44,6 +47,12 @@ export function AssignmentHistoryDialog({
         return <Badge className="bg-red-100 text-red-800">Unassigned</Badge>;
       case 'sync':
         return <Badge className="bg-purple-100 text-purple-800">Synced</Badge>;
+      case 'changed':
+        return <Badge className="bg-yellow-100 text-yellow-800">Reassigned</Badge>;
+      case 'status_changed':
+        return <Badge className="bg-blue-100 text-blue-800">Status Changed</Badge>;
+      case 'updated':
+        return <Badge className="bg-orange-100 text-orange-800">Info Updated</Badge>;
       default:
         return <Badge className="bg-gray-100 text-gray-800">{action?.toLowerCase() === 'transfer' ? 'Reassigned' : action}</Badge>;
     }
@@ -81,7 +90,7 @@ export function AssignmentHistoryDialog({
                 data-testid={`history-entry-${entry.id}`}
               >
                 <div className="flex items-center justify-between">
-                  {getActionBadge(entry.action)}
+                  {getActionBadge(entry.changeType || entry.action || '')}
                   <span className="text-sm text-muted-foreground flex items-center gap-1">
                     <Calendar className="h-3 w-3" />
                     {format(new Date(entry.createdAt), 'MMM d, yyyy h:mm a')}
@@ -107,9 +116,9 @@ export function AssignmentHistoryDialog({
                   </div>
                 )}
                 
-                {entry.performedBy && (
+                {(entry.changedBy || entry.performedBy) && (
                   <div className="text-xs text-muted-foreground">
-                    Performed by: {entry.performedBy}
+                    Changed by: {entry.changedBy || entry.performedBy}
                   </div>
                 )}
               </div>
