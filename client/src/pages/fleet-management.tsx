@@ -427,6 +427,26 @@ export default function FleetManagement() {
     return m;
   }, [poFlagsData]);
 
+  // Rental Ops open vehicle set — cross-references Rental Operations page open rentals (Snowflake)
+  const { data: rentalOpsData } = useQuery<{ vehicleNumbers: string[] }>({
+    queryKey: ['/api/rental-ops/open-vehicle-numbers'],
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const rentalOpsVehicleSet = useMemo(() => {
+    const s = new Set<string>();
+    if (!rentalOpsData?.vehicleNumbers) return s;
+    for (const vn of rentalOpsData.vehicleNumbers) {
+      s.add(vn);
+      const canonical = toCanonical(vn);
+      if (canonical) s.add(canonical);
+      const display = toDisplayNumber(vn);
+      if (display) s.add(display);
+    }
+    return s;
+  }, [rentalOpsData]);
+
   // POs for selected vehicle
   const { data: vehiclePOs, isLoading: posLoading } = useQuery<any[]>({
     queryKey: ["/api/holman/pos", selectedVehicle?.vehicleNumber],
@@ -1614,6 +1634,9 @@ export default function FleetManagement() {
                     const distanceInfo = typeof distanceScore === 'number' && Number.isFinite(distanceScore) ? getDistanceLabel(distanceScore) : null;
                     const hasMismatch = assignStatus.status === 'mismatch';
                     const poFlags = poFlagsMap.get(vehicle.vehicleNumber);
+                    const isInRentalOps = rentalOpsVehicleSet.has(vehicle.vehicleNumber)
+                      || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
+                      || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
                     
                     return (
                       <Card 
@@ -1657,6 +1680,9 @@ export default function FleetManagement() {
                               )}
                               {poFlags?.hasOpenMaintenance && (
                                 <Badge className="bg-amber-500 text-white text-xs border-none">MAINT ({poFlags.openMaintenanceCount})</Badge>
+                              )}
+                              {isInRentalOps && (
+                                <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
                               )}
                             </div>
                           </div>
