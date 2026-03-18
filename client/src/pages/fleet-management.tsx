@@ -1672,6 +1672,9 @@ export default function FleetManagement() {
                               <Badge className={assignStatus.color + ' border text-xs'}>
                                 {assignStatus.label}
                               </Badge>
+                              {isInRentalOps && (
+                                <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
+                              )}
                               <Badge variant="outline" className="text-xs">
                                 {ownership.type}
                               </Badge>
@@ -1680,9 +1683,6 @@ export default function FleetManagement() {
                               )}
                               {poFlags?.hasOpenMaintenance && (
                                 <Badge className="bg-amber-500 text-white text-xs border-none">MAINT ({poFlags.openMaintenanceCount})</Badge>
-                              )}
-                              {isInRentalOps && (
-                                <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
                               )}
                             </div>
                           </div>
