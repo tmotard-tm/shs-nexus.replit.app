@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { fleetScopeStorage } from "./fleet-scope-storage";
+import { storage } from "./storage";
 import { fsDb } from "./fleet-scope-db";
 import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages } from "@shared/fleet-scope-schema";
 import { sql, eq, desc, and, isNull, count } from "drizzle-orm";
@@ -968,6 +969,33 @@ function trackChanges(existing: any, updates: any): string[] {
   }
 
   return changes;
+}
+
+// Auth middleware for fleet-scope routes — validates session cookie using main storage
+async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
+  const cookieHeader = req.headers.cookie;
+  const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
+  if (!sessionId) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  try {
+    const session = await storage.getSession(sessionId);
+    if (!session || session.expiresAt < new Date()) {
+      if (session) {
+        await storage.deleteSession(sessionId);
+      }
+      return res.status(401).json({ message: "Session expired" });
+    }
+    const user = await storage.getUser(session.userId);
+    if (!user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+    req.user = { id: user.id, username: user.username, role: user.role };
+    return next();
+  } catch (err: any) {
+    console.error("[FS Auth] Auth error:", err.message);
+    return res.status(401).json({ message: "Authentication failed" });
+  }
 }
 
 export function registerFleetScopeRoutes(): Router {
@@ -11646,6 +11674,121 @@ Respond ONLY with valid JSON, no other text.`;
       console.error("[RegMsg] Webhook error:", error);
       res.set("Content-Type", "text/xml");
       res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+  });
+
+  // GET /reports/last-oil-change.csv — Export last oil change per vehicle as CSV (requires auth)
+  app.get("/reports/last-oil-change.csv", requireFsAuth, async (req, res) => {
+    const escapeCell = (val: string): string => {
+      if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+        return `"${val.replace(/"/g, '""')}"`;
+      }
+      return val;
+    };
+
+    const formatDate = (raw: string | null): string => {
+      if (!raw) return "";
+      const d = new Date(raw);
+      return isNaN(d.getTime()) ? String(raw) : d.toISOString().split("T")[0];
+    };
+
+    const buildCsv = (rows: { CLIENT_VEHICLE_NUMBER: string | null; HOLMAN_VEHICLE_NUMBER: string | null; PO_DATE: string | null; PO_NUMBER: string | null; PO_STATUS: string | null }[]): string => {
+      const lines = ["Vehicle Number,Holman Vehicle Number,Last Oil Change Date,PO Number,PO Status"];
+      for (const row of rows) {
+        lines.push(
+          [
+            row.CLIENT_VEHICLE_NUMBER ?? "",
+            row.HOLMAN_VEHICLE_NUMBER ?? "",
+            formatDate(row.PO_DATE),
+            row.PO_NUMBER ?? "",
+            row.PO_STATUS ?? "",
+          ]
+            .map(escapeCell)
+            .join(",")
+        );
+      }
+      return lines.join("\r\n");
+    };
+
+    try {
+      // Partition by HOLMAN_VEHICLE_NUMBER when available, fall back to CLIENT_VEHICLE_NUMBER
+      // so that vehicles with a null Holman number are not collapsed together.
+      const oilChangeSqlWithAta = `
+        WITH ranked AS (
+          SELECT
+            CLIENT_VEHICLE_NUMBER,
+            HOLMAN_VEHICLE_NUMBER,
+            PO_DATE,
+            PO_NUMBER,
+            PO_STATUS,
+            ROW_NUMBER() OVER (
+              PARTITION BY COALESCE(NULLIF(TRIM(HOLMAN_VEHICLE_NUMBER), ''), CLIENT_VEHICLE_NUMBER)
+              ORDER BY PO_DATE DESC NULLS LAST
+            ) AS rn
+          FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS
+          WHERE REPAIR_TYPE_DESCRIPTION = 'PREVENTATIVE MAINT.'
+            AND (
+              ATA_GROUP_DESC ILIKE '%OIL%'
+              OR ATA_GROUP_DESC ILIKE '%LUBE%'
+            )
+        )
+        SELECT
+          CLIENT_VEHICLE_NUMBER,
+          HOLMAN_VEHICLE_NUMBER,
+          PO_DATE,
+          PO_NUMBER,
+          PO_STATUS
+        FROM ranked
+        WHERE rn = 1
+        ORDER BY COALESCE(NULLIF(TRIM(HOLMAN_VEHICLE_NUMBER), ''), CLIENT_VEHICLE_NUMBER)
+      `;
+
+      let rows = await executeQuery<{
+        CLIENT_VEHICLE_NUMBER: string | null;
+        HOLMAN_VEHICLE_NUMBER: string | null;
+        PO_DATE: string | null;
+        PO_NUMBER: string | null;
+        PO_STATUS: string | null;
+      }>(oilChangeSqlWithAta);
+
+      // Fallback: if oil/lube ATA filter matched nothing, use all PREVENTATIVE MAINT. POs
+      if (rows.length === 0) {
+        console.log("[OilChangeCSV] No ATA oil/lube matches; falling back to all PREVENTATIVE MAINT. records");
+        const oilChangeSqlFallback = `
+          WITH ranked AS (
+            SELECT
+              CLIENT_VEHICLE_NUMBER,
+              HOLMAN_VEHICLE_NUMBER,
+              PO_DATE,
+              PO_NUMBER,
+              PO_STATUS,
+              ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(NULLIF(TRIM(HOLMAN_VEHICLE_NUMBER), ''), CLIENT_VEHICLE_NUMBER)
+                ORDER BY PO_DATE DESC NULLS LAST
+              ) AS rn
+            FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS
+            WHERE REPAIR_TYPE_DESCRIPTION = 'PREVENTATIVE MAINT.'
+          )
+          SELECT
+            CLIENT_VEHICLE_NUMBER,
+            HOLMAN_VEHICLE_NUMBER,
+            PO_DATE,
+            PO_NUMBER,
+            PO_STATUS
+          FROM ranked
+          WHERE rn = 1
+          ORDER BY COALESCE(NULLIF(TRIM(HOLMAN_VEHICLE_NUMBER), ''), CLIENT_VEHICLE_NUMBER)
+        `;
+        rows = await executeQuery(oilChangeSqlFallback);
+      }
+
+      const csvContent = buildCsv(rows);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", 'attachment; filename="last-oil-change.csv"');
+      res.send(csvContent);
+    } catch (error: any) {
+      console.error("[OilChangeCSV] Error generating CSV:", error.message);
+      res.status(500).json({ message: "Failed to generate oil change CSV" });
     }
   });
 
