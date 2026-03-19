@@ -685,7 +685,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
               <TableRow className="border-b-2 border-border">
                 <TableHead className="whitespace-nowrap bg-muted">
                   <ColumnFilterPopover
-                    title="Assignment"
+                    title="TPMS Status"
                     options={uniqueAssignments}
                     selectedValues={assignmentFilters}
                     onToggle={(v) => toggleFilter(assignmentFilters, v, setAssignmentFilters)}
