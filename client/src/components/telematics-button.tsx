@@ -129,7 +129,7 @@ export function TelematicsButton({
         variant={variant}
         size={size}
         className={className}
-        onClick={() => setOpen(true)}
+        onClick={(e) => { e.stopPropagation(); setOpen(true); }}
         data-testid={`btn-telematics-${vehicleNumber}`}
       >
         <Satellite className="h-4 w-4 mr-1.5" />
