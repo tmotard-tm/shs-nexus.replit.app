@@ -149,7 +149,7 @@ export default function SamsaraIntegration() {
   );
 
   const filteredSafetyScores = safetyScores.filter((s: any) =>
-    (s.DRIVER_ID || "").toLowerCase().includes(safetySearch.toLowerCase())
+    String(s.DRIVER_ID || "").toLowerCase().includes(safetySearch.toLowerCase())
   );
 
   const devicesOnline = devices.filter((d: any) =>
