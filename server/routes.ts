@@ -12899,7 +12899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       amsWorked = true;
 
       for (const v of rows) {
-        const vin = (v.VIN || v.vin || '').trim();
+        const vin = (v.VIN || v.vin || '').trim().toUpperCase();
         if (!vin) continue;
         const raw_status = v.TruckStatus ?? v.truckStatus ?? v.truck_status;
         if (raw_status == null) {
@@ -12934,7 +12934,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const sfRows = await snowflakeService.executeQuery(sql) as Array<{ VIN: string; TRUCK_STATUS: string }>;
     for (const row of sfRows) {
       if (!row.VIN) continue;
-      const vin = row.VIN.trim();
+      const vin = row.VIN.trim().toUpperCase();
       const rawStatus = (row.TRUCK_STATUS || '').trim();
       // Try to resolve via lookup map in case TRUCK_STATUS stores numeric IDs
       const label = lookupMap.get(rawStatus) ?? rawStatus;

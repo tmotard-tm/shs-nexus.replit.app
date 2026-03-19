@@ -857,7 +857,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                             <div className="h-4 w-20 animate-pulse rounded bg-muted" />
                           ) : (
                             (() => {
-                              const label = vehicle.vin ? amsTruckStatusMap?.[vehicle.vin] : undefined;
+                              const label = vehicle.vin ? amsTruckStatusMap?.[vehicle.vin.trim().toUpperCase()] : undefined;
                               return label ? (
                                 <span className="text-xs text-foreground whitespace-nowrap">{label}</span>
                               ) : (
