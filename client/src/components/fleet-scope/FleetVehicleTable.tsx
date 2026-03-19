@@ -253,6 +253,14 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     return s;
   }, [rentalOpsData]);
 
+  // AMS truck-status map: VIN → human-readable label (single fetch for whole table)
+  const { data: amsTruckStatusMap, isLoading: amsStatusLoading } = useQuery<Record<string, string | null>>({
+    queryKey: ['/api/ams/truck-status-map'],
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+
   // Sorting state
   const [sortColumn, setSortColumn] = useState<SortColumn>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
@@ -686,6 +694,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                   />
                 </TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">Rental</TableHead>
+                <TableHead className="whitespace-nowrap bg-muted">AMS Status</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">
                   <ColumnFilterPopover
                     title="General Status"
@@ -841,6 +850,20 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                             || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
                             || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber))) && (
                             <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {amsStatusLoading ? (
+                            <div className="h-4 w-20 animate-pulse rounded bg-muted" />
+                          ) : (
+                            (() => {
+                              const label = vehicle.vin ? amsTruckStatusMap?.[vehicle.vin] : undefined;
+                              return label ? (
+                                <span className="text-xs text-foreground whitespace-nowrap">{label}</span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">-</span>
+                              );
+                            })()
                           )}
                         </TableCell>
                         <TableCell>
