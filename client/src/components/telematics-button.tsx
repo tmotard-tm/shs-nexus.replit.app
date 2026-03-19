@@ -137,7 +137,11 @@ export function TelematicsButton({
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
+        <DialogContent
+          className="sm:max-w-2xl max-h-[90vh] flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Satellite className="h-5 w-5" />
