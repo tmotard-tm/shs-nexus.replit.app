@@ -1087,49 +1087,6 @@ export default function FleetManagement() {
               </Card>
             </div>
 
-            {/* Quick Lookup Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Lookup by Enterprise ID</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Enter Enterprise ID..."
-                      value={techLookup}
-                      onChange={(e) => setTechLookup(e.target.value.toUpperCase())}
-                      onKeyDown={(e) => e.key === 'Enter' && handleTechLookup()}
-                      data-testid="input-tech-lookup"
-                    />
-                    <Button onClick={handleTechLookup} disabled={!techLookup.trim()} data-testid="button-tech-lookup">
-                      <Search className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Lookup by Truck #</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Enter Truck Number..."
-                      value={truckLookup}
-                      onChange={(e) => setTruckLookup(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleTruckLookup()}
-                      data-testid="input-truck-lookup"
-                    />
-                    <Button onClick={handleTruckLookup} disabled={!truckLookup.trim()} data-testid="button-truck-lookup">
-                      <Search className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
             {/* Data Status Alerts */}
             {hasError && !isLoading && (
               <Alert variant="destructive">
@@ -1153,13 +1110,6 @@ export default function FleetManagement() {
                   Holman API is unavailable. Showing {activeVehicles.length} cached vehicles{oosCount > 0 && !showOos ? ` (${oosCount} Out of Service hidden)` : ""}.
                 </AlertDescription>
               </Alert>
-            )}
-
-            {isLiveMode && !isLoading && (
-              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                <CheckCircle className="h-4 w-4" />
-                <span>Live data from Holman API</span>
-              </div>
             )}
 
             {/* Search and Filters */}
