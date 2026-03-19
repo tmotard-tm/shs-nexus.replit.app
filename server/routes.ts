@@ -8599,13 +8599,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`[Samsara Telematics] Resolving vehicle ${vehicleNumber} → candidates: [${candidates.join(', ')}] → found: ${resolvedTruckNumber || 'none'}`);
 
+      const vehicleVin = vehicle?.VIN || null;
+
       const [locationResult, odometerResult, maintenanceResult, fuelResult, streamResult] = await Promise.allSettled([
         samsaraService.getVehicleLocation(resolvedTruckNumber, 9999),
-        vehicleId ? samsaraService.getOdometer(vehicleId) : Promise.resolve([]),
-        vehicleId ? snowflake.executeQuery(
-          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE WHERE VEHICLE_ID = ? ORDER BY MAINT_ID DESC LIMIT 50`,
-          [vehicleId]
+        // SAMSARA_ODOMETER is keyed by VIN, not VEHICLE_ID
+        vehicleVin ? snowflake.executeQuery(
+          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_ODOMETER WHERE VIN = ? ORDER BY OBD_TIME DESC LIMIT 1`,
+          [vehicleVin]
         ) : Promise.resolve([]),
+        // SAMSARA_MAINTENANCE: fetch all records and filter in memory (VEHICLE_ID filter fails in SQL)
+        vehicleId ? samsaraService.getMaintenance() : Promise.resolve([]),
         vehicleId ? snowflake.executeQuery(
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_FUEL_ENERGY_DAILY WHERE VEHICLE_ID = ? ORDER BY RUN_DATE_UTC DESC LIMIT 7`,
           [vehicleId]
@@ -8616,13 +8620,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ),
       ]);
 
+      // Filter maintenance records to this vehicle in memory
+      const allMaintenance = maintenanceResult.status === 'fulfilled' ? (maintenanceResult.value as any[]) : [];
+      const vehicleMaintenance = vehicleId
+        ? allMaintenance.filter((m: any) => String(m.VEHICLE_ID) === String(vehicleId))
+        : [];
+
       res.json({
         vehicle,
         vehicleId,
         resolvedTruckNumber,
         location: locationResult.status === 'fulfilled' ? locationResult.value : null,
         odometer: odometerResult.status === 'fulfilled' ? (odometerResult.value as any[])[0] || null : null,
-        maintenance: maintenanceResult.status === 'fulfilled' ? maintenanceResult.value : [],
+        maintenance: vehicleMaintenance,
         fuel: fuelResult.status === 'fulfilled' ? fuelResult.value : [],
         stream: streamResult.status === 'fulfilled' && (streamResult.value as any[]).length > 0
           ? (streamResult.value as any[])[0] : null,
