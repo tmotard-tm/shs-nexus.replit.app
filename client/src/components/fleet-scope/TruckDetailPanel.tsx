@@ -338,7 +338,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
   const [commentValue, setCommentValue] = useState("");
   const [isEditingComment, setIsEditingComment] = useState(false);
 
-  const { data: truck, isLoading: truckLoading } = useQuery<Truck>({
+  const { data: truck, isLoading: truckLoading } = useQuery<Truck & { techAddress?: string }>({
     queryKey: ["/api/fs/trucks", truckId],
     enabled: !!truckId && open,
   });
@@ -518,6 +518,12 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
                         {fullAddress && (
                           <InfoRow label="Vendor Address" value={fullAddress} icon={<MapPin className="w-3.5 h-3.5" />} testId="panel-vendor-address" />
                         )}
+                        {samsaraData?.REVERSE_GEO_FULL && (
+                          <InfoRow label="Samsara Location" value={samsaraData.REVERSE_GEO_FULL} icon={<Navigation className="w-3.5 h-3.5" />} testId="panel-samsara-location" />
+                        )}
+                        {samsaraData?.TIME && (
+                          <InfoRow label="Last Samsara Signal" value={format(new Date(samsaraData.TIME), "MMM d, yyyy h:mm a")} icon={<Clock className="w-3.5 h-3.5" />} testId="panel-samsara-signal" />
+                        )}
                         <EditableInfoRow
                           label="Contact"
                           value={truck.contactName}
@@ -681,6 +687,11 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
                       <InfoRow label="Tech Lead Phone" value={truck.techLeadPhone} icon={<Phone className="w-3.5 h-3.5" />} />
                       {truck.techState && (
                         <InfoRow label="State" value={truck.techState} icon={<MapPin className="w-3.5 h-3.5" />} />
+                      )}
+                      {truck.techAddress && (
+                        <div className="col-span-2">
+                          <InfoRow label="Tech Home Address" value={truck.techAddress} icon={<MapPin className="w-3.5 h-3.5" />} testId="panel-tech-address" />
+                        </div>
                       )}
                     </div>
                   </div>

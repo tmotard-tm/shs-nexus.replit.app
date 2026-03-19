@@ -34,14 +34,14 @@ if (process.env.FS_SENDGRID_API_KEY) {
 }
 
 // Technician data cache (populated from TPMS_EXTRACT on startup and daily refresh)
-let technicianDataCache: Map<string, { fullName: string; techNo: string; mobilePhone: string; managerName: string; managerPhone: string; enterpriseId: string }> = new Map();
+let technicianDataCache: Map<string, { fullName: string; techNo: string; mobilePhone: string; managerName: string; managerPhone: string; enterpriseId: string; fullAddress: string }> = new Map();
 let technicianCacheLastUpdated: Date | null = null;
 
 // Manual spare truck cleanup tracker - runs once per day
 let lastManualTruckCleanup: Date | null = null;
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-export function getCachedTechnicianData(): Map<string, { fullName: string; techNo: string; mobilePhone: string; managerName: string; managerPhone: string }> {
+export function getCachedTechnicianData(): Map<string, { fullName: string; techNo: string; mobilePhone: string; managerName: string; managerPhone: string; fullAddress: string }> {
   return technicianDataCache;
 }
 
@@ -324,7 +324,8 @@ async function refreshTechnicianCache(): Promise<void> {
   try {
     console.log("[TechCache] Refreshing technician data cache from Snowflake...");
     const techSql = `
-      SELECT TRUCK_LU, FULL_NAME, TECH_NO, MOBILEPHONENUMBER, MANAGER_NAME, MANAGER_ENT_ID, ENTERPRISE_ID 
+      SELECT TRUCK_LU, FULL_NAME, TECH_NO, MOBILEPHONENUMBER, MANAGER_NAME, MANAGER_ENT_ID, ENTERPRISE_ID,
+             PRIMARYADDR1, PRIMARYADDR2, PRIMARYCITY, PRIMARYSTATE, PRIMARYZIP
       FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
     `;
     const techData = await executeQuery<{
@@ -335,6 +336,11 @@ async function refreshTechnicianCache(): Promise<void> {
       MANAGER_NAME: string | null;
       MANAGER_ENT_ID: string | number | null;
       ENTERPRISE_ID: string | number | null;
+      PRIMARYADDR1: string | null;
+      PRIMARYADDR2: string | null;
+      PRIMARYCITY: string | null;
+      PRIMARYSTATE: string | null;
+      PRIMARYZIP: string | null;
     }>(techSql);
     
     // First pass: Build lookup of ENTERPRISE_ID -> phone number for manager phone lookup
@@ -358,13 +364,23 @@ async function refreshTechnicianCache(): Promise<void> {
           managerPhone = enterpriseIdToPhone.get(managerEntId) || '';
         }
         
+        const addressParts = [
+          tech.PRIMARYADDR1?.trim(),
+          tech.PRIMARYADDR2?.trim(),
+          tech.PRIMARYCITY?.trim(),
+          tech.PRIMARYSTATE?.trim(),
+          tech.PRIMARYZIP?.trim(),
+        ].filter(Boolean);
+        const fullAddress = addressParts.join(', ');
+
         newCache.set(vehicleNum, {
           fullName: tech.FULL_NAME || '',
           techNo: tech.TECH_NO ? String(tech.TECH_NO) : '',
           mobilePhone: tech.MOBILEPHONENUMBER ? String(tech.MOBILEPHONENUMBER) : '',
           managerName: tech.MANAGER_NAME || '',
           managerPhone,
-          enterpriseId: tech.ENTERPRISE_ID ? String(tech.ENTERPRISE_ID).trim() : ''
+          enterpriseId: tech.ENTERPRISE_ID ? String(tech.ENTERPRISE_ID).trim() : '',
+          fullAddress,
         });
       }
     }
@@ -2340,7 +2356,9 @@ export function registerFleetScopeRoutes(): Router {
       if (!truck) {
         return res.status(404).json({ message: "Truck not found" });
       }
-      res.json(truck);
+      const tNum = (truck.truckNumber || '').toString().padStart(6, '0');
+      const techCacheEntry = technicianDataCache.get(tNum);
+      res.json({ ...truck, techAddress: techCacheEntry?.fullAddress || '' });
     } catch (error: any) {
       console.error("Error fetching truck:", error);
       res.status(500).json({ message: "Failed to fetch truck" });
