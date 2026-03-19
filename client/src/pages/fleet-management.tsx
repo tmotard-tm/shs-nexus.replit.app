@@ -1775,12 +1775,20 @@ export default function FleetManagement() {
                             <Badge className={assignStatus.color + ' border text-xs'}>
                               {assignStatus.label}
                             </Badge>
-                            <ViewInventoryButton 
-                              vehicleNumber={vehicle.vehicleNumber} 
-                              size="sm" 
-                              variant="ghost" 
-                              className="h-7 text-xs"
-                            />
+                            <div className="flex items-center gap-1">
+                              <ViewInventoryButton 
+                                vehicleNumber={vehicle.vehicleNumber} 
+                                size="sm" 
+                                variant="ghost" 
+                                className="h-7 text-xs"
+                              />
+                              <TelematicsButton
+                                vehicleNumber={vehicle.vehicleNumber}
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs"
+                              />
+                            </div>
                           </div>
                         </CardContent>
                       </Card>

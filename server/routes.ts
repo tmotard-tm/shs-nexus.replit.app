@@ -8576,19 +8576,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { getSnowflakeService: getSnowflake } = await import("./snowflake-service");
       const snowflake = getSnowflake();
 
+      // Build all candidate truck number formats to maximize match chance
+      const canonical = vehicleNumber.replace(/^0+/, '') || '0';
+      const fiveDigit = canonical.padStart(5, '0');
+      const sixDigit = canonical.padStart(6, '0');
+      const candidates = [...new Set([vehicleNumber, fiveDigit, sixDigit, canonical])];
+
+      // Find vehicle record using any of the candidate formats
+      const placeholders = candidates.map(() => '?').join(', ');
       const [vehicleRows] = await Promise.allSettled([
         snowflake.executeQuery(
-          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_VEHICLES WHERE TRUCK_NUMBER = ? LIMIT 1`,
-          [vehicleNumber]
+          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_VEHICLES WHERE TRUCK_NUMBER IN (${placeholders}) LIMIT 1`,
+          candidates
         )
       ]);
 
       const vehicle = vehicleRows.status === 'fulfilled' && (vehicleRows.value as any[]).length > 0
         ? (vehicleRows.value as any[])[0] : null;
       const vehicleId = vehicle?.VEHICLE_ID || null;
+      // Use the actual TRUCK_NUMBER that matched so location lookups use the same format
+      const resolvedTruckNumber = vehicle?.TRUCK_NUMBER || vehicleNumber;
+
+      console.log(`[Samsara Telematics] Resolving vehicle ${vehicleNumber} → candidates: [${candidates.join(', ')}] → found: ${resolvedTruckNumber || 'none'}`);
 
       const [locationResult, odometerResult, maintenanceResult, fuelResult, streamResult] = await Promise.allSettled([
-        samsaraService.getVehicleLocation(vehicleNumber, 9999),
+        samsaraService.getVehicleLocation(resolvedTruckNumber, 9999),
         vehicleId ? samsaraService.getOdometer(vehicleId) : Promise.resolve([]),
         vehicleId ? snowflake.executeQuery(
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE WHERE VEHICLE_ID = ? ORDER BY MAINT_ID DESC LIMIT 50`,
@@ -8599,14 +8611,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           [vehicleId]
         ) : Promise.resolve([]),
         snowflake.executeQuery(
-          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_STREAM WHERE VEHICLE_NAME = ? ORDER BY TIME DESC LIMIT 1`,
-          [vehicleNumber]
+          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_STREAM WHERE VEHICLE_NAME IN (${placeholders}) ORDER BY TIME DESC LIMIT 1`,
+          candidates
         ),
       ]);
 
       res.json({
         vehicle,
         vehicleId,
+        resolvedTruckNumber,
         location: locationResult.status === 'fulfilled' ? locationResult.value : null,
         odometer: odometerResult.status === 'fulfilled' ? (odometerResult.value as any[])[0] || null : null,
         maintenance: maintenanceResult.status === 'fulfilled' ? maintenanceResult.value : [],
