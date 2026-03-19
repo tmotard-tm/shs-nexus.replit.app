@@ -153,6 +153,7 @@ export function Sidebar() {
         if (categoryPerms) {
           const pagesInCategory = getPagesByCategory(category.key);
           for (const page of pagesInCategory) {
+            if (page.hideFromNav) continue;
             result.push({
               name: page.label,
               href: page.path,
@@ -164,6 +165,7 @@ export function Sidebar() {
       } else if (categoryPerms?.enabled) {
         const pagesInCategory = getPagesByCategory(category.key);
         for (const page of pagesInCategory) {
+          if (page.hideFromNav) continue;
           if (categoryPerms[page.permissionKey]) {
             result.push({
               name: page.label,

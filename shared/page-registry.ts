@@ -56,6 +56,7 @@ export interface PageDefinition {
   icon: LucideIcon;
   category: PageCategory;
   permissionKey: string;
+  hideFromNav?: boolean;
   features?: (PageFeature | PageFeatureGroup)[];
 }
 
@@ -295,6 +296,7 @@ export const PAGES: PageDefinition[] = [
     icon: Truck,
     category: "management",
     permissionKey: "fleetManagement",
+    hideFromNav: true,
     features: [
       { key: "viewVehicles", label: "View Vehicles", description: "Show/hide vehicle list" },
       { key: "syncToHolman", label: "Sync to Holman", description: "Show/hide Sync to Holman button" },
@@ -310,6 +312,7 @@ export const PAGES: PageDefinition[] = [
     icon: UserPlus,
     category: "management",
     permissionKey: "weeklyOnboarding",
+    hideFromNav: true,
   },
   {
     key: "weeklyOffboarding",
@@ -319,6 +322,7 @@ export const PAGES: PageDefinition[] = [
     icon: UserMinus,
     category: "management",
     permissionKey: "weeklyOffboarding",
+    hideFromNav: true,
   },
   {
     key: "techRoster",
