@@ -30,7 +30,8 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip } from "lucide-react";
-import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
+import { downloadExcelWorkbook, addJsonWorksheet, readExcelFileAs2D } from '@/lib/xlsx-utils';
 
 interface DecommissioningVehicle {
   id: number;
@@ -275,13 +276,9 @@ export default function Decommissioning() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
-        const data = event.target?.result;
-        const workbook = XLSX.read(data, { type: "binary" });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+        const jsonData = await readExcelFileAs2D(event.target?.result as ArrayBuffer) as any[][];
 
         if (jsonData.length < 2) {
           toast({
@@ -335,7 +332,7 @@ export default function Decommissioning() {
         });
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
     
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -419,7 +416,7 @@ export default function Decommissioning() {
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const exportData = filteredVehicles.map((v) => ({
       "Truck #": v.truckNumber,
       "VIN": v.vin || "",
@@ -445,12 +442,11 @@ export default function Decommissioning() {
       "Comments": v.comments || "",
     }));
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Decommissioning");
-    
+    const wb = new ExcelJS.Workbook();
+    addJsonWorksheet(wb, exportData, "Decommissioning");
+
     const date = new Date().toISOString().split("T")[0];
-    XLSX.writeFile(wb, `Decommissioning_${date}.xlsx`);
+    await downloadExcelWorkbook(wb, `Decommissioning_${date}.xlsx`);
     
     toast({
       title: "Export Complete",

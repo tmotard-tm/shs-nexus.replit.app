@@ -60,7 +60,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
+import { downloadExcelWorkbook, addJsonWorksheet, readExcelFile } from '@/lib/xlsx-utils';
 
 interface PORecord {
   id: string;
@@ -415,7 +416,7 @@ function POPriorityView() {
     });
   };
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (!filteredGroups.length || !displayColumns.length) return;
     const allRows = filteredGroups.flatMap(g => g.rows);
     const exportData = allRows.map(row => {
@@ -425,11 +426,10 @@ function POPriorityView() {
       }
       return obj;
     });
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    XLSX.utils.book_append_sheet(wb, ws, 'PO Priority');
+    const wb = new ExcelJS.Workbook();
+    addJsonWorksheet(wb, exportData, 'PO Priority');
     const dateStr = new Date().toISOString().split('T')[0];
-    XLSX.writeFile(wb, `PO_Priority_${dateStr}.xlsx`);
+    await downloadExcelWorkbook(wb, `PO_Priority_${dateStr}.xlsx`);
   };
 
   if (prioLoading) {
@@ -778,13 +778,9 @@ export default function POs() {
 
     if (isExcel) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
-          const data = new Uint8Array(e.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: 'array' });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet);
+          const jsonData = await readExcelFile(e.target?.result as ArrayBuffer);
           
           if (jsonData.length === 0) {
             toast({
@@ -859,7 +855,7 @@ export default function POs() {
     });
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     if (filteredOrders.length === 0) {
       toast({
         title: "No data to export",
@@ -905,16 +901,15 @@ export default function POs() {
     });
 
     // Create workbook and worksheet
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "POs");
+    const workbook = new ExcelJS.Workbook();
+    addJsonWorksheet(workbook, exportData, "POs");
 
     // Generate filename with timestamp
     const timestamp = new Date().toISOString().split('T')[0];
     const filename = `POs-export-${timestamp}.xlsx`;
 
     // Download the file
-    XLSX.writeFile(workbook, filename);
+    await downloadExcelWorkbook(workbook, filename);
 
     toast({
       title: "Export successful",

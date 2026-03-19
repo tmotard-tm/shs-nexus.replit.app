@@ -12,7 +12,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { FleetVehicleTable } from "@/components/fleet-scope/FleetVehicleTable";
 import { USMapVehicles, type MapSelection, type MapFilters, type CategoryKey } from "@/components/fleet-scope/USMapVehicles";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
+import { downloadExcelWorkbook } from '@/lib/xlsx-utils';
 import { format, getISOWeek, getISOWeekYear } from "date-fns";
 import { 
   Package,
@@ -451,7 +452,7 @@ export default function AllVehicles() {
     return { ...counts, installed, penetration };
   }, [data?.vehicles]);
 
-  const handleCrackdownExport = useCallback(() => {
+  const handleCrackdownExport = useCallback(async () => {
     if (!data?.vehicles) return;
     const vehicles = data.vehicles as any[];
     const unplugged = vehicles.filter((v: any) => v.samsaraStatus === 'Inactive/Unplugged');
@@ -481,11 +482,25 @@ export default function AllVehicles() {
     bucket1.forEach((v: any) => { districtCounts[v.district || 'Unknown'] = (districtCounts[v.district || 'Unknown'] || 0) + 1; });
     const top5Districts = Object.entries(districtCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-    const wb = XLSX.utils.book_new();
+    const wb = new ExcelJS.Workbook();
 
-    const headerStyle = { font: { bold: true, color: { rgb: 'FFFFFF' }, name: 'Arial', sz: 10 }, fill: { fgColor: { rgb: '1F3864' } } };
+    const applyHeaderStyle = (row: ExcelJS.Row, colCount: number) => {
+      for (let ci = 1; ci <= colCount; ci++) {
+        const cell = row.getCell(ci);
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3864' } };
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Arial', size: 10 };
+      }
+    };
 
-    const summaryData = [
+    const applyRowColor = (ws: ExcelJS.Worksheet, rowIdx: number, argb: string, colCount: number) => {
+      for (let ci = 1; ci <= colCount; ci++) {
+        const cell = ws.getRow(rowIdx).getCell(ci);
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } };
+        cell.font = { name: 'Arial', size: 10 };
+      }
+    };
+
+    const summaryRows = [
       ['Samsara Crackdown Report', format(new Date(), 'yyyy-MM-dd')],
       [],
       ['Metric', 'Count'],
@@ -505,79 +520,57 @@ export default function AllVehicles() {
       ['Top 5 Districts by Bucket 1', ''],
       ...top5Districts.map(([d, c]) => [d, c]),
     ];
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-    wsSummary['!cols'] = [{ wch: 45 }, { wch: 15 }];
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+    const wsSummary = wb.addWorksheet('Summary');
+    summaryRows.forEach(row => wsSummary.addRow(row));
+    wsSummary.getColumn(1).width = 45;
+    wsSummary.getColumn(2).width = 15;
 
     const compHeaders = ['Priority', 'Tech Name', 'Phone', 'Vehicle #', 'Tech ID', 'District', 'State', 'Category', 'Status', 'Sub Status', 'Days Dark', 'Last Signal'];
-    const compData = [compHeaders, ...complianceRows.map((v: any) => [
+    const wsComp = wb.addWorksheet('Compliance Action');
+    wsComp.addRow(compHeaders);
+    complianceRows.forEach((v: any) => wsComp.addRow([
       v.bucketLabel, v.technicianName || '', v.technicianPhone || '', v.vehicleNumber || '',
       v.technicianNo || '', v.district || '', v.locationState || '', v.inventoryProductCategory || '',
-      v.generalStatus || '', v.subStatus || '', getDaysDark(v), v.lastSamsaraSignal ? format(new Date(v.lastSamsaraSignal), 'yyyy-MM-dd HH:mm') : ''
-    ])];
-    const wsComp = XLSX.utils.aoa_to_sheet(compData);
-    wsComp['!cols'] = compHeaders.map(h => ({ wch: h === 'Priority' ? 55 : h === 'Last Signal' ? 18 : 15 }));
-    wsComp['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: compData.length - 1, c: compHeaders.length - 1 } }) };
-    const bucketColors: Record<number, string> = { 1: 'FFCCCC', 2: 'FFE5CC', 3: 'FFFACC' };
-    complianceRows.forEach((v, i) => {
-      const rowIdx = i + 1;
-      compHeaders.forEach((_, ci) => {
-        const cell = wsComp[XLSX.utils.encode_cell({ r: rowIdx, c: ci })];
-        if (cell) cell.s = { fill: { fgColor: { rgb: bucketColors[v.bucket] } }, font: { name: 'Arial', sz: 10 } };
-      });
+      v.generalStatus || '', v.subStatus || '', getDaysDark(v),
+      v.lastSamsaraSignal ? format(new Date(v.lastSamsaraSignal), 'yyyy-MM-dd HH:mm') : ''
+    ]));
+    compHeaders.forEach((h, i) => { wsComp.getColumn(i + 1).width = h === 'Priority' ? 55 : h === 'Last Signal' ? 18 : 15; });
+    wsComp.autoFilter = { from: { row: 1, column: 1 }, to: { row: wsComp.rowCount, column: compHeaders.length } };
+    applyHeaderStyle(wsComp.getRow(1), compHeaders.length);
+    const bucketColors: Record<number, string> = { 1: 'FFFFCCCC', 2: 'FFFFE5CC', 3: 'FFFFFACC' };
+    complianceRows.forEach((v: any, i: number) => {
+      applyRowColor(wsComp, i + 2, bucketColors[v.bucket] || 'FFFFFFFF', compHeaders.length);
     });
-    compHeaders.forEach((_, ci) => {
-      const cell = wsComp[XLSX.utils.encode_cell({ r: 0, c: ci })];
-      if (cell) cell.s = headerStyle;
-    });
-    XLSX.utils.book_append_sheet(wb, wsComp, 'Compliance Action');
 
     const repHeaders = ['Vehicle #', 'Tech Name', 'Phone', 'Tech ID', 'District', 'State', 'Category', 'Sub Status', 'Days Dark', 'Last Signal'];
-    const repData = [repHeaders, ...repairShop.map((v: any) => [
+    const wsRep = wb.addWorksheet('Repair Shop');
+    wsRep.addRow(repHeaders);
+    repairShop.forEach((v: any) => wsRep.addRow([
       v.vehicleNumber || '', v.technicianName || '', v.technicianPhone || '', v.technicianNo || '',
       v.district || '', v.locationState || '', v.inventoryProductCategory || '',
-      v.subStatus || '', getDaysDark(v), v.lastSamsaraSignal ? format(new Date(v.lastSamsaraSignal), 'yyyy-MM-dd HH:mm') : ''
-    ])];
-    const wsRep = XLSX.utils.aoa_to_sheet(repData);
-    wsRep['!cols'] = repHeaders.map(() => ({ wch: 18 }));
-    wsRep['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: repData.length - 1, c: repHeaders.length - 1 } }) };
-    repairShop.forEach((_, i) => {
-      const rowIdx = i + 1;
-      repHeaders.forEach((__, ci) => {
-        const cell = wsRep[XLSX.utils.encode_cell({ r: rowIdx, c: ci })];
-        if (cell) cell.s = { fill: { fgColor: { rgb: 'D4EDDA' } }, font: { name: 'Arial', sz: 10 } };
-      });
-    });
-    repHeaders.forEach((_, ci) => {
-      const cell = wsRep[XLSX.utils.encode_cell({ r: 0, c: ci })];
-      if (cell) cell.s = headerStyle;
-    });
-    XLSX.utils.book_append_sheet(wb, wsRep, 'Repair Shop');
+      v.subStatus || '', getDaysDark(v),
+      v.lastSamsaraSignal ? format(new Date(v.lastSamsaraSignal), 'yyyy-MM-dd HH:mm') : ''
+    ]));
+    repHeaders.forEach((_, i) => { wsRep.getColumn(i + 1).width = 18; });
+    wsRep.autoFilter = { from: { row: 1, column: 1 }, to: { row: wsRep.rowCount, column: repHeaders.length } };
+    applyHeaderStyle(wsRep.getRow(1), repHeaders.length);
+    repairShop.forEach((_: any, i: number) => { applyRowColor(wsRep, i + 2, 'FFD4EDDA', repHeaders.length); });
 
     const fleetHeaders = ['Priority', 'Vehicle #', 'District', 'State', 'Category', 'General Status', 'Sub Status', 'Days Dark', 'Last Signal'];
-    const fleetData = [fleetHeaders, ...fleetCoord.sort((a: any, b: any) => getDaysDark(b) - getDaysDark(a)).map((v: any) => [
+    const wsFleet = wb.addWorksheet('Fleet Coordinator');
+    wsFleet.addRow(fleetHeaders);
+    fleetCoord.sort((a: any, b: any) => getDaysDark(b) - getDaysDark(a)).forEach((v: any) => wsFleet.addRow([
       'Storage 90d+ - Fleet Coordinator Review', v.vehicleNumber || '', v.district || '', v.locationState || '',
       v.inventoryProductCategory || '', v.generalStatus || '', v.subStatus || '',
       getDaysDark(v), v.lastSamsaraSignal ? format(new Date(v.lastSamsaraSignal), 'yyyy-MM-dd HH:mm') : ''
-    ])];
-    const wsFleet = XLSX.utils.aoa_to_sheet(fleetData);
-    wsFleet['!cols'] = fleetHeaders.map(h => ({ wch: h === 'Priority' ? 40 : 18 }));
-    wsFleet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: fleetData.length - 1, c: fleetHeaders.length - 1 } }) };
-    fleetCoord.forEach((_, i) => {
-      const rowIdx = i + 1;
-      fleetHeaders.forEach((__, ci) => {
-        const cell = wsFleet[XLSX.utils.encode_cell({ r: rowIdx, c: ci })];
-        if (cell) cell.s = { fill: { fgColor: { rgb: 'CCE0FF' } }, font: { name: 'Arial', sz: 10 } };
-      });
-    });
-    fleetHeaders.forEach((_, ci) => {
-      const cell = wsFleet[XLSX.utils.encode_cell({ r: 0, c: ci })];
-      if (cell) cell.s = headerStyle;
-    });
-    XLSX.utils.book_append_sheet(wb, wsFleet, 'Fleet Coordinator');
+    ]));
+    fleetHeaders.forEach((h, i) => { wsFleet.getColumn(i + 1).width = h === 'Priority' ? 40 : 18; });
+    wsFleet.autoFilter = { from: { row: 1, column: 1 }, to: { row: wsFleet.rowCount, column: fleetHeaders.length } };
+    applyHeaderStyle(wsFleet.getRow(1), fleetHeaders.length);
+    fleetCoord.forEach((_: any, i: number) => { applyRowColor(wsFleet, i + 2, 'FFCCE0FF', fleetHeaders.length); });
 
     const fileName = `samsara_crackdown_${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+    await downloadExcelWorkbook(wb, fileName);
   }, [data?.vehicles]);
 
   return (

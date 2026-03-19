@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { fleetScopeStorage } from './fleet-scope-storage';
 
 export interface FleetCostJob {
@@ -59,6 +59,18 @@ export function saveUploadedFile(jobId: string, buffer: Buffer): void {
   fs.writeFileSync(filePath, buffer);
 }
 
+function getExcelCellValue(cell: ExcelJS.Cell): unknown {
+  if (!cell || cell.value === null || cell.value === undefined) return null;
+  const v = cell.value;
+  if (typeof v === 'object') {
+    if (v instanceof Date) return v;
+    if ('richText' in v) return (v as any).richText.map((r: any) => r.text).join('');
+    if ('result' in v) return (v as any).result;
+    if ('text' in v) return (v as any).text;
+    if ('hyperlink' in v) return (v as any).text || (v as any).hyperlink;
+  }
+  return v;
+}
 
 export async function processJobInBackground(jobId: string): Promise<void> {
   const job = jobs.get(jobId);
@@ -68,28 +80,57 @@ export async function processJobInBackground(jobId: string): Promise<void> {
   }
 
   const filePath = getFilePath(jobId);
-  
+
   try {
     job.status = 'processing';
     console.log(`[Fleet Cost Job] Starting background processing for job ${jobId}`);
 
     const fileBuffer = fs.readFileSync(filePath);
-    const workbook = XLSX.read(fileBuffer, { type: "buffer" });
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-    
-    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-    const headers: string[] = [];
-    for (let col = range.s.c; col <= range.e.c; col++) {
-      const cell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c: col })];
-      headers.push(cell ? String(cell.v) : `Column${col}`);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(fileBuffer);
+
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
+      throw new Error("No worksheets found in file");
     }
+
+    const headers: string[] = [];
+    const headerRow = worksheet.getRow(1);
+    headerRow.eachCell({ includeEmpty: true }, cell => {
+      const v = getExcelCellValue(cell);
+      headers.push(v !== null && v !== undefined ? String(v) : `Column${headers.length + 1}`);
+    });
 
     if (headers.length === 0) {
       throw new Error("No headers found in file");
     }
 
-    const totalRows = range.e.r - range.s.r;
+    const allDataRows: Array<{
+      recordKey: string;
+      keyColumn: string;
+      rawData: Record<string, unknown>;
+      importedBy: string;
+    }> = [];
+
+    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber === 1) return;
+      const rowData: Record<string, unknown> = {};
+      headers.forEach((header, colIdx) => {
+        rowData[header] = getExcelCellValue(row.getCell(colIdx + 1));
+      });
+      const hasData = Object.values(rowData).some(v => v !== null && v !== '');
+      if (hasData) {
+        const dataRowNumber = allDataRows.length + 1;
+        allDataRows.push({
+          recordKey: `ROW_${dataRowNumber}`,
+          keyColumn: "ROW_NUMBER",
+          rawData: rowData,
+          importedBy: job.importedBy,
+        });
+      }
+    });
+
+    const totalRows = allDataRows.length;
     job.totalRows = totalRows;
     console.log(`[Fleet Cost Job] Job ${jobId}: Processing ${totalRows} rows`);
 
@@ -99,40 +140,16 @@ export async function processJobInBackground(jobId: string): Promise<void> {
     let totalInserted = 0;
     let totalUpdated = 0;
 
-    for (let startRow = range.s.r + 1; startRow <= range.e.r; startRow += CHUNK_SIZE) {
-      const endRow = Math.min(startRow + CHUNK_SIZE - 1, range.e.r);
-      const chunkData: Array<{ recordKey: string; keyColumn: string; rawData: Record<string, unknown>; importedBy: string }> = [];
+    for (let startIdx = 0; startIdx < allDataRows.length; startIdx += CHUNK_SIZE) {
+      const chunk = allDataRows.slice(startIdx, startIdx + CHUNK_SIZE);
 
-      for (let row = startRow; row <= endRow; row++) {
-        const rowData: Record<string, unknown> = {};
-        for (let col = range.s.c; col <= range.e.c; col++) {
-          const cell = worksheet[XLSX.utils.encode_cell({ r: row, c: col })];
-          rowData[headers[col]] = cell ? cell.v : null;
-        }
-        
-        // Skip completely empty rows
-        const hasData = Object.values(rowData).some(v => v !== null && v !== '');
-        if (hasData) {
-          // Use row number as the unique key - ensures every row from Excel is kept
-          const rowNumber = row - range.s.r; // 1-based row number (excluding header)
-          const recordKey = `ROW_${rowNumber}`;
-          
-          chunkData.push({
-            recordKey: recordKey,
-            keyColumn: "ROW_NUMBER",
-            rawData: rowData,
-            importedBy: job.importedBy,
-          });
-        }
-      }
-
-      if (chunkData.length > 0) {
-        const result = await fleetScopeStorage.upsertFleetCostRecords(chunkData);
+      if (chunk.length > 0) {
+        const result = await fleetScopeStorage.upsertFleetCostRecords(chunk);
         totalInserted += result.inserted;
         totalUpdated += result.updated;
       }
 
-      job.processedRows = endRow - range.s.r;
+      job.processedRows = Math.min(startIdx + CHUNK_SIZE, totalRows);
       job.progress = Math.round((job.processedRows / totalRows) * 100);
       job.inserted = totalInserted;
       job.updated = totalUpdated;
@@ -162,7 +179,7 @@ export async function processJobInBackground(jobId: string): Promise<void> {
     job.error = error instanceof Error ? error.message : 'Unknown error';
     job.completedAt = new Date();
     console.error(`[Fleet Cost Job] Job ${jobId} failed:`, error);
-    
+
     try {
       fs.unlinkSync(filePath);
     } catch (e) {}
@@ -172,7 +189,7 @@ export async function processJobInBackground(jobId: string): Promise<void> {
 export function cleanupOldJobs(): void {
   const ONE_HOUR = 60 * 60 * 1000;
   const now = Date.now();
-  
+
   const entries = Array.from(jobs.entries());
   for (const [jobId, job] of entries) {
     if (job.completedAt && now - job.completedAt.getTime() > ONE_HOUR) {

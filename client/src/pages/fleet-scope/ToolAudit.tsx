@@ -16,7 +16,8 @@ import {
   Loader2,
   Download,
 } from "lucide-react";
-import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
+import { downloadExcelWorkbook, addJsonWorksheet } from '@/lib/xlsx-utils';
 
 interface ConditionReportAnswer {
   note: string | null;
@@ -218,7 +219,7 @@ export default function ToolAudit() {
   };
 
   // Export tool audit data to XLSX
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (tools.length === 0) return;
 
     // Prepare data for export
@@ -245,11 +246,8 @@ export default function ToolAudit() {
     const unknownCount = tools.filter(t => isToolPresent(t) === null).length;
 
     // Create workbook with tool details
-    const wb = XLSX.utils.book_new();
-    
-    // Add tools sheet
-    const toolsWs = XLSX.utils.json_to_sheet(exportData);
-    XLSX.utils.book_append_sheet(wb, toolsWs, 'Tool Audit');
+    const wb = new ExcelJS.Workbook();
+    addJsonWorksheet(wb, exportData, 'Tool Audit');
 
     // Add summary sheet
     const summaryData = [
@@ -261,15 +259,14 @@ export default function ToolAudit() {
       { 'Metric': 'Unknown Status', 'Value': unknownCount },
       { 'Metric': 'With Photos', 'Value': tools.filter(t => t.hasPhoto).length },
     ];
-    const summaryWs = XLSX.utils.json_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+    addJsonWorksheet(wb, summaryData, 'Summary');
 
     // Generate filename with asset ID and date
     const dateStr = new Date().toISOString().split('T')[0];
     const filename = `ToolAudit_${assetId}_${dateStr}.xlsx`;
 
     // Download
-    XLSX.writeFile(wb, filename);
+    await downloadExcelWorkbook(wb, filename);
   };
 
   // Group tools by section

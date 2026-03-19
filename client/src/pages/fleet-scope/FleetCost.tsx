@@ -36,6 +36,7 @@ import {
   ChevronRight,
   Clock,
 } from "lucide-react";
+import { readExcelFile } from '@/lib/xlsx-utils';
 
 interface ForecastDetails {
   weeks: string[];
@@ -321,17 +322,12 @@ export default function FleetCost() {
     setUploadStatus(`Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)...`);
 
     try {
-      // Read XLSX file on client side for approved cost (similar to fleet cost)
-      const XLSX = await import('xlsx');
       const arrayBuffer = await file.arrayBuffer();
-      
+
       setUploadProgress(30);
       setUploadStatus("Parsing Excel file...");
-      
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as Record<string, unknown>[];
+
+      const jsonData = await readExcelFile(arrayBuffer) as Record<string, unknown>[];
       
       if (jsonData.length === 0) {
         throw new Error("No data found in the Excel file");

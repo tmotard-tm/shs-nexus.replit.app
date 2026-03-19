@@ -198,7 +198,8 @@ function determineOwner(truck: Truck): OwnerType {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { format, formatDistanceToNow } from "date-fns";
-import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
+import { downloadExcelWorkbook, addJsonWorksheet, readExcelFile } from '@/lib/xlsx-utils';
 
 // localStorage key for dashboard filters
 const DASHBOARD_FILTERS_KEY = "dashboard-filters";
@@ -1693,11 +1694,9 @@ export default function Dashboard() {
 
     if (ext === 'xlsx' || ext === 'xls') {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
-          const workbook = XLSX.read(e.target?.result, { type: 'array' });
-          const sheet = workbook.Sheets[workbook.SheetNames[0]];
-          const jsonData: any[] = XLSX.utils.sheet_to_json(sheet, { raw: false });
+          const jsonData = await readExcelFile(e.target?.result as ArrayBuffer);
           processCallImportData(jsonData);
         } catch (err: any) {
           toast({ title: "Failed to parse file", description: err.message, variant: "destructive" });
@@ -1898,46 +1897,13 @@ export default function Dashboard() {
       "Last Updated By": truck.lastUpdatedBy || "",
     }));
 
-    const worksheet = XLSX.utils.json_to_sheet(worksheetData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Fleet Trucks");
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = addJsonWorksheet(workbook, worksheetData, "Fleet Trucks");
 
-    const colWidths = [
-      { wch: 15 }, // Truck Number
-      { wch: 10 }, // State
-      { wch: 25 }, // SHS Owner
-      { wch: 25 }, // Main Status
-      { wch: 35 }, // Sub-Status
-      { wch: 45 }, // Status (Combined)
-      { wch: 25 }, // Registration Sticker Valid
-      { wch: 18 }, // Date Put in Repair
-      { wch: 18 }, // Repair Completed
-      { wch: 18 }, // AMS Documented
-      { wch: 50 }, // Repair Address
-      { wch: 15 }, // Repair Phone
-      { wch: 25 }, // Local Repair Contact Name
-      { wch: 28 }, // Confirmed Set of Expired Tags
-      { wch: 30 }, // Confirmed Declined Repair
-      { wch: 12 }, // Assigned
-      { wch: 20 }, // Tech Name
-      { wch: 15 }, // Enterprise ID
-      { wch: 25 }, // Tech Specialty
-      { wch: 15 }, // Tech Phone
-      { wch: 20 }, // Pick Up Slot Booked
-      { wch: 28 }, // Time Blocked To Pick Up Van
-      { wch: 18 }, // Rental Returned
-      { wch: 15 }, // Van Picked Up
-      { wch: 50 }, // Comments
-      { wch: 20 }, // New Truck Assigned
-      { wch: 30 }, // Registration Renewal In Process
-      { wch: 35 }, // Spare Van Assignment In Process
-      { wch: 30 }, // Spare Van In Process to Ship
-      { wch: 20 }, // Last Updated
-      { wch: 18 }, // Last Updated By
-    ];
-    worksheet["!cols"] = colWidths;
+    const colWidths = [15, 10, 25, 25, 35, 45, 25, 18, 18, 18, 50, 15, 25, 28, 30, 12, 20, 15, 25, 15, 20, 28, 18, 15, 50, 20, 30, 35, 30, 20, 18];
+    colWidths.forEach((w, i) => { worksheet.getColumn(i + 1).width = w; });
 
-    XLSX.writeFile(workbook, `fleet-scope-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
+    await downloadExcelWorkbook(workbook, `fleet-scope-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
 
     toast({
       title: "Export successful",

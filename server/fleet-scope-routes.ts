@@ -15,7 +15,6 @@ import { fetchSamsaraLocations, testSamsaraConnection, type SamsaraLocationData 
 import { reverseGeocode, batchReverseGeocode, getGeocodeStats } from "./fleet-scope-reverse-geocode";
 import sgMail from "@sendgrid/mail";
 import multer from "multer";
-import * as XLSX from "xlsx";
 
 function getDb() {
   if (!fsDb) throw new Error("Fleet-Scope database not configured (FS_DATABASE_URL missing)");

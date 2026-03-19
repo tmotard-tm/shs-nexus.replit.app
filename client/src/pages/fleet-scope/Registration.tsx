@@ -60,7 +60,8 @@ import {
   Building2,
   PackageCheck,
 } from "lucide-react";
-import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
+import { downloadExcelWorkbook, addJsonWorksheet } from '@/lib/xlsx-utils';
 
 const DISTRICT_OWNER_MAP: Record<string, string> = {
   '3132': 'Rob',
@@ -305,7 +306,7 @@ export default function Registration() {
   });
 
   // Export to XLSX with two tabs
-  const handleExportXlsx = () => {
+  const handleExportXlsx = async () => {
     if (!filteredTrucks.length) {
       toast({
         title: "No Data",
@@ -345,21 +346,19 @@ export default function Registration() {
     });
 
     // Create workbook with two sheets
-    const wb = XLSX.utils.book_new();
+    const wb = new ExcelJS.Workbook();
 
     // Sheet 1: Other Parking Locations
     const otherParkingData = otherParkingTrucks.map(formatRow);
-    const ws1 = XLSX.utils.json_to_sheet(otherParkingData);
-    XLSX.utils.book_append_sheet(wb, ws1, 'Other Parking Locations');
+    addJsonWorksheet(wb, otherParkingData, 'Other Parking Locations');
 
     // Sheet 2: In Repair Shops
     const repairShopData = repairShopTrucks.map(formatRow);
-    const ws2 = XLSX.utils.json_to_sheet(repairShopData);
-    XLSX.utils.book_append_sheet(wb, ws2, 'In Repair Shops');
+    addJsonWorksheet(wb, repairShopData, 'In Repair Shops');
 
     // Download
     const date = new Date().toISOString().split('T')[0];
-    XLSX.writeFile(wb, `Registration_Export_${date}.xlsx`);
+    await downloadExcelWorkbook(wb, `Registration_Export_${date}.xlsx`);
 
     toast({
       title: "Export Complete",
@@ -659,7 +658,7 @@ export default function Registration() {
     return { total: trucks.length, expired, expiringSoon, upToDate, noDate };
   }, [data?.trucks]);
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (!filteredTrucks.length) return;
 
     const exportData = filteredTrucks.map(truck => {
@@ -676,10 +675,9 @@ export default function Registration() {
       };
     });
 
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Registration");
-    XLSX.writeFile(workbook, `registration_${new Date().toISOString().split('T')[0]}.xlsx`);
+    const workbook = new ExcelJS.Workbook();
+    addJsonWorksheet(workbook, exportData, "Registration");
+    await downloadExcelWorkbook(workbook, `registration_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   if (error) {

@@ -51,7 +51,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
+import { downloadExcelWorkbook, addJsonWorksheet } from '@/lib/xlsx-utils';
 
 interface PMFRecord {
   assetId: string;
@@ -222,11 +223,8 @@ export default function PMF() {
       }));
 
       // Create workbook
-      const wb = XLSX.utils.book_new();
-      
-      // Add tools sheet
-      const toolsWs = XLSX.utils.json_to_sheet(exportData);
-      XLSX.utils.book_append_sheet(wb, toolsWs, 'Tool Audit');
+      const wb = new ExcelJS.Workbook();
+      addJsonWorksheet(wb, exportData, 'Tool Audit');
 
       // Add summary sheet
       const summaryData = [
@@ -238,15 +236,14 @@ export default function PMF() {
         { 'Metric': 'Tools Not Present', 'Value': summary.toolsNotPresent },
         { 'Metric': 'Unknown Status', 'Value': summary.toolsUnknown },
       ];
-      const summaryWs = XLSX.utils.json_to_sheet(summaryData);
-      XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+      addJsonWorksheet(wb, summaryData, 'Summary');
 
       // Generate filename with date
       const dateStr = new Date().toISOString().split('T')[0];
       const filename = `PMF_ToolAudit_All_${dateStr}.xlsx`;
 
       // Download
-      XLSX.writeFile(wb, filename);
+      await downloadExcelWorkbook(wb, filename);
 
       toast({
         title: "Export Complete",
