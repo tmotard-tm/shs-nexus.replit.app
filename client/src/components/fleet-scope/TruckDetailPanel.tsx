@@ -683,15 +683,15 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
                     <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
                       <InfoRow label="Tech Name" value={truck.techName} icon={<User className="w-3.5 h-3.5" />} />
                       <InfoRow label="Tech Phone" value={truck.techPhone} icon={<Phone className="w-3.5 h-3.5" />} />
+                      {truck.techAddress && (
+                        <div className="col-span-2">
+                          <InfoRow label="Tech Address" value={truck.techAddress} icon={<MapPin className="w-3.5 h-3.5" />} testId="panel-tech-address" />
+                        </div>
+                      )}
                       <InfoRow label="Tech Lead" value={truck.techLeadName} icon={<User className="w-3.5 h-3.5" />} />
                       <InfoRow label="Tech Lead Phone" value={truck.techLeadPhone} icon={<Phone className="w-3.5 h-3.5" />} />
                       {truck.techState && (
                         <InfoRow label="State" value={truck.techState} icon={<MapPin className="w-3.5 h-3.5" />} />
-                      )}
-                      {truck.techAddress && (
-                        <div className="col-span-2">
-                          <InfoRow label="Tech Home Address" value={truck.techAddress} icon={<MapPin className="w-3.5 h-3.5" />} testId="panel-tech-address" />
-                        </div>
                       )}
                     </div>
                   </div>
