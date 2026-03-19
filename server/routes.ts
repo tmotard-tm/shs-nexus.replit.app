@@ -13959,11 +13959,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       // Query all 3 pipeline tables in parallel — they are all appended daily together
-      // Use COUNT(DISTINCT VEHICLE_NUMBER) for open/ticket so counts match the deduplicated
-      // business-logic view instead of raw PO-line counts.
+      // Open rentals trend uses the same combined business-logic as the main count:
+      //   Segment 1: Enterprise open ticket vehicles (from ENTERPRISE table)
+      //   Segment 2: Holman non-Enterprise/toll vehicles not already in Segment 1 for the same date
+      // This ensures the trend line matches the deduplicated count shown in the UI.
       const [ticketRows, openRows, closedRows] = await Promise.all([
         sf.executeQuery(`SELECT FILE_DATE, SOURCE_FILENAME, LOADED_TS, COUNT(DISTINCT VEHICLE_NUMBER) as ROW_COUNT FROM ${RENTAL_TICKET_TABLE} WHERE TICKET_STATUS='OPEN' GROUP BY FILE_DATE, SOURCE_FILENAME, LOADED_TS ORDER BY FILE_DATE DESC LIMIT 60`).catch(() => []) as Promise<any[]>,
-        sf.executeQuery(`SELECT FILE_DATE, SOURCE_FILENAME, LOADED_TS, COUNT(DISTINCT VEHICLE_NUMBER) as ROW_COUNT FROM ${RENTAL_OPEN_TABLE} GROUP BY FILE_DATE, SOURCE_FILENAME, LOADED_TS ORDER BY FILE_DATE DESC LIMIT 60`).catch(() => []) as Promise<any[]>,
+        sf.executeQuery(`SELECT FILE_DATE, NULL as SOURCE_FILENAME, NULL as LOADED_TS, COUNT(DISTINCT VEHICLE_NUMBER) as ROW_COUNT FROM (SELECT FILE_DATE, VEHICLE_NUMBER FROM ${RENTAL_TICKET_TABLE} WHERE TICKET_STATUS='OPEN' UNION SELECT h.FILE_DATE, h.VEHICLE_NUMBER FROM ${RENTAL_OPEN_TABLE} h WHERE UPPER(COALESCE(h.RENTAL_VENDOR,'')) NOT LIKE '%ENTERPRISE%' AND UPPER(COALESCE(h.RENTAL_VENDOR,'')) NOT LIKE '%TOLL%' AND NOT EXISTS (SELECT 1 FROM ${RENTAL_TICKET_TABLE} e WHERE e.VEHICLE_NUMBER=h.VEHICLE_NUMBER AND e.TICKET_STATUS='OPEN' AND e.FILE_DATE=h.FILE_DATE)) combined GROUP BY FILE_DATE ORDER BY FILE_DATE DESC LIMIT 60`).catch(() => []) as Promise<any[]>,
         sf.executeQuery(`SELECT FILE_DATE, SOURCE_FILENAME, LOADED_TS, COUNT(*) as ROW_COUNT FROM ${RENTAL_CLOSED_TABLE} GROUP BY FILE_DATE, SOURCE_FILENAME, LOADED_TS ORDER BY FILE_DATE DESC LIMIT 60`).catch(() => []) as Promise<any[]>,
       ]);
 
