@@ -16,16 +16,23 @@ interface SnowflakeConfig {
 }
 
 function getPrivateKey(): string {
+  const keyContent = process.env.SNOWFLAKE_PRIVATE_KEY;
+  if (keyContent) {
+    return keyContent.replace(/\\n/g, '\n');
+  }
+
   const keyPath = process.env.SNOWFLAKE_PRIVATE_KEY_PATH;
   if (!keyPath) {
-    throw new Error('SNOWFLAKE_PRIVATE_KEY_PATH environment variable is not set');
+    throw new Error(
+      'Neither SNOWFLAKE_PRIVATE_KEY nor SNOWFLAKE_PRIVATE_KEY_PATH environment variable is set'
+    );
   }
-  
+
   const fullPath = path.resolve(keyPath);
   if (!fs.existsSync(fullPath)) {
     throw new Error(`Private key file not found at: ${fullPath}`);
   }
-  
+
   return fs.readFileSync(fullPath, 'utf8');
 }
 
