@@ -26,6 +26,7 @@ import {
 import { GiMagicLamp } from "react-icons/gi";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
+import { TelematicsButton } from "@/components/telematics-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -1935,6 +1936,7 @@ export default function FleetManagement() {
                     </Button>
                   </div>
                   <ViewInventoryButton vehicleNumber={selectedVehicle.vehicleNumber} className="w-full" size="sm" />
+                  <TelematicsButton vehicleNumber={selectedVehicle.vehicleNumber} className="w-full" size="sm" />
                 </div>
 
                 <Separator />

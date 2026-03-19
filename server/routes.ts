@@ -8569,6 +8569,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/samsara/telematics/:vehicleNumber", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber } = req.params;
+      const samsaraService = getSamsaraService();
+      const { getSnowflakeService: getSnowflake } = await import("./snowflake-service");
+      const snowflake = getSnowflake();
+
+      const [vehicleRows] = await Promise.allSettled([
+        snowflake.executeQuery(
+          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_VEHICLES WHERE TRUCK_NUMBER = ? LIMIT 1`,
+          [vehicleNumber]
+        )
+      ]);
+
+      const vehicle = vehicleRows.status === 'fulfilled' && (vehicleRows.value as any[]).length > 0
+        ? (vehicleRows.value as any[])[0] : null;
+      const vehicleId = vehicle?.VEHICLE_ID || null;
+
+      const [locationResult, odometerResult, maintenanceResult, fuelResult, streamResult] = await Promise.allSettled([
+        samsaraService.getVehicleLocation(vehicleNumber, 9999),
+        vehicleId ? samsaraService.getOdometer(vehicleId) : Promise.resolve([]),
+        vehicleId ? snowflake.executeQuery(
+          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE WHERE VEHICLE_ID = ? ORDER BY MAINT_ID DESC LIMIT 50`,
+          [vehicleId]
+        ) : Promise.resolve([]),
+        vehicleId ? snowflake.executeQuery(
+          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_FUEL_ENERGY_DAILY WHERE VEHICLE_ID = ? ORDER BY RUN_DATE_UTC DESC LIMIT 7`,
+          [vehicleId]
+        ) : Promise.resolve([]),
+        snowflake.executeQuery(
+          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_STREAM WHERE VEHICLE_NAME = ? ORDER BY TIME DESC LIMIT 1`,
+          [vehicleNumber]
+        ),
+      ]);
+
+      res.json({
+        vehicle,
+        vehicleId,
+        location: locationResult.status === 'fulfilled' ? locationResult.value : null,
+        odometer: odometerResult.status === 'fulfilled' ? (odometerResult.value as any[])[0] || null : null,
+        maintenance: maintenanceResult.status === 'fulfilled' ? maintenanceResult.value : [],
+        fuel: fuelResult.status === 'fulfilled' ? fuelResult.value : [],
+        stream: streamResult.status === 'fulfilled' && (streamResult.value as any[]).length > 0
+          ? (streamResult.value as any[])[0] : null,
+      });
+    } catch (error: any) {
+      console.error('[Samsara Telematics] Error:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/samsara/fuel", requireAuth, async (req, res) => {
     try {
       const samsaraService = getSamsaraService();
