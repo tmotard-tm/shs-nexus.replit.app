@@ -826,7 +826,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
             <TableBody>
               {filteredVehicles.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={19} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={20} className="text-center py-8 text-muted-foreground">
                     No vehicles found matching your filters
                   </TableCell>
                 </TableRow>
