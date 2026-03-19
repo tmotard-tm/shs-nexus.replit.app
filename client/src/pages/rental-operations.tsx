@@ -137,7 +137,13 @@ export default function RentalOperations() {
   const isHistorical = selectedFileDate !== null && selectedFileDate !== latestDate;
   const effectiveDate = selectedFileDate;
 
-  const { data: openData, isLoading: loadingOpen } = useQuery<{ data: any[]; total: number; enterpriseCount: number; holmanNonEnterpriseCount: number; oosFilteredCount?: number; view: string }>({
+  const fetchJson = async (url: string) => {
+    const r = await fetch(url, { credentials: "include" });
+    if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`); }
+    return r.json();
+  };
+
+  const { data: openData, isLoading: loadingOpen, isError: openError, error: openErr } = useQuery<{ data: any[]; total: number; enterpriseCount: number; holmanNonEnterpriseCount: number; oosFilteredCount?: number; view: string; _cachedAt?: number }>({
     queryKey: ["/api/rental-ops/open", showRaw ? "raw" : "business", showOos, effectiveDate],
     queryFn: () => {
       const params = new URLSearchParams();
@@ -145,39 +151,39 @@ export default function RentalOperations() {
       if (showOos) params.set("includeOos", "true");
       if (effectiveDate) params.set("fileDate", effectiveDate);
       const qs = params.toString();
-      return fetch(`/api/rental-ops/open${qs ? `?${qs}` : ""}`, { credentials: "include" }).then(r => r.json());
+      return fetchJson(`/api/rental-ops/open${qs ? `?${qs}` : ""}`);
     },
     enabled: activeTab === "open" || activeTab === "position" || activeTab === "analytics",
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: closedData, isLoading: loadingClosed } = useQuery<{ data: any[]; total: number; oosFilteredCount?: number }>({
+  const { data: closedData, isLoading: loadingClosed, isError: closedError } = useQuery<{ data: any[]; total: number; oosFilteredCount?: number; _cachedAt?: number }>({
     queryKey: ["/api/rental-ops/closed", showOos],
-    queryFn: () => fetch(`/api/rental-ops/closed${showOos ? "?includeOos=true" : ""}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetchJson(`/api/rental-ops/closed${showOos ? "?includeOos=true" : ""}`),
     enabled: activeTab === "closed" || activeTab === "extensions",
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: ticketData, isLoading: loadingTickets } = useQuery<{ data: any[]; total: number; oosFilteredCount?: number }>({
+  const { data: ticketData, isLoading: loadingTickets, isError: ticketsError } = useQuery<{ data: any[]; total: number; oosFilteredCount?: number }>({
     queryKey: ["/api/rental-ops/tickets", showOos, effectiveDate],
     queryFn: () => {
       const params = new URLSearchParams();
       if (showOos) params.set("includeOos", "true");
       if (effectiveDate) params.set("fileDate", effectiveDate);
-      return fetch(`/api/rental-ops/tickets?${params.toString()}`, { credentials: "include" }).then(r => r.json());
+      return fetchJson(`/api/rental-ops/tickets?${params.toString()}`);
     },
     enabled: activeTab === "tickets",
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: summary, isLoading: loadingSummary } = useQuery<any>({
+  const { data: summary, isLoading: loadingSummary, isError: summaryError, error: summaryErr } = useQuery<any>({
     queryKey: ["/api/rental-ops/summary", effectiveDate, showOos],
     queryFn: () => {
       const params = new URLSearchParams();
       if (effectiveDate) params.set("fileDate", effectiveDate);
       if (showOos) params.set("includeOos", "true");
       const qs = params.toString();
-      return fetch(`/api/rental-ops/summary${qs ? `?${qs}` : ""}`, { credentials: "include" }).then(r => r.json());
+      return fetchJson(`/api/rental-ops/summary${qs ? `?${qs}` : ""}`);
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -439,6 +445,17 @@ export default function RentalOperations() {
         {/* Data Quality Banner */}
         <div className="flex flex-wrap gap-2 p-3 bg-muted/40 rounded-lg border">
           <span className="text-xs font-medium text-muted-foreground mr-1 self-center">Data Quality:</span>
+          {(openData?._cachedAt || closedData?._cachedAt) && (
+            <span className="text-xs text-muted-foreground self-center border-l pl-2 ml-1">
+              Snowflake cache: {(() => {
+                const ts = openData?._cachedAt || closedData?._cachedAt || 0;
+                const mins = Math.floor((Date.now() - ts) / 60000);
+                if (mins < 1) return "loaded just now";
+                if (mins < 60) return `loaded ${mins}m ago`;
+                return `loaded ${Math.floor(mins / 60)}h ${mins % 60}m ago`;
+              })()}
+            </span>
+          )}
           {[
             { key: "rental_open", label: "Open Rentals" },
             { key: "rental_closed", label: "Closed Rentals" },
@@ -549,6 +566,11 @@ export default function RentalOperations() {
                   <div className="flex items-center justify-center py-12 text-muted-foreground">
                     <Loader2 className="h-6 w-6 animate-spin mr-2" />Loading from Snowflake...
                   </div>
+                ) : openError ? (
+                  <div className="flex items-center justify-center py-12 text-destructive gap-2">
+                    <span className="font-medium">Unable to load rental data:</span>
+                    <span className="text-sm">{(openErr as Error)?.message?.includes("503") ? "Snowflake pipeline is unavailable" : (openErr as Error)?.message}</span>
+                  </div>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -614,6 +636,11 @@ export default function RentalOperations() {
                   <div className="flex items-center justify-center py-12 text-muted-foreground">
                     <Loader2 className="h-6 w-6 animate-spin mr-2" />Loading from Snowflake...
                   </div>
+                ) : closedError ? (
+                  <div className="flex items-center justify-center py-12 text-destructive gap-2">
+                    <span className="font-medium">Unable to load closed rental data:</span>
+                    <span className="text-sm">Snowflake pipeline is unavailable</span>
+                  </div>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -669,6 +696,11 @@ export default function RentalOperations() {
                 {loadingTickets ? (
                   <div className="flex items-center justify-center py-12 text-muted-foreground">
                     <Loader2 className="h-6 w-6 animate-spin mr-2" />Loading from Snowflake...
+                  </div>
+                ) : ticketsError ? (
+                  <div className="flex items-center justify-center py-12 text-destructive gap-2">
+                    <span className="font-medium">Unable to load ticket data:</span>
+                    <span className="text-sm">Snowflake pipeline is unavailable</span>
                   </div>
                 ) : (
                   <Table>
@@ -739,6 +771,11 @@ export default function RentalOperations() {
                 {loadingClosed ? (
                   <div className="flex items-center justify-center py-12 text-muted-foreground">
                     <Loader2 className="h-6 w-6 animate-spin mr-2" />Loading...
+                  </div>
+                ) : closedError ? (
+                  <div className="flex items-center justify-center py-12 text-destructive gap-2">
+                    <span className="font-medium">Unable to load extension data:</span>
+                    <span className="text-sm">Snowflake pipeline is unavailable</span>
                   </div>
                 ) : (
                   <Table>

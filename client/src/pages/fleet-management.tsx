@@ -144,10 +144,13 @@ export default function FleetManagement() {
   const [nexusContact, setNexusContact] = useState("");
   const [nexusComments, setNexusComments] = useState("");
 
-  // Fetch vehicles from Holman API with TPMS enrichment
+  // Fetch vehicles from Holman API with TPMS enrichment.
+  // refetchInterval aligns with the server's 15-minute in-memory cache so the client
+  // automatically picks up background-refreshed data without a manual sync trigger.
   const { data: apiResponse, isLoading, error, refetch, isFetching } = useQuery<FleetVehiclesResponse>({
     queryKey: ['/api/holman/fleet-vehicles'],
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 15 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
@@ -1122,6 +1125,17 @@ export default function FleetManagement() {
                       <CardTitle data-testid="text-page-title">Fleet Vehicles</CardTitle>
                       <CardDescription>
                         Manage all fleet vehicles - assign, update, and sync with Holman
+                        {syncStatus?.lastSyncAt && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            · Last synced {(() => {
+                              const diffMs = Date.now() - new Date(syncStatus.lastSyncAt!).getTime();
+                              const mins = Math.floor(diffMs / 60000);
+                              if (mins < 1) return "just now";
+                              if (mins < 60) return `${mins}m ago`;
+                              return `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
+                            })()}
+                          </span>
+                        )}
                       </CardDescription>
                     </div>
                   </div>

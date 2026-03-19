@@ -58,9 +58,21 @@ interface SyncResult {
   };
 }
 
+// 15-minute in-memory response cache — avoids hitting Holman's API on every page load.
+// The first request after expiry triggers a live fetch; callers get stale data + a
+// background refresh fires immediately so the cache is warm for the next request.
+const FLEET_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
 class HolmanVehicleSyncService {
   private lastSyncAttempt: Date | null = null;
   private lastSuccessfulSync: Date | null = null;
+
+  private responseCache: {
+    result: SyncResult;
+    cachedAt: number;
+  } | null = null;
+
+  private backgroundRefreshInFlight = false;
 
   // Get or create sync state for vehicles
   async getSyncState(): Promise<HolmanSyncState | null> {
@@ -297,12 +309,34 @@ class HolmanVehicleSyncService {
     page?: number;
     pageSize?: number;
     statusCode?: number;
+    forceRefresh?: boolean;
   } = {}): Promise<SyncResult> {
-    const { pageSize = 500, statusCode = 1 } = options;
+    const { pageSize = 500, statusCode = 1, forceRefresh = false } = options;
 
     if (!holmanApiService.isConfigured()) {
       console.log('[HolmanSync] API not configured, falling back to cache');
       return this.getCachedVehicles(1, pageSize, statusCode, 'API credentials not configured');
+    }
+
+    // Return in-memory cache if it's still fresh and not a forced refresh
+    const now = Date.now();
+    if (!forceRefresh && this.responseCache && (now - this.responseCache.cachedAt) < FLEET_CACHE_TTL_MS) {
+      console.log(`[HolmanSync] Serving from in-memory cache (age: ${Math.round((now - this.responseCache.cachedAt) / 1000)}s)`);
+      return this.responseCache.result;
+    }
+
+    // If cache is stale (not a hard miss) return existing data immediately and refresh in background
+    if (!forceRefresh && this.responseCache && !this.backgroundRefreshInFlight) {
+      console.log('[HolmanSync] Cache stale — returning existing data and triggering background refresh');
+      this.backgroundRefreshInFlight = true;
+      this.fetchActiveVehicles({ pageSize, statusCode, forceRefresh: true })
+        .then(freshResult => {
+          this.responseCache = { result: freshResult, cachedAt: Date.now() };
+          console.log('[HolmanSync] Background refresh complete, cache updated');
+        })
+        .catch(err => console.error('[HolmanSync] Background refresh failed:', err))
+        .finally(() => { this.backgroundRefreshInFlight = false; });
+      return this.responseCache.result;
     }
 
     this.lastSyncAttempt = new Date();
@@ -353,11 +387,12 @@ class HolmanVehicleSyncService {
       };
 
       // Query 1: active/new/out-of-service vehicles (status 0,1,2) — no soldDateCode needed
-      // Query 2: sold vehicles (status 3) — soldDateCode=5 returns all regardless of sale date
+      // Query 2: sold vehicles (status 3) — soldDateCode=4 limits to last 90 days (vs. =5 which
+      //          returns all-time and fetches ~9,700 records across 20 pages unnecessarily)
       // Must be two separate calls; combining them in one request causes the API to ignore status 3
       const [activeVehicleData, soldVehicleData] = await Promise.all([
         fetchAllPages('0,1,2'),
-        fetchAllPages('3', '5'),
+        fetchAllPages('3', '4'),
       ]);
 
       const allVehicleData = [...activeVehicleData, ...soldVehicleData];
@@ -377,7 +412,13 @@ class HolmanVehicleSyncService {
       
       console.log(`[HolmanSync] Filtered to ${filteredVehicleData.length} vehicles in divisions ${ALLOWED_DIVISIONS.join(', ')}`);
 
-      const fleetVehicles = filteredVehicleData.map((v: any) => this.transformToFleetVehicle(v));
+      const rawFleetVehicles = filteredVehicleData.map((v: any) => this.transformToFleetVehicle(v));
+
+      // Enrich with TPMS tech assignment data before caching so every cached response
+      // is already enriched — callers no longer need a separate enrichWithTPMSData call.
+      const fleetVehicles = rawFleetVehicles.length > 0
+        ? await this.enrichWithTPMSData(rawFleetVehicles)
+        : rawFleetVehicles;
 
       this.lastSuccessfulSync = new Date();
 
@@ -401,7 +442,7 @@ class HolmanVehicleSyncService {
       const pendingCount = await this.getPendingChangeCount();
       const finalCount = filteredVehicleData.length;
 
-      return {
+      const liveResult: SyncResult = {
         success: true,
         vehicles: fleetVehicles,
         syncStatus: {
@@ -420,6 +461,11 @@ class HolmanVehicleSyncService {
           totalPages: 1,
         },
       };
+
+      // Store in in-memory cache so subsequent requests are served instantly
+      this.responseCache = { result: liveResult, cachedAt: Date.now() };
+
+      return liveResult;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('[HolmanSync] Live fetch failed:', errorMessage);

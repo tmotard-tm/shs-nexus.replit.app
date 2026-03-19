@@ -660,8 +660,21 @@ async function autoSyncPmfFromParq(): Promise<void> {
 }
 
 // Auto-sync PMF activity logs from PARQ API every 6 hours
-async function autoSyncActivityLogs(): Promise<void> {
+async function autoSyncActivityLogs(options: { skipIfRecentlySynced?: boolean } = {}): Promise<void> {
   try {
+    // On server restarts, skip the activity log sync if logs were successfully
+    // updated within the last 2 hours — this avoids 121+ API calls every restart.
+    if (options.skipIfRecentlySynced) {
+      const meta = await fleetScopeStorage.getPmfActivitySyncMeta();
+      if (meta && meta.lastSyncAt && meta.syncStatus === 'success') {
+        const ageMs = Date.now() - new Date(meta.lastSyncAt).getTime();
+        if (ageMs < 2 * 60 * 60 * 1000) {
+          console.log(`[Activity Scheduler] Skipping startup sync — last sync was ${Math.round(ageMs / 60000)}m ago (within 2h window)`);
+          return;
+        }
+      }
+    }
+
     console.log("[Activity Scheduler] Starting automatic activity log sync...");
     
     // Get all PMF vehicles with their internal PARQ IDs
@@ -736,12 +749,14 @@ async function autoSyncActivityLogs(): Promise<void> {
 }
 
 // Run all auto-captures (and PMF sync)
-async function runAllAutoCaptures(): Promise<void> {
+async function runAllAutoCaptures(opts: { isStartup?: boolean } = {}): Promise<void> {
   // First sync PMF data from PARQ API before capturing snapshots
   await autoSyncPmfFromParq();
   
-  // Sync activity logs after PMF data is updated
-  await autoSyncActivityLogs();
+  // Sync activity logs after PMF data is updated.
+  // On server startup, skip if logs were synced within the last 2 hours to avoid
+  // firing 121+ PARQ API requests on every restart.
+  await autoSyncActivityLogs({ skipIfRecentlySynced: opts.isStartup === true });
   
   await autoCaptureByovSnapshot();
   await autoCaptureFleetSnapshot();
@@ -752,7 +767,7 @@ async function runAllAutoCaptures(): Promise<void> {
 // Start auto-capture scheduler (checks every 6 hours)
 setInterval(runAllAutoCaptures, 6 * 60 * 60 * 1000);
 // Also run once on startup after a short delay
-setTimeout(runAllAutoCaptures, 10000);
+setTimeout(() => runAllAutoCaptures({ isStartup: true }), 10000);
 
 // Pre-warm Fleet Finder cache on startup (with automatic retries if API is down)
 setTimeout(() => {
@@ -1013,8 +1028,17 @@ async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
   }
 }
 
-export function registerFleetScopeRoutes(): Router {
+export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next: any) => Promise<any>): Router {
   const app = Router();
+
+  // Apply authentication to all fleet-scope routes except the /public/* paths,
+  // which are protected by their own API key check instead.
+  app.use((req: any, res: any, next: any) => {
+    if (req.path.startsWith('/public/') || req.path === '/public') {
+      return next();
+    }
+    return requireAuth(req, res, next);
+  });
 
   // Ensure MANUAL_EDIT_TIMESTAMP column exists in Snowflake SPARE_VEHICLE_ASSIGNMENT_STATUS
   (async () => {
@@ -7791,11 +7815,25 @@ Respond ONLY with valid JSON, no other text.`;
   // METRICS ROUTES
   // =====================
 
+  // 5-minute in-memory cache to avoid hitting the DB on every `/metrics`, `/metrics/weekly`,
+  // and `/metrics/current` call when MetricsDashboard fires all 3 on mount.
+  const metricsSnapshotCache = new Map<string, { data: any; ts: number }>();
+  const METRICS_CACHE_TTL_MS = 5 * 60 * 1000;
+  async function getCachedSnapshots(startDate?: string, endDate?: string): Promise<any[]> {
+    const key = `${startDate || ''}:${endDate || ''}`;
+    const cached = metricsSnapshotCache.get(key);
+    if (cached && Date.now() - cached.ts < METRICS_CACHE_TTL_MS) return cached.data;
+    const data = await fleetScopeStorage.getMetricsSnapshots(startDate, endDate);
+    metricsSnapshotCache.set(key, { data, ts: Date.now() });
+    return data;
+  }
+
   // Capture today's metrics snapshot
   app.post("/metrics/capture", async (req, res) => {
     try {
       const capturedBy = req.body.capturedBy || "System";
       const snapshot = await fleetScopeStorage.captureMetricsSnapshot(capturedBy);
+      metricsSnapshotCache.clear();
       res.status(201).json(snapshot);
     } catch (error: any) {
       console.error("Error capturing metrics snapshot:", error);
@@ -7808,7 +7846,7 @@ Respond ONLY with valid JSON, no other text.`;
     try {
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
-      const snapshots = await fleetScopeStorage.getMetricsSnapshots(startDate, endDate);
+      const snapshots = await getCachedSnapshots(startDate, endDate);
       res.json(snapshots);
     } catch (error: any) {
       console.error("Error fetching metrics snapshots:", error);
@@ -7827,7 +7865,7 @@ Respond ONLY with valid JSON, no other text.`;
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - (weeks * 7));
       
-      const snapshots = await fleetScopeStorage.getMetricsSnapshots(
+      const snapshots = await getCachedSnapshots(
         startDate.toISOString().split('T')[0],
         endDate.toISOString().split('T')[0]
       );

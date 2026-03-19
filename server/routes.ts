@@ -490,7 +490,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Mount Fleet-Scope module routes at /api/fs/*
   if (fsDb) {
-    const fsRouter = registerFleetScopeRoutes();
+    const fsRouter = registerFleetScopeRoutes(requireAuth);
     app.use("/api/fs", fsRouter);
     console.log("[Fleet-Scope] Routes mounted at /api/fs/*");
   } else {
@@ -3802,12 +3802,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       storage.getOnboardingHires().catch(() => []),
       db.select().from(storageSpots).catch(() => []),
       db.select().from(termedTechs).catch(() => []),
-      fleetService.fetchActiveVehicles().then(async (r) => {
-        if (r.vehicles.length > 0) {
-          r.vehicles = await fleetService.enrichWithTPMSData(r.vehicles);
-        }
-        return r;
-      }).catch(() => ({ vehicles: [] as any[] })),
+      fleetService.fetchActiveVehicles().catch(() => ({ vehicles: [] as any[] })),
     ]);
 
     const allQueues = [
@@ -7399,26 +7394,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { pageNumber = '1', pageSize = '500' } = req.query;
       
-      console.log('[Holman Fleet] Fetching live vehicles from Holman API...');
+      console.log('[Holman Fleet] Fetching vehicles...');
       
       const result = await holmanVehicleSyncService.fetchActiveVehicles({
         page: parseInt(pageNumber as string),
         pageSize: parseInt(pageSize as string),
       });
 
+      // TPMS enrichment is now applied inside fetchActiveVehicles() before caching,
+      // so vehicles here are already enriched.
       console.log(`[Holman Fleet] Returned ${result.vehicles.length} vehicles (mode: ${result.syncStatus.dataMode})`);
-      
-      // Always enrich with TPMS assigned tech data
-      let vehicles = result.vehicles;
-      if (vehicles.length > 0) {
-        console.log('[Holman Fleet] Enriching vehicles with TPMS tech assignments...');
-        vehicles = await holmanVehicleSyncService.enrichWithTPMSData(vehicles);
-      }
       
       res.json({
         success: result.success,
-        totalCount: result.pagination?.totalCount || vehicles.length,
-        vehicles: vehicles,
+        totalCount: result.pagination?.totalCount || result.vehicles.length,
+        vehicles: result.vehicles,
         syncStatus: result.syncStatus,
       });
     } catch (error: any) {
@@ -7457,11 +7447,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Manual sync endpoint
+  // Manual sync endpoint — bypasses the 15-minute in-memory cache
   app.post("/api/holman/fleet-vehicles/sync", requireAuth, async (req: any, res) => {
     try {
       console.log('[Holman Fleet] Manual sync triggered');
-      const result = await holmanVehicleSyncService.fetchActiveVehicles();
+      const result = await holmanVehicleSyncService.fetchActiveVehicles({ forceRefresh: true });
       res.json({
         success: result.success,
         syncStatus: result.syncStatus,
@@ -12673,168 +12663,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/weekly-offboarding", requireAuth, async (req: any, res) => {
-    try {
-      const { getSnowflakeService } = await import("./snowflake-service");
-      const snowflakeService = getSnowflakeService();
-      
-      const query = `
-        SELECT 
-          t.EMPL_NAME,
-          t.ENTERPRISE_ID,
-          t.EMPLID,
-          t.EMPL_STATUS,
-          t.EFFDT,
-          t.LAST_DATE_WORKED,
-          t.PLANNING_AREA,
-          t.TECH_SPECIALTY,
-          c.SNSTV_HOME_ADDR1,
-          c.SNSTV_HOME_ADDR2,
-          c.SNSTV_HOME_CITY,
-          c.SNSTV_HOME_STATE,
-          c.SNSTV_HOME_POSTAL,
-          c.SNSTV_MAIN_PHONE,
-          c.SNSTV_CELL_PHONE,
-          c.SNSTV_HOME_PHONE,
-          tpms.TRUCK_LU
-        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
-        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
-          ON t.EMPLID = c.EMPLID
-        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
-          ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
-        WHERE t.LAST_DATE_WORKED >= '2026-01-01'
-          AND (
-            tpms.TRUCK_LU IS NULL 
-            OR NOT EXISTS (
-              SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT active
-              WHERE active.TRUCK_LU = tpms.TRUCK_LU
-            )
-          )
-        ORDER BY t.LAST_DATE_WORKED DESC
-      `;
-      
-      const rows = await snowflakeService.executeQuery(query) as Array<{
-        EMPL_NAME: string;
-        ENTERPRISE_ID: string;
-        EMPLID: string;
-        EMPL_STATUS: string;
-        EFFDT: string;
-        LAST_DATE_WORKED: string;
-        PLANNING_AREA: string;
-        TECH_SPECIALTY: string;
-        SNSTV_HOME_ADDR1: string;
-        SNSTV_HOME_ADDR2: string;
-        SNSTV_HOME_CITY: string;
-        SNSTV_HOME_STATE: string;
-        SNSTV_HOME_POSTAL: string;
-        SNSTV_MAIN_PHONE: string;
-        SNSTV_CELL_PHONE: string;
-        SNSTV_HOME_PHONE: string;
-        TRUCK_LU: string;
-      }>;
-      
-      const formatPhone = (phone: string | null | undefined): string | null => {
-        if (!phone) return null;
-        const digits = phone.replace(/\D/g, '');
-        if (digits.length === 10) {
-          return `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
-        }
-        if (digits.length === 11 && digits[0] === '1') {
-          return `(${digits.slice(1, 4)})${digits.slice(4, 7)}-${digits.slice(7)}`;
-        }
-        return phone;
-      };
-      
-      const planningAreaOwnerMap: Record<string, string> = {
-        '3132': 'Rob & Andrea',
-        '3580': 'Monica, Cheryl & Machell',
-        '4766': 'Rob & Andrea',
-        '6141': 'Monica, Cheryl & Machell',
-        '7084': 'Rob & Andrea',
-        '7088': 'Carol & Tasha',
-        '7108': 'Carol & Tasha',
-        '7323': 'Monica, Cheryl & Machell',
-        '7435': 'Rob & Andrea',
-        '7670': 'Rob & Andrea',
-        '7744': 'Rob & Andrea',
-        '7983': 'Rob & Andrea',
-        '7995': 'Carol & Tasha',
-        '8035': 'Rob & Andrea',
-        '8096': 'Monica, Cheryl & Machell',
-        '8107': 'Carol & Tasha',
-        '8147': 'Carol & Tasha',
-        '8158': 'Carol & Tasha',
-        '8162': 'Monica, Cheryl & Machell',
-        '8169': 'Carol & Tasha',
-        '8175': 'Rob & Andrea',
-        '8184': 'Carol & Tasha',
-        '8206': 'Monica, Cheryl & Machell',
-        '8220': 'Monica, Cheryl & Machell',
-        '8228': 'Carol & Tasha',
-        '8309': 'Monica, Cheryl & Machell',
-        '8366': 'Carol & Tasha',
-        '8380': 'Rob & Andrea',
-        '8420': 'Monica, Cheryl & Machell',
-        '8555': 'Monica, Cheryl & Machell',
-        '8935': 'Monica, Cheryl & Machell',
-      };
-      
-      const getOwner = (planningArea: string | null | undefined): string => {
-        if (!planningArea) return 'Unknown';
-        const code = planningArea.replace(/\D/g, '').slice(0, 4);
-        return planningAreaOwnerMap[code] || 'Unknown';
-      };
-      
-      const formattedData = rows.map(row => {
-        const addressParts = [
-          row.SNSTV_HOME_ADDR1,
-          row.SNSTV_HOME_ADDR2,
-          row.SNSTV_HOME_CITY,
-          row.SNSTV_HOME_STATE,
-          row.SNSTV_HOME_POSTAL
-        ].filter(Boolean);
-        const address = addressParts.join(', ');
-        
-        const phoneParts = [
-          formatPhone(row.SNSTV_MAIN_PHONE),
-          formatPhone(row.SNSTV_CELL_PHONE),
-          formatPhone(row.SNSTV_HOME_PHONE)
-        ].filter(Boolean);
-        const contactPhone = phoneParts.join(' / ');
-        
-        return {
-          emplName: row.EMPL_NAME || '',
-          enterpriseId: row.ENTERPRISE_ID || '',
-          emplId: row.EMPLID || '',
-          emplStatus: row.EMPL_STATUS || '',
-          effdt: row.EFFDT || '',
-          lastDateWorked: row.LAST_DATE_WORKED || '',
-          planningArea: row.PLANNING_AREA || '',
-          techSpecialty: row.TECH_SPECIALTY || '',
-          address: address,
-          contactPhone: contactPhone,
-          owner: getOwner(row.PLANNING_AREA),
-          truck: row.TRUCK_LU || '',
-        };
-      });
-      
-      res.json(formattedData);
-    } catch (error: any) {
-      console.error("Error fetching weekly offboarding data:", error);
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  // Weekly Offboarding - Sync/Refresh
-  app.post("/api/snowflake/sync/weekly-offboarding", requireAuth, async (req: any, res) => {
-    try {
-      res.json({ success: true, message: "Term roster refreshed from Snowflake" });
-    } catch (error: any) {
-      console.error("Error syncing weekly offboarding:", error);
-      res.status(500).json({ success: false, message: error.message });
-    }
-  });
-
   // AMS API Integration Routes
   console.log("Registering AMS API routes...");
 
@@ -13481,6 +13309,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return parseRentalDate(r.ORIGINAL_START_DATE) || parseRentalDate(r.RENTAL_START_DATE);
   }
 
+  // ── Rental-ops response cache (30-minute TTL keyed by endpoint+params) ──────
+  const RENTAL_OPS_CACHE_TTL_MS = 30 * 60 * 1000;
+  const rentalOpsCache = new Map<string, { data: any; cachedAt: number }>();
+  function getRentalOpsCache(key: string): { data: any; cachedAt: number } | null {
+    const entry = rentalOpsCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.cachedAt > RENTAL_OPS_CACHE_TTL_MS) { rentalOpsCache.delete(key); return null; }
+    return entry;
+  }
+  function setRentalOpsCache(key: string, data: any): void {
+    rentalOpsCache.set(key, { data, cachedAt: Date.now() });
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   // Returns a Set of 5-digit-padded vehicle numbers that are currently out of service
   // Used to filter OOS trucks from rental-ops listings by default
   async function getOosVehicleSet(): Promise<Set<string>> {
@@ -13523,6 +13365,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       //   Segment 2: Holman open, vendor NOT Enterprise/Toll, NOT in Enterprise ticket table
       const showRaw = req.query?.view === "raw";
 
+      const openCacheKey = `open:${req.query?.fileDate || 'latest'}:${showRaw}:${includeOos}`;
+      const openCached = getRentalOpsCache(openCacheKey);
+      if (openCached) { console.log(`[RentalOps] Cache hit: ${openCacheKey}`); return res.json({ ...openCached.data, _cachedAt: openCached.cachedAt }); }
+
       const normVeh = (v: string) => {
         if (!v) return "";
         return toDisplayNumber(v);
@@ -13561,7 +13407,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             source: "holman_raw",
           };
         });
-        return res.json({ data, total: data.length, totalPOLines: rows.length, view: "raw" });
+        const rawResult = { data, total: data.length, totalPOLines: rows.length, view: "raw" };
+        setRentalOpsCache(openCacheKey, rawResult);
+        return res.json(rawResult);
       }
 
       // === BUSINESS LOGIC VIEW (matches Excel 333 formula) ===
@@ -13677,7 +13525,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const data = allData;
 
-      res.json({
+      const openBizResult = {
         data,
         total: data.length,
         enterpriseCount: enterpriseSegment.length,
@@ -13685,7 +13533,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalHolmanPOLines: holmanRows.length,
         oosFilteredCount: oosCount,
         view: "business_logic",
-      });
+      };
+      setRentalOpsCache(openCacheKey, openBizResult);
+      res.json(openBizResult);
     } catch (err: any) {
       return handleSnowflakeError(err, res, RENTAL_TICKET_TABLE);
     }
@@ -13698,6 +13548,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sf = getSnowflakeService();
       await sf.connect();
       const includeOos = req.query?.includeOos === "true";
+      const closedCacheKey = `closed:${req.query?.fileDate || 'latest'}:${includeOos}`;
+      const closedCached = getRentalOpsCache(closedCacheKey);
+      if (closedCached) { console.log(`[RentalOps] Cache hit: ${closedCacheKey}`); return res.json({ ...closedCached.data, _cachedAt: closedCached.cachedAt }); }
       const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_CLOSED_TABLE} WHERE ${closedDateFilter(req.query?.fileDate as string)} LIMIT 5000`) as any[];
       const seen = new Map<string, any>();
       for (const r of rows) {
@@ -13733,7 +13586,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           oosCount = before - data.length;
         }
       }
-      res.json({ data, total: data.length, oosFilteredCount: oosCount, source: RENTAL_CLOSED_TABLE });
+      const closedResult = { data, total: data.length, oosFilteredCount: oosCount, source: RENTAL_CLOSED_TABLE };
+      setRentalOpsCache(closedCacheKey, closedResult);
+      res.json(closedResult);
     } catch (err: any) {
       return handleSnowflakeError(err, res, RENTAL_CLOSED_TABLE);
     }
@@ -13746,6 +13601,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sf = getSnowflakeService();
       await sf.connect();
       const includeOos = req.query?.includeOos === "true";
+      const ticketsCacheKey = `tickets:${req.query?.fileDate || 'latest'}:${includeOos}`;
+      const ticketsCached = getRentalOpsCache(ticketsCacheKey);
+      if (ticketsCached) { console.log(`[RentalOps] Cache hit: ${ticketsCacheKey}`); return res.json({ ...ticketsCached.data, _cachedAt: ticketsCached.cachedAt }); }
       const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} LIMIT 2000`) as any[];
       let data = rows.map((r: any) => {
         const currentTicketStart = parseRentalDate(r.RENTAL_START_DATE);
@@ -13793,7 +13651,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           oosCount = before - data.length;
         }
       }
-      res.json({ data, total: data.length, oosFilteredCount: oosCount, source: RENTAL_TICKET_TABLE });
+      const ticketsResult = { data, total: data.length, oosFilteredCount: oosCount, source: RENTAL_TICKET_TABLE };
+      setRentalOpsCache(ticketsCacheKey, ticketsResult);
+      res.json(ticketsResult);
     } catch (err: any) {
       return handleSnowflakeError(err, res, RENTAL_TICKET_TABLE);
     }
@@ -13807,6 +13667,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await sf.connect();
       const normV = (v: string) => v ? toDisplayNumber(v) : "";
       const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
+
+      const openVnsCacheKey = `open-vns:${req.query?.fileDate || 'latest'}`;
+      const openVnsCached = getRentalOpsCache(openVnsCacheKey);
+      if (openVnsCached) { console.log(`[RentalOps] Cache hit: ${openVnsCacheKey}`); return res.json({ ...openVnsCached.data, _cachedAt: openVnsCached.cachedAt }); }
 
       const [ticketRows, holmanRows] = await Promise.all([
         sf.executeQuery(`SELECT VEHICLE_NUMBER FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`).catch(() => []) as Promise<any[]>,
@@ -13836,7 +13700,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!oosVehicles.has(vn)) allVns.push(vn);
       }
 
-      res.json({ vehicleNumbers: allVns });
+      const openVnsResult = { vehicleNumbers: allVns };
+      setRentalOpsCache(openVnsCacheKey, openVnsResult);
+      res.json(openVnsResult);
     } catch (err: any) {
       return handleSnowflakeError(err, res);
     }
@@ -13853,6 +13719,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return toDisplayNumber(v);
       };
       const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
+
+      const includeOosSummaryQ = req.query?.includeOos === "true";
+      const summaryCacheKey = `summary:${req.query?.fileDate || 'latest'}:${includeOosSummaryQ}`;
+      const summaryCached = getRentalOpsCache(summaryCacheKey);
+      if (summaryCached) { console.log(`[RentalOps] Cache hit: ${summaryCacheKey}`); return res.json({ ...summaryCached.data, _cachedAt: summaryCached.cachedAt }); }
 
       const [ticketRows, holmanRows, closedRows] = await Promise.all([
         sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTAL_START_DATE, TICKET_STATUS FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`).catch(() => []) as Promise<any[]>,
@@ -13889,8 +13760,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const holmanNonEntVns = new Set<string>(holmanNonEntMap.keys());
 
       // Apply the same OOS filter as the open endpoint (so summary matches Open Rentals tab count)
-      const includeOosSummary = req.query?.includeOos === "true";
-      const oosVehicles = includeOosSummary ? new Set<string>() : await getOosVehicleSet();
+      const oosVehicles = includeOosSummaryQ ? new Set<string>() : await getOosVehicleSet();
       if (oosVehicles.size > 0) {
         const normPad = (v: string) => toDisplayNumber(v);
         for (const vn of Array.from(entOpenVns)) {
@@ -13927,7 +13797,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      res.json({
+      const summaryResult = {
         totalOpen,
         enterpriseOpen: entOpenVns.size,
         holmanNonEnterprise: holmanNonEntVns.size,
@@ -13935,7 +13805,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         extensions: extensionCount,
         divisionBreakdown,
         avgDaysOpen,
-      });
+      };
+      setRentalOpsCache(summaryCacheKey, summaryResult);
+      res.json(summaryResult);
     } catch (err: any) {
       return handleSnowflakeError(err, res);
     }

@@ -103,7 +103,7 @@ export default function SamsaraIntegration() {
 
   const { data: assignments = [], isLoading: assignmentsLoading } = useQuery<any[]>({
     queryKey: ["/api/samsara/assignments", assignmentDate],
-    queryFn: () => fetch(`/api/samsara/assignments?date=${assignmentDate}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch(`/api/samsara/assignments?date=${assignmentDate}`, { credentials: "include" }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`); } return r.json(); }),
     enabled: activeTab === "assignments" || activeTab === "overview",
   });
 

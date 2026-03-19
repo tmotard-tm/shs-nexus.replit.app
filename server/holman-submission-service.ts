@@ -424,6 +424,9 @@ export class HolmanSubmissionService {
   // get a definitive check and are settled as completed or failed.
   async pollPendingSubmissions(): Promise<{ checked: number; completed: number; failed: number; stillPending: number }> {
     const pending = await this.getAllPendingSubmissions();
+    if (pending.length === 0) {
+      return { checked: 0, completed: 0, failed: 0, stillPending: 0 };
+    }
     console.log(`[HolmanSubmission] Polling ${pending.length} pending submissions`);
 
     let completed = 0;

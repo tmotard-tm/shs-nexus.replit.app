@@ -1,7 +1,7 @@
 const FLEET_FINDER_API_URL = 'https://9e30626d-ed67-4c4b-b880-4bddd6e67962-00-2uf4pwa9m1r7r.worf.replit.dev/api/all-vehicles';
 
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes cache - longer TTL to reduce API calls
-const RETRY_DELAY_MS = 60 * 1000; // 1 minute retry delay on failure
+const RETRY_DELAY_MS = 2 * 60 * 1000; // 2 minute retry delay on failure (exponential backoff applied)
 
 export interface FleetFinderVehicle {
   VEHICLE_NUMBER: string;
@@ -322,7 +322,7 @@ export function clearFleetFinderCache(): void {
 
 // Pre-warm the cache on server startup with retries
 let prewarmAttempts = 0;
-const MAX_PREWARM_ATTEMPTS = 5;
+const MAX_PREWARM_ATTEMPTS = 2;
 
 export async function prewarmFleetFinderCache(): Promise<void> {
   console.log('[FleetFinder] Pre-warming cache on startup...');
@@ -344,7 +344,7 @@ export async function prewarmFleetFinderCache(): Promise<void> {
   // First attempt
   if (await attemptFetch()) return;
   
-  // Schedule retries if first attempt fails
+  // Schedule retries if first attempt fails (exponential backoff)
   const scheduleRetry = () => {
     prewarmAttempts++;
     if (prewarmAttempts >= MAX_PREWARM_ATTEMPTS) {
@@ -352,11 +352,12 @@ export async function prewarmFleetFinderCache(): Promise<void> {
       return;
     }
     
-    console.log(`[FleetFinder] Scheduling pre-warm retry ${prewarmAttempts}/${MAX_PREWARM_ATTEMPTS} in ${RETRY_DELAY_MS / 1000}s`);
+    const delayMs = RETRY_DELAY_MS * Math.pow(2, prewarmAttempts - 1);
+    console.log(`[FleetFinder] Scheduling pre-warm retry ${prewarmAttempts}/${MAX_PREWARM_ATTEMPTS} in ${delayMs / 1000}s`);
     setTimeout(async () => {
       if (await attemptFetch()) return;
       scheduleRetry();
-    }, RETRY_DELAY_MS);
+    }, delayMs);
   };
   
   scheduleRetry();

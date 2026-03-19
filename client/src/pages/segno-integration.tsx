@@ -166,7 +166,7 @@ export default function SegnoIntegration() {
     success: boolean; records: any[]; totalCount: number; nextOffset: number;
   }>({
     queryKey: ["/api/segno/onboarding", onboardingOffset],
-    queryFn: () => fetch(`/api/segno/onboarding?offset=${onboardingOffset}&max=100`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch(`/api/segno/onboarding?offset=${onboardingOffset}&max=100`, { credentials: "include" }).then(async r => { if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`); } return r.json(); }),
     enabled: false,
   });
 
