@@ -21,9 +21,8 @@ import {
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
-  UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench
+  UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench, Download
 } from "lucide-react";
-import { GiMagicLamp } from "react-icons/gi";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { TelematicsButton } from "@/components/telematics-button";
@@ -1189,8 +1188,8 @@ export default function FleetManagement() {
                       variant="outline"
                       data-testid="button-fleet-export-csv"
                     >
-                      <GiMagicLamp className="h-4 w-4 mr-2" />
-                      Sean's Genie
+                      <Download className="h-4 w-4 mr-2" />
+                      Export CSV
                     </Button>
                     <Button 
                       onClick={() => refetch()}
