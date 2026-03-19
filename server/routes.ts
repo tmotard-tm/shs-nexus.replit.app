@@ -12843,64 +12843,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const AMS_TRUCK_STATUS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
   async function buildAmsTruckStatusMap(): Promise<Record<string, string | null>> {
-    console.log('[AMS TruckStatusMap] Building VIN→TruckStatus map...');
-    // Fetch truck-status lookup first to resolve numeric IDs to labels
-    const lookupItems: any[] = await amsApiService.getLookup('truck-status').catch(() => []);
-    const lookupMap = new Map<string, string>();
-    for (const item of lookupItems) {
-      const id = String(item.UniqueID);
-      const skip = new Set(['UniqueID', 'uniqueID', 'Id', 'id']);
-      let label: string | undefined;
-      for (const [key, val] of Object.entries(item)) {
-        if (skip.has(key)) continue;
-        if (typeof val === 'string' && val.trim()) { label = val.trim(); break; }
-      }
-      lookupMap.set(id, label ?? id);
-    }
-
-    // Paginate through all AMS vehicles
+    console.log('[AMS TruckStatusMap] Building VIN→TruckStatus map from Snowflake...');
+    const { getSnowflakeService } = await import("./snowflake-service");
+    const snowflakeService = getSnowflakeService();
+    const sql = `
+      SELECT VIN, TRUCK_STATUS
+      FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
+      WHERE VIN IS NOT NULL
+        AND TRUCK_STATUS IS NOT NULL
+        AND TRUCK_STATUS != ''
+    `;
+    const rows = await snowflakeService.executeQuery(sql) as Array<{ VIN: string; TRUCK_STATUS: string }>;
     const result: Record<string, string | null> = {};
-    const pageSize = 500;
-    let offset = 0;
-    let totalFetched = 0;
-
-    while (true) {
-      let page: any;
-      try {
-        page = await amsApiService.searchVehicles({ limit: pageSize, offset });
-      } catch (err: any) {
-        console.warn(`[AMS TruckStatusMap] Search failed at offset ${offset}: ${err.message}`);
-        break;
+    for (const row of rows) {
+      if (row.VIN && row.TRUCK_STATUS) {
+        result[row.VIN.trim()] = row.TRUCK_STATUS.trim();
       }
-      const rows: any[] = Array.isArray(page) ? page : (Array.isArray(page?.data) ? page.data : []);
-      if (rows.length === 0) break;
-
-      for (const v of rows) {
-        const vin = v.VIN || v.vin;
-        if (!vin) continue;
-        const raw = v.TruckStatus ?? v.truckStatus;
-        if (raw == null) {
-          result[vin] = null;
-        } else {
-          const label = lookupMap.get(String(raw));
-          result[vin] = label ?? String(raw);
-        }
-      }
-
-      totalFetched += rows.length;
-      if (rows.length < pageSize) break; // last page
-      offset += pageSize;
     }
-
-    console.log(`[AMS TruckStatusMap] Built map with ${Object.keys(result).length} vehicles (fetched ${totalFetched} rows)`);
+    console.log(`[AMS TruckStatusMap] Built map with ${Object.keys(result).length} vehicles from ${rows.length} Snowflake rows`);
     return result;
   }
 
   app.get("/api/ams/truck-status-map", requireAuth, async (_req, res) => {
     try {
-      if (!amsApiService.isConfigured()) {
-        return res.json({});
-      }
       const now = Date.now();
       if (!amsTruckStatusCache || (now - amsTruckStatusCache.builtAt) > AMS_TRUCK_STATUS_CACHE_TTL_MS) {
         amsTruckStatusCache = { data: await buildAmsTruckStatusMap(), builtAt: now };
