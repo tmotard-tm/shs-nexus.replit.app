@@ -14659,8 +14659,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/holman/pos/:vehicleNumber", requireAuth, async (req, res) => {
     try {
-      const data = await storage.getHolmanPosByVehicle(req.params.vehicleNumber);
-      res.json({ data, total: data.length });
+      const vehicleNumber = req.params.vehicleNumber.trim();
+
+      // Query Snowflake directly for complete, up-to-date PO history
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (isSnowflakeConfigured()) {
+        try {
+          const sf = getSnowflakeService();
+          await sf.connect();
+
+          const rows = await sf.executeQuery(
+            `SELECT DISTINCT
+               PO_NUMBER,
+               PO_TYPE_DESCRIPTION,
+               DIVISION,
+               PO_STATUS,
+               PO_DATE,
+               LINE_ITEM_COST,
+               DESCRIPTION,
+               VENDOR_NAME,
+               ENTERPRISE_ID,
+               SERIAL_NO
+             FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS
+             WHERE HOLMAN_VEHICLE_NUMBER = '${vehicleNumber}'
+             ORDER BY PO_DATE DESC NULLS LAST`
+          ) as any[];
+
+          const data = rows.map((r: any) => {
+            const typeDesc = (r.PO_TYPE_DESCRIPTION || r.DIVISION || "").toLowerCase();
+            let poType: string;
+            if (typeDesc.includes("rental") || typeDesc.includes("interim")) poType = "rental";
+            else if (typeDesc.includes("maint") || typeDesc.includes("repair") || typeDesc.includes("service")) poType = "maintenance";
+            else poType = typeDesc || "other";
+
+            return {
+              poNumber: String(r.PO_NUMBER || "").replace(/^'/, "").trim(),
+              poType,
+              poStatus: String(r.PO_STATUS || "").trim() || null,
+              poDate: r.PO_DATE ? String(r.PO_DATE).slice(0, 10) : null,
+              amount: r.LINE_ITEM_COST ?? null,
+              description: String(r.DESCRIPTION || r.PO_TYPE_DESCRIPTION || "").trim().slice(0, 500) || null,
+              vendor: String(r.VENDOR_NAME || "").trim() || null,
+              vin: String(r.SERIAL_NO || "").trim() || null,
+            };
+          }).filter(r => r.poNumber);
+
+          return res.json({ data, total: data.length, source: "snowflake" });
+        } catch (sfErr: any) {
+          console.warn("[PO History] Snowflake query failed, falling back to cache:", sfErr.message);
+        }
+      }
+
+      // Fallback: local cache
+      const data = await storage.getHolmanPosByVehicle(vehicleNumber);
+      res.json({ data, total: data.length, source: "cache" });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

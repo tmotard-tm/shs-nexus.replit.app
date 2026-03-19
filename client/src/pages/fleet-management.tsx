@@ -2675,7 +2675,7 @@ export default function FleetManagement() {
               PO History — Vehicle #{selectedVehicle?.vehicleNumber}
             </DialogTitle>
             <DialogDescription>
-              All POs cached from Holman for this vehicle.
+              All POs from Holman for this vehicle, queried live from Snowflake.
             </DialogDescription>
           </DialogHeader>
 
