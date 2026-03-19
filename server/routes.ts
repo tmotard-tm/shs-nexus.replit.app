@@ -8608,10 +8608,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_ODOMETER WHERE VIN = ? ORDER BY OBD_TIME DESC LIMIT 1`,
           [vehicleVin]
         ) : Promise.resolve([]),
-        // SAMSARA_MAINTENANCE: wrap in subquery so the derived VEHICLE_ID column is filterable
-        vehicleId ? snowflake.executeQuery(
-          `SELECT * FROM (SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE) AS maint WHERE VEHICLE_ID = ? ORDER BY MAINT_ID DESC LIMIT 50`,
-          [vehicleId]
+        // SAMSARA_MAINTENANCE: VEHICLE_ID is a derived view column and cannot be used in WHERE.
+        // Filter by VIN (same approach that works for SAMSARA_ODOMETER).
+        vehicleVin ? snowflake.executeQuery(
+          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE WHERE VIN = ? ORDER BY MAINT_ID DESC LIMIT 50`,
+          [vehicleVin]
         ) : Promise.resolve([]),
         vehicleId ? snowflake.executeQuery(
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_FUEL_ENERGY_DAILY WHERE VEHICLE_ID = ? ORDER BY RUN_DATE_UTC DESC LIMIT 7`,
@@ -8625,7 +8626,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Use direct SQL result; log outcome for debugging
       const vehicleMaintenance = maintenanceResult.status === 'fulfilled' ? (maintenanceResult.value as any[]) : [];
-      console.log(`[Samsara Telematics] Maintenance for ${vehicleNumber}: vehicleId=${vehicleId}, records=${vehicleMaintenance.length}, status=${maintenanceResult.status}${maintenanceResult.status === 'rejected' ? ', err=' + (maintenanceResult as any).reason?.message : ''}`);
+      console.log(`[Samsara Telematics] Maintenance for ${vehicleNumber}: vin=${vehicleVin}, records=${vehicleMaintenance.length}, status=${maintenanceResult.status}${maintenanceResult.status === 'rejected' ? ', err=' + (maintenanceResult as any).reason?.message : ''}`);
 
       res.json({
         vehicle,
