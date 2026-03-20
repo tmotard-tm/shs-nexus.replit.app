@@ -577,6 +577,7 @@ export default function RentalOperations() {
                       <TableRow>
                         <TableHead>Vehicle #<SortButton field="vehicleNumber" sort={openSort} setSort={setOpenSort} /></TableHead>
                         <TableHead>Tech / Renter<SortButton field="renterName" sort={openSort} setSort={setOpenSort} /></TableHead>
+                        <TableHead>Enterprise ID</TableHead>
                         <TableHead>Ticket / PO #</TableHead>
                         <TableHead>Start Date<SortButton field="rentalStartDate" sort={openSort} setSort={setOpenSort} /></TableHead>
                         <TableHead>Days Open<SortButton field="daysOpen" sort={openSort} setSort={setOpenSort} /></TableHead>
@@ -586,13 +587,14 @@ export default function RentalOperations() {
                     </TableHeader>
                     <TableBody>
                       {sortedOpen.length === 0 ? (
-                        <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                        <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                           {openSearch ? "No results match your search" : "No open rental data from Snowflake pipeline table"}
                         </TableCell></TableRow>
                       ) : sortedOpen.map((r: any, i: number) => (
                         <TableRow key={i} className={rowAgingClass(r.daysOpen || 0)}>
                           <TableCell className="font-mono text-sm">{r.vehicleNumber || "—"}</TableCell>
                           <TableCell className="max-w-[200px] truncate">{r.renterName || "—"}</TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">{r.enterpriseId || "—"}</TableCell>
                           <TableCell className="font-mono text-xs">{r.poNumber || "—"}</TableCell>
                           <TableCell className="text-sm">{formatDate(r.rentalStartDate)}</TableCell>
                           <TableCell><DaysBadge days={r.daysOpen || 0} /></TableCell>
