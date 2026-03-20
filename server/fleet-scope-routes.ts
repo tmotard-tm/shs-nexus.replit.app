@@ -2239,6 +2239,116 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // ===== Suggested Replacement Vehicles for a Rental Truck =====
+  app.get("/rental/suggested-replacements/:vehicleNumber", async (req, res) => {
+    try {
+      const raw = (req.params.vehicleNumber || '').trim();
+      const padded = raw.padStart(6, '0');
+      const unpadded = raw.replace(/^0+/, '') || raw;
+
+      // Step 1: find the tech's ENTERPRISE_ID and FULL_NAME from TPMS_EXTRACT
+      const step1Sql = `
+        SELECT ENTERPRISE_ID, FULL_NAME
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED
+        WHERE TRUCK_LU IN (?, ?)
+        ORDER BY FILE_DATE DESC
+        LIMIT 1
+      `;
+      const step1 = await executeQuery<{ ENTERPRISE_ID: string | number | null; FULL_NAME: string | null }>(step1Sql, [padded, unpadded]);
+
+      if (step1.length === 0 || !step1[0].ENTERPRISE_ID) {
+        return res.json({ techName: null, jobTitle: null, suggestions: [] });
+      }
+
+      const enterpriseId = String(step1[0].ENTERPRISE_ID).trim();
+      const techName = step1[0].FULL_NAME || null;
+
+      // Step 2: find job title from the HR roster (same approach as /tech-specialty/:vehicleNumber)
+      let jobTitle: string | null = null;
+      const step2Sql = `
+        SELECT JOBTITLE
+        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_HIRE_ROSTER_VW
+        WHERE UPPER(ENTERPRISE_ID) = UPPER(?)
+        ORDER BY LAST_HIRE_DT DESC
+        LIMIT 1
+      `;
+      const step2 = await executeQuery<{ JOBTITLE: string | null }>(step2Sql, [enterpriseId]);
+      if (step2.length > 0 && step2[0].JOBTITLE) {
+        jobTitle = step2[0].JOBTITLE;
+      } else {
+        const fallbackSql = `
+          SELECT JOBTITLE
+          FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_ACTIVE_ROSTER_FWE_VW_VIEW
+          WHERE UPPER(ENTERPRISE_ID) = UPPER(?)
+          ORDER BY LAST_HIRE_DT DESC
+          LIMIT 1
+        `;
+        const fallback = await executeQuery<{ JOBTITLE: string | null }>(fallbackSql, [enterpriseId]);
+        if (fallback.length > 0 && fallback[0].JOBTITLE) {
+          jobTitle = fallback[0].JOBTITLE;
+        }
+      }
+
+      if (!jobTitle) {
+        return res.json({ techName, jobTitle: null, suggestions: [] });
+      }
+
+      // Step 3: determine INTERIOR filter based on job title, then find top 3 unassigned vehicles
+      const upperTitle = jobTitle.toUpperCase();
+      let interiorFilter: string | null = null;
+      let allowEmptyInterior = false;
+
+      if (upperTitle.includes('TECHNICIAN 1')) {
+        interiorFilter = 'Utility Without Ref Racks';
+        allowEmptyInterior = true;
+      } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('HVAC')) {
+        interiorFilter = 'Utility With Ref Racks';
+        allowEmptyInterior = false;
+      } else {
+        // Unknown job title — return no suggestions
+        return res.json({ techName, jobTitle, suggestions: [] });
+      }
+
+      let step3Sql: string;
+      let step3Params: string[];
+
+      if (allowEmptyInterior) {
+        step3Sql = `
+          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
+          FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
+          WHERE LOWER(TPMS_ASSIGNED) != 'assigned'
+            AND (UPPER(INTERIOR) = UPPER(?) OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
+          LIMIT 3
+        `;
+        step3Params = [interiorFilter];
+      } else {
+        step3Sql = `
+          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
+          FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
+          WHERE LOWER(TPMS_ASSIGNED) != 'assigned'
+            AND UPPER(INTERIOR) = UPPER(?)
+          LIMIT 3
+        `;
+        step3Params = [interiorFilter];
+      }
+
+      const suggestions = await executeQuery<{ VEHICLE_NUMBER: string; TRUCK_STATUS: string | null; INTERIOR: string | null }>(step3Sql, step3Params);
+
+      return res.json({
+        techName,
+        jobTitle,
+        suggestions: suggestions.map(r => ({
+          vehicleNumber: r.VEHICLE_NUMBER,
+          truckStatus: r.TRUCK_STATUS || null,
+          interior: r.INTERIOR || null,
+        })),
+      });
+    } catch (error: any) {
+      console.error("[SuggestedReplacements] Error:", error.message);
+      return res.json({ techName: null, jobTitle: null, suggestions: [] });
+    }
+  });
+
   // ===== PO Status per Truck (from Snowflake HOLMAN_ETL_PO_DETAILS) =====
   let poStatusCache: { data: any; timestamp: number } | null = null;
   const PO_STATUS_CACHE_TTL = 5 * 60 * 1000;

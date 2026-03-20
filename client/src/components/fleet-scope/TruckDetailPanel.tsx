@@ -48,6 +48,82 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 
+interface SuggestedVehicle {
+  vehicleNumber: string;
+  truckStatus: string | null;
+  interior: string | null;
+}
+
+interface SuggestedReplacementsData {
+  techName: string | null;
+  jobTitle: string | null;
+  suggestions: SuggestedVehicle[];
+}
+
+function SuggestedReplacements({ truckNumber }: { truckNumber: string | number | null | undefined }) {
+  const vn = truckNumber ? String(truckNumber).replace(/^0+/, '') || String(truckNumber) : null;
+  const { data, isLoading } = useQuery<SuggestedReplacementsData>({
+    queryKey: ['/api/fs/rental/suggested-replacements', vn],
+    enabled: !!vn,
+  });
+
+  if (!vn) return null;
+
+  return (
+    <div>
+      <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+        <Car className="w-4 h-4 text-muted-foreground" />
+        Suggested Replacements
+      </h3>
+      <div className="rounded-md border p-3">
+        {isLoading ? (
+          <div className="space-y-2">
+            {[...Array(3)].map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
+        ) : !data?.jobTitle ? (
+          <p className="text-xs text-muted-foreground italic">
+            {data?.techName ? `No job title found for ${data.techName}` : "No technician found for this truck"}
+          </p>
+        ) : data.suggestions.length === 0 ? (
+          <div className="space-y-1">
+            {data.techName && (
+              <p className="text-xs text-muted-foreground mb-2">
+                Tech: <span className="font-medium text-foreground">{data.techName}</span>
+                {" · "}<span className="italic">{data.jobTitle}</span>
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground italic">No unassigned vehicles match this tech's skill set</p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {data.techName && (
+              <p className="text-xs text-muted-foreground mb-2">
+                Tech: <span className="font-medium text-foreground">{data.techName}</span>
+                {" · "}<span className="italic">{data.jobTitle}</span>
+              </p>
+            )}
+            {data.suggestions.map((v) => (
+              <div key={v.vehicleNumber} className="flex items-center justify-between rounded-sm bg-muted/50 px-2 py-1.5">
+                <span className="font-mono text-sm font-semibold">{v.vehicleNumber}</span>
+                <div className="flex items-center gap-2">
+                  {v.interior && (
+                    <span className="text-xs text-muted-foreground truncate max-w-[120px]">{v.interior}</span>
+                  )}
+                  {v.truckStatus && (
+                    <Badge variant="outline" className="text-xs py-0 px-1.5 h-5">{v.truckStatus}</Badge>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface TruckDetailPanelProps {
   truckId: number | null;
   open: boolean;
@@ -694,6 +770,8 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
                     </div>
                   </div>
                 </div>
+
+                <SuggestedReplacements truckNumber={truck.truckNumber} />
 
                 <div>
                   <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
