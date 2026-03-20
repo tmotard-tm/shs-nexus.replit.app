@@ -101,12 +101,10 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
           <div className="space-y-1.5">
             {techLine}
             {data.suggestions.map((v) => (
-              <div key={v.vehicleNumber} className="flex items-center justify-between rounded-sm bg-muted/50 px-2 py-1.5">
+              <div key={v.vehicleNumber} className="grid grid-cols-[4rem_1fr_auto] items-center gap-x-2 rounded-sm bg-muted/50 px-2 py-1.5">
                 <span className="font-mono text-sm font-semibold">{v.vehicleNumber}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground truncate max-w-[120px]">{v.interior || "N/A"}</span>
-                  <Badge variant="outline" className="text-xs py-0 px-1.5 h-5">{v.truckStatus || "Unknown"}</Badge>
-                </div>
+                <span className="text-xs text-muted-foreground truncate">{v.interior || "N/A"}</span>
+                <Badge variant="outline" className="text-xs py-0 px-1.5 h-5 justify-self-end">{v.truckStatus || "Unknown"}</Badge>
               </div>
             ))}
           </div>
