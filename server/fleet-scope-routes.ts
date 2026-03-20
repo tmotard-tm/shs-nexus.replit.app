@@ -2243,25 +2243,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.get("/rental/suggested-replacements/:vehicleNumber", async (req, res) => {
     try {
       const raw = (req.params.vehicleNumber || '').trim();
-      const padded = raw.padStart(6, '0');
       const unpadded = raw.replace(/^0+/, '') || raw;
 
-      // Step 1: find the tech's ENTERPRISE_ID and FULL_NAME from TPMS_EXTRACT
-      const step1Sql = `
-        SELECT ENTERPRISE_ID, FULL_NAME
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED
-        WHERE TRUCK_LU IN (?, ?)
-        ORDER BY FILE_DATE DESC
-        LIMIT 1
-      `;
-      const step1 = await executeQuery<{ ENTERPRISE_ID: string | number | null; FULL_NAME: string | null }>(step1Sql, [padded, unpadded]);
-
-      if (step1.length === 0 || !step1[0].ENTERPRISE_ID) {
+      // Step 1: find the tech's ENTERPRISE_ID and FULL_NAME from the in-memory tech cache
+      // (same source as the Tech Name shown in the Tech Information panel)
+      const cacheEntry = technicianDataCache.get(unpadded);
+      if (!cacheEntry || !cacheEntry.enterpriseId) {
         return res.json({ techName: null, jobTitle: null, suggestions: [] });
       }
 
-      const enterpriseId = String(step1[0].ENTERPRISE_ID).trim();
-      const techName = step1[0].FULL_NAME || null;
+      const enterpriseId = cacheEntry.enterpriseId;
+      const techName = cacheEntry.fullName || null;
 
       // Step 2: find job title from the HR roster (same approach as /tech-specialty/:vehicleNumber)
       let jobTitle: string | null = null;
