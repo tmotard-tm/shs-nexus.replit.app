@@ -191,7 +191,29 @@ async function initializeSnowflake() {
   }
 }
 
+async function patchStoredRolePermissions() {
+  try {
+    const { deepMergePermissions, getServerDefaultPermissions } = await import('./permission-utils');
+
+    const allRecords = await storage.getAllRolePermissions();
+    for (const record of allRecords) {
+      const defaults = getServerDefaultPermissions(record.role);
+      const merged = deepMergePermissions(defaults, record.permissions);
+      if (JSON.stringify(merged) !== JSON.stringify(record.permissions)) {
+        await storage.upsertRolePermission(record.role, merged);
+        log(`✅ Patched stored permissions for role '${record.role}' with missing keys`);
+      }
+    }
+  } catch (error) {
+    console.error("⚠️ Failed to patch stored role permissions:", error);
+  }
+}
+
 (async () => {
+  // Patch stored role permissions — fill in any keys added since the record was created
+  // Must run before routes are registered so the fix is live immediately
+  await patchStoredRolePermissions();
+
   const server = await registerRoutes(app);
 
   // Seed templates during startup

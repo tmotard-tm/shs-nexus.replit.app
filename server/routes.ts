@@ -34,6 +34,8 @@ import { initFleetScopeSchema } from "./fleet-scope-schema-init";
 import passport from "passport";
 import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
 
+import { mergeRolePermissionWithDefaults } from "./permission-utils";
+
 // Initialize session cleanup on startup
 try {
   storage.cleanExpiredSessions().then(cleanedCount => {
@@ -7002,7 +7004,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const permissions = await storage.getAllRolePermissions();
-      res.json(permissions);
+      res.json(permissions.map(mergeRolePermissionWithDefaults));
     } catch (error) {
       console.error("Error fetching role permissions:", error);
       res.status(500).json({ message: "Failed to fetch role permissions" });
@@ -7024,7 +7026,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: `Role permission for '${role}' not found` });
       }
       
-      res.json(permission);
+      res.json(mergeRolePermissionWithDefaults(permission));
     } catch (error) {
       console.error("Error fetching role permission:", error);
       res.status(500).json({ message: "Failed to fetch role permission" });
