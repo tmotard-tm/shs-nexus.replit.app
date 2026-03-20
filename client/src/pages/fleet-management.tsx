@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
-  Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
+  Truck, Search, Filter, ChevronDown, ChevronUp, ChevronRight, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
   UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench, Download
@@ -371,6 +371,7 @@ export default function FleetManagement() {
   const [poFilterDateTo, setPoFilterDateTo] = useState("");
   const [poFilterPoNumber, setPoFilterPoNumber] = useState("");
   const [poFilterVendor, setPoFilterVendor] = useState("");
+  const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set());
 
   // Address form
   const [addrLine1, setAddrLine1] = useState("");
@@ -2706,6 +2707,7 @@ export default function FleetManagement() {
             setPoFilterDateTo("");
             setPoFilterPoNumber("");
             setPoFilterVendor("");
+            setExpandedPOs(new Set());
           }
         }}
       >
@@ -2781,60 +2783,145 @@ export default function FleetManagement() {
                 No POs cached for this vehicle.
               </div>
             ) : (() => {
-              const filtered = vehiclePOs.filter((po: any) => {
-                if (poFilterPoNumber && !String(po.poNumber || "").toLowerCase().includes(poFilterPoNumber.toLowerCase())) return false;
-                if (poFilterVendor && !String(po.vendor || po.vendorName || "").toLowerCase().includes(poFilterVendor.toLowerCase())) return false;
-                const poDate = po.poDate || po.openDate || po.date || "";
+              // Group all line items by PO number
+              const groupMap = new Map<string, { summary: any; lines: any[] }>();
+              for (const row of vehiclePOs) {
+                const key = row.poNumber || "UNKNOWN";
+                if (!groupMap.has(key)) {
+                  groupMap.set(key, { summary: row, lines: [] });
+                }
+                groupMap.get(key)!.lines.push(row);
+              }
+
+              // Apply filters at the PO group level
+              const filteredGroups = Array.from(groupMap.values()).filter(({ summary }) => {
+                if (poFilterPoNumber && !String(summary.poNumber || "").toLowerCase().includes(poFilterPoNumber.toLowerCase())) return false;
+                if (poFilterVendor && !String(summary.vendor || summary.vendorName || "").toLowerCase().includes(poFilterVendor.toLowerCase())) return false;
+                const poDate = summary.poDate || summary.openDate || summary.date || "";
                 if (poFilterDateFrom && poDate && poDate < poFilterDateFrom) return false;
                 if (poFilterDateTo && poDate && poDate > poFilterDateTo) return false;
                 return true;
               });
+
+              const totalLines = filteredGroups.reduce((acc, g) => acc + g.lines.length, 0);
+
+              const fmtAmt = (v: any) => v != null ? `$${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
+
               return (
                 <>
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-background border-b">
+                    <thead className="sticky top-0 bg-background border-b z-10">
                       <tr>
+                        <th className="text-left py-2 px-2 font-medium text-muted-foreground w-6"></th>
                         <th className="text-left py-2 px-2 font-medium text-muted-foreground">PO #</th>
                         <th className="text-left py-2 px-2 font-medium text-muted-foreground">Type</th>
                         <th className="text-left py-2 px-2 font-medium text-muted-foreground">Status</th>
                         <th className="text-left py-2 px-2 font-medium text-muted-foreground">Date</th>
-                        <th className="text-right py-2 px-2 font-medium text-muted-foreground">Amount</th>
+                        <th className="text-right py-2 px-2 font-medium text-muted-foreground">Total</th>
                         <th className="text-left py-2 px-2 font-medium text-muted-foreground">Vendor</th>
-                        <th className="text-left py-2 px-2 font-medium text-muted-foreground">Description</th>
+                        <th className="text-left py-2 px-2 font-medium text-muted-foreground">Lines</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.length === 0 ? (
+                      {filteredGroups.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="text-center py-8 text-muted-foreground">No POs match your filters.</td>
+                          <td colSpan={8} className="text-center py-8 text-muted-foreground">No POs match your filters.</td>
                         </tr>
-                      ) : filtered.map((po: any, i: number) => (
-                        <tr key={i} className="border-b hover:bg-muted/30">
-                          <td className="py-1.5 px-2 font-mono">{po.poNumber || "—"}</td>
-                          <td className="py-1.5 px-2">
-                            {po.poType === "maintenance"
-                              ? <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border-none">MAINT</Badge>
-                              : po.poType === "rental"
-                              ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 text-xs border-none">RENTAL</Badge>
-                              : po.poType
-                              ? <Badge variant="secondary" className="text-xs">{po.poType}</Badge>
-                              : <span className="text-muted-foreground">—</span>}
-                          </td>
-                          <td className="py-1.5 px-2">
-                            <span className={`font-medium ${po.poStatus?.toUpperCase() === 'OPEN' ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}`}>
-                              {po.poStatus || "—"}
-                            </span>
-                          </td>
-                          <td className="py-1.5 px-2 text-muted-foreground">{po.poDate || po.openDate || po.date || "—"}</td>
-                          <td className="py-1.5 px-2 text-right">{po.amount != null ? `$${Number(po.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}</td>
-                          <td className="py-1.5 px-2">{po.vendor || po.vendorName || "—"}</td>
-                          <td className="py-1.5 px-2 text-muted-foreground max-w-[200px] truncate">{po.description || po.serviceDescription || "—"}</td>
-                        </tr>
-                      ))}
+                      ) : filteredGroups.map(({ summary, lines }) => {
+                        const poKey = summary.poNumber || "UNKNOWN";
+                        const isExpanded = expandedPOs.has(poKey);
+                        const totalAmt = lines.reduce((acc: number, l: any) => acc + (Number(l.amount) || 0), 0);
+                        return (
+                          <>
+                            {/* PO Summary Row */}
+                            <tr
+                              key={`po-${poKey}`}
+                              className="border-b hover:bg-muted/30 cursor-pointer"
+                              onClick={() => setExpandedPOs(prev => {
+                                const next = new Set(prev);
+                                if (next.has(poKey)) next.delete(poKey);
+                                else next.add(poKey);
+                                return next;
+                              })}
+                            >
+                              <td className="py-1.5 px-2 text-muted-foreground">
+                                {isExpanded
+                                  ? <ChevronDown className="h-3 w-3" />
+                                  : <ChevronRight className="h-3 w-3" />}
+                              </td>
+                              <td className="py-1.5 px-2 font-mono font-semibold text-blue-600 dark:text-blue-400">
+                                {summary.poNumber || "—"}
+                              </td>
+                              <td className="py-1.5 px-2">
+                                {summary.poType === "maintenance"
+                                  ? <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border-none">MAINT</Badge>
+                                  : summary.poType === "rental"
+                                  ? <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 text-xs border-none">RENTAL</Badge>
+                                  : summary.poType
+                                  ? <Badge variant="secondary" className="text-xs">{summary.poType}</Badge>
+                                  : <span className="text-muted-foreground">—</span>}
+                              </td>
+                              <td className="py-1.5 px-2">
+                                <span className={`font-medium ${summary.poStatus?.toUpperCase() === 'OPEN' ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}`}>
+                                  {summary.poStatus || "—"}
+                                </span>
+                              </td>
+                              <td className="py-1.5 px-2 text-muted-foreground">{summary.poDate || summary.openDate || summary.date || "—"}</td>
+                              <td className="py-1.5 px-2 text-right font-medium">{fmtAmt(totalAmt)}</td>
+                              <td className="py-1.5 px-2">{summary.vendor || summary.vendorName || "—"}</td>
+                              <td className="py-1.5 px-2 text-muted-foreground">{lines.length} line{lines.length !== 1 ? "s" : ""}</td>
+                            </tr>
+
+                            {/* Expanded Line Items */}
+                            {isExpanded && (
+                              <tr key={`lines-${poKey}`}>
+                                <td colSpan={8} className="p-0 bg-muted/20 dark:bg-muted/10">
+                                  <table className="w-full text-xs border-l-2 border-blue-300 dark:border-blue-700 ml-4">
+                                    <thead>
+                                      <tr className="border-b border-muted">
+                                        <th className="text-left py-1.5 px-3 font-medium text-muted-foreground">#</th>
+                                        <th className="text-left py-1.5 px-3 font-medium text-muted-foreground">Description</th>
+                                        <th className="text-left py-1.5 px-3 font-medium text-muted-foreground">ATA Code</th>
+                                        <th className="text-left py-1.5 px-3 font-medium text-muted-foreground">ATA Group</th>
+                                        <th className="text-left py-1.5 px-3 font-medium text-muted-foreground">Repair Type</th>
+                                        <th className="text-right py-1.5 px-3 font-medium text-muted-foreground">Amount</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {lines.map((line: any, idx: number) => (
+                                        <tr key={idx} className="border-b border-muted/50 hover:bg-muted/30">
+                                          <td className="py-1 px-3 text-muted-foreground">{idx + 1}</td>
+                                          <td className="py-1 px-3 max-w-[240px]">{line.description || "—"}</td>
+                                          <td className="py-1 px-3 font-mono text-orange-600 dark:text-orange-400">
+                                            {line.ataGroupCode || <span className="text-muted-foreground">—</span>}
+                                          </td>
+                                          <td className="py-1 px-3 text-muted-foreground">
+                                            {line.ataGroupDesc || "—"}
+                                          </td>
+                                          <td className="py-1 px-3">
+                                            {line.repairType
+                                              ? <Badge variant="outline" className="text-[10px] py-0 h-4 font-normal">{line.repairType}</Badge>
+                                              : <span className="text-muted-foreground">—</span>}
+                                          </td>
+                                          <td className="py-1 px-3 text-right">{fmtAmt(line.amount)}</td>
+                                        </tr>
+                                      ))}
+                                      <tr className="border-t border-muted">
+                                        <td colSpan={5} className="py-1.5 px-3 text-right font-medium text-muted-foreground">PO Total</td>
+                                        <td className="py-1.5 px-3 text-right font-semibold">{fmtAmt(totalAmt)}</td>
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        );
+                      })}
                     </tbody>
                   </table>
                   <p className="text-xs text-muted-foreground px-2 py-2 border-t">
-                    Showing {filtered.length} of {vehiclePOs.length} POs
+                    Showing {filteredGroups.length} PO{filteredGroups.length !== 1 ? "s" : ""} ({totalLines} line item{totalLines !== 1 ? "s" : ""}) — click a PO row to see line items &amp; ATA codes
                   </p>
                 </>
               );

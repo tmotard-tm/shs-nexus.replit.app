@@ -14608,7 +14608,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await sf.connect();
 
           const rows = await sf.executeQuery(
-            `SELECT DISTINCT
+            `SELECT
                PO_NUMBER,
                PO_TYPE_DESCRIPTION,
                DIVISION,
@@ -14618,10 +14618,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                DESCRIPTION,
                VENDOR_NAME,
                ENTERPRISE_ID,
-               SERIAL_NO
+               SERIAL_NO,
+               ATA_GROUP_CODE,
+               ATA_GROUP_DESC,
+               REPAIR_TYPE_DESCRIPTION
              FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS
              WHERE HOLMAN_VEHICLE_NUMBER = '${vehicleNumber}'
-             ORDER BY PO_DATE DESC NULLS LAST`
+             ORDER BY PO_DATE DESC NULLS LAST, PO_NUMBER`
           ) as any[];
 
           const data = rows.map((r: any) => {
@@ -14640,6 +14643,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               description: String(r.DESCRIPTION || r.PO_TYPE_DESCRIPTION || "").trim().slice(0, 500) || null,
               vendor: String(r.VENDOR_NAME || "").trim() || null,
               vin: String(r.SERIAL_NO || "").trim() || null,
+              ataGroupCode: String(r.ATA_GROUP_CODE || "").trim() || null,
+              ataGroupDesc: String(r.ATA_GROUP_DESC || "").trim() || null,
+              repairType: String(r.REPAIR_TYPE_DESCRIPTION || "").trim() || null,
             };
           }).filter(r => r.poNumber);
 
