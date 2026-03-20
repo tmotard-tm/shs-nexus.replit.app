@@ -8638,6 +8638,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Returns the set of VINs that have active DTC codes — used for card badges
+  app.get("/api/samsara/dtc-vehicles", requireAuth, async (req, res) => {
+    try {
+      const { getSnowflakeService: getSnowflake } = await import("./snowflake-service");
+      const snowflake = getSnowflake();
+      const rows = await snowflake.executeQuery(
+        `SELECT DISTINCT VIN FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE WHERE (DTC_ID IS NOT NULL AND DTC_ID != '') OR (DTC_DESCRIPTION IS NOT NULL AND DTC_DESCRIPTION != '')`
+      );
+      const vins = (rows as any[]).map((r: any) => r.VIN).filter(Boolean);
+      console.log(`[Samsara DTC Vehicles] ${vins.length} VINs with active DTC codes`);
+      res.json({ vins });
+    } catch (error: any) {
+      console.error('[Samsara DTC Vehicles] Error:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/samsara/fuel", requireAuth, async (req, res) => {
     try {
       const samsaraService = getSamsaraService();

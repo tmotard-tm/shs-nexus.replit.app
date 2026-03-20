@@ -450,6 +450,19 @@ export default function FleetManagement() {
     return s;
   }, [rentalOpsData]);
 
+  // VINs that have active DTC codes in Samsara — used for check engine badges
+  const { data: dtcVehiclesData } = useQuery<{ vins: string[] }>({
+    queryKey: ['/api/samsara/dtc-vehicles'],
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const dtcVinSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const vin of dtcVehiclesData?.vins ?? []) s.add(vin.toUpperCase());
+    return s;
+  }, [dtcVehiclesData]);
+
   // POs for selected vehicle
   const { data: vehiclePOs, isLoading: posLoading } = useQuery<any[]>({
     queryKey: ["/api/holman/pos", selectedVehicle?.vehicleNumber],
@@ -1601,6 +1614,7 @@ export default function FleetManagement() {
                     const isInRentalOps = rentalOpsVehicleSet.has(vehicle.vehicleNumber)
                       || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
                       || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
+                    const hasDTC = vehicle.vin ? dtcVinSet.has(vehicle.vin.toUpperCase()) : false;
                     
                     return (
                       <Card 
@@ -1647,6 +1661,12 @@ export default function FleetManagement() {
                               )}
                               {isInRentalOps && (
                                 <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
+                              )}
+                              {hasDTC && (
+                                <Badge className="bg-orange-600 text-white text-xs border-none flex items-center gap-1">
+                                  <Wrench className="h-3 w-3" />
+                                  Check Engine
+                                </Badge>
                               )}
                             </div>
                           </div>
