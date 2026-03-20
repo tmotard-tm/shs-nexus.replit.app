@@ -29,6 +29,7 @@ import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils
 import { registerFleetScopeRoutes } from "./fleet-scope-routes";
 import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
 import { fsDb } from "./fleet-scope-db";
+import { initFleetScopeSchema } from "./fleet-scope-schema-init";
 // SAML SSO INTEGRATION
 import passport from "passport";
 import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
@@ -490,11 +491,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Mount Fleet-Scope module routes at /api/fs/*
   if (fsDb) {
+    await initFleetScopeSchema();
     const fsRouter = registerFleetScopeRoutes(requireAuth);
     app.use("/api/fs", fsRouter);
     console.log("[Fleet-Scope] Routes mounted at /api/fs/*");
   } else {
-    console.log("[Fleet-Scope] Skipped — Fleet-Scope DB not configured (set FS_DATABASE_URL or FS_PGHOST/FS_PGUSER/FS_PGPASSWORD/FS_PGDATABASE)");
+    console.log("[Fleet-Scope] Skipped — Fleet-Scope DB not configured (set DATABASE_URL)");
   }
 
   // SAML SSO INTEGRATION - Initialize passport and SAML strategy
