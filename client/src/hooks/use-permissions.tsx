@@ -40,13 +40,7 @@ function deepMergePermissions(defaults: any, stored: any, inheritedEnabled?: boo
     if (key in stored) {
       result[key] = deepMergePermissions(defaults[key], stored[key], parentEnabled);
     } else {
-      if (parentEnabled !== undefined && typeof defaults[key] === 'boolean') {
-        result[key] = parentEnabled;
-      } else if (parentEnabled !== undefined && typeof defaults[key] === 'object') {
-        result[key] = setAllBooleans(defaults[key], parentEnabled);
-      } else {
-        result[key] = defaults[key];
-      }
+      result[key] = defaults[key];
     }
   }
   return result;
