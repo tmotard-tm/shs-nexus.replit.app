@@ -23,9 +23,8 @@ const FAILED_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour for failed lookups
 // Cache TTL: 7 days (coordinates don't change frequently)
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-// Rate limiting: max requests per second
-let lastRequestTime = 0;
-const MIN_REQUEST_INTERVAL_MS = 200; // 5 requests per second max
+// Concurrency limit for batch geocoding
+const BATCH_CONCURRENCY = 10;
 
 /**
  * Generate cache key from coordinates
@@ -33,18 +32,6 @@ const MIN_REQUEST_INTERVAL_MS = 200; // 5 requests per second max
  */
 function getCacheKey(lat: number, lon: number): string {
   return `${lat.toFixed(5)},${lon.toFixed(5)}`;
-}
-
-/**
- * Wait for rate limit
- */
-async function waitForRateLimit(): Promise<void> {
-  const now = Date.now();
-  const timeSinceLastRequest = now - lastRequestTime;
-  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL_MS) {
-    await new Promise(resolve => setTimeout(resolve, MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest));
-  }
-  lastRequestTime = Date.now();
 }
 
 /**
@@ -67,8 +54,6 @@ export async function reverseGeocode(lat: number, lon: number): Promise<Geocoded
   }
   
   try {
-    await waitForRateLimit();
-    
     // Use BigDataCloud free reverse geocode API
     const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`;
     
@@ -161,14 +146,19 @@ export async function batchReverseGeocode(
   
   console.log(`[ReverseGeocode] Cache hit: ${coordinates.length - uncached.length - failedSkipped}/${coordinates.length}, failed-cache skip: ${failedSkipped}, need to fetch: ${uncached.length}`);
   
-  // Fetch uncached coordinates (with rate limiting)
-  // Limit to 50 requests per batch to avoid long delays
-  const toFetch = uncached.slice(0, 50);
+  // Fetch uncached coordinates concurrently in chunks to avoid long delays.
+  // Cap at 300 per batch; run BATCH_CONCURRENCY requests in parallel at a time.
+  const toFetch = uncached.slice(0, 300);
   
-  for (const coord of toFetch) {
-    const result = await reverseGeocode(coord.lat, coord.lon);
-    if (result) {
-      results.set(coord.vehicleId, result);
+  for (let i = 0; i < toFetch.length; i += BATCH_CONCURRENCY) {
+    const chunk = toFetch.slice(i, i + BATCH_CONCURRENCY);
+    const settled = await Promise.allSettled(
+      chunk.map(coord => reverseGeocode(coord.lat, coord.lon).then(result => ({ coord, result })))
+    );
+    for (const outcome of settled) {
+      if (outcome.status === 'fulfilled' && outcome.value.result) {
+        results.set(outcome.value.coord.vehicleId, outcome.value.result);
+      }
     }
   }
   
