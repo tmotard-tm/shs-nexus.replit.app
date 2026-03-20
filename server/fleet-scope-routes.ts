@@ -2466,7 +2466,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       if (!truck) {
         return res.status(404).json({ message: "Truck not found" });
       }
-      const tNum = (truck.truckNumber || '').toString().padStart(6, '0');
+      const tNum = normalizeFleetIdForCache((truck.truckNumber || '').toString());
       const techCacheEntry = technicianDataCache.get(tNum);
       res.json({ ...truck, techAddress: techCacheEntry?.fullAddress || '' });
     } catch (error: any) {
@@ -9340,10 +9340,14 @@ Respond ONLY with valid JSON, no other text.`;
     scheduleNextTechDataRefresh();
   }, 10000); // Start 2 seconds after Assigned scheduler
   
-  // Populate technician cache on startup (for All Vehicles table)
+  // Populate technician cache on startup, then refresh every 30 minutes
   setTimeout(async () => {
     console.log(`[TechCache] Initializing technician data cache...`);
     await refreshTechnicianCache();
+    setInterval(async () => {
+      console.log(`[TechCache] Running scheduled 30-minute refresh...`);
+      await refreshTechnicianCache();
+    }, 30 * 60 * 1000);
   }, 12000); // Start after other schedulers
 
   // =====================
