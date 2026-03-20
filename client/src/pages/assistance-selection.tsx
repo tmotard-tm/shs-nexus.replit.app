@@ -1,5 +1,4 @@
 import { useState, useMemo } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
@@ -80,32 +79,39 @@ export default function AssistanceSelection() {
         <div className="absolute inset-0 bg-background/60"></div>
         <div className="relative z-10 max-w-4xl mx-auto pt-4 px-4">
           <div className="text-center mb-6">
-            <h2 className="text-3xl font-bold mb-3" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-selection-title">
+            <h2 className="text-5xl font-bold mb-3" style={{ color: '#007bff', textShadow: '2px 2px 0 black, -2px -2px 0 black, 2px -2px 0 black, -2px 2px 0 black' }} data-testid="text-selection-title">
               Nexus: Your Business, Synced.
             </h2>
           </div>
 
-          {/* Workflow Buttons Card */}
+          {/* Workflow Buttons Card — glass style */}
           {workflowOptions.length > 0 && (
-          <Card className="backdrop-blur-sm border-white/20 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95">
-            <CardContent className="p-6">
-              <div className={`grid gap-4 ${workflowOptions.length >= 5 ? 'grid-cols-5' : workflowOptions.length >= 3 ? 'grid-cols-3' : 'grid-cols-' + workflowOptions.length}`} style={{ gridTemplateColumns: `repeat(${Math.min(workflowOptions.length, 5)}, minmax(0, 1fr))` }}>
-                {workflowOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={option.action}
-                    className="flex flex-col items-center gap-2 p-4 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                    data-testid={`button-${option.value}`}
-                  >
-                    <div className={`w-12 h-12 rounded-lg ${option.color} flex items-center justify-center`}>
-                      <option.icon className="h-6 w-6 text-white" />
-                    </div>
-                    <span className="text-xs text-center text-gray-700 dark:text-gray-200 font-medium leading-tight">{option.label}</span>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <div
+            className="rounded-2xl p-6"
+            style={{
+              background: 'rgba(255, 255, 255, 0.12)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255, 255, 255, 0.25)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
+            }}
+          >
+            <div className={`grid gap-4`} style={{ gridTemplateColumns: `repeat(${Math.min(workflowOptions.length, 5)}, minmax(0, 1fr))` }}>
+              {workflowOptions.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={option.action}
+                  className="flex flex-col items-center gap-2 p-4 rounded-xl transition-all hover:bg-white/10"
+                  data-testid={`button-${option.value}`}
+                >
+                  <div className={`w-12 h-12 rounded-lg ${option.color} flex items-center justify-center shadow-lg`}>
+                    <option.icon className="h-6 w-6 text-white" />
+                  </div>
+                  <span className="text-xs text-center text-white font-medium leading-tight" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>{option.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           )}
 
         </div>
