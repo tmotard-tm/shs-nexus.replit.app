@@ -2252,7 +2252,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         SELECT ENTERPRISE_ID
         FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
         WHERE TRUCK_LU IN (?, ?)
-        ORDER BY FILE_DATE DESC
         LIMIT 1
       `;
       const step1 = await executeQuery<{ ENTERPRISE_ID: string | number | null }>(step1Sql, [padded, unpadded]);
