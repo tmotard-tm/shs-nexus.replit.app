@@ -2247,29 +2247,29 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const unpadded = raw.replace(/^0+/, '') || raw;
 
       // Step 1: look up ENTERPRISE_ID from TPMS_EXTRACT using TRUCK_LU
-      // (this is the same table the tech name cache is built from)
+      // Note: executeQuery ignores bind parameters — use string interpolation like all other TPMS_EXTRACT queries
       const step1Sql = `
         SELECT ENTERPRISE_ID
         FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-        WHERE TRUCK_LU IN (?, ?)
+        WHERE TRUCK_LU IN (${padded}, ${unpadded})
         LIMIT 1
       `;
-      const step1 = await executeQuery<{ ENTERPRISE_ID: string | number | null }>(step1Sql, [padded, unpadded]);
+      const step1 = await executeQuery<{ ENTERPRISE_ID: string | number | null }>(step1Sql);
 
       if (step1.length === 0 || !step1[0].ENTERPRISE_ID) {
         return res.json({ matchFound: false, techName: null, jobTitle: null, suggestions: [] });
       }
 
-      const enterpriseId = String(step1[0].ENTERPRISE_ID).trim();
+      const enterpriseId = String(step1[0].ENTERPRISE_ID).trim().replace(/'/g, "''");
 
       // Step 2: look up FULL_NAME and JOB_TITLE from DRIVELINE_ALL_TECHS
       const step2Sql = `
         SELECT FULL_NAME, JOB_TITLE
         FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS
-        WHERE UPPER(TRIM(ENTERPRISE_ID)) = UPPER(?)
+        WHERE UPPER(TRIM(ENTERPRISE_ID)) = UPPER(TRIM('${enterpriseId}'))
         LIMIT 1
       `;
-      const step2 = await executeQuery<{ FULL_NAME: string | null; JOB_TITLE: string | null }>(step2Sql, [enterpriseId]);
+      const step2 = await executeQuery<{ FULL_NAME: string | null; JOB_TITLE: string | null }>(step2Sql);
 
       if (step2.length === 0) {
         return res.json({ matchFound: false, techName: null, jobTitle: null, suggestions: [] });
@@ -2285,7 +2285,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // Step 3: determine INTERIOR filter based on job title and query REPLIT_ALL_VEHICLES
       const upperTitle = jobTitle.toUpperCase();
       let step3Sql: string;
-      let step3Params: string[];
 
       if (upperTitle.includes('TECHNICIAN 1')) {
         // Technician 1 → "Utility Without Ref Racks" or null/empty interior
@@ -2293,26 +2292,24 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
-            AND (UPPER(INTERIOR) = UPPER(?) OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
+            AND (UPPER(INTERIOR) = 'UTILITY WITHOUT REF RACKS' OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
           LIMIT 3
         `;
-        step3Params = ['Utility Without Ref Racks'];
       } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('HVAC')) {
         // Technician 2 / HVAC → "Utility With Ref Racks"
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
-            AND UPPER(INTERIOR) = UPPER(?)
+            AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'
           LIMIT 3
         `;
-        step3Params = ['Utility With Ref Racks'];
       } else {
         // Job title doesn't match known skill patterns
         return res.json({ matchFound: true, techName, jobTitle, suggestions: [] });
       }
 
-      const suggestions = await executeQuery<{ VEHICLE_NUMBER: string; TRUCK_STATUS: string | null; INTERIOR: string | null }>(step3Sql, step3Params);
+      const suggestions = await executeQuery<{ VEHICLE_NUMBER: string; TRUCK_STATUS: string | null; INTERIOR: string | null }>(step3Sql);
 
       return res.json({
         matchFound: true,
