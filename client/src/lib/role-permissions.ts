@@ -482,6 +482,11 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     return !!perms.sidebar.fleetScope;
   }
 
+  // TPMS module - all sub-routes share the same permission flag
+  if (route === '/tpms' || route.startsWith('/tpms/')) {
+    return !!perms.sidebar.tpms;
+  }
+
   // Handle wildcard patterns for forms - all authenticated users can access forms
   if (route.startsWith('/forms/')) {
     return true;
