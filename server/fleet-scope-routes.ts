@@ -2280,7 +2280,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const jobTitle = step2[0].JOB_TITLE || null;
 
       if (!jobTitle) {
-        return res.json({ matchFound: true, techName, jobTitle: null, suggestions: [] });
+        return res.json({ matchFound: false, techName, jobTitle: null, suggestions: [] });
       }
 
       // Step 3: determine INTERIOR filter based on job title and query REPLIT_ALL_VEHICLES
@@ -2293,7 +2293,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
-          WHERE LOWER(TPMS_ASSIGNED) != 'assigned'
+          WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND (UPPER(INTERIOR) = UPPER(?) OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
           LIMIT 3
         `;
@@ -2303,7 +2303,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
-          WHERE LOWER(TPMS_ASSIGNED) != 'assigned'
+          WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND UPPER(INTERIOR) = UPPER(?)
           LIMIT 3
         `;

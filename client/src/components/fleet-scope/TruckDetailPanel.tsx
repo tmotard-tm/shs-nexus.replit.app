@@ -104,12 +104,8 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
               <div key={v.vehicleNumber} className="flex items-center justify-between rounded-sm bg-muted/50 px-2 py-1.5">
                 <span className="font-mono text-sm font-semibold">{v.vehicleNumber}</span>
                 <div className="flex items-center gap-2">
-                  {v.interior && (
-                    <span className="text-xs text-muted-foreground truncate max-w-[120px]">{v.interior}</span>
-                  )}
-                  {v.truckStatus && (
-                    <Badge variant="outline" className="text-xs py-0 px-1.5 h-5">{v.truckStatus}</Badge>
-                  )}
+                  <span className="text-xs text-muted-foreground truncate max-w-[120px]">{v.interior || "N/A"}</span>
+                  <Badge variant="outline" className="text-xs py-0 px-1.5 h-5">{v.truckStatus || "Unknown"}</Badge>
                 </div>
               </div>
             ))}
