@@ -86,9 +86,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     <RoleProtectedRoute>
       <>
         <PreviewModeBanner />
-        <div className="dev-banner">
-          🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
-        </div>
         <div className="min-h-screen bg-background flex overflow-x-hidden">
           <Sidebar />
           {children}

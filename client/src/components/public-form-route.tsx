@@ -40,9 +40,6 @@ export function PublicFormRoute({ children }: PublicFormRouteProps) {
   if (isVerified === null) {
     return (
       <>
-        <div className="dev-banner">
-          🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
-        </div>
         <div className="min-h-screen bg-background flex items-center justify-center">
           <div className="text-center">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
@@ -57,9 +54,6 @@ export function PublicFormRoute({ children }: PublicFormRouteProps) {
   if (!isVerified) {
     return (
       <>
-        <div className="dev-banner">
-          🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
-        </div>
         <HumanVerificationGate 
           onVerificationComplete={handleVerificationComplete}
           originalUrl={originalUrl}
@@ -71,9 +65,6 @@ export function PublicFormRoute({ children }: PublicFormRouteProps) {
   // User is verified, show the form
   return (
     <>
-      <div className="dev-banner">
-        🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
-      </div>
       <div className="min-h-screen bg-background">
         <div className="w-full">
           {children}

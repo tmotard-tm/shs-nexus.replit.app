@@ -61,9 +61,6 @@ export function PermissionProtectedRoute({
   if (isLoading || !accessChecked) {
     return (
       <>
-        <div className="dev-banner">
-          🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
-        </div>
         <div className="min-h-screen bg-background flex items-center justify-center">
           <div className="text-center">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
@@ -86,9 +83,6 @@ export function PermissionProtectedRoute({
   if (!hasAccess && !redirectOnDenied) {
     return (
       <>
-        <div className="dev-banner">
-          🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
-        </div>
         <div className="min-h-screen bg-background flex items-center justify-center p-6">
           <Card className="max-w-md w-full" data-testid="access-denied-card">
             <CardHeader className="text-center">
@@ -138,9 +132,6 @@ export function PermissionProtectedRoute({
   // Access granted - render the protected content
   return (
     <>
-      <div className="dev-banner">
-        🚧 DEVELOPMENT VERSION - CONCEPT MODEL ONLY - NOT FOR PRODUCTION USE 🚧
-      </div>
       <div className="min-h-screen bg-background flex">
         {children}
       </div>
