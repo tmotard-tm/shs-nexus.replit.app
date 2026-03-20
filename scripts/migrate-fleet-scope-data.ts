@@ -209,7 +209,8 @@ async function resetSequenceIfExists(pool: Pool, tableName: string, pkColumn: st
     if (!seqName) return undefined; // No sequence — UUID or non-serial PK
 
     const seqRes = await pool.query(
-      `SELECT setval('${seqName}', COALESCE((SELECT MAX("${pkColumn}") FROM "${tableName}"), 1)) AS next_val`
+      `SELECT setval($1, COALESCE((SELECT MAX("${pkColumn}") FROM "${tableName}"), 1)) AS next_val`,
+      [seqName]
     );
     return Number((seqRes.rows[0] as Record<string, unknown>).next_val);
   } catch {
