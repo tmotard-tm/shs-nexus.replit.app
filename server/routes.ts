@@ -8593,17 +8593,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const vehicleVin = vehicle?.VIN || null;
 
-      const [locationResult, odometerResult, faultCodesResult, fuelResult, streamResult] = await Promise.allSettled([
+      const [locationResult, odometerResult, maintenanceResult, fuelResult, streamResult, criticalityResult] = await Promise.allSettled([
         samsaraService.getVehicleLocation(resolvedTruckNumber, 9999),
         // SAMSARA_ODOMETER is keyed by VIN
         vehicleVin ? snowflake.executeQuery(
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_ODOMETER WHERE VIN = ? ORDER BY OBD_TIME DESC LIMIT 1`,
           [vehicleVin]
         ) : Promise.resolve([]),
-        // Use the live Samsara API for fault codes — Snowflake SAMSARA_MAINTENANCE has an incompatible schema
-        vehicleId && samsaraService.isLiveApiConfigured()
-          ? samsaraService.liveGetVehicleFaultCodes(String(vehicleId))
-          : Promise.resolve([]),
+        // SAMSARA_MAINTENANCE is keyed by MAINT_ID = Samsara Vehicle ID.
+        // Fetch all DTC rows from the most recent daily load for this vehicle.
+        vehicleId ? snowflake.executeQuery(
+          `SELECT DTC_SHORT_CODE, DTC_DESCRIPTION, DTC_ID,
+                  J1939_CHECKENGINELIGHT_STOPISON, J1939_CHECKENGINELIGHT_PROTECTISON,
+                  J1939_CHECKENGINELIGHT_WARNINGISON, J1939_CHECKENGINELIGHT_EMISSIONSISON,
+                  J1939_DIAGNOSTICTROUBLECODES, LOAD_TS_UTC
+           FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE
+           WHERE MAINT_ID = ?
+             AND LOAD_TS_UTC >= DATEADD(day, -2,
+               (SELECT MAX(LOAD_TS_UTC) FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE WHERE MAINT_ID = ?))
+           ORDER BY LOAD_TS_UTC DESC`,
+          [vehicleId, vehicleId]
+        ) : Promise.resolve([]),
         vehicleId ? snowflake.executeQuery(
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_FUEL_ENERGY_DAILY WHERE VEHICLE_ID = ? ORDER BY RUN_DATE_UTC DESC LIMIT 7`,
           [vehicleId]
@@ -8612,19 +8622,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_STREAM WHERE VEHICLE_NAME IN (${placeholders}) ORDER BY TIME DESC LIMIT 1`,
           candidates
         ),
+        // SAMSARA_CRITICALITY_SCORE: pre-computed severity triage for this vehicle
+        resolvedTruckNumber ? snowflake.executeQuery(
+          `SELECT SEVERITY_SCORE, SEVERITY_LABEL, RECOMMENDED_ACTION, DTC_COUNT_DISTINCT, LAMP_BASE,
+                  J1939_DIAGNOSTICTROUBLECODES, DTC_SHORT_CODE, DTC_DESCRIPTION, MAINT_LOAD_TS_UTC
+           FROM PARTS_SUPPLYCHAIN.FLEET.SAMSARA_CRITICALITY_SCORE
+           WHERE TRUCK_NUMBER = ? LIMIT 1`,
+          [resolvedTruckNumber]
+        ) : Promise.resolve([]),
       ]);
 
-      const faultCodes = faultCodesResult.status === 'fulfilled' ? faultCodesResult.value as any[] : [];
-      console.log(`[Samsara Telematics] Fault codes for ${vehicleNumber}: ${faultCodes.length} active codes (live API)`);
-
-      // Map live fault codes to the shape the frontend expects
-      const maintenance = faultCodes.map((f: any) => ({
-        MAINT_ID: f.faultCode,
+      // SAMSARA_MAINTENANCE rows — deduplicate by DTC_SHORT_CODE (latest load wins)
+      const rawMaintRows = maintenanceResult.status === 'fulfilled' ? maintenanceResult.value as any[] : [];
+      const seenCodes = new Set<string>();
+      const maintenance = rawMaintRows.filter((m: any) => {
+        const code = m.DTC_SHORT_CODE || m.J1939_DIAGNOSTICTROUBLECODES || '';
+        if (seenCodes.has(code)) return false;
+        seenCodes.add(code);
+        return true;
+      }).map((m: any) => ({
+        MAINT_ID: m.DTC_SHORT_CODE || m.DTC_ID,
         VEHICLE_ID: String(vehicleId),
-        DTC_ID: f.faultCode,
-        DTC_DESCRIPTION: f.description,
-        J1939_STATUS: f.status ?? f.source ?? null,
+        DTC_ID: m.DTC_SHORT_CODE,
+        DTC_DESCRIPTION: m.DTC_DESCRIPTION,
+        J1939_STATUS: m.J1939_CHECKENGINELIGHT_STOPISON ? 'Stop' :
+                      m.J1939_CHECKENGINELIGHT_PROTECTISON ? 'Protect' :
+                      m.J1939_CHECKENGINELIGHT_WARNINGISON ? 'Warning' :
+                      m.J1939_CHECKENGINELIGHT_EMISSIONSISON ? 'Emissions' : null,
       }));
+      console.log(`[Samsara Telematics] Fault codes for ${vehicleNumber}: ${maintenance.length} codes from SAMSARA_MAINTENANCE (MAINT_ID=${vehicleId})`);
+
+      const critRows = criticalityResult.status === 'fulfilled' ? criticalityResult.value as any[] : [];
+      const criticality = critRows.length > 0 ? critRows[0] : null;
 
       res.json({
         vehicle,
@@ -8636,6 +8665,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fuel: fuelResult.status === 'fulfilled' ? fuelResult.value : [],
         stream: streamResult.status === 'fulfilled' && (streamResult.value as any[]).length > 0
           ? (streamResult.value as any[])[0] : null,
+        criticality,
       });
     } catch (error: any) {
       console.error('[Samsara Telematics] Error:', error);
@@ -8643,16 +8673,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Returns the set of Samsara vehicle names (truck numbers) with active J1939 fault codes
-  // Used for check-engine card badges — matches by truck number, not VIN
+  // Returns truck numbers with active DTCs — sourced from PARTS_SUPPLYCHAIN.FLEET.SAMSARA_CRITICALITY_SCORE
+  // Much faster than paginating the live Samsara API; data is refreshed daily via Snowflake pipeline
   app.get("/api/samsara/dtc-vehicles", requireAuth, async (req, res) => {
     try {
-      const samsaraService = getSamsaraService();
-      if (!samsaraService.isLiveApiConfigured()) {
-        return res.json({ truckNumbers: [] });
-      }
-      const truckNumbers = await samsaraService.liveGetAllVehiclesWithFaults();
-      res.json({ truckNumbers });
+      const { getSnowflakeService: getSF } = await import("./snowflake-service");
+      const sf = getSF();
+      const rows = await sf.executeQuery(
+        `SELECT TRUCK_NUMBER, SEVERITY_SCORE, SEVERITY_LABEL, DTC_COUNT_DISTINCT
+         FROM PARTS_SUPPLYCHAIN.FLEET.SAMSARA_CRITICALITY_SCORE
+         ORDER BY SEVERITY_SCORE DESC`
+      );
+      const vehicles = (rows as any[]).map((r: any) => ({
+        truckNumber: r.TRUCK_NUMBER,
+        severityScore: r.SEVERITY_SCORE,
+        severityLabel: r.SEVERITY_LABEL,
+      }));
+      const truckNumbers = vehicles.map((v: any) => v.truckNumber).filter(Boolean);
+      console.log(`[Samsara DTC Vehicles] ${truckNumbers.length} vehicles with active DTCs (from Snowflake)`);
+      res.json({ truckNumbers, vehicles });
     } catch (error: any) {
       console.error('[Samsara DTC Vehicles] Error:', error);
       res.status(500).json({ message: error.message });

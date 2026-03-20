@@ -58,6 +58,16 @@ interface TelematicsData {
     TIME: string | null;
     REVERSE_GEO_FULL: string | null;
   } | null;
+  criticality: {
+    SEVERITY_SCORE: number | null;
+    SEVERITY_LABEL: string | null;
+    RECOMMENDED_ACTION: string | null;
+    DTC_COUNT_DISTINCT: number | null;
+    LAMP_BASE: string | null;
+    DTC_SHORT_CODE: string | null;
+    DTC_DESCRIPTION: string | null;
+    MAINT_LOAD_TS_UTC: string | null;
+  } | null;
 }
 
 interface TelematicsButtonProps {
@@ -258,6 +268,33 @@ export function TelematicsButton({
                       <Badge variant="destructive" className="text-xs ml-1">{activeDTCs.length}</Badge>
                     )}
                   </h3>
+
+                  {/* Criticality triage panel from Snowflake SAMSARA_CRITICALITY_SCORE */}
+                  {data?.criticality && (data.criticality.SEVERITY_LABEL && data.criticality.SEVERITY_LABEL !== 'CLEAR') && (() => {
+                    const label = data.criticality!.SEVERITY_LABEL ?? '';
+                    const severityClasses: Record<string, string> = {
+                      STOP:       'bg-red-50 border-red-300 text-red-800 dark:bg-red-950/30 dark:border-red-700 dark:text-red-300',
+                      PROTECT:    'bg-orange-50 border-orange-300 text-orange-800 dark:bg-orange-950/30 dark:border-orange-700 dark:text-orange-300',
+                      WARNING:    'bg-yellow-50 border-yellow-300 text-yellow-800 dark:bg-yellow-950/30 dark:border-yellow-700 dark:text-yellow-300',
+                      EMISSIONS:  'bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/30 dark:border-amber-700 dark:text-amber-300',
+                      DTC_ONLY:   'bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-950/30 dark:border-blue-700 dark:text-blue-300',
+                    };
+                    const cls = severityClasses[label] ?? 'bg-muted border-border text-foreground';
+                    return (
+                      <div className={`rounded-lg border p-3 mb-2 text-xs ${cls}`}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold uppercase tracking-wide">{label.replace('_', ' ')}</span>
+                          {data.criticality!.SEVERITY_SCORE != null && (
+                            <span className="font-mono font-bold">Score: {data.criticality!.SEVERITY_SCORE}</span>
+                          )}
+                        </div>
+                        {data.criticality!.RECOMMENDED_ACTION && (
+                          <p className="leading-snug opacity-90">{data.criticality!.RECOMMENDED_ACTION}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {activeDTCs.length === 0 ? (
                     <div className="flex items-center gap-2 text-green-600 bg-green-50 dark:bg-green-950/20 rounded-lg p-3">
                       <CheckCircle className="h-4 w-4 shrink-0" />
