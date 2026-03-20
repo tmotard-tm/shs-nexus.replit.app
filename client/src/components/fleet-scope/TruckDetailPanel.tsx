@@ -55,6 +55,7 @@ interface SuggestedVehicle {
 }
 
 interface SuggestedReplacementsData {
+  matchFound: boolean;
   techName: string | null;
   jobTitle: string | null;
   suggestions: SuggestedVehicle[];
@@ -69,6 +70,13 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
 
   if (!vn) return null;
 
+  const techLine = data?.techName || data?.jobTitle ? (
+    <p className="text-xs text-muted-foreground mb-2">
+      {data.techName && <><span className="font-medium text-foreground">{data.techName}</span>{data.jobTitle ? " · " : ""}</>}
+      {data.jobTitle && <span className="italic">{data.jobTitle}</span>}
+    </p>
+  ) : null;
+
   return (
     <div>
       <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
@@ -82,28 +90,16 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
               <Skeleton key={i} className="h-10 w-full" />
             ))}
           </div>
-        ) : !data?.jobTitle ? (
-          <p className="text-xs text-muted-foreground italic">
-            {data?.techName ? `No job title found for ${data.techName}` : "No technician found for this truck"}
-          </p>
+        ) : !data?.matchFound ? (
+          <p className="text-xs text-muted-foreground italic">No tech match found</p>
         ) : data.suggestions.length === 0 ? (
           <div className="space-y-1">
-            {data.techName && (
-              <p className="text-xs text-muted-foreground mb-2">
-                Tech: <span className="font-medium text-foreground">{data.techName}</span>
-                {" · "}<span className="italic">{data.jobTitle}</span>
-              </p>
-            )}
-            <p className="text-xs text-muted-foreground italic">No unassigned vehicles match this tech's skill set</p>
+            {techLine}
+            <p className="text-xs text-muted-foreground italic">No unassigned vehicles available for this skill set</p>
           </div>
         ) : (
           <div className="space-y-1.5">
-            {data.techName && (
-              <p className="text-xs text-muted-foreground mb-2">
-                Tech: <span className="font-medium text-foreground">{data.techName}</span>
-                {" · "}<span className="italic">{data.jobTitle}</span>
-              </p>
-            )}
+            {techLine}
             {data.suggestions.map((v) => (
               <div key={v.vehicleNumber} className="flex items-center justify-between rounded-sm bg-muted/50 px-2 py-1.5">
                 <span className="font-mono text-sm font-semibold">{v.vehicleNumber}</span>

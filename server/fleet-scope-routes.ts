@@ -2243,68 +2243,53 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.get("/rental/suggested-replacements/:vehicleNumber", async (req, res) => {
     try {
       const raw = (req.params.vehicleNumber || '').trim();
+      const padded = raw.padStart(6, '0');
       const unpadded = raw.replace(/^0+/, '') || raw;
 
-      // Step 1: find the tech's ENTERPRISE_ID and FULL_NAME from the in-memory tech cache
-      // (same source as the Tech Name shown in the Tech Information panel)
-      const cacheEntry = technicianDataCache.get(unpadded);
-      if (!cacheEntry || !cacheEntry.enterpriseId) {
-        return res.json({ techName: null, jobTitle: null, suggestions: [] });
-      }
-
-      const enterpriseId = cacheEntry.enterpriseId;
-      const techName = cacheEntry.fullName || null;
-
-      // Step 2: find job title from the HR roster (same approach as /tech-specialty/:vehicleNumber)
-      let jobTitle: string | null = null;
-      const step2Sql = `
-        SELECT JOBTITLE
-        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_HIRE_ROSTER_VW
-        WHERE UPPER(ENTERPRISE_ID) = UPPER(?)
-        ORDER BY LAST_HIRE_DT DESC
+      // Step 1: look up ENTERPRISE_ID from TPMS_EXTRACT using TRUCK_LU
+      // (this is the same table the tech name cache is built from)
+      const step1Sql = `
+        SELECT ENTERPRISE_ID
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+        WHERE TRUCK_LU IN (?, ?)
+        ORDER BY FILE_DATE DESC
         LIMIT 1
       `;
-      const step2 = await executeQuery<{ JOBTITLE: string | null }>(step2Sql, [enterpriseId]);
-      if (step2.length > 0 && step2[0].JOBTITLE) {
-        jobTitle = step2[0].JOBTITLE;
-      } else {
-        const fallbackSql = `
-          SELECT JOBTITLE
-          FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_ACTIVE_ROSTER_FWE_VW_VIEW
-          WHERE UPPER(ENTERPRISE_ID) = UPPER(?)
-          ORDER BY LAST_HIRE_DT DESC
-          LIMIT 1
-        `;
-        const fallback = await executeQuery<{ JOBTITLE: string | null }>(fallbackSql, [enterpriseId]);
-        if (fallback.length > 0 && fallback[0].JOBTITLE) {
-          jobTitle = fallback[0].JOBTITLE;
-        }
+      const step1 = await executeQuery<{ ENTERPRISE_ID: string | number | null }>(step1Sql, [padded, unpadded]);
+
+      if (step1.length === 0 || !step1[0].ENTERPRISE_ID) {
+        return res.json({ matchFound: false, techName: null, jobTitle: null, suggestions: [] });
       }
+
+      const enterpriseId = String(step1[0].ENTERPRISE_ID).trim();
+
+      // Step 2: look up FULL_NAME and JOB_TITLE from DRIVELINE_ALL_TECHS
+      const step2Sql = `
+        SELECT FULL_NAME, JOB_TITLE
+        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS
+        WHERE UPPER(TRIM(ENTERPRISE_ID)) = UPPER(?)
+        LIMIT 1
+      `;
+      const step2 = await executeQuery<{ FULL_NAME: string | null; JOB_TITLE: string | null }>(step2Sql, [enterpriseId]);
+
+      if (step2.length === 0) {
+        return res.json({ matchFound: false, techName: null, jobTitle: null, suggestions: [] });
+      }
+
+      const techName = step2[0].FULL_NAME || null;
+      const jobTitle = step2[0].JOB_TITLE || null;
 
       if (!jobTitle) {
-        return res.json({ techName, jobTitle: null, suggestions: [] });
+        return res.json({ matchFound: true, techName, jobTitle: null, suggestions: [] });
       }
 
-      // Step 3: determine INTERIOR filter based on job title, then find top 3 unassigned vehicles
+      // Step 3: determine INTERIOR filter based on job title and query REPLIT_ALL_VEHICLES
       const upperTitle = jobTitle.toUpperCase();
-      let interiorFilter: string | null = null;
-      let allowEmptyInterior = false;
-
-      if (upperTitle.includes('TECHNICIAN 1')) {
-        interiorFilter = 'Utility Without Ref Racks';
-        allowEmptyInterior = true;
-      } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('HVAC')) {
-        interiorFilter = 'Utility With Ref Racks';
-        allowEmptyInterior = false;
-      } else {
-        // Unknown job title — return no suggestions
-        return res.json({ techName, jobTitle, suggestions: [] });
-      }
-
       let step3Sql: string;
       let step3Params: string[];
 
-      if (allowEmptyInterior) {
+      if (upperTitle.includes('TECHNICIAN 1')) {
+        // Technician 1 → "Utility Without Ref Racks" or null/empty interior
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
@@ -2312,8 +2297,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             AND (UPPER(INTERIOR) = UPPER(?) OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
           LIMIT 3
         `;
-        step3Params = [interiorFilter];
-      } else {
+        step3Params = ['Utility Without Ref Racks'];
+      } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('HVAC')) {
+        // Technician 2 / HVAC → "Utility With Ref Racks"
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
@@ -2321,12 +2307,16 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             AND UPPER(INTERIOR) = UPPER(?)
           LIMIT 3
         `;
-        step3Params = [interiorFilter];
+        step3Params = ['Utility With Ref Racks'];
+      } else {
+        // Job title doesn't match known skill patterns
+        return res.json({ matchFound: true, techName, jobTitle, suggestions: [] });
       }
 
       const suggestions = await executeQuery<{ VEHICLE_NUMBER: string; TRUCK_STATUS: string | null; INTERIOR: string | null }>(step3Sql, step3Params);
 
       return res.json({
+        matchFound: true,
         techName,
         jobTitle,
         suggestions: suggestions.map(r => ({
@@ -2337,7 +2327,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       });
     } catch (error: any) {
       console.error("[SuggestedReplacements] Error:", error.message);
-      return res.json({ techName: null, jobTitle: null, suggestions: [] });
+      return res.json({ matchFound: false, techName: null, jobTitle: null, suggestions: [] });
     }
   });
 
