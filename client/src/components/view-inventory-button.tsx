@@ -208,11 +208,16 @@ export function ViewInventoryButton({
           size={showSummary ? "default" : size} 
           className={`${className} ${showSummary ? 'h-auto py-2 px-3' : ''}`}
           data-testid={`btn-view-inventory-${cleanVehicleNumber}`}
+          onClick={(e) => e.stopPropagation()}
         >
           {renderButtonContent()}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh]">
+      <DialogContent 
+        className="sm:max-w-3xl max-h-[90vh]"
+        onPointerDownOutside={(e) => e.stopPropagation()}
+        onInteractOutside={(e) => e.stopPropagation()}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Boxes className="h-5 w-5" />
