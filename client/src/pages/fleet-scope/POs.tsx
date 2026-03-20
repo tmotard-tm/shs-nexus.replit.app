@@ -1061,7 +1061,7 @@ export default function POs() {
     ];
     
     const priorityGroup2Start = "Context_economics";
-    const priorityGroup2End = "High_Scost_Flags";
+    const priorityGroup2End = "High_Cost_Flags";
     
     const normalize = (s: string) => s.toLowerCase().replace(/[_\s]/g, '');
     
