@@ -8600,9 +8600,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_ODOMETER WHERE VIN = ? ORDER BY OBD_TIME DESC LIMIT 1`,
           [vehicleVin]
         ) : Promise.resolve([]),
-        // SAMSARA_MAINTENANCE: no column is filterable in WHERE (derived view).
-        // Full table scan, then filter in-memory by VEHICLE_ID.
-        vehicleId ? snowflake.executeQuery(
+        // SAMSARA_MAINTENANCE: view is keyed by VIN; full table scan, then filter in-memory by VIN.
+        vehicleVin ? snowflake.executeQuery(
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE LIMIT 5000`
         ) : Promise.resolve([]),
         vehicleId ? snowflake.executeQuery(
@@ -8615,14 +8614,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ),
       ]);
 
-      // Filter maintenance in-memory by VEHICLE_ID (view columns can't be used in WHERE)
+      // Filter maintenance in-memory by VIN (the view is keyed by VIN, not VEHICLE_ID)
       const allMaintenance = maintenanceResult.status === 'fulfilled' ? (maintenanceResult.value as any[]) : [];
-      const vehicleMaintenance = vehicleId
-        ? allMaintenance.filter((m: any) => String(m.VEHICLE_ID) === String(vehicleId))
+      const vehicleMaintenance = vehicleVin
+        ? allMaintenance.filter((m: any) => m.VIN && String(m.VIN).toUpperCase() === String(vehicleVin).toUpperCase())
         : [];
-      // Debug: log first 3 VEHICLE_IDs from the table so we can verify format
-      const sampleIds = allMaintenance.slice(0, 3).map((m: any) => m.VEHICLE_ID);
-      console.log(`[Samsara Telematics] Maintenance for ${vehicleNumber}: vehicleId=${vehicleId}, totalFetched=${allMaintenance.length}, matched=${vehicleMaintenance.length}, sampleIds=[${sampleIds.join(', ')}]`);
+      console.log(`[Samsara Telematics] Maintenance for ${vehicleNumber}: vin=${vehicleVin}, totalFetched=${allMaintenance.length}, matched=${vehicleMaintenance.length}`);
 
       res.json({
         vehicle,
