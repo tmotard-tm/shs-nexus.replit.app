@@ -6,6 +6,7 @@ export const modules: ModuleMap = {
   "./components/mockups/home-redesign/CornerLaunchpad.tsx": () => import("../components/mockups/home-redesign/CornerLaunchpad.tsx"),
   "./components/mockups/home-redesign/FullscreenTiles.tsx": () => import("../components/mockups/home-redesign/FullscreenTiles.tsx"),
   "./components/mockups/home-redesign/LeftGlassPanel.tsx": () => import("../components/mockups/home-redesign/LeftGlassPanel.tsx"),
+  "./components/mockups/home-redesign/SidebarConcept.tsx": () => import("../components/mockups/home-redesign/SidebarConcept.tsx"),
   "./components/mockups/nexus-integration/FleetScopeLanding.tsx": () => import("../components/mockups/nexus-integration/FleetScopeLanding.tsx"),
   "./components/mockups/nexus-integration/LandingPage.tsx": () => import("../components/mockups/nexus-integration/LandingPage.tsx"),
   "./components/mockups/nexus-integration/SidebarMenu.tsx": () => import("../components/mockups/nexus-integration/SidebarMenu.tsx")
