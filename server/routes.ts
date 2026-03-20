@@ -8593,17 +8593,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const vehicleVin = vehicle?.VIN || null;
 
-      const [locationResult, odometerResult, maintenanceResult, fuelResult, streamResult] = await Promise.allSettled([
+      const [locationResult, odometerResult, faultCodesResult, fuelResult, streamResult] = await Promise.allSettled([
         samsaraService.getVehicleLocation(resolvedTruckNumber, 9999),
-        // SAMSARA_ODOMETER is keyed by VIN, not VEHICLE_ID
+        // SAMSARA_ODOMETER is keyed by VIN
         vehicleVin ? snowflake.executeQuery(
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_ODOMETER WHERE VIN = ? ORDER BY OBD_TIME DESC LIMIT 1`,
           [vehicleVin]
         ) : Promise.resolve([]),
-        // SAMSARA_MAINTENANCE: view is keyed by VIN; full table scan, then filter in-memory by VIN.
-        vehicleVin ? snowflake.executeQuery(
-          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE LIMIT 5000`
-        ) : Promise.resolve([]),
+        // Use the live Samsara API for fault codes — Snowflake SAMSARA_MAINTENANCE has an incompatible schema
+        vehicleId && samsaraService.isLiveApiConfigured()
+          ? samsaraService.liveGetVehicleFaultCodes(String(vehicleId))
+          : Promise.resolve([]),
         vehicleId ? snowflake.executeQuery(
           `SELECT * FROM bi_analytics.app_samsara.SAMSARA_FUEL_ENERGY_DAILY WHERE VEHICLE_ID = ? ORDER BY RUN_DATE_UTC DESC LIMIT 7`,
           [vehicleId]
@@ -8614,12 +8614,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ),
       ]);
 
-      // Filter maintenance in-memory by VIN (the view is keyed by VIN, not VEHICLE_ID)
-      const allMaintenance = maintenanceResult.status === 'fulfilled' ? (maintenanceResult.value as any[]) : [];
-      const vehicleMaintenance = vehicleVin
-        ? allMaintenance.filter((m: any) => m.VIN && String(m.VIN).toUpperCase() === String(vehicleVin).toUpperCase())
-        : [];
-      console.log(`[Samsara Telematics] Maintenance for ${vehicleNumber}: vin=${vehicleVin}, totalFetched=${allMaintenance.length}, matched=${vehicleMaintenance.length}`);
+      const faultCodes = faultCodesResult.status === 'fulfilled' ? faultCodesResult.value as any[] : [];
+      console.log(`[Samsara Telematics] Fault codes for ${vehicleNumber}: ${faultCodes.length} active codes (live API)`);
+
+      // Map live fault codes to the shape the frontend expects
+      const maintenance = faultCodes.map((f: any) => ({
+        MAINT_ID: f.faultCode,
+        VEHICLE_ID: String(vehicleId),
+        DTC_ID: f.faultCode,
+        DTC_DESCRIPTION: f.description,
+        J1939_STATUS: f.status ?? f.source ?? null,
+      }));
 
       res.json({
         vehicle,
@@ -8627,7 +8632,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         resolvedTruckNumber,
         location: locationResult.status === 'fulfilled' ? locationResult.value : null,
         odometer: odometerResult.status === 'fulfilled' ? (odometerResult.value as any[])[0] || null : null,
-        maintenance: vehicleMaintenance,
+        maintenance,
         fuel: fuelResult.status === 'fulfilled' ? fuelResult.value : [],
         stream: streamResult.status === 'fulfilled' && (streamResult.value as any[]).length > 0
           ? (streamResult.value as any[])[0] : null,
@@ -8638,17 +8643,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Returns the set of VINs that have active DTC codes — used for card badges
+  // Returns the set of Samsara vehicle names (truck numbers) with active J1939 fault codes
+  // Used for check-engine card badges — matches by truck number, not VIN
   app.get("/api/samsara/dtc-vehicles", requireAuth, async (req, res) => {
     try {
-      const { getSnowflakeService: getSnowflake } = await import("./snowflake-service");
-      const snowflake = getSnowflake();
-      const rows = await snowflake.executeQuery(
-        `SELECT DISTINCT VIN FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE WHERE (DTC_ID IS NOT NULL AND DTC_ID != '') OR (DTC_DESCRIPTION IS NOT NULL AND DTC_DESCRIPTION != '')`
-      );
-      const vins = (rows as any[]).map((r: any) => r.VIN).filter(Boolean);
-      console.log(`[Samsara DTC Vehicles] ${vins.length} VINs with active DTC codes`);
-      res.json({ vins });
+      const samsaraService = getSamsaraService();
+      if (!samsaraService.isLiveApiConfigured()) {
+        return res.json({ truckNumbers: [] });
+      }
+      const truckNumbers = await samsaraService.liveGetAllVehiclesWithFaults();
+      res.json({ truckNumbers });
     } catch (error: any) {
       console.error('[Samsara DTC Vehicles] Error:', error);
       res.status(500).json({ message: error.message });

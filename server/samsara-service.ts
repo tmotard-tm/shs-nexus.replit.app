@@ -564,6 +564,67 @@ export class SamsaraService {
       return false;
     }
   }
+
+  // Fetch active fault codes for a single vehicle from the live Samsara API
+  async liveGetVehicleFaultCodes(samsaraVehicleId: string): Promise<Array<{
+    faultCode: string;
+    description: string | null;
+    source: string;
+    status: string | null;
+  }>> {
+    const qs = `/fleet/vehicles/stats?types=j1939DiagnosticFaultCodes,obdDtcFaultCodes&vehicleIds=${encodeURIComponent(samsaraVehicleId)}`;
+    const result = await this.callLiveApi(qs);
+    const vehicles: any[] = result?.data || [];
+    console.log(`[Samsara FaultCodes] Live API response for vehicleId=${samsaraVehicleId}:`, JSON.stringify(vehicles).slice(0, 500));
+
+    const faults: Array<{ faultCode: string; description: string | null; source: string; status: string | null }> = [];
+    for (const v of vehicles) {
+      // J1939 fault codes
+      const j1939: any[] = v.j1939DiagnosticFaultCodes?.value ?? [];
+      for (const f of j1939) {
+        faults.push({
+          faultCode: f.id ?? f.faultCode ?? '',
+          description: f.description ?? null,
+          source: 'J1939',
+          status: f.activatedAtMs ? 'Active' : null,
+        });
+      }
+      // OBD DTC fault codes
+      const obd: any[] = v.obdDtcFaultCodes?.value ?? [];
+      for (const f of obd) {
+        faults.push({
+          faultCode: typeof f === 'string' ? f : (f.id ?? f.faultCode ?? ''),
+          description: typeof f === 'object' ? (f.description ?? null) : null,
+          source: 'OBD',
+          status: null,
+        });
+      }
+    }
+    return faults;
+  }
+
+  // Fetch all Samsara vehicle names (truck numbers) that currently have active fault codes
+  async liveGetAllVehiclesWithFaults(): Promise<string[]> {
+    const truckNamesWithFaults: string[] = [];
+    let cursor: string | undefined;
+    let pageCount = 0;
+    do {
+      const params = new URLSearchParams({ types: 'j1939DiagnosticFaultCodes', limit: '512' });
+      if (cursor) params.set('after', cursor);
+      const groupId = this.groupId || process.env.SAMSARA_GROUP_ID;
+      if (groupId) params.set('parentTagIds', groupId);
+      const result = await this.callLiveApi(`/fleet/vehicles/stats?${params}`);
+      const page: any[] = result?.data || [];
+      pageCount++;
+      for (const v of page) {
+        const codes: any[] = v.j1939DiagnosticFaultCodes?.value ?? [];
+        if (codes.length > 0 && v.name) truckNamesWithFaults.push(v.name);
+      }
+      cursor = result.pagination?.hasNextPage ? result.pagination.endCursor : undefined;
+    } while (cursor);
+    console.log(`[Samsara FaultCodes] Scanned ${pageCount} page(s), found ${truckNamesWithFaults.length} vehicles with active J1939 fault codes`);
+    return truckNamesWithFaults;
+  }
 }
 
 let samsaraServiceInstance: SamsaraService | null = null;

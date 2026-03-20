@@ -450,16 +450,23 @@ export default function FleetManagement() {
     return s;
   }, [rentalOpsData]);
 
-  // VINs that have active DTC codes in Samsara — used for check engine badges
-  const { data: dtcVehiclesData } = useQuery<{ vins: string[] }>({
+  // Truck numbers with active J1939 fault codes from Samsara live API — used for check engine badges
+  const { data: dtcVehiclesData } = useQuery<{ truckNumbers: string[] }>({
     queryKey: ['/api/samsara/dtc-vehicles'],
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const dtcVinSet = useMemo(() => {
+  const dtcTruckSet = useMemo(() => {
     const s = new Set<string>();
-    for (const vin of dtcVehiclesData?.vins ?? []) s.add(vin.toUpperCase());
+    for (const name of dtcVehiclesData?.truckNumbers ?? []) {
+      // Samsara names come in various formats (e.g. "6121", "006121") — normalise all forms
+      const canonical = name.replace(/^0+/, '') || '0';
+      s.add(canonical);
+      s.add(name);
+      s.add(canonical.padStart(5, '0'));
+      s.add(canonical.padStart(6, '0'));
+    }
     return s;
   }, [dtcVehiclesData]);
 
@@ -1614,7 +1621,7 @@ export default function FleetManagement() {
                     const isInRentalOps = rentalOpsVehicleSet.has(vehicle.vehicleNumber)
                       || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
                       || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
-                    const hasDTC = vehicle.vin ? dtcVinSet.has(vehicle.vin.toUpperCase()) : false;
+                    const hasDTC = dtcTruckSet.has(vehicle.vehicleNumber) || dtcTruckSet.has(toCanonical(vehicle.vehicleNumber));
                     
                     return (
                       <Card 
