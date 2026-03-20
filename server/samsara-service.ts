@@ -565,6 +565,47 @@ export class SamsaraService {
     }
   }
 
+  // Extract fault code entries from a Samsara faultCodes stat object
+  private parseFaultCodesFromStat(faultCodes: any): Array<{
+    faultCode: string;
+    description: string | null;
+    source: string;
+    status: string | null;
+  }> {
+    const results: Array<{ faultCode: string; description: string | null; source: string; status: string | null }> = [];
+    const obdii = faultCodes?.obdii || {};
+    // OBD-II confirmed DTCs
+    for (const group of obdii.diagnosticTroubleCodes ?? []) {
+      for (const dtc of group.confirmedDtcs ?? []) {
+        results.push({
+          faultCode: dtc.dtcShortCode ?? String(dtc.dtcId ?? ''),
+          description: dtc.dtcDescription ?? null,
+          source: 'OBD-II',
+          status: obdii.checkEngineLightIsOn ? 'Check Engine' : 'Confirmed',
+        });
+      }
+      for (const dtc of group.pendingDtcs ?? []) {
+        results.push({
+          faultCode: dtc.dtcShortCode ?? String(dtc.dtcId ?? ''),
+          description: dtc.dtcDescription ?? null,
+          source: 'OBD-II',
+          status: 'Pending',
+        });
+      }
+    }
+    // J1939 fault codes
+    const j1939 = faultCodes?.j1939 || {};
+    for (const fc of j1939.diagnosticFaultCodes ?? []) {
+      results.push({
+        faultCode: fc.spn ? `SPN ${fc.spn} FMI ${fc.fmi ?? ''}` : String(fc.id ?? ''),
+        description: fc.description ?? null,
+        source: 'J1939',
+        status: fc.lamp ?? 'Active',
+      });
+    }
+    return results;
+  }
+
   // Fetch active fault codes for a single vehicle from the live Samsara API
   async liveGetVehicleFaultCodes(samsaraVehicleId: string): Promise<Array<{
     faultCode: string;
@@ -572,35 +613,24 @@ export class SamsaraService {
     source: string;
     status: string | null;
   }>> {
-    const qs = `/fleet/vehicles/stats?types=j1939DiagnosticFaultCodes,obdDtcFaultCodes&vehicleIds=${encodeURIComponent(samsaraVehicleId)}`;
-    const result = await this.callLiveApi(qs);
+    const result = await this.callLiveApi(
+      `/fleet/vehicles/stats?types=faultCodes&vehicleIds=${encodeURIComponent(samsaraVehicleId)}`
+    );
     const vehicles: any[] = result?.data || [];
-    console.log(`[Samsara FaultCodes] Live API response for vehicleId=${samsaraVehicleId}:`, JSON.stringify(vehicles).slice(0, 500));
-
-    const faults: Array<{ faultCode: string; description: string | null; source: string; status: string | null }> = [];
-    for (const v of vehicles) {
-      // J1939 fault codes
-      const j1939: any[] = v.j1939DiagnosticFaultCodes?.value ?? [];
-      for (const f of j1939) {
-        faults.push({
-          faultCode: f.id ?? f.faultCode ?? '',
-          description: f.description ?? null,
-          source: 'J1939',
-          status: f.activatedAtMs ? 'Active' : null,
-        });
-      }
-      // OBD DTC fault codes
-      const obd: any[] = v.obdDtcFaultCodes?.value ?? [];
-      for (const f of obd) {
-        faults.push({
-          faultCode: typeof f === 'string' ? f : (f.id ?? f.faultCode ?? ''),
-          description: typeof f === 'object' ? (f.description ?? null) : null,
-          source: 'OBD',
-          status: null,
-        });
-      }
-    }
+    const faults = vehicles.flatMap((v: any) => this.parseFaultCodesFromStat(v.faultCodes));
+    console.log(`[Samsara FaultCodes] vehicleId=${samsaraVehicleId}: ${faults.length} active codes`);
     return faults;
+  }
+
+  // Returns a boolean indicating if a faultCodes stat object has any active codes worth badging
+  private hasBadgeableFaults(faultCodes: any): boolean {
+    const obdii = faultCodes?.obdii || {};
+    if (obdii.checkEngineLightIsOn) return true;
+    for (const group of obdii.diagnosticTroubleCodes ?? []) {
+      if ((group.confirmedDtcs?.length ?? 0) > 0 || (group.pendingDtcs?.length ?? 0) > 0) return true;
+    }
+    if ((faultCodes?.j1939?.diagnosticFaultCodes?.length ?? 0) > 0) return true;
+    return false;
   }
 
   // Fetch all Samsara vehicle names (truck numbers) that currently have active fault codes
@@ -609,7 +639,7 @@ export class SamsaraService {
     let cursor: string | undefined;
     let pageCount = 0;
     do {
-      const params = new URLSearchParams({ types: 'j1939DiagnosticFaultCodes', limit: '512' });
+      const params = new URLSearchParams({ types: 'faultCodes', limit: '512' });
       if (cursor) params.set('after', cursor);
       const groupId = this.groupId || process.env.SAMSARA_GROUP_ID;
       if (groupId) params.set('parentTagIds', groupId);
@@ -617,12 +647,13 @@ export class SamsaraService {
       const page: any[] = result?.data || [];
       pageCount++;
       for (const v of page) {
-        const codes: any[] = v.j1939DiagnosticFaultCodes?.value ?? [];
-        if (codes.length > 0 && v.name) truckNamesWithFaults.push(v.name);
+        if (v.name && this.hasBadgeableFaults(v.faultCodes)) {
+          truckNamesWithFaults.push(v.name);
+        }
       }
       cursor = result.pagination?.hasNextPage ? result.pagination.endCursor : undefined;
     } while (cursor);
-    console.log(`[Samsara FaultCodes] Scanned ${pageCount} page(s), found ${truckNamesWithFaults.length} vehicles with active J1939 fault codes`);
+    console.log(`[Samsara FaultCodes] Scanned ${pageCount} page(s), found ${truckNamesWithFaults.length} vehicles with active fault codes`);
     return truckNamesWithFaults;
   }
 }
