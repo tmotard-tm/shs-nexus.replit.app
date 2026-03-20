@@ -1,0 +1,88 @@
+#27 - Fleet-Scope Phase 2: Database Cutover & Redirect
+What & Why
+Phase 1 moved the entire Fleet-Scope UI into Nexus while keeping it pointed at the original Fleet-Scope database via FS_DATABASE_URL. Phase 2 completes the migration: detect and port any code changes made to the original app since Phase 1, add fs_ prefixes to all Fleet-Scope table names in Nexus's schema, copy all data into Nexus's own database under those prefixed names, reset sequences so new inserts don't collide, switch the connection over, and add a temporary redirect on the original fleet-scope.replit.app so existing users land on https://SHS-Nexus.replit.app.
+
+Done looks like
+The drift detection script is run and any real logic changes from the original Fleet-Scope app are reflected in Nexus's Fleet-Scope module
+All 32 Fleet-Scope tables exist in Nexus's PostgreSQL database under fs_ prefixed names (e.g., fs_trucks, fs_purchase_orders, fs_call_logs) with verified row counts matching the source
+shared/fleet-scope-schema.ts uses fs_ prefixed physical table names throughout — any developer or DBA can immediately identify all 32 Fleet-Scope tables from information_schema.tables
+All PostgreSQL sequences for fs_ tables are reset to MAX(id) + 1 so no new insert can collide with a migrated ID
+All environment variable secrets from the original Fleet-Scope app (FS_SAMSARA_API_TOKEN, FS_PMF_CLIENT_ID, FS_PMF_CLIENT_SECRET, FS_TWILIO_ACCOUNT_SID, FS_TWILIO_AUTH_TOKEN, FS_TWILIO_PHONE_NUMBER, FS_ELEVENLABS_API_KEY, FS_PUBLIC_SPARES_API_KEY, FS_BYOV_API_KEY) are confirmed present in Nexus's environment before cutover
+holmanVehicleRef null-safety is verified — all views and queries that touch this column handle null values without errors
+Nexus's Fleet-Scope module reads from and writes to its own database (DATABASE_URL) — FS_DATABASE_URL is no longer used by Nexus at runtime
+https://fleet-scope.replit.app serves a "We've moved" page with a 5-second auto-redirect and a direct link to https://SHS-Nexus.replit.app
+The redirect starts as a 302 (temporary) for the first 24–48 hours, then the user manually promotes it to a 301 (permanent) after confirming data is flowing correctly — this preserves rollback ability during the validation window
+The redirect change is deployed to the original fleet-scope.replit.app Replit (executor notes this as a manual deploy step for the user)
+Existing Nexus functionality is completely unaffected
+Out of scope
+Merging Fleet-Scope trucks/vehicles with Nexus's Holman vehicle cache — deferred
+Decommissioning or deleting the original Fleet-Scope Replit (done after redirect window closes, ~1–2 weeks)
+Any UI redesign or feature changes to Fleet-Scope pages
+Moving to a Postgres-schema-level separation (e.g., fleet_scope.trucks) — the fs_ prefix strategy achieves the same namespace isolation with less operational complexity
+Pre-work findings (already investigated — executor should not re-investigate)
+scripts/migrate-fleet-scope-data.ts does not exist — it must be written from scratch
+shared/fleet-scope-schema.ts currently defines all 32 tables without an fs_ prefix — this must be fixed before migration runs (see Task 2)
+There are no name collisions between current Fleet-Scope table names and Nexus table names, but the fs_ prefix is required for long-term namespace clarity and safe database tooling behavior
+The trucks table has a newer column (holmanVehicleRef) added after Phase 1; the migration script must include it in upserts, and existing views must be verified to handle null values
+server/fleet-scope-db.ts currently connects via FS_DATABASE_URL; after cutover it must use DATABASE_URL (Nexus's own DB)
+The original Fleet-Scope source is at Fleet-Scope Zip/Fleet-Scope/ — all redirect changes go there
+Tasks
+Run drift detection and port changes — Execute npx tsx scripts/detect-fleet-scope-drift.ts to get a fresh diff between the original Fleet-Scope source (Fleet-Scope Zip/Fleet-Scope/) and Nexus's current Fleet-Scope module. For every file flagged as Modified in the original app (excluding structural migration differences like import paths and env var prefixes that the script normalizes out), apply the substantive logic changes to the corresponding file in Nexus's Fleet-Scope module.
+
+Add fs_ prefix to all Fleet-Scope table names in Nexus's schema — In shared/fleet-scope-schema.ts, update the first string argument of every pgTable() call to add an fs_ prefix. The JavaScript variable names and all exported types stay exactly the same — only the physical database table name string changes. All 32 tables must be updated: trucks → fs_trucks, actions → fs_actions, tracking_records → fs_tracking_records, metrics_snapshots → fs_metrics_snapshots, pmf_imports → fs_pmf_imports, pmf_rows → fs_pmf_rows, pmf_status_events → fs_pmf_status_events, pmf_activity_logs → fs_pmf_activity_logs, pmf_activity_sync_meta → fs_pmf_activity_sync_meta, spare_vehicle_details → fs_spare_vehicle_details, purchase_orders → fs_purchase_orders, po_import_meta → fs_po_import_meta, archived_trucks → fs_archived_trucks, rental_imports → fs_rental_imports, registration_tracking → fs_registration_tracking, truck_consolidations → fs_truck_consolidations, byov_weekly_snapshots → fs_byov_weekly_snapshots, pickup_weekly_snapshots → fs_pickup_weekly_snapshots, fleet_weekly_snapshots → fs_fleet_weekly_snapshots, pmf_status_weekly_snapshots → fs_pmf_status_weekly_snapshots, repair_weekly_snapshots → fs_repair_weekly_snapshots, fleet_cost_records → fs_fleet_cost_records, fleet_cost_import_meta → fs_fleet_cost_import_meta, approved_cost_records → fs_approved_cost_records, approved_cost_import_meta → fs_approved_cost_import_meta, samsara_locations → fs_samsara_locations, vehicle_maintenance_costs → fs_vehicle_maintenance_costs, decommissioning_vehicles → fs_decommissioning_vehicles, reg_messages → fs_reg_messages, reg_scheduled_messages → fs_reg_scheduled_messages, rental_weekly_manual → fs_rental_weekly_manual, call_logs → fs_call_logs.
+
+Verify secrets and null safety before cutover — Before any data movement:
+
+Confirm all required Fleet-Scope secrets are present in Nexus's environment: FS_SAMSARA_API_TOKEN, FS_PMF_CLIENT_ID, FS_PMF_CLIENT_SECRET, FS_TWILIO_ACCOUNT_SID, FS_TWILIO_AUTH_TOKEN, FS_TWILIO_PHONE_NUMBER, FS_ELEVENLABS_API_KEY, FS_PUBLIC_SPARES_API_KEY, FS_BYOV_API_KEY. Log a clear PASS/MISSING status for each one.
+Audit every Fleet-Scope page and query that references holmanVehicleRef and confirm all handle a null value gracefully (no unchecked .toUpperCase() or similar calls on a potentially null field).
+Put original Fleet-Scope into maintenance mode — In Fleet-Scope Zip/Fleet-Scope/server/app.ts, add a middleware at the top of the route stack that renders a "Migration in Progress — Please Wait" banner page for all browser requests and returns HTTP 503 for API requests. This prevents any new writes to the original Fleet-Scope database during the final migration window. Note in a comment that this change must be deployed to fleet-scope.replit.app before the migration script is run, and removed after the redirect goes live.
+
+Write the data migration script — Create scripts/migrate-fleet-scope-data.ts that:
+
+Connects to the source DB via FS_DATABASE_URL (read-only) and to Nexus's DB via DATABASE_URL
+Copies all 32 tables in dependency order, reading from the original unprefixed table names in the source and writing to the fs_-prefixed names in Nexus
+Uses INSERT ... ON CONFLICT DO UPDATE keyed on each table's primary key so the script is safely re-runnable
+Includes the holmanVehicleRef column in the fs_trucks upsert
+After all rows are copied, resets each table's PostgreSQL sequence to SELECT setval(pg_get_serial_sequence('fs_<table>', 'id'), COALESCE(MAX(id), 1)) so new inserts start from the correct next value — this must run for every table that has a serial/identity id column
+Logs per-table: source row count, destination row count after upsert, sequence reset value, and any errors
+Migration order: Core (trucks → fs_trucks, actions → fs_actions, archived_trucks, truck_consolidations) → Tracking (tracking_records, registration_tracking, reg_messages, reg_scheduled_messages) → PMF (pmf_imports, pmf_rows, pmf_status_events, pmf_activity_logs, pmf_activity_sync_meta) → POs & Cost (purchase_orders, po_import_meta, fleet_cost_records, fleet_cost_import_meta, approved_cost_records, approved_cost_import_meta, vehicle_maintenance_costs) → Spares & Decommissioning (spare_vehicle_details, decommissioning_vehicles) → Metrics (metrics_snapshots, byov_weekly_snapshots, pickup_weekly_snapshots, fleet_weekly_snapshots, pmf_status_weekly_snapshots, repair_weekly_snapshots, rental_weekly_manual) → GPS (samsara_locations) → AI (call_logs, rental_imports)
+Run and verify migration — Execute the migration script and confirm row counts match between source and destination for all 32 tables, and that all sequences are reset. Log a clear summary. This step must complete successfully before Task 7.
+
+Switch Nexus Fleet-Scope to Nexus's own database — Update server/fleet-scope-db.ts to connect using DATABASE_URL (Nexus's database) instead of FS_DATABASE_URL. Remove the FS_PG* fallback logic. Verify the app starts cleanly and Fleet-Scope pages load data correctly from the new connection.
+
+Add redirect to original Fleet-Scope app — Replace the maintenance mode middleware from Task 4 in Fleet-Scope Zip/Fleet-Scope/server/app.ts with the permanent redirect middleware:
+
+For browser requests (Accept: text/html), serve a "We've moved" HTML page with the message "Fleet Scope has moved to Nexus — you'll be redirected in 5 seconds", an auto-redirect via <meta http-equiv="refresh" content="5;url=https://SHS-Nexus.replit.app">, and a direct "Go now" link
+For all other requests, return HTTP 302 (temporary redirect) to https://SHS-Nexus.replit.app — not 301 — so browser caches do not lock in the redirect during the validation window
+Add a comment block clearly explaining: "Use 302 for the first 24–48 hours. After confirming Nexus data is flowing correctly, manually change this to 301 to make it permanent."
+Note that these changes must be deployed to the fleet-scope.replit.app Replit by the user
+Rollback Plan
+There are four stage gates where a failure requires a distinct rollback. Each gate is explicitly designed to be reversible before proceeding to the next.
+
+Gate 1 — After drift porting (Task 1) Risk: A ported change from the original app breaks Nexus functionality. Rollback: Revert the modified files in Nexus's Fleet-Scope module back to their pre-Task-1 state. The original Fleet-Scope database is completely untouched. Nexus continues operating normally on FS_DATABASE_URL.
+
+Gate 2 — After fs_ schema rename (Task 2) Risk: The renamed schema breaks Nexus while it still connects to the original Fleet-Scope DB (which has unprefixed table names). Rollback: Revert shared/fleet-scope-schema.ts to unprefixed table names. No database tables have changed at this point — the schema file is the only thing affected. Nexus restarts cleanly.
+
+Gate 3 — After maintenance mode deployed to original app (Task 4) Risk: Maintenance mode is too disruptive or deployed prematurely. Rollback: Revert the maintenance mode middleware in Fleet-Scope Zip/Fleet-Scope/server/app.ts and redeploy to fleet-scope.replit.app. The original app resumes normal read/write operation immediately.
+
+Gate 4 — After DB switch (Task 7) — the critical gate Risk: Nexus Fleet-Scope behaves incorrectly after switching to its own database (data gaps, wrong sequences, missing records, broken background jobs). Rollback:
+
+Revert server/fleet-scope-db.ts back to FS_DATABASE_URL and redeploy Nexus. Fleet-Scope is immediately back on the original authoritative database.
+The original Fleet-Scope app was in maintenance mode during the migration window, so the original DB received no new writes — it remains the clean authoritative source.
+Any data written to Nexus's fs_ tables between the switch and the rollback will be lost. This is acceptable during the validation window because the original app was locked. The migration script can be re-run after the root cause is fixed (it is idempotent via UPSERT).
+If the redirect (Task 8) was already deployed, also revert it to maintenance mode so users are held until the next cutover attempt.
+Critical constraint enabling Gate 4 rollback: The FS_DATABASE_URL secret must NOT be removed from Nexus's environment during the entire 24–48 hour validation window. Deleting it makes rollback impossible. Only remove it after the 301 redirect is in place and data has been confirmed correct.
+
+After validation window closes (user action — not in this task) Once the user confirms Nexus Fleet-Scope is operating correctly after 24–48 hours:
+
+Change the redirect in Fleet-Scope Zip/Fleet-Scope/server/app.ts from 302 to 301 and redeploy.
+Remove FS_DATABASE_URL and all FS_PG* secrets from Nexus's environment.
+Schedule decommissioning of the original fleet-scope.replit.app Replit after the 1–2 week bookmark-update window.
+Relevant files
+scripts/detect-fleet-scope-drift.ts
+scripts/migrate-fleet-scope-data.ts
+server/fleet-scope-db.ts
+shared/fleet-scope-schema.ts
+server/db.ts
+Fleet-Scope Zip/Fleet-Scope/server/app.ts
+Fleet-Scope Zip/Fleet-Scope/shared/schema.ts
