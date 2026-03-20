@@ -6,18 +6,17 @@ import * as fsSchema from "@shared/fleet-scope-schema";
 neonConfig.webSocketConstructor = ws;
 
 /**
- * Fleet-Scope Database Connection & Environment Variables
+ * Fleet-Scope Database Connection
  *
- * DATABASE (one of):
- *   FS_DATABASE_URL            — Full PostgreSQL connection string (preferred)
- *   OR individual components:
- *     FS_PGHOST                — Database host
- *     FS_PGPORT                — Database port (default: 5432)
- *     FS_PGUSER                — Database user
- *     FS_PGPASSWORD            — Database password
- *     FS_PGDATABASE            — Database name
+ * After Phase 2 cutover, Fleet-Scope reads from and writes to Nexus's own
+ * PostgreSQL database (DATABASE_URL) under fs_-prefixed table names.
+ * FS_DATABASE_URL is NO LONGER USED by Nexus at runtime.
  *
- * INTEGRATIONS (all FS_ prefixed):
+ * Keep FS_DATABASE_URL in the environment for the first 24–48 hours (rollback
+ * window). Only remove it after the 301 redirect is confirmed and data is
+ * flowing correctly through Nexus.
+ *
+ * INTEGRATIONS (all FS_ prefixed env vars used elsewhere in the Fleet-Scope module):
  *   FS_SAMSARA_API_TOKEN       — Samsara GPS/telematics API token
  *   FS_PMF_CLIENT_ID           — PARQ managed fleet OAuth client ID
  *   FS_PMF_CLIENT_SECRET       — PARQ managed fleet OAuth client secret
@@ -37,45 +36,19 @@ neonConfig.webSocketConstructor = ws;
  *   FS_SNOWFLAKE_SCHEMA        — Fleet-Scope Snowflake schema
  *   FS_SNOWFLAKE_TABLE         — Fleet-Scope Snowflake default table
  *   FS_SNOWFLAKE_PRIVATE_KEY_PATH — Path to Snowflake private key file
- *
- * If FS_DATABASE_URL is not set, the connector falls back to building a
- * connection string from FS_PGHOST, FS_PGPORT, FS_PGUSER, FS_PGPASSWORD,
- * and FS_PGDATABASE. If neither is available, Fleet-Scope is disabled.
  */
 
-function buildConnectionString(): string | null {
-  if (process.env.FS_DATABASE_URL) {
-    return process.env.FS_DATABASE_URL;
-  }
-
-  const host = process.env.FS_PGHOST;
-  const user = process.env.FS_PGUSER;
-  const password = process.env.FS_PGPASSWORD;
-  const database = process.env.FS_PGDATABASE;
-  const port = process.env.FS_PGPORT || "5432";
-
-  if (host && user && password && database) {
-    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=require`;
-  }
-
-  return null;
-}
-
-const fsConnectionString = buildConnectionString();
-
-if (!fsConnectionString) {
-  console.warn(
-    "[Fleet-Scope] FS_DATABASE_URL (or FS_PGHOST/FS_PGPORT/FS_PGUSER/FS_PGPASSWORD/FS_PGDATABASE) not set — Fleet-Scope module will be unavailable.",
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    "[Fleet-Scope] DATABASE_URL must be set. Nexus database is required for Fleet-Scope after Phase 2 cutover.",
   );
 }
 
-export const fsPool = fsConnectionString
-  ? new Pool({
-      connectionString: fsConnectionString,
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    })
-  : null;
+export const fsPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
 
-export const fsDb = fsPool ? drizzle({ client: fsPool, schema: fsSchema }) : null;
+export const fsDb = drizzle({ client: fsPool, schema: fsSchema });

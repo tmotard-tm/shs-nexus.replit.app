@@ -430,7 +430,7 @@ export const TRUCK_STATUSES = [
 
 export type TruckStatus = typeof TRUCK_STATUSES[number];
 
-export const trucks = pgTable("trucks", {
+export const trucks = pgTable("fs_trucks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   truckNumber: text("truck_number").notNull().unique(),
   status: text("status").notNull(), // Combined status for display
@@ -553,7 +553,7 @@ export const trucks = pgTable("trucks", {
   createdAt: timestamp("created_at").default(sql`now()`),
 });
 
-export const actions = pgTable("actions", {
+export const actions = pgTable("fs_actions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   truckId: varchar("truck_id").notNull().references(() => trucks.id, { onDelete: "cascade" }),
   actionTime: timestamp("action_time").default(sql`now()`),
@@ -565,7 +565,7 @@ export const actions = pgTable("actions", {
 export const TRACKING_CARRIERS = ["UPS", "FedEx", "USPS"] as const;
 export type TrackingCarrier = typeof TRACKING_CARRIERS[number];
 
-export const trackingRecords = pgTable("tracking_records", {
+export const trackingRecords = pgTable("fs_tracking_records", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   truckId: varchar("truck_id").references(() => trucks.id, { onDelete: "cascade" }),
   carrier: text("carrier").notNull().default("UPS"),
@@ -587,7 +587,7 @@ export const trackingRecords = pgTable("tracking_records", {
 });
 
 // Metrics snapshots table for daily tracking
-export const metricsSnapshots = pgTable("metrics_snapshots", {
+export const metricsSnapshots = pgTable("fs_metrics_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   metricDate: text("metric_date").notNull().unique(), // YYYY-MM-DD format
   
@@ -720,7 +720,7 @@ export type TrackingRecord = typeof trackingRecords.$inferSelect;
 export type InsertTrackingRecord = z.infer<typeof insertTrackingRecordSchema>;
 
 // PMF (Park My Fleet) Data Persistence Tables
-export const pmfImports = pgTable("pmf_imports", {
+export const pmfImports = pgTable("fs_pmf_imports", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   originalFilename: text("original_filename"),
   headers: text("headers"), // JSON stringified array of headers
@@ -730,7 +730,7 @@ export const pmfImports = pgTable("pmf_imports", {
   rowCount: integer("row_count").default(0),
 });
 
-export const pmfRows = pgTable("pmf_rows", {
+export const pmfRows = pgTable("fs_pmf_rows", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   importId: varchar("import_id").references(() => pmfImports.id, { onDelete: "set null" }),
   assetId: text("asset_id").unique(), // Unique constraint for upsert by assetId
@@ -756,7 +756,7 @@ export type PmfRow = typeof pmfRows.$inferSelect;
 export type InsertPmfRow = z.infer<typeof insertPmfRowSchema>;
 
 // PMF Status Change Events - tracks when vehicles change status
-export const pmfStatusEvents = pgTable("pmf_status_events", {
+export const pmfStatusEvents = pgTable("fs_pmf_status_events", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   assetId: text("asset_id").notNull(),
   status: text("status").notNull(),
@@ -775,7 +775,7 @@ export type PmfStatusEvent = typeof pmfStatusEvents.$inferSelect;
 export type InsertPmfStatusEvent = z.infer<typeof insertPmfStatusEventSchema>;
 
 // PMF Activity Logs - tracks vehicle activity from PARQ API (synced every 6 hours)
-export const pmfActivityLogs = pgTable("pmf_activity_logs", {
+export const pmfActivityLogs = pgTable("fs_pmf_activity_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vehicleId: integer("vehicle_id").notNull(), // PARQ vehicle ID (numeric)
   assetId: text("asset_id").notNull(), // Asset ID for linking to pmf_rows
@@ -788,7 +788,7 @@ export const pmfActivityLogs = pgTable("pmf_activity_logs", {
 });
 
 // PMF Activity Sync Metadata - tracks last sync time
-export const pmfActivitySyncMeta = pgTable("pmf_activity_sync_meta", {
+export const pmfActivitySyncMeta = pgTable("fs_pmf_activity_sync_meta", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   lastSyncAt: timestamp("last_sync_at").default(sql`now()`),
   vehiclesSynced: integer("vehicles_synced").default(0),
@@ -821,7 +821,7 @@ export type MetricsSnapshot = typeof metricsSnapshots.$inferSelect;
 export type InsertMetricsSnapshot = z.infer<typeof insertMetricsSnapshotSchema>;
 
 // Spare Vehicle Details - editable fields for vehicles from Snowflake UNASSIGNED_VEHICLES
-export const spareVehicleDetails = pgTable("spare_vehicle_details", {
+export const spareVehicleDetails = pgTable("fs_spare_vehicle_details", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vehicleNumber: varchar("vehicle_number", { length: 50 }).notNull().unique(), // Links to Snowflake VEHICLE_NUMBER
   keysStatus: varchar("keys_status", { length: 50 }), // Present / Not Present / Unknown/would not check
@@ -853,7 +853,7 @@ export type UpdateSpareVehicleDetails = z.infer<typeof updateSpareVehicleDetails
 
 // Purchase Orders (POs) Table - stores imported PO data from CSV/XLSX
 // Each row from file is stored separately (no consolidation)
-export const purchaseOrders = pgTable("purchase_orders", {
+export const purchaseOrders = pgTable("fs_purchase_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   poNumber: varchar("po_number", { length: 100 }).notNull(), // PO number used for matching during re-import
   rawData: text("raw_data"), // JSON stringified row data from import
@@ -864,7 +864,7 @@ export const purchaseOrders = pgTable("purchase_orders", {
 });
 
 // PO import metadata - tracks column headers from imports
-export const poImportMeta = pgTable("po_import_meta", {
+export const poImportMeta = pgTable("fs_po_import_meta", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   headers: text("headers"), // JSON stringified array of column headers
   lastImportedAt: timestamp("last_imported_at").default(sql`now()`),
@@ -888,7 +888,7 @@ export type PoImportMeta = typeof poImportMeta.$inferSelect;
 export type InsertPoImportMeta = z.infer<typeof insertPoImportMetaSchema>;
 
 // Archived Trucks Table - stores trucks that were removed during rental reconciliation
-export const archivedTrucks = pgTable("archived_trucks", {
+export const archivedTrucks = pgTable("fs_archived_trucks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   truckNumber: text("truck_number").notNull(),
   originalTruckId: varchar("original_truck_id"), // Reference to the original truck ID before archival
@@ -911,7 +911,7 @@ export const archivedTrucks = pgTable("archived_trucks", {
 });
 
 // Rental Imports Table - tracks each rental list import for reconciliation
-export const rentalImports = pgTable("rental_imports", {
+export const rentalImports = pgTable("fs_rental_imports", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   importedAt: timestamp("imported_at").default(sql`now()`),
   importedBy: text("imported_by").default("System"),
@@ -946,7 +946,7 @@ export type RentalImport = typeof rentalImports.$inferSelect;
 export type InsertRentalImport = z.infer<typeof insertRentalImportSchema>;
 
 // Registration Tracking - tracks per-vehicle registration workflow fields
-export const registrationTracking = pgTable("registration_tracking", {
+export const registrationTracking = pgTable("fs_registration_tracking", {
   truckNumber: text("truck_number").primaryKey(),
   initialTextSent: boolean("initial_text_sent").default(false),
   timeSlotConfirmed: boolean("time_slot_confirmed").default(false),
@@ -963,7 +963,7 @@ export type RegistrationTracking = typeof registrationTracking.$inferSelect;
 export type InsertRegistrationTracking = z.infer<typeof insertRegistrationTrackingSchema>;
 
 // Truck Consolidations - tracks weekly consolidation history
-export const truckConsolidations = pgTable("truck_consolidations", {
+export const truckConsolidations = pgTable("fs_truck_consolidations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   consolidatedAt: timestamp("consolidated_at").default(sql`now()`),
   consolidatedBy: text("consolidated_by").default("System"),
@@ -992,7 +992,7 @@ export type TruckConsolidation = typeof truckConsolidations.$inferSelect;
 export type InsertTruckConsolidation = z.infer<typeof insertTruckConsolidationSchema>;
 
 // BYOV Weekly Snapshots - tracks weekly enrollment counts from BYOV Dashboard
-export const byovWeeklySnapshots = pgTable("byov_weekly_snapshots", {
+export const byovWeeklySnapshots = pgTable("fs_byov_weekly_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   capturedAt: timestamp("captured_at").default(sql`now()`),
   capturedBy: text("captured_by").default("System"),
@@ -1019,7 +1019,7 @@ export type ByovWeeklySnapshot = typeof byovWeeklySnapshots.$inferSelect;
 export type InsertByovWeeklySnapshot = z.infer<typeof insertByovWeeklySnapshotSchema>;
 
 // Pickup Weekly Snapshots - tracks vehicles with pickup slot booked per Sat-Fri week
-export const pickupWeeklySnapshots = pgTable("pickup_weekly_snapshots", {
+export const pickupWeeklySnapshots = pgTable("fs_pickup_weekly_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   capturedAt: timestamp("captured_at").default(sql`now()`),
   capturedBy: text("captured_by").default("System"),
@@ -1039,7 +1039,7 @@ export type PickupWeeklySnapshot = typeof pickupWeeklySnapshots.$inferSelect;
 export type InsertPickupWeeklySnapshot = z.infer<typeof insertPickupWeeklySnapshotSchema>;
 
 // Fleet Weekly Snapshots - tracks assigned/unassigned counts from REPLIT_ALL_VEHICLES
-export const fleetWeeklySnapshots = pgTable("fleet_weekly_snapshots", {
+export const fleetWeeklySnapshots = pgTable("fs_fleet_weekly_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   capturedAt: timestamp("captured_at").default(sql`now()`),
   capturedBy: text("captured_by").default("System"),
@@ -1060,7 +1060,7 @@ export type FleetWeeklySnapshot = typeof fleetWeeklySnapshots.$inferSelect;
 export type InsertFleetWeeklySnapshot = z.infer<typeof insertFleetWeeklySnapshotSchema>;
 
 // PMF Status Weekly Snapshots - tracks PMF vehicle counts by status
-export const pmfStatusWeeklySnapshots = pgTable("pmf_status_weekly_snapshots", {
+export const pmfStatusWeeklySnapshots = pgTable("fs_pmf_status_weekly_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   capturedAt: timestamp("captured_at").default(sql`now()`),
   capturedBy: text("captured_by").default("System"),
@@ -1084,7 +1084,7 @@ export type PmfStatusWeeklySnapshot = typeof pmfStatusWeeklySnapshots.$inferSele
 export type InsertPmfStatusWeeklySnapshot = z.infer<typeof insertPmfStatusWeeklySnapshotSchema>;
 
 // Repair Weekly Snapshots - tracks vehicles in repair counts
-export const repairWeeklySnapshots = pgTable("repair_weekly_snapshots", {
+export const repairWeeklySnapshots = pgTable("fs_repair_weekly_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   capturedAt: timestamp("captured_at").default(sql`now()`),
   capturedBy: text("captured_by").default("System"),
@@ -1105,7 +1105,7 @@ export type InsertRepairWeeklySnapshot = z.infer<typeof insertRepairWeeklySnapsh
 
 // Fleet Cost Records - stores imported fleet cost data with upsert logic
 // Matches records by identifier column (Vehicle Number, VIN, Asset ID, etc.)
-export const fleetCostRecords = pgTable("fleet_cost_records", {
+export const fleetCostRecords = pgTable("fs_fleet_cost_records", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   recordKey: varchar("record_key", { length: 255 }).notNull().unique(), // Unique identifier from the file (Vehicle Number, VIN, etc.)
   keyColumn: varchar("key_column", { length: 100 }).notNull(), // Name of the column used as identifier
@@ -1116,7 +1116,7 @@ export const fleetCostRecords = pgTable("fleet_cost_records", {
 });
 
 // Fleet Cost Import Metadata - tracks column headers and import history
-export const fleetCostImportMeta = pgTable("fleet_cost_import_meta", {
+export const fleetCostImportMeta = pgTable("fs_fleet_cost_import_meta", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   headers: text("headers"), // JSON stringified array of column headers
   keyColumn: varchar("key_column", { length: 100 }), // Which column is used as identifier
@@ -1143,7 +1143,7 @@ export type InsertFleetCostImportMeta = z.infer<typeof insertFleetCostImportMeta
 
 // Approved Cost Records - stores imported approved PO data (pending billing)
 // Uses PO DATE for date intervals and AMOUNT column for cost values
-export const approvedCostRecords = pgTable("approved_cost_records", {
+export const approvedCostRecords = pgTable("fs_approved_cost_records", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   recordKey: varchar("record_key", { length: 255 }).notNull().unique(), // Unique identifier from the file
   keyColumn: varchar("key_column", { length: 100 }).notNull(), // Name of the column used as identifier
@@ -1154,7 +1154,7 @@ export const approvedCostRecords = pgTable("approved_cost_records", {
 });
 
 // Approved Cost Import Metadata - tracks column headers and import history
-export const approvedCostImportMeta = pgTable("approved_cost_import_meta", {
+export const approvedCostImportMeta = pgTable("fs_approved_cost_import_meta", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   headers: text("headers"), // JSON stringified array of column headers
   keyColumn: varchar("key_column", { length: 100 }), // Which column is used as identifier
@@ -1181,7 +1181,7 @@ export type InsertApprovedCostImportMeta = z.infer<typeof insertApprovedCostImpo
 
 // Samsara Locations - persists last known Samsara GPS locations for vehicles
 // This ensures we retain location data even when vehicles become unassigned or stop reporting
-export const samsaraLocations = pgTable("samsara_locations", {
+export const samsaraLocations = pgTable("fs_samsara_locations", {
   vehicleNumber: varchar("vehicle_number", { length: 20 }).primaryKey(),
   samsaraVehicleId: varchar("samsara_vehicle_id", { length: 50 }),
   samsaraVehicleName: varchar("samsara_vehicle_name", { length: 100 }),
@@ -1206,7 +1206,7 @@ export type SamsaraLocation = typeof samsaraLocations.$inferSelect;
 export type InsertSamsaraLocation = z.infer<typeof insertSamsaraLocationSchema>;
 
 // Vehicle Maintenance Costs - stores lifetime maintenance costs per vehicle
-export const vehicleMaintenanceCosts = pgTable("vehicle_maintenance_costs", {
+export const vehicleMaintenanceCosts = pgTable("fs_vehicle_maintenance_costs", {
   vehicleNumber: varchar("vehicle_number", { length: 20 }).primaryKey(),
   lifetimeMaintenance: text("lifetime_maintenance"), // Stored as string to preserve formatting
   lifetimeMaintenanceNumeric: integer("lifetime_maintenance_numeric"), // Numeric value in cents for sorting
@@ -1221,7 +1221,7 @@ export type VehicleMaintenanceCost = typeof vehicleMaintenanceCosts.$inferSelect
 export type InsertVehicleMaintenanceCost = z.infer<typeof insertVehicleMaintenanceCostSchema>;
 
 // Decommissioning Table - tracks declined repair vehicles for decommissioning
-export const decommissioningVehicles = pgTable("decommissioning_vehicles", {
+export const decommissioningVehicles = pgTable("fs_decommissioning_vehicles", {
   id: serial("id").primaryKey(),
   truckNumber: varchar("truck_number", { length: 20 }).notNull().unique(),
   vin: varchar("vin", { length: 50 }), // VIN from HOLMAN_VEHICLES table
@@ -1266,7 +1266,7 @@ export type DecommissioningVehicle = typeof decommissioningVehicles.$inferSelect
 export type InsertDecommissioningVehicle = z.infer<typeof insertDecommissioningVehicleSchema>;
 
 // Registration Messages - bidirectional SMS conversations with technicians
-export const regMessages = pgTable("reg_messages", {
+export const regMessages = pgTable("fs_reg_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   truckNumber: text("truck_number").notNull(),
   techId: text("tech_id"),
@@ -1288,7 +1288,7 @@ export type RegMessage = typeof regMessages.$inferSelect;
 export type InsertRegMessage = z.infer<typeof insertRegMessageSchema>;
 
 // Registration Scheduled Messages - deferred sends for TCPA quiet hours
-export const regScheduledMessages = pgTable("reg_scheduled_messages", {
+export const regScheduledMessages = pgTable("fs_reg_scheduled_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   truckNumber: text("truck_number").notNull(),
   techId: text("tech_id"),
@@ -1305,7 +1305,7 @@ export const insertRegScheduledMessageSchema = createInsertSchema(regScheduledMe
 export type RegScheduledMessage = typeof regScheduledMessages.$inferSelect;
 export type InsertRegScheduledMessage = z.infer<typeof insertRegScheduledMessageSchema>;
 
-export const rentalWeeklyManual = pgTable("rental_weekly_manual", {
+export const rentalWeeklyManual = pgTable("fs_rental_weekly_manual", {
   id: serial("id").primaryKey(),
   weekYear: integer("week_year").notNull(),
   weekNumber: integer("week_number").notNull(),
@@ -1314,7 +1314,7 @@ export const rentalWeeklyManual = pgTable("rental_weekly_manual", {
   createdAt: timestamp("created_at").default(sql`now()`),
   updatedAt: timestamp("updated_at").default(sql`now()`),
 }, (table) => [
-  sql`CREATE UNIQUE INDEX IF NOT EXISTS rental_weekly_manual_week_unique ON rental_weekly_manual(week_year, week_number)`,
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS rental_weekly_manual_week_unique ON fs_rental_weekly_manual(week_year, week_number)`,
 ]);
 
 export const insertRentalWeeklyManualSchema = createInsertSchema(rentalWeeklyManual).omit({
@@ -1326,7 +1326,7 @@ export const insertRentalWeeklyManualSchema = createInsertSchema(rentalWeeklyMan
 export type RentalWeeklyManual = typeof rentalWeeklyManual.$inferSelect;
 export type InsertRentalWeeklyManual = z.infer<typeof insertRentalWeeklyManualSchema>;
 
-export const callLogs = pgTable("call_logs", {
+export const callLogs = pgTable("fs_call_logs", {
   id: serial("id").primaryKey(),
   truckId: varchar("truck_id").notNull(),
   truckNumber: text("truck_number"),

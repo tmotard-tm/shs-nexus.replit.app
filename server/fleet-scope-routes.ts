@@ -17,7 +17,6 @@ import sgMail from "@sendgrid/mail";
 import multer from "multer";
 
 function getDb() {
-  if (!fsDb) throw new Error("Fleet-Scope database not configured (FS_DATABASE_URL missing)");
   return fsDb;
 }
 

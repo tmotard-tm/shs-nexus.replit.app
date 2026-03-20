@@ -3,7 +3,6 @@ import { fsDb } from "./fleet-scope-db";
 import { eq, desc, gte, lte, and, inArray, sql } from "drizzle-orm";
 
 function getDb() {
-  if (!fsDb) throw new Error("Fleet-Scope database not configured (FS_DATABASE_URL missing)");
   return fsDb;
 }
 
