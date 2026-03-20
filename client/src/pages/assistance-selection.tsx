@@ -81,11 +81,8 @@ export default function AssistanceSelection() {
         <div className="relative z-10 max-w-4xl mx-auto pt-4 px-4">
           <div className="text-center mb-6">
             <h2 className="text-3xl font-bold mb-3" style={{ color: '#007bff', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }} data-testid="text-selection-title">
-              Welcome to Nexus
+              Nexus: Your Business, Synced.
             </h2>
-            <p className="text-lg" style={{ color: 'white', textShadow: '1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black' }}>
-              What can we help you with today?
-            </p>
           </div>
 
           {/* Workflow Buttons Card */}
