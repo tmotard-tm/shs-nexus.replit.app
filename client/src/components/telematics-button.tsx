@@ -262,64 +262,68 @@ export function TelematicsButton({
 
                 {/* Engine / DTC Codes */}
                 <section>
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1.5">
                     <Wrench className="h-3.5 w-3.5" /> Engine / Diagnostic Codes
                     {activeDTCs.length > 0 && (
                       <Badge variant="destructive" className="text-xs ml-1">{activeDTCs.length}</Badge>
                     )}
                   </h3>
 
-                  {/* Criticality triage panel from Snowflake SAMSARA_CRITICALITY_SCORE */}
-                  {data?.criticality && (data.criticality.SEVERITY_LABEL && data.criticality.SEVERITY_LABEL !== 'CLEAR') && (() => {
-                    const label = data.criticality!.SEVERITY_LABEL ?? '';
-                    const severityClasses: Record<string, string> = {
-                      STOP:       'bg-red-50 border-red-300 text-red-800 dark:bg-red-950/30 dark:border-red-700 dark:text-red-300',
-                      PROTECT:    'bg-orange-50 border-orange-300 text-orange-800 dark:bg-orange-950/30 dark:border-orange-700 dark:text-orange-300',
-                      WARNING:    'bg-yellow-50 border-yellow-300 text-yellow-800 dark:bg-yellow-950/30 dark:border-yellow-700 dark:text-yellow-300',
-                      EMISSIONS:  'bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/30 dark:border-amber-700 dark:text-amber-300',
-                      DTC_ONLY:   'bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-950/30 dark:border-blue-700 dark:text-blue-300',
-                    };
-                    const cls = severityClasses[label] ?? 'bg-muted border-border text-foreground';
-                    return (
-                      <div className={`rounded-lg border p-3 mb-2 text-xs ${cls}`}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-semibold uppercase tracking-wide">{label.replace('_', ' ')}</span>
-                          {data.criticality!.SEVERITY_SCORE != null && (
-                            <span className="font-mono font-bold">Score: {data.criticality!.SEVERITY_SCORE}</span>
-                          )}
-                        </div>
-                        {data.criticality!.RECOMMENDED_ACTION && (
-                          <p className="leading-snug opacity-90">{data.criticality!.RECOMMENDED_ACTION}</p>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {activeDTCs.length === 0 ? (
+                  {activeDTCs.length === 0 && !data?.criticality ? (
                     <div className="flex items-center gap-2 text-green-600 bg-green-50 dark:bg-green-950/20 rounded-lg p-3">
                       <CheckCircle className="h-4 w-4 shrink-0" />
                       <span className="text-xs">No active diagnostic codes</span>
                     </div>
                   ) : (
-                    <div className="rounded-lg border overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead className="bg-muted">
-                          <tr>
-                            <th className="text-left px-3 py-2 font-medium">DTC Code</th>
-                            <th className="text-left px-3 py-2 font-medium">Description</th>
-                            <th className="text-left px-3 py-2 font-medium">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
+                    <div className="space-y-2">
+
+                      {/* Criticality triage banner */}
+                      {data?.criticality?.SEVERITY_LABEL && data.criticality.SEVERITY_LABEL !== 'CLEAR' && (() => {
+                        const label = data.criticality!.SEVERITY_LABEL ?? '';
+                        const severityConfig: Record<string, { cls: string; icon: string }> = {
+                          STOP:      { cls: 'bg-red-50 border-red-300 text-red-900 dark:bg-red-950/40 dark:border-red-700 dark:text-red-200',      icon: '🛑' },
+                          PROTECT:   { cls: 'bg-orange-50 border-orange-300 text-orange-900 dark:bg-orange-950/40 dark:border-orange-700 dark:text-orange-200', icon: '🔶' },
+                          WARNING:   { cls: 'bg-yellow-50 border-yellow-300 text-yellow-900 dark:bg-yellow-950/40 dark:border-yellow-700 dark:text-yellow-200', icon: '⚠️' },
+                          EMISSIONS: { cls: 'bg-amber-50 border-amber-300 text-amber-900 dark:bg-amber-950/40 dark:border-amber-700 dark:text-amber-200',  icon: '💨' },
+                          DTC_ONLY:  { cls: 'bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-950/40 dark:border-blue-700 dark:text-blue-200',   icon: '🔧' },
+                        };
+                        const { cls, icon } = severityConfig[label] ?? { cls: 'bg-muted border-border text-foreground', icon: '⚙️' };
+                        return (
+                          <div className={`rounded-lg border p-3 ${cls}`}>
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-bold">{icon} {label.replace(/_/g, ' ')}</span>
+                              {data.criticality!.SEVERITY_SCORE != null && (
+                                <span className="text-xs font-mono font-semibold opacity-80">Severity Score: {data.criticality!.SEVERITY_SCORE}</span>
+                              )}
+                            </div>
+                            {data.criticality!.RECOMMENDED_ACTION && (
+                              <p className="text-xs mt-1 leading-snug opacity-85">{data.criticality!.RECOMMENDED_ACTION}</p>
+                            )}
+                            {data.criticality!.DTC_COUNT_DISTINCT != null && (
+                              <p className="text-xs mt-1 opacity-70">{data.criticality!.DTC_COUNT_DISTINCT} distinct fault code{data.criticality!.DTC_COUNT_DISTINCT !== 1 ? 's' : ''} detected</p>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Individual DTC code cards */}
+                      {activeDTCs.length > 0 && (
+                        <div className="space-y-1.5">
                           {activeDTCs.map((m, i) => (
-                            <tr key={m.MAINT_ID || i} className="border-t hover:bg-muted/30">
-                              <td className="px-3 py-2 font-mono text-destructive">{m.DTC_ID || "—"}</td>
-                              <td className="px-3 py-2">{m.DTC_DESCRIPTION || "—"}</td>
-                              <td className="px-3 py-2 text-muted-foreground">{m.J1939_STATUS || "—"}</td>
-                            </tr>
+                            <div key={m.MAINT_ID || i} className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+                              <div className="flex items-start justify-between gap-3">
+                                <span className="font-mono font-bold text-sm text-destructive">{m.DTC_ID || "Unknown"}</span>
+                                {m.J1939_STATUS && (
+                                  <Badge variant="outline" className="text-xs shrink-0 border-destructive/40 text-destructive">
+                                    {m.J1939_STATUS}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-xs text-foreground mt-0.5 leading-snug">{m.DTC_DESCRIPTION || "No description available"}</p>
+                            </div>
                           ))}
-                        </tbody>
-                      </table>
+                        </div>
+                      )}
                     </div>
                   )}
                 </section>
