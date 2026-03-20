@@ -477,6 +477,11 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     return routePermissions[route]();
   }
 
+  // Fleet Scope module - all sub-routes share the same permission flag
+  if (route === '/fleet-scope' || route.startsWith('/fleet-scope/')) {
+    return !!perms.sidebar.fleetScope;
+  }
+
   // Handle wildcard patterns for forms - all authenticated users can access forms
   if (route.startsWith('/forms/')) {
     return true;
