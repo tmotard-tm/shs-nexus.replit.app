@@ -6,6 +6,23 @@ import { EMBEDDED_TEMPLATES } from "../shared/templates-embedded";
 import { TemplateLoader } from "../shared/template-loader";
 import type { InsertTemplateWithId } from "../shared/schema";
 
+// The @neondatabase/serverless driver has a bug in v0.10.x where it throws an uncaught
+// TypeError ("Cannot set property message of #<ErrorEvent> which has only a getter")
+// when a WebSocket connection to the DB drops. This crashes the entire Node.js process.
+// Until a fixed version is available, intercept this specific error and keep the server alive.
+process.on('uncaughtException', (err: Error) => {
+  if (err instanceof TypeError && err.message.includes('Cannot set property message')) {
+    console.error('[NeonDB] Absorbed non-fatal WebSocket connection error:', err.message);
+    return;
+  }
+  console.error('[FATAL] Uncaught exception — exiting:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  console.error('[WARN] Unhandled promise rejection:', reason);
+});
+
 const app = express();
 
 // Trust proxy configuration for proper IP detection behind proxies/load balancers
