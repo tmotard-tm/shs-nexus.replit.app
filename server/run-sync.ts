@@ -131,6 +131,26 @@ async function runSync(): Promise<void> {
       console.log('[Scheduled Sync] Continuing...');
     }
 
+    // Offboarding Queue Gap-Check
+    console.log('\n--- Running Offboarding Queue Gap-Check ---');
+    console.log('[Scheduled Sync] Creating missing offboarding tasks across all 5 queues...');
+
+    try {
+      const { createOffboardingQueueTasks } = await import('./create-offboarding-tasks-service');
+      const offboardingResult = await createOffboardingQueueTasks('scheduled_task');
+      console.log(`[Scheduled Sync] Offboarding gap-check complete:`);
+      console.log(`  - Techs processed: ${offboardingResult.techsProcessed}`);
+      console.log(`  - Tasks created: ${offboardingResult.tasksCreated}`);
+      console.log(`  - Tasks skipped: ${offboardingResult.tasksSkipped}`);
+      if (offboardingResult.errors && offboardingResult.errors.length > 0) {
+        console.log(`  - Errors: ${offboardingResult.errors.length}`);
+        offboardingResult.errors.slice(0, 5).forEach((err: string) => console.log(`    - ${err}`));
+      }
+    } catch (offboardingError) {
+      console.error('[Scheduled Sync] Offboarding gap-check failed (non-fatal):', offboardingError);
+      console.log('[Scheduled Sync] Continuing...');
+    }
+
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log('\n' + '='.repeat(60));
     console.log(`[Scheduled Sync] COMPLETED SUCCESSFULLY`);

@@ -63,6 +63,7 @@ import { PublicFormRoute } from "@/components/public-form-route";
 import { RoleProtectedRoute } from "@/components/role-protected-route";
 import { RoleBasedHome } from "@/components/role-based-home";
 import { SecurityQuestionsGate } from "@/components/security-questions-gate";
+import OffboardingQueue from "@/pages/offboarding-queue";
 import FleetScopeLayout from "@/pages/fleet-scope/FleetScopeLayout";
 import RawPOs from "@/pages/fleet-scope/RawPOs";
 import TruckDetail from "@/pages/fleet-scope/TruckDetail";
@@ -277,6 +278,12 @@ function Router() {
       <Route path="/decommissions-queue">
         <ProtectedRoute>
           <DecommissionsQueuePage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/offboarding-queue">
+        <ProtectedRoute>
+          <OffboardingQueue />
         </ProtectedRoute>
       </Route>
 

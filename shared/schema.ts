@@ -70,6 +70,7 @@ export interface RolePermissionSettings {
       assetsQueue: boolean;
       inventoryQueue: boolean;
       fleetQueue: boolean;
+      offboardingQueue: boolean;
     };
     management: {
       enabled: boolean;
@@ -280,6 +281,7 @@ export const queueItems = pgTable("queue_items", {
   phoneNewHireDepartment: text("phone_new_hire_department"),
   phoneRecoveryStage: text("phone_recovery_stage").default("initiation"),
   phoneWrittenOff: boolean("phone_written_off").default(false),
+  isTlt: boolean("is_tlt").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {

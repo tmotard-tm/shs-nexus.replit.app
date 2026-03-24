@@ -15045,6 +15045,437 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===== Unified Offboarding Queue API =====
+  function classifyOffboardingQueue(step: string, department: string): string {
+    if (step === 'phone_recover_device_day0') return 'phone';
+    if (step === 'ntao_stop_replenishment_day0' || (department || '').toUpperCase() === 'NTAO') return 'ntao';
+    if (step === 'tools_recover_equipment_day0' || ['ASSETS MANAGEMENT', 'ASSETS'].includes((department || '').toUpperCase())) return 'assets';
+    if (step === 'fleet_initial_coordination_day0' || (department || '').toUpperCase() === 'FLEET') return 'fleet';
+    if (step === 'inventory_remove_tpms_day0' || ['INVENTORY CONTROL', 'INVENTORY'].includes((department || '').toUpperCase())) return 'inventory';
+    return 'unknown';
+  }
+
+  async function hasOffboardingAccess(user: any): Promise<boolean> {
+    if (user.role === 'developer' || user.role === 'admin') return true;
+    const hasAnyQueue = ['ntao', 'assets', 'fleet', 'inventory'].some(m => hasQueueAccess(user, m as any));
+    if (!hasAnyQueue) return false;
+    try {
+      const rolePerms = await storage.getRolePermission(user.role);
+      if (rolePerms && rolePerms.permissions) {
+        const perms = rolePerms.permissions as any;
+        if (perms?.sidebar?.queues?.offboardingQueue === false) return false;
+      }
+    } catch {}
+    return true;
+  }
+
+  app.get('/api/unified-offboarding/techs', requireAuth, async (req: any, res) => {
+    try {
+      if (!await hasOffboardingAccess(req.user)) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+
+      const allOffboardingItems = await db.select()
+        .from(queueItems)
+        .where(and(
+          eq(queueItems.workflowType, 'offboarding'),
+          isNotNull(queueItems.workflowId)
+        ));
+
+      const workflowMap = new Map<string, typeof allOffboardingItems>();
+      for (const item of allOffboardingItems) {
+        if (!item.workflowId) continue;
+        const list = workflowMap.get(item.workflowId) || [];
+        list.push(item);
+        workflowMap.set(item.workflowId, list);
+      }
+
+      const enterpriseIdsSeen = new Set<string>();
+      const techs: any[] = [];
+
+      for (const [workflowId, items] of workflowMap) {
+        const firstItem = items[0];
+        let parsedData: any = {};
+        try {
+          parsedData = typeof firstItem.data === 'string' ? JSON.parse(firstItem.data) : (firstItem.data || {});
+        } catch {}
+
+        const tech = parsedData?.technician || {};
+        const vehicle = parsedData?.vehicle || {};
+        const enterpriseId = tech.enterpriseId || tech.techRacfid || parsedData?.employee?.enterpriseId || '';
+        const employeeId = tech.employeeId || parsedData?.employee?.employeeId || '';
+
+        if (enterpriseId) enterpriseIdsSeen.add(enterpriseId.toUpperCase());
+
+        const separationDate = tech.lastDayWorked || tech.effectiveDate || null;
+        let daysOpen = 0;
+        if (separationDate) {
+          const sep = new Date(separationDate);
+          daysOpen = Math.floor((Date.now() - sep.getTime()) / (1000 * 60 * 60 * 24));
+        }
+
+        const isByov = items.some(i => i.isByov);
+        const isTlt = items.some(i => (i as any).isTlt);
+
+        const queueStatuses: Record<string, { status: string; id: string | null }> = {
+          ntao: { status: 'missing', id: null },
+          assets: { status: 'missing', id: null },
+          fleet: { status: 'missing', id: null },
+          inventory: { status: 'missing', id: null },
+          phone: { status: 'missing', id: null },
+        };
+
+        for (const item of items) {
+          let itemData: any = {};
+          try {
+            itemData = typeof item.data === 'string' ? JSON.parse(item.data) : (item.data || {});
+          } catch {}
+          const qKey = classifyOffboardingQueue(itemData?.step || '', item.department || '');
+          if (qKey in queueStatuses) {
+            queueStatuses[qKey] = { status: item.status, id: item.id };
+          }
+        }
+
+        const hasEscalation = items.some(i => i.priority === 'critical') ||
+          (items.some(i => i.status === 'pending') && daysOpen > 7);
+
+        const hasRental = items.some(i => {
+          try {
+            const d = typeof i.data === 'string' ? JSON.parse(i.data) : (i.data || {});
+            return d?.vehicle?.hasRental === true || d?.vehicle?.rentalStatus === 'active';
+          } catch { return false; }
+        });
+
+        techs.push({
+          workflowId,
+          techName: tech.techName || parsedData?.employee?.name || 'Unknown',
+          enterpriseId,
+          employeeId,
+          separationDate,
+          daysOpen,
+          truckNumber: vehicle.vehicleNumber || vehicle.truckNo || '',
+          isByov,
+          isTlt,
+          hasRental,
+          hasEscalation,
+          queueStatuses,
+        });
+      }
+
+      const allTermed = await db.select().from(termedTechs).where(isNotNull(termedTechs.employeeId));
+      for (const tt of allTermed) {
+        if (!tt.employeeId) continue;
+        const eid = (tt.techRacfid || '').toUpperCase();
+        if (eid && enterpriseIdsSeen.has(eid)) continue;
+        const workflowId = `termed-${tt.employeeId}`;
+        const separationDate = tt.lastDayWorked?.toString() || tt.effectiveDate?.toString() || null;
+        let daysOpen = 0;
+        if (separationDate) {
+          const sep = new Date(separationDate);
+          daysOpen = Math.floor((Date.now() - sep.getTime()) / (1000 * 60 * 60 * 24));
+        }
+        techs.push({
+          workflowId,
+          techName: tt.techName || 'Unknown',
+          enterpriseId: tt.techRacfid || '',
+          employeeId: tt.employeeId || '',
+          separationDate,
+          daysOpen,
+          truckNumber: '',
+          isByov: false,
+          isTlt: tt.jobTitle?.trim() === 'Team Lead Technician',
+          hasRental: false,
+          hasEscalation: daysOpen > 7,
+          queueStatuses: {
+            ntao: { status: 'missing', id: null },
+            assets: { status: 'missing', id: null },
+            fleet: { status: 'missing', id: null },
+            inventory: { status: 'missing', id: null },
+            phone: { status: 'missing', id: null },
+          },
+        });
+        if (eid) enterpriseIdsSeen.add(eid);
+      }
+
+      techs.sort((a, b) => {
+        if (!a.separationDate && !b.separationDate) return 0;
+        if (!a.separationDate) return 1;
+        if (!b.separationDate) return -1;
+        return new Date(b.separationDate).getTime() - new Date(a.separationDate).getTime();
+      });
+
+      const queueKeys = ['ntao', 'assets', 'fleet', 'inventory', 'phone'];
+      const queueBreakdown: Record<string, { pending: number; in_progress: number; completed: number; missing: number }> = {};
+      for (const qk of queueKeys) {
+        queueBreakdown[qk] = { pending: 0, in_progress: 0, completed: 0, missing: 0 };
+        for (const t of techs) {
+          const s = t.queueStatuses[qk]?.status || 'missing';
+          if (s === 'pending') queueBreakdown[qk].pending++;
+          else if (s === 'in_progress') queueBreakdown[qk].in_progress++;
+          else if (s === 'completed') queueBreakdown[qk].completed++;
+          else queueBreakdown[qk].missing++;
+        }
+      }
+
+      const escalated = techs.filter(t => t.hasEscalation).length;
+      const avgDaysOpen = techs.length > 0
+        ? Math.round(techs.reduce((sum, t) => sum + (t.daysOpen || 0), 0) / techs.length)
+        : 0;
+      const completedTechs = techs.filter(t =>
+        Object.values(t.queueStatuses).every((qs: any) => qs.status === 'completed')
+      ).length;
+      const completionPct = techs.length > 0 ? Math.round((completedTechs / techs.length) * 100) : 0;
+
+      return res.json({
+        techs,
+        summary: {
+          totalTechs: techs.length,
+          escalated,
+          avgDaysOpen,
+          completionPct,
+          queueBreakdown,
+        },
+      });
+    } catch (err: any) {
+      console.error('[UnifiedOffboarding] GET /techs error:', err.message);
+      return res.status(500).json({ message: 'Failed to fetch offboarding techs' });
+    }
+  });
+
+  app.get('/api/unified-offboarding/tech/:workflowId', requireAuth, async (req: any, res) => {
+    try {
+      if (!await hasOffboardingAccess(req.user)) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      const { workflowId } = req.params;
+
+      const items = await db.select()
+        .from(queueItems)
+        .where(and(
+          eq(queueItems.workflowId, workflowId),
+          eq(queueItems.workflowType, 'offboarding')
+        ));
+
+      if (items.length === 0 && workflowId.startsWith('termed-')) {
+        const employeeId = workflowId.replace('termed-', '');
+        const termedRow = await storage.getTermedTechByEmployeeId(employeeId);
+        if (!termedRow) {
+          return res.status(404).json({ message: 'Tech not found' });
+        }
+        return res.json({
+          workflowId,
+          techName: termedRow.techName,
+          enterpriseId: termedRow.techRacfid,
+          employeeId: termedRow.employeeId,
+          separationDate: termedRow.lastDayWorked?.toString() || null,
+          tasks: {},
+        });
+      }
+
+      if (items.length === 0) {
+        return res.status(404).json({ message: 'Workflow not found' });
+      }
+
+      const firstItem = items[0];
+      let parsedData: any = {};
+      try {
+        parsedData = typeof firstItem.data === 'string' ? JSON.parse(firstItem.data) : (firstItem.data || {});
+      } catch {}
+
+      const tech = parsedData?.technician || {};
+      const vehicle = parsedData?.vehicle || {};
+
+      const tasks: Record<string, any> = {};
+      for (const item of items) {
+        let itemData: any = {};
+        try {
+          itemData = typeof item.data === 'string' ? JSON.parse(item.data) : (item.data || {});
+        } catch {}
+        const qKey = classifyOffboardingQueue(itemData?.step || '', item.department || '');
+        tasks[qKey] = {
+          id: item.id,
+          status: item.status,
+          priority: item.priority,
+          assignedTo: item.assignedTo,
+          department: item.department,
+          notes: item.notes,
+          workflowStep: item.workflowStep,
+          createdAt: item.createdAt,
+          startedAt: item.startedAt,
+          completedAt: item.completedAt,
+          isByov: item.isByov,
+          isTlt: (item as any).isTlt,
+          vehicleType: item.vehicleType,
+          fleetRoutingDecision: item.fleetRoutingDecision,
+          routingReceivedAt: item.routingReceivedAt,
+          blockedActions: item.blockedActions,
+          taskToolsReturn: item.taskToolsReturn,
+          taskIphoneReturn: item.taskIphoneReturn,
+          taskDisconnectedLine: item.taskDisconnectedLine,
+          taskDisconnectedMPayment: item.taskDisconnectedMPayment,
+          taskCloseSegnoOrders: item.taskCloseSegnoOrders,
+          taskCreateShippingLabel: item.taskCreateShippingLabel,
+          phoneNumber: item.phoneNumber,
+          phoneContactHistory: item.phoneContactHistory,
+          phoneContactMethod: item.phoneContactMethod,
+          phoneShippingLabelSent: item.phoneShippingLabelSent,
+          phoneTrackingNumber: item.phoneTrackingNumber,
+          phoneDateReceived: item.phoneDateReceived,
+          phonePhysicalCondition: item.phonePhysicalCondition,
+          phoneConditionNotes: item.phoneConditionNotes,
+          phoneDataWipeCompleted: item.phoneDataWipeCompleted,
+          phoneWipeMethod: item.phoneWipeMethod,
+          phoneReprovisionCompleted: item.phoneReprovisionCompleted,
+          phoneWrittenOff: item.phoneWrittenOff,
+          phoneServiceReinstated: item.phoneServiceReinstated,
+          phoneRecoveryStage: item.phoneRecoveryStage,
+          carrier: item.carrier,
+          data: itemData,
+        };
+      }
+
+      return res.json({
+        workflowId,
+        techName: tech.techName || parsedData?.employee?.name || 'Unknown',
+        enterpriseId: tech.enterpriseId || tech.techRacfid || '',
+        employeeId: tech.employeeId || '',
+        separationDate: tech.lastDayWorked || tech.effectiveDate || null,
+        truckNumber: vehicle.vehicleNumber || vehicle.truckNo || '',
+        fleetPickupAddress: vehicle.fleetPickupAddress || null,
+        contactNumber: tech.contactNumber || null,
+        personalEmail: tech.personalEmail || null,
+        district: tech.district || null,
+        planningArea: tech.planningArea || null,
+        jobTitle: tech.jobTitle || null,
+        separationCategory: tech.separationCategory || null,
+        tasks,
+      });
+    } catch (err: any) {
+      console.error('[UnifiedOffboarding] GET /tech/:workflowId error:', err.message);
+      return res.status(500).json({ message: 'Failed to fetch tech detail' });
+    }
+  });
+
+  app.patch('/api/unified-offboarding/task/:taskId', requireAuth, async (req: any, res) => {
+    try {
+      if (!await hasOffboardingAccess(req.user)) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      const { taskId } = req.params;
+      const existingTask = await storage.getQueueItem(taskId);
+      if (!existingTask) {
+        return res.status(404).json({ message: 'Task not found' });
+      }
+      if (existingTask.workflowType !== 'offboarding') {
+        return res.status(400).json({ message: 'Task is not an offboarding task' });
+      }
+
+      const ALLOWED_FIELDS = [
+        'status', 'notes', 'assignedTo', 'priority',
+        'taskToolsReturn', 'taskIphoneReturn', 'taskDisconnectedLine', 'taskDisconnectedMPayment',
+        'taskCloseSegnoOrders', 'taskCreateShippingLabel',
+        'toolAuditNotificationSent', 'carrier',
+        'fleetRoutingDecision',
+        'phoneContactMethod', 'phoneShippingLabelSent', 'phoneTrackingNumber',
+        'phonePhysicalCondition', 'phoneConditionNotes', 'phoneDataWipeCompleted',
+        'phoneWipeMethod', 'phoneReprovisionCompleted', 'phoneRecoveryStage',
+        'phoneWrittenOff', 'phoneServiceReinstated',
+      ];
+
+      const updates: any = { updatedAt: new Date() };
+      for (const field of ALLOWED_FIELDS) {
+        if (req.body[field] !== undefined) {
+          updates[field] = req.body[field];
+        }
+      }
+
+      if (updates.status === 'in_progress' && !existingTask.startedAt) {
+        updates.startedAt = new Date();
+      }
+      if (updates.status === 'completed' && !existingTask.completedAt) {
+        updates.completedAt = new Date();
+      }
+      if (updates.toolAuditNotificationSent && !existingTask.toolAuditNotificationSentAt) {
+        updates.toolAuditNotificationSentAt = new Date();
+      }
+
+      const updated = await storage.updateQueueItem(taskId, updates);
+      return res.json(updated);
+    } catch (err: any) {
+      console.error('[UnifiedOffboarding] PATCH /task/:taskId error:', err.message);
+      return res.status(500).json({ message: 'Failed to update task' });
+    }
+  });
+
+  app.post('/api/unified-offboarding/task/:taskId/contact-log', requireAuth, async (req: any, res) => {
+    try {
+      if (!await hasOffboardingAccess(req.user)) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      const { taskId } = req.params;
+      const existingTask = await storage.getQueueItem(taskId);
+      if (!existingTask) {
+        return res.status(404).json({ message: 'Task not found' });
+      }
+      if (existingTask.workflowType !== 'offboarding') {
+        return res.status(400).json({ message: 'Task is not an offboarding task' });
+      }
+
+      let history: any[] = [];
+      if (existingTask.phoneContactHistory) {
+        history = Array.isArray(existingTask.phoneContactHistory)
+          ? existingTask.phoneContactHistory
+          : [];
+      }
+
+      history.push({
+        method: req.body.method || 'unknown',
+        outcome: req.body.outcome || null,
+        notes: req.body.notes || null,
+        contactedBy: req.body.contactedBy || req.user.id,
+        timestamp: new Date().toISOString(),
+      });
+
+      const updated = await storage.updateQueueItem(taskId, {
+        phoneContactHistory: history,
+        phoneContactMethod: req.body.method || existingTask.phoneContactMethod,
+        updatedAt: new Date(),
+      });
+      return res.json(updated);
+    } catch (err: any) {
+      console.error('[UnifiedOffboarding] POST /task/:taskId/contact-log error:', err.message);
+      return res.status(500).json({ message: 'Failed to add contact log' });
+    }
+  });
+
+  app.get('/api/unified-offboarding/admin/duplicate-check', requireAuth, async (req: any, res) => {
+    try {
+      if (req.user.role !== 'developer' && req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Admin access required' });
+      }
+      const { checkOffboardingDuplicates } = await import('./create-offboarding-tasks-service');
+      const result = await checkOffboardingDuplicates();
+      return res.json({ duplicates: result, count: result.length });
+    } catch (err: any) {
+      console.error('[UnifiedOffboarding] GET /admin/duplicate-check error:', err.message);
+      return res.status(500).json({ message: 'Failed to check duplicates' });
+    }
+  });
+
+  app.post('/api/unified-offboarding/admin/run-task-creation', requireAuth, async (req: any, res) => {
+    try {
+      if (req.user.role !== 'developer' && req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Admin access required' });
+      }
+      const { createOffboardingQueueTasks } = await import('./create-offboarding-tasks-service');
+      const result = await createOffboardingQueueTasks('manual');
+      return res.json(result);
+    } catch (err: any) {
+      console.error('[UnifiedOffboarding] POST /admin/run-task-creation error:', err.message);
+      return res.status(500).json({ message: 'Failed to run task creation' });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack

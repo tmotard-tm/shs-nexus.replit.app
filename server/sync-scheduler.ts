@@ -5,6 +5,7 @@ import { queueItems } from '@shared/schema';
 import { eq, and, isNotNull } from 'drizzle-orm';
 import { getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
 import { storage } from './storage';
+import { createOffboardingQueueTasks } from './create-offboarding-tasks-service';
 
 const SYNC_HOUR_EST = 5; // 5am EST
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
@@ -12,12 +13,14 @@ const ENRICH_INTERVAL_HOURS = 12; // Enrich every 12 hours
 const SEPARATION_POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for separation sync
 const NOTIFICATION_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const OP_EVENTS_RETRY_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes for operation events retry
+const OFFBOARDING_TASKS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for offboarding gap-check
 
 let lastSyncDate: string | null = null;
 let lastEnrichTime: number | null = null; // Timestamp of last enrichment
 let lastSeparationPollTime: number | null = null; // Sprint 0: Track separation polls
 let lastNotificationBackfillTime: number | null = null;
 let lastOpEventsRetryTime: number | null = null;
+let lastOffboardingTasksTime: number | null = null;
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -89,6 +92,7 @@ async function checkAndRunSync(): Promise<void> {
   }
 
   await checkAndRunOpEventsRetry();
+  await checkAndRunOffboardingTasks();
 }
 
 async function checkAndRunEnrichment(): Promise<void> {
@@ -180,6 +184,21 @@ async function checkAndRunOpEventsRetry(): Promise<void> {
     }
   } catch (error: any) {
     console.error('[Scheduler] Error during operation events retry:', error?.message);
+  }
+}
+
+async function checkAndRunOffboardingTasks(): Promise<void> {
+  try {
+    const now = Date.now();
+    if (lastOffboardingTasksTime !== null && (now - lastOffboardingTasksTime) < OFFBOARDING_TASKS_INTERVAL_MS) {
+      return;
+    }
+    lastOffboardingTasksTime = now;
+    console.log('[Scheduler] Running offboarding gap-check (every 30 minutes)');
+    const result = await createOffboardingQueueTasks('scheduler');
+    console.log(`[Scheduler] Offboarding gap-check complete: ${result.techsProcessed} techs, ${result.tasksCreated} tasks created, ${result.tasksSkipped} skipped`);
+  } catch (error: any) {
+    console.error('[Scheduler] Error during offboarding gap-check:', error?.message);
   }
 }
 

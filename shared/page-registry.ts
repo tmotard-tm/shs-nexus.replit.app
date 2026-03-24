@@ -19,6 +19,7 @@ import {
   Mail,
   Wrench,
   Package,
+  ClipboardList,
   type LucideIcon
 } from "lucide-react";
 
@@ -209,6 +210,15 @@ export const PAGES: PageDefinition[] = [
         ],
       },
     ],
+  },
+  {
+    key: "offboardingQueue",
+    label: "Offboarding Queue",
+    description: "Unified offboarding queue with cross-queue visibility for all separating technicians",
+    path: "/offboarding-queue",
+    icon: ClipboardList,
+    category: "queues",
+    permissionKey: "offboardingQueue",
   },
   {
     key: "storageSpots",

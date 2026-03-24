@@ -33,6 +33,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       assetsQueue: true,
       inventoryQueue: true,
       fleetQueue: true,
+      offboardingQueue: true,
     },
     management: {
       enabled: true,
@@ -161,6 +162,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       assetsQueue: true,
       inventoryQueue: true,
       fleetQueue: true,
+      offboardingQueue: true,
     },
     management: {
       enabled: true,
@@ -288,6 +290,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       assetsQueue: true,
       inventoryQueue: true,
       fleetQueue: true,
+      offboardingQueue: true,
     },
     management: {
       enabled: false,
@@ -452,6 +455,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/holman-integration': () => perms.sidebar.management.integrations,
     '/field-mapping': () => perms.sidebar.management.integrations,
     '/decommissions-queue': () => perms.sidebar.queues.queueManagement,
+    '/offboarding-queue': () => perms.sidebar.queues.offboardingQueue,
     '/active-vehicles': () => perms.sidebar.management.fleetManagement,
     '/test-repair-results': () => perms.sidebar.management.integrations,
     '/activity': () => perms.sidebar.activities.activityLogs,
