@@ -107,11 +107,9 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
                 <span className="font-mono text-sm font-semibold w-14 shrink-0">{v.vehicleNumber}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-muted-foreground truncate">{v.interior || "N/A"}</p>
-                  {(v.distanceMiles !== null || v.locationSource) && (
+                  {v.distanceMiles !== null && (
                     <p className="text-xs text-muted-foreground/70 truncate">
-                      {v.distanceMiles !== null ? `${v.distanceMiles} mi` : ""}
-                      {v.distanceMiles !== null && v.locationSource ? " · " : ""}
-                      {v.locationSource || ""}
+                      {v.distanceMiles} mi{v.locationSource ? ` · ${v.locationSource}` : ""}
                     </p>
                   )}
                 </div>
