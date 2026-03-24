@@ -24,7 +24,7 @@ const zipCoordCache = new Map<string, ZipCoordinates | null>();
 /**
  * Get coordinates for a US ZIP code using the free Zippopotam API
  */
-export async function getZipCoordinates(zipCode: string): Promise<ZipCoordinates | null> {
+async function getZipCoordinates(zipCode: string): Promise<ZipCoordinates | null> {
   // Clean the ZIP code (take first 5 digits)
   const cleanZip = zipCode.replace(/\D/g, '').slice(0, 5);
   if (cleanZip.length !== 5) {

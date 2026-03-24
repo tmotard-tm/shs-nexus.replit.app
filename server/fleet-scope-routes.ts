@@ -2246,21 +2246,21 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const padded = raw.padStart(6, '0');
       const unpadded = raw.replace(/^0+/, '') || raw;
 
-      // Step 1: look up ENTERPRISE_ID + tech's home ZIP from TPMS_EXTRACT using TRUCK_LU
+      // Step 1: look up ENTERPRISE_ID from TPMS_EXTRACT using TRUCK_LU
+      // Note: executeQuery ignores bind parameters — use string interpolation like all other TPMS_EXTRACT queries
       const step1Sql = `
-        SELECT ENTERPRISE_ID, PRIMARYZIP
+        SELECT ENTERPRISE_ID
         FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
         WHERE TRUCK_LU IN (${padded}, ${unpadded})
         LIMIT 1
       `;
-      const step1 = await executeQuery<{ ENTERPRISE_ID: string | number | null; PRIMARYZIP: string | null }>(step1Sql);
+      const step1 = await executeQuery<{ ENTERPRISE_ID: string | number | null }>(step1Sql);
 
       if (step1.length === 0 || !step1[0].ENTERPRISE_ID) {
         return res.json({ matchFound: false, techName: null, jobTitle: null, suggestions: [] });
       }
 
       const enterpriseId = String(step1[0].ENTERPRISE_ID).trim().replace(/'/g, "''");
-      const techZip = step1[0].PRIMARYZIP?.trim() || null;
 
       // Step 2: look up FULL_NAME and JOB_TITLE from DRIVELINE_ALL_TECHS
       const step2Sql = `
@@ -2282,202 +2282,44 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.json({ matchFound: false, techName, jobTitle: null, suggestions: [] });
       }
 
-      // Step 2.5: geocode tech's home ZIP for the distance reference point
-      const { getZipCoordinates } = await import("./fleet-scope-distance-calculator");
-      let techCoords: { lat: number; lng: number } | null = null;
-      if (techZip) {
-        try { techCoords = await getZipCoordinates(techZip); } catch { /* ignore */ }
-      }
-
-      // Haversine straight-line distance in miles
-      function haversineDistanceMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
-        const R = 3958.8;
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) ** 2 +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      }
-
-      // Parse 5-digit ZIP from a free-form address string
-      function parseZipFromAddress(address: string): string | null {
-        const match = address.match(/\b(\d{5})(?:-\d{4})?\b/);
-        return match ? match[1] : null;
-      }
-
-      // Step 3: determine INTERIOR filter, fetch up to 30 candidates with AMS lat/lon
+      // Step 3: determine INTERIOR filter based on job title and query REPLIT_ALL_VEHICLES
       const upperTitle = jobTitle.toUpperCase();
       let step3Sql: string;
 
       if (upperTitle.includes('TECHNICIAN 1')) {
+        // Technician 1 → "Utility Without Ref Racks" or null/empty interior
         step3Sql = `
-          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
-                 AMS_ZIP_LAT, AMS_ZIP_LON, AMS_LAST_UPDATE
+          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND (UPPER(INTERIOR) = 'UTILITY WITHOUT REF RACKS' OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
-          LIMIT 30
+          LIMIT 3
         `;
       } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('HVAC')) {
+        // Technician 2 / HVAC → "Utility With Ref Racks"
         step3Sql = `
-          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
-                 AMS_ZIP_LAT, AMS_ZIP_LON, AMS_LAST_UPDATE
+          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'
-          LIMIT 30
+          LIMIT 3
         `;
       } else {
+        // Job title doesn't match known skill patterns
         return res.json({ matchFound: true, techName, jobTitle, suggestions: [] });
       }
 
-      const candidates = await executeQuery<{
-        VEHICLE_NUMBER: string;
-        TRUCK_STATUS: string | null;
-        INTERIOR: string | null;
-        AMS_ZIP_LAT: number | null;
-        AMS_ZIP_LON: number | null;
-        AMS_LAST_UPDATE: string | null;
-      }>(step3Sql);
-
-      if (candidates.length === 0) {
-        return res.json({ matchFound: true, techName, jobTitle, suggestions: [] });
-      }
-
-      // Step 4: Samsara location cache (already cached in memory)
-      const samsaraCache = await fetchSamsaraLocations();
-
-      // Step 5: Batch-fetch confirmed addresses from SPARE_VEHICLE_ASSIGNMENT_STATUS
-      const quotedNums = candidates
-        .map(c => c.VEHICLE_NUMBER?.toString().trim())
-        .filter(Boolean)
-        .map(n => `'${n!.replace(/'/g, "''")}'`);
-
-      const confirmedMap = new Map<string, { address: string; updatedAt: Date | null }>();
-      if (quotedNums.length > 0) {
-        try {
-          const confirmedSql = `
-            SELECT VEHICLE_NUMBER, CONFIRMED_ADDRESS, ADDRESS_UPDATED_AT
-            FROM PARTS_SUPPLYCHAIN.FLEET.SPARE_VEHICLE_ASSIGNMENT_STATUS
-            WHERE VEHICLE_NUMBER IN (${quotedNums.join(', ')})
-              AND CONFIRMED_ADDRESS IS NOT NULL
-              AND TRIM(CONFIRMED_ADDRESS) != ''
-          `;
-          const confirmedRows = await executeQuery<{
-            VEHICLE_NUMBER: string;
-            CONFIRMED_ADDRESS: string | null;
-            ADDRESS_UPDATED_AT: string | null;
-          }>(confirmedSql);
-          for (const row of confirmedRows) {
-            if (row.VEHICLE_NUMBER && row.CONFIRMED_ADDRESS) {
-              confirmedMap.set(row.VEHICLE_NUMBER.toString().trim(), {
-                address: row.CONFIRMED_ADDRESS,
-                updatedAt: row.ADDRESS_UPDATED_AT ? new Date(row.ADDRESS_UPDATED_AT) : null,
-              });
-            }
-          }
-        } catch (err: any) {
-          console.error('[SuggestedReplacements] Confirmed address fetch failed:', err.message);
-        }
-      }
-
-      // Step 6: Resolve best location for each candidate + compute Haversine distance
-      type LocationSource = 'samsara' | 'confirmed' | 'ams';
-      type SuggestionWithDist = {
-        vehicleNumber: string;
-        truckStatus: string | null;
-        interior: string | null;
-        distanceMiles: number | null;
-        locationSource: LocationSource | null;
-      };
-
-      const withDistance: SuggestionWithDist[] = await Promise.all(
-        candidates.map(async (c) => {
-          const rawNum = c.VEHICLE_NUMBER?.toString().trim() || '';
-          const normalizedNum = rawNum.replace(/^0+/, '') || rawNum;
-
-          type Src = { lat: number; lon: number; ts: Date | null; source: LocationSource };
-          const sources: Src[] = [];
-
-          // Source 1 — Samsara GPS (most accurate, real-time)
-          const samsaraEntry = samsaraCache.get(normalizedNum);
-          if (samsaraEntry?.latitude && samsaraEntry?.longitude) {
-            sources.push({
-              lat: samsaraEntry.latitude,
-              lon: samsaraEntry.longitude,
-              ts: samsaraEntry.timestamp ? new Date(samsaraEntry.timestamp) : null,
-              source: 'samsara',
-            });
-          }
-
-          // Source 2 — Confirmed address (parse ZIP → geocode)
-          const confirmed = confirmedMap.get(rawNum);
-          if (confirmed?.address) {
-            const zip = parseZipFromAddress(confirmed.address);
-            if (zip) {
-              try {
-                const coords = await getZipCoordinates(zip);
-                if (coords) {
-                  sources.push({
-                    lat: coords.lat,
-                    lon: coords.lng,
-                    ts: confirmed.updatedAt,
-                    source: 'confirmed',
-                  });
-                }
-              } catch { /* ignore */ }
-            }
-          }
-
-          // Source 3 — AMS ZIP lat/lon
-          const amsLat = c.AMS_ZIP_LAT != null ? Number(c.AMS_ZIP_LAT) : null;
-          const amsLon = c.AMS_ZIP_LON != null ? Number(c.AMS_ZIP_LON) : null;
-          if (amsLat && amsLon) {
-            sources.push({
-              lat: amsLat,
-              lon: amsLon,
-              ts: c.AMS_LAST_UPDATE ? new Date(c.AMS_LAST_UPDATE) : null,
-              source: 'ams',
-            });
-          }
-
-          if (sources.length === 0 || !techCoords) {
-            return { vehicleNumber: rawNum, truckStatus: c.TRUCK_STATUS || null, interior: c.INTERIOR || null, distanceMiles: null, locationSource: null };
-          }
-
-          // Pick source with the most recent timestamp (null timestamps rank last)
-          sources.sort((a, b) => {
-            if (!a.ts && !b.ts) return 0;
-            if (!a.ts) return 1;
-            if (!b.ts) return -1;
-            return b.ts.getTime() - a.ts.getTime();
-          });
-
-          const best = sources[0];
-          const distanceMiles = Math.round(haversineDistanceMiles(techCoords.lat, techCoords.lng, best.lat, best.lon));
-          return {
-            vehicleNumber: rawNum,
-            truckStatus: c.TRUCK_STATUS || null,
-            interior: c.INTERIOR || null,
-            distanceMiles,
-            locationSource: best.source,
-          };
-        })
-      );
-
-      // Step 7: Sort ascending by distance (nulls last), return closest 3
-      withDistance.sort((a, b) => {
-        if (a.distanceMiles === null && b.distanceMiles === null) return 0;
-        if (a.distanceMiles === null) return 1;
-        if (b.distanceMiles === null) return -1;
-        return a.distanceMiles - b.distanceMiles;
-      });
+      const suggestions = await executeQuery<{ VEHICLE_NUMBER: string; TRUCK_STATUS: string | null; INTERIOR: string | null }>(step3Sql);
 
       return res.json({
         matchFound: true,
         techName,
         jobTitle,
-        suggestions: withDistance.slice(0, 3),
+        suggestions: suggestions.map(r => ({
+          vehicleNumber: r.VEHICLE_NUMBER,
+          truckStatus: r.TRUCK_STATUS || null,
+          interior: r.INTERIOR || null,
+        })),
       });
     } catch (error: any) {
       console.error("[SuggestedReplacements] Error:", error.message);
