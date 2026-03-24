@@ -2468,7 +2468,61 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
       const tNum = normalizeFleetIdForCache((truck.truckNumber || '').toString());
       const techCacheEntry = technicianDataCache.get(tNum);
-      res.json({ ...truck, techAddress: techCacheEntry?.fullAddress || '' });
+      let techAddress = techCacheEntry?.fullAddress || '';
+
+      // Fallback: if no address found by truck number and truck has a stored tech name,
+      // try matching by LAST_NAME in TPMS_EXTRACT. Only use result if exactly one record
+      // matches (to avoid ambiguity with common last names).
+      if (!techAddress && truck.techName) {
+        try {
+          const trimmedName = truck.techName.trim();
+          let lastName: string;
+          if (trimmedName.includes(',')) {
+            // "LastName, FirstName" format
+            lastName = trimmedName.split(',')[0].trim();
+          } else {
+            // "FirstName LastName" or "First Middle Last" format
+            const parts = trimmedName.split(/\s+/);
+            lastName = parts[parts.length - 1];
+          }
+
+          if (lastName && lastName.length >= 2) {
+            const escapedLastName = lastName.replace(/'/g, "''");
+            const fallbackSql = `
+              SELECT PRIMARYADDR1, PRIMARYADDR2, PRIMARYCITY, PRIMARYSTATE, PRIMARYZIP
+              FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+              WHERE UPPER(TRIM(LAST_NAME)) = UPPER(TRIM('${escapedLastName}'))
+            `;
+            const results = await executeQuery<{
+              PRIMARYADDR1: string | null;
+              PRIMARYADDR2: string | null;
+              PRIMARYCITY: string | null;
+              PRIMARYSTATE: string | null;
+              PRIMARYZIP: string | null;
+            }>(fallbackSql);
+
+            if (results.length === 1) {
+              const addressParts = [
+                results[0].PRIMARYADDR1?.trim(),
+                results[0].PRIMARYADDR2?.trim(),
+                results[0].PRIMARYCITY?.trim(),
+                results[0].PRIMARYSTATE?.trim(),
+                results[0].PRIMARYZIP?.trim(),
+              ].filter(Boolean);
+              if (addressParts.length > 0) {
+                techAddress = addressParts.join(', ');
+                console.log(`[TechAddress] Found address via LAST_NAME fallback for truck ${truck.truckNumber} (last name: ${lastName}): ${techAddress}`);
+              }
+            } else if (results.length > 1) {
+              console.log(`[TechAddress] LAST_NAME fallback skipped for truck ${truck.truckNumber}: ${results.length} records matched last name "${lastName}" (ambiguous)`);
+            }
+          }
+        } catch (fallbackError: any) {
+          console.error(`[TechAddress] LAST_NAME fallback failed for truck ${truck.truckNumber}:`, fallbackError.message);
+        }
+      }
+
+      res.json({ ...truck, techAddress });
     } catch (error: any) {
       console.error("Error fetching truck:", error);
       res.status(500).json({ message: "Failed to fetch truck" });
