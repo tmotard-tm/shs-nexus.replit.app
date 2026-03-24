@@ -52,6 +52,8 @@ interface SuggestedVehicle {
   vehicleNumber: string;
   truckStatus: string | null;
   interior: string | null;
+  distanceMiles: number | null;
+  locationSource: string | null;
 }
 
 interface SuggestedReplacementsData {
@@ -101,10 +103,19 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
           <div className="space-y-1.5">
             {techLine}
             {data.suggestions.map((v) => (
-              <div key={v.vehicleNumber} className="grid grid-cols-[4rem_1fr_auto] items-center gap-x-2 rounded-sm bg-muted/50 px-2 py-1.5">
-                <span className="font-mono text-sm font-semibold">{v.vehicleNumber}</span>
-                <span className="text-xs text-muted-foreground truncate">{v.interior || "N/A"}</span>
-                <Badge variant="outline" className="text-xs py-0 px-1.5 h-5 justify-self-end">{v.truckStatus || "Unknown"}</Badge>
+              <div key={v.vehicleNumber} className="flex items-center gap-x-2 rounded-sm bg-muted/50 px-2 py-1.5">
+                <span className="font-mono text-sm font-semibold w-14 shrink-0">{v.vehicleNumber}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-muted-foreground truncate">{v.interior || "N/A"}</p>
+                  {(v.distanceMiles !== null || v.locationSource) && (
+                    <p className="text-xs text-muted-foreground/70 truncate">
+                      {v.distanceMiles !== null ? `${v.distanceMiles} mi` : ""}
+                      {v.distanceMiles !== null && v.locationSource ? " · " : ""}
+                      {v.locationSource || ""}
+                    </p>
+                  )}
+                </div>
+                <Badge variant="outline" className="text-xs py-0 px-1.5 h-5 shrink-0">{v.truckStatus || "Unknown"}</Badge>
               </div>
             ))}
           </div>

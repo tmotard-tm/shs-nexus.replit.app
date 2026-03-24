@@ -8,6 +8,7 @@ import { broadcastMessage, getNextAllowedSendTime, sendTwilioMessage } from "./f
 import { insertTruckSchema, updateTruckSchema, insertTrackingRecordSchema, parseStatus, validateStatus, normalizeStatusLegacy } from "@shared/fleet-scope-schema";
 import { z } from "zod";
 import { testConnection, executeQuery, getTableData, getTableSchema } from "./fleet-scope-snowflake";
+import { getZipCoordinates } from "./fleet-scope-distance-calculator";
 import { trackPackage, testUPSConnection, checkRateLimit } from "./fleet-scope-ups";
 import { parqApi } from "./fleet-scope-pmf-api";
 import { fetchFleetFinderData, fetchFleetFinderVehicleInfo, prewarmFleetFinderCache, type FleetFinderLocationData, type FleetFinderVehicleInfo } from "./fleet-scope-fleet-finder";
@@ -2283,43 +2284,152 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // Step 3: determine INTERIOR filter based on job title and query REPLIT_ALL_VEHICLES
+      // Fetch 20 candidates so we can distance-sort and pick the closest 3
       const upperTitle = jobTitle.toUpperCase();
       let step3Sql: string;
 
       if (upperTitle.includes('TECHNICIAN 1')) {
-        // Technician 1 → "Utility Without Ref Racks" or null/empty interior
         step3Sql = `
-          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
+          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
+                 GPS_LATITUDE, GPS_LONGITUDE,
+                 AMS_ZIP_LAT, AMS_ZIP_LON
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND (UPPER(INTERIOR) = 'UTILITY WITHOUT REF RACKS' OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
-          LIMIT 3
+          LIMIT 20
         `;
       } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('HVAC')) {
-        // Technician 2 / HVAC → "Utility With Ref Racks"
         step3Sql = `
-          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR
+          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
+                 GPS_LATITUDE, GPS_LONGITUDE,
+                 AMS_ZIP_LAT, AMS_ZIP_LON
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'
-          LIMIT 3
+          LIMIT 20
         `;
       } else {
-        // Job title doesn't match known skill patterns
         return res.json({ matchFound: true, techName, jobTitle, suggestions: [] });
       }
 
-      const suggestions = await executeQuery<{ VEHICLE_NUMBER: string; TRUCK_STATUS: string | null; INTERIOR: string | null }>(step3Sql);
+      type CandidateRow = {
+        VEHICLE_NUMBER: string;
+        TRUCK_STATUS: string | null;
+        INTERIOR: string | null;
+        GPS_LATITUDE: number | null;
+        GPS_LONGITUDE: number | null;
+        AMS_ZIP_LAT: number | null;
+        AMS_ZIP_LON: number | null;
+      };
+      const candidates = await executeQuery<CandidateRow>(step3Sql);
+
+      // ---- Distance sorting ----
+      // Haversine formula: returns straight-line miles between two lat/lng points
+      function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const R = 3958.8; // Earth radius in miles
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLon / 2) ** 2;
+        return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+      }
+
+      // Resolve tech's ZIP from the truck's repair address in fs_trucks
+      let techLat: number | null = null;
+      let techLon: number | null = null;
+      try {
+        const truck = await fleetScopeStorage.getTruckByNumber(padded) ??
+                      await fleetScopeStorage.getTruckByNumber(unpadded);
+        if (truck?.repairAddress) {
+          const zipMatch = truck.repairAddress.match(/\b(\d{5})(?:-\d{4})?\b/g);
+          const techZip = zipMatch ? zipMatch[zipMatch.length - 1] : null;
+          if (techZip) {
+            const coords = await getZipCoordinates(techZip);
+            if (coords) {
+              techLat = coords.lat;
+              techLon = coords.lng;
+            }
+          }
+        }
+      } catch {
+        // Non-fatal: fall back to unsorted order
+      }
+
+      // Fetch Samsara locations (uses cached data — no extra network call)
+      let samsaraMap: Map<string, { latitude: number; longitude: number }> = new Map();
+      try {
+        const samsaraLocations = await fetchSamsaraLocations();
+        samsaraLocations.forEach((data, vehicleNum) => {
+          if (data.latitude && data.longitude) {
+            samsaraMap.set(vehicleNum, { latitude: data.latitude, longitude: data.longitude });
+          }
+        });
+      } catch {
+        // Non-fatal
+      }
+
+      // Score each candidate by distance from the tech
+      type ScoredCandidate = {
+        vehicleNumber: string;
+        truckStatus: string | null;
+        interior: string | null;
+        distanceMiles: number | null;
+        locationSource: string | null;
+      };
+
+      const scored: ScoredCandidate[] = candidates.map(r => {
+        const vNum = String(r.VEHICLE_NUMBER).replace(/^0+/, '') || String(r.VEHICLE_NUMBER);
+
+        // Resolve spare vehicle coordinates: Samsara → GPS (Snowflake) → AMS (Snowflake)
+        let spareLat: number | null = null;
+        let spareLon: number | null = null;
+        let locationSource: string | null = null;
+
+        const samsaraEntry = samsaraMap.get(vNum);
+        if (samsaraEntry) {
+          spareLat = samsaraEntry.latitude;
+          spareLon = samsaraEntry.longitude;
+          locationSource = 'Samsara';
+        } else if (r.GPS_LATITUDE != null && r.GPS_LONGITUDE != null) {
+          spareLat = Number(r.GPS_LATITUDE);
+          spareLon = Number(r.GPS_LONGITUDE);
+          locationSource = 'GPS';
+        } else if (r.AMS_ZIP_LAT != null && r.AMS_ZIP_LON != null) {
+          spareLat = Number(r.AMS_ZIP_LAT);
+          spareLon = Number(r.AMS_ZIP_LON);
+          locationSource = 'AMS';
+        }
+
+        let distanceMiles: number | null = null;
+        if (techLat !== null && techLon !== null && spareLat !== null && spareLon !== null) {
+          distanceMiles = haversine(techLat, techLon, spareLat, spareLon);
+        }
+
+        return {
+          vehicleNumber: r.VEHICLE_NUMBER,
+          truckStatus: r.TRUCK_STATUS || null,
+          interior: r.INTERIOR || null,
+          distanceMiles,
+          locationSource,
+        };
+      });
+
+      // Sort: vehicles with distance first (nearest first), then vehicles with no distance
+      scored.sort((a, b) => {
+        if (a.distanceMiles === null && b.distanceMiles === null) return 0;
+        if (a.distanceMiles === null) return 1;
+        if (b.distanceMiles === null) return -1;
+        return a.distanceMiles - b.distanceMiles;
+      });
 
       return res.json({
         matchFound: true,
         techName,
         jobTitle,
-        suggestions: suggestions.map(r => ({
-          vehicleNumber: r.VEHICLE_NUMBER,
-          truckStatus: r.TRUCK_STATUS || null,
-          interior: r.INTERIOR || null,
-        })),
+        suggestions: scored.slice(0, 3),
       });
     } catch (error: any) {
       console.error("[SuggestedReplacements] Error:", error.message);
