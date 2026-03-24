@@ -4,7 +4,6 @@ hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["jq"]
 
 [deployment]
 deploymentTarget = "autoscale"
@@ -16,19 +15,7 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 23636
-externalPort = 3000
-
-[[ports]]
-localPort = 23636
-externalPort = 3001
-
-[[ports]]
-localPort = 23637
-externalPort = 4200
-
-[[ports]]
-localPort = 23638
+localPort = 5904
 externalPort = 3002
 
 [env]
@@ -56,14 +43,14 @@ args = "npm run dev"
 waitForPort = 5000
 
 [agent]
-integrations = ["javascript_mem_db:1.0.0", "javascript_database:1.0.0", "javascript_log_in_with_replit:1.0.0", "javascript_auth_all_persistance:1.0.0", "javascript_sendgrid:1.0.0", "javascript_object_storage:1.0.0", "javascript_openai:1.0.0", "javascript_gemini:1.0.0"]
+integrations = ["javascript_database:1.0.0"]
 
 [userenv]
 
 [userenv.shared]
-TOOL_AUDIT_EMAIL_TEST_MODE = "true"
-TOOL_AUDIT_TEST_EMAIL = "stephen.wong@transformco.com"
-
-[postMerge]
-path = "scripts/post-merge.sh"
-timeoutMs = 20000
+SNOWFLAKE_USER = "SVC_SCA_AUTO"
+SNOWFLAKE_ACCOUNT = "sears_hs_prod.us-east-1"
+SNOWFLAKE_DATABASE = "PARTS_SUPPLYCHAIN"
+SNOWFLAKE_SCHEMA = "SOFTEON"
+SNOWFLAKE_TABLE = "TPMS_EXTRACT"
+SNOWFLAKE_PRIVATE_KEY_PATH = "server/keys/snowflake_private_key.p8"
