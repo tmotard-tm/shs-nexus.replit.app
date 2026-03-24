@@ -1117,8 +1117,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // Fetch distinct truck numbers (not just count) so we can preserve them historically even if trucks are later removed
       const result = await getDb().execute(sql`
         SELECT DISTINCT t.truck_number
-        FROM actions a
-        JOIN trucks t ON a.truck_id = t.id
+        FROM fs_actions a
+        JOIN fs_trucks t ON a.truck_id = t.id
         WHERE a.action_time >= ${satStr}::timestamp
           AND a.action_time < ${friStr}::timestamp
           AND a.action_note ILIKE '%Pick Up Slot Booked changed from No to Yes%'
@@ -1137,7 +1137,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const weekLabel = `${formatShort(saturday)} - ${formatShort(fridayDisplay)}`;
       
       const existing = await getDb().execute(sql`
-        SELECT id, pickups_scheduled, truck_numbers FROM pickup_weekly_snapshots
+        SELECT id, pickups_scheduled, truck_numbers FROM fs_pickup_weekly_snapshots
         WHERE week_number = ${weekNumber} AND week_year = ${weekYear}
         LIMIT 1
       `);
@@ -1154,7 +1154,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         
         const truckNumsJson = JSON.stringify(finalTruckNumbers);
         await getDb().execute(sql`
-          UPDATE pickup_weekly_snapshots
+          UPDATE fs_pickup_weekly_snapshots
           SET pickups_scheduled = ${finalCount}, 
               captured_at = now(), 
               week_label = ${weekLabel},
@@ -1189,7 +1189,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.get("/pickup-weekly-snapshots", async (req, res) => {
     try {
       const snapshots = await getDb().execute(sql`
-        SELECT * FROM pickup_weekly_snapshots
+        SELECT * FROM fs_pickup_weekly_snapshots
         ORDER BY week_year DESC, week_number DESC
         LIMIT 52
       `);
@@ -1207,7 +1207,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const { pickupsScheduled, truckNumbers } = req.body;
       
       const existing = await getDb().execute(sql`
-        SELECT * FROM pickup_weekly_snapshots WHERE id = ${id} LIMIT 1
+        SELECT * FROM fs_pickup_weekly_snapshots WHERE id = ${id} LIMIT 1
       `);
       
       if (!existing.rows || existing.rows.length === 0) {
@@ -1227,7 +1227,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       
       const patchTruckNumsJson = JSON.stringify(updatedTruckNumbers);
       await getDb().execute(sql`
-        UPDATE pickup_weekly_snapshots
+        UPDATE fs_pickup_weekly_snapshots
         SET pickups_scheduled = ${updatedCount},
             truck_numbers = (SELECT array_agg(value::text) FROM jsonb_array_elements_text(${patchTruckNumsJson}::jsonb)),
             captured_at = now()
