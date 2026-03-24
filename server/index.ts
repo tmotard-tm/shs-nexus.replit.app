@@ -10,9 +10,17 @@ import type { InsertTemplateWithId } from "../shared/schema";
 // TypeError ("Cannot set property message of #<ErrorEvent> which has only a getter")
 // when a WebSocket connection to the DB drops. This crashes the entire Node.js process.
 // Until a fixed version is available, intercept this specific error and keep the server alive.
+//
+// NeonDB serverless also forcibly closes connections when its compute scales/suspends,
+// reporting "terminating connection due to administrator command". This is normal NeonDB
+// housekeeping behaviour — the pool reconnects automatically on the next request.
 process.on('uncaughtException', (err: Error) => {
   if (err instanceof TypeError && err.message.includes('Cannot set property message')) {
     console.error('[NeonDB] Absorbed non-fatal WebSocket connection error:', err.message);
+    return;
+  }
+  if (err.message?.includes('terminating connection due to administrator command')) {
+    console.error('[NeonDB] Absorbed connection termination (compute scaling/idle timeout) — pool will reconnect automatically');
     return;
   }
   console.error('[FATAL] Uncaught exception — exiting:', err);
