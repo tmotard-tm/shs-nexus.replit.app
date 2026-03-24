@@ -2291,7 +2291,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       if (upperTitle.includes('TECHNICIAN 1')) {
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
-                 GPS_LATITUDE, GPS_LONGITUDE,
                  AMS_ZIP_LAT, AMS_ZIP_LON
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
@@ -2301,7 +2300,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('HVAC')) {
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
-                 GPS_LATITUDE, GPS_LONGITUDE,
                  AMS_ZIP_LAT, AMS_ZIP_LON
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
@@ -2316,8 +2314,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         VEHICLE_NUMBER: string;
         TRUCK_STATUS: string | null;
         INTERIOR: string | null;
-        GPS_LATITUDE: number | null;
-        GPS_LONGITUDE: number | null;
         AMS_ZIP_LAT: number | null;
         AMS_ZIP_LON: number | null;
       };
@@ -2361,8 +2357,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // Fetch Samsara locations (uses cached data — no extra network call)
       let samsaraMap: Map<string, { latitude: number; longitude: number }> = new Map();
       try {
-        const samsaraLocations = await fetchSamsaraLocations();
-        samsaraLocations.forEach((data, vehicleNum) => {
+        const samsaraFetch = await fetchSamsaraLocations();
+        samsaraFetch.forEach((data, vehicleNum) => {
           if (data.latitude && data.longitude) {
             samsaraMap.set(vehicleNum, { latitude: data.latitude, longitude: data.longitude });
           }
@@ -2371,19 +2367,56 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         // Non-fatal
       }
 
-      // Score each candidate by distance from the tech
+      // Batch-fetch confirmed physical addresses from fs_spare_vehicle_details
+      const candidateVehicleNums = candidates.map(r =>
+        String(r.VEHICLE_NUMBER).replace(/^0+/, '') || String(r.VEHICLE_NUMBER)
+      );
+      let confirmedZipMap: Map<string, string> = new Map();
+      try {
+        const spareDetails = await fleetScopeStorage.getSpareVehicleDetails(candidateVehicleNums);
+        for (const detail of spareDetails) {
+          if (detail.physicalAddress) {
+            const zipMatch = detail.physicalAddress.match(/\b(\d{5})(?:-\d{4})?\b/g);
+            const zip = zipMatch ? zipMatch[zipMatch.length - 1] : null;
+            if (zip) {
+              const vNum = String(detail.vehicleNumber).replace(/^0+/, '') || detail.vehicleNumber;
+              confirmedZipMap.set(vNum, zip);
+            }
+          }
+        }
+      } catch {
+        // Non-fatal
+      }
+
+      // Geocode confirmed ZIPs in parallel (cached — usually instant after first hit)
+      const confirmedCoordsMap: Map<string, { lat: number; lng: number }> = new Map();
+      if (confirmedZipMap.size > 0) {
+        await Promise.all(
+          Array.from(confirmedZipMap.entries()).map(async ([vNum, zip]) => {
+            try {
+              const coords = await getZipCoordinates(zip);
+              if (coords) confirmedCoordsMap.set(vNum, coords);
+            } catch {
+              // Non-fatal
+            }
+          })
+        );
+      }
+
+      // Score each candidate by distance from the tech.
+      // Resolution priority: Samsara (live GPS) → Confirmed (physicalAddress ZIP) → AMS (Snowflake coords)
       type ScoredCandidate = {
         vehicleNumber: string;
         truckStatus: string | null;
         interior: string | null;
         distanceMiles: number | null;
         locationSource: string | null;
+        _origIdx: number; // for stable sort
       };
 
-      const scored: ScoredCandidate[] = candidates.map(r => {
+      const scored: ScoredCandidate[] = candidates.map((r, idx) => {
         const vNum = String(r.VEHICLE_NUMBER).replace(/^0+/, '') || String(r.VEHICLE_NUMBER);
 
-        // Resolve spare vehicle coordinates: Samsara → GPS (Snowflake) → AMS (Snowflake)
         let spareLat: number | null = null;
         let spareLon: number | null = null;
         let locationSource: string | null = null;
@@ -2393,14 +2426,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           spareLat = samsaraEntry.latitude;
           spareLon = samsaraEntry.longitude;
           locationSource = 'Samsara';
-        } else if (r.GPS_LATITUDE != null && r.GPS_LONGITUDE != null) {
-          spareLat = Number(r.GPS_LATITUDE);
-          spareLon = Number(r.GPS_LONGITUDE);
-          locationSource = 'GPS';
-        } else if (r.AMS_ZIP_LAT != null && r.AMS_ZIP_LON != null) {
-          spareLat = Number(r.AMS_ZIP_LAT);
-          spareLon = Number(r.AMS_ZIP_LON);
-          locationSource = 'AMS';
+        } else {
+          const confirmedCoords = confirmedCoordsMap.get(vNum);
+          if (confirmedCoords) {
+            spareLat = confirmedCoords.lat;
+            spareLon = confirmedCoords.lng;
+            locationSource = 'Confirmed';
+          } else if (r.AMS_ZIP_LAT != null && r.AMS_ZIP_LON != null) {
+            spareLat = Number(r.AMS_ZIP_LAT);
+            spareLon = Number(r.AMS_ZIP_LON);
+            locationSource = 'AMS';
+          }
         }
 
         let distanceMiles: number | null = null;
@@ -2414,12 +2450,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           interior: r.INTERIOR || null,
           distanceMiles,
           locationSource,
+          _origIdx: idx,
         };
       });
 
-      // Sort: vehicles with distance first (nearest first), then vehicles with no distance
+      // Stable sort: nearest first; null-distance vehicles preserve their original Snowflake order
       scored.sort((a, b) => {
-        if (a.distanceMiles === null && b.distanceMiles === null) return 0;
+        if (a.distanceMiles === null && b.distanceMiles === null) return a._origIdx - b._origIdx;
         if (a.distanceMiles === null) return 1;
         if (b.distanceMiles === null) return -1;
         return a.distanceMiles - b.distanceMiles;
@@ -2429,7 +2466,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         matchFound: true,
         techName,
         jobTitle,
-        suggestions: scored.slice(0, 3),
+        suggestions: scored.slice(0, 3).map(({ _origIdx: _i, ...rest }) => rest),
       });
     } catch (error: any) {
       console.error("[SuggestedReplacements] Error:", error.message);
