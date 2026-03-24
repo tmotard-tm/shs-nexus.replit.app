@@ -2511,7 +2511,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               ].filter(Boolean);
               if (addressParts.length > 0) {
                 techAddress = addressParts.join(', ');
-                console.log(`[TechAddress] Found address via LAST_NAME fallback for truck ${truck.truckNumber} (last name: ${lastName}): ${techAddress}`);
+                console.log(`[TechAddress] Found address via LAST_NAME fallback for truck ${truck.truckNumber}`);
               }
             } else if (results.length > 1) {
               console.log(`[TechAddress] LAST_NAME fallback skipped for truck ${truck.truckNumber}: ${results.length} records matched last name "${lastName}" (ambiguous)`);
