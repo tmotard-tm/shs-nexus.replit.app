@@ -11938,5 +11938,36 @@ Respond ONLY with valid JSON, no other text.`;
     }
   });
 
+  // POST /rental-sync — manually trigger Rental Ops → Fleet Scope auto-sync (admin/manager only)
+  app.post("/rental-sync", async (req: any, res) => {
+    try {
+      const user = req.user;
+      if (!user || !["admin", "manager"].includes(user.role)) {
+        return res.status(403).json({ message: "Admin or manager access required" });
+      }
+
+      console.log(`[RentalSync] Manual sync triggered by ${user.username}`);
+
+      const { syncRentalOpsToFleetScope } = await import("./rental-ops-sync");
+      const result = await syncRentalOpsToFleetScope();
+
+      res.json({
+        success: true,
+        vehiclesInRentalOps: result.vehiclesInRentalOps,
+        added: result.added.length,
+        addedTrucks: result.added,
+        removed: result.removed.length,
+        removedTrucks: result.removed,
+        dateFilled: result.updated,
+        unchanged: result.unchanged,
+        consolidationId: result.consolidationId,
+        message: `Sync complete: ${result.added.length} added, ${result.removed.length} removed, ${result.updated} date(s) filled`,
+      });
+    } catch (error: any) {
+      console.error("[RentalSync] Manual sync failed:", error);
+      res.status(500).json({ message: error.message || "Rental Ops sync failed" });
+    }
+  });
+
   return app;
 }

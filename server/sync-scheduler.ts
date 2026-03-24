@@ -66,6 +66,16 @@ async function checkAndRunSync(): Promise<void> {
           console.error('[Scheduler] Odometer enrichment failed (non-fatal):', odoErr?.message);
         }
 
+        // Sync open rentals from Rental Ops into Fleet Scope Rentals Dashboard
+        try {
+          const { syncRentalOpsToFleetScope } = await import('./rental-ops-sync');
+          console.log('[Scheduler] Starting Rental Ops → Fleet Scope auto-sync...');
+          const rentalSyncResult = await syncRentalOpsToFleetScope();
+          console.log(`[Scheduler] Rental Ops sync complete — Added: ${rentalSyncResult.added.length}, Removed: ${rentalSyncResult.removed.length}, Date-filled: ${rentalSyncResult.updated}, Unchanged: ${rentalSyncResult.unchanged}`);
+        } catch (rentalErr: any) {
+          console.error('[Scheduler] Rental Ops → Fleet Scope sync failed (non-fatal):', rentalErr?.message);
+        }
+
         lastSyncDate = currentDateStr;
         console.log(`[Scheduler] Scheduled sync completed successfully for ${currentDateStr}`);
       }

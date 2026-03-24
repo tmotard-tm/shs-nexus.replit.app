@@ -183,7 +183,7 @@ export interface IStorage {
   updateApprovedCostImportMeta(headers: string[], keyColumn: string, totalRows: number, importedBy?: string): Promise<ApprovedCostImportMeta>;
   
   // Truck Consolidation operations
-  consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string }>, consolidatedBy: string): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }>;
+  consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string }>, consolidatedBy: string, preserveExistingDates?: boolean): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }>;
   getTruckConsolidations(limit?: number): Promise<TruckConsolidation[]>;
   
   // PMF Activity Log operations
@@ -1375,7 +1375,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Truck Consolidation operations
-  async consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string }>, consolidatedBy: string): Promise<{ added: string[]; removed: string[]; unchanged: number; consolidationId: string }> {
+  async consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string }>, consolidatedBy: string, preserveExistingDates = false): Promise<{ added: string[]; removed: string[]; unchanged: number; consolidationId: string }> {
     // Get current trucks in the system
     const currentTrucks = await this.getAllTrucks();
     const currentTruckNumbers = new Set(currentTrucks.map(t => t.truckNumber.trim().toUpperCase()));
@@ -1425,12 +1425,14 @@ export class DatabaseStorage implements IStorage {
     }
     
     // Update dateInRepair for matching trucks (in both lists)
+    // When preserveExistingDates=true (auto-sync), only fill blank values — never overwrite
     let updatedCount = 0;
     for (const truckNum of Array.from(inputTruckNumbers)) {
       if (currentTruckNumbers.has(truckNum)) {
         const entry = inputMap.get(truckNum);
         const truck = currentTrucks.find(t => t.truckNumber.trim().toUpperCase() === truckNum);
         if (truck && entry?.dateInRepair) {
+          if (preserveExistingDates && truck.datePutInRepair) continue;
           await this.updateTruck(truck.id, {
             datePutInRepair: entry.dateInRepair,
           });
