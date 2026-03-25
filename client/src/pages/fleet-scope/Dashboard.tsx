@@ -606,7 +606,7 @@ export default function Dashboard() {
     if (!openTruck) return;
     const normalized = openTruck.replace(/^0+/, '') || openTruck;
     const match = trucks.find(t => {
-      const tn = (t.truckNumber || '').replace(/^0+/, '') || t.truckNumber;
+      const tn = String(t.truckNumber ?? '').replace(/^0+/, '') || String(t.truckNumber ?? '');
       return tn === normalized;
     });
     if (match) {
