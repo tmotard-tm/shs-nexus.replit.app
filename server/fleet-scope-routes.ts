@@ -2284,7 +2284,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // Step 3: determine INTERIOR filter based on job title and query REPLIT_ALL_VEHICLES
-      // Fetch 20 candidates so we can distance-sort and pick the closest 3
+      // Fetch the full matching pool (no row cap) so distance-sort finds the truly closest 3
       const upperTitle = jobTitle.toUpperCase();
       let step3Sql: string;
 
@@ -2295,16 +2295,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND (UPPER(INTERIOR) = 'UTILITY WITHOUT REF RACKS' OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
-          LIMIT 20
         `;
-      } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('HVAC')) {
+      } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('TECHNICIAN 3') || upperTitle.includes('HVAC')) {
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
                  AMS_ZIP_LAT, AMS_ZIP_LON
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'
-          LIMIT 20
         `;
       } else {
         return res.json({ matchFound: true, techName, jobTitle, suggestions: [] });
