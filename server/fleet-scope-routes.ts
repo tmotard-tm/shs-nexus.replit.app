@@ -2536,6 +2536,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       // Sort: healthy trucks first (hasCheckEngine = false before true),
       // then nearest within each health tier; null-distance vehicles are last within tier.
+      // Tertiary _origIdx ensures deterministic ordering for ties.
       scored.sort((a, b) => {
         // Primary: health tier (no DTC before DTC)
         if (a.hasCheckEngine !== b.hasCheckEngine) return a.hasCheckEngine ? 1 : -1;
@@ -2543,7 +2544,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         if (a.distanceMiles === null && b.distanceMiles === null) return a._origIdx - b._origIdx;
         if (a.distanceMiles === null) return 1;
         if (b.distanceMiles === null) return -1;
-        return a.distanceMiles - b.distanceMiles;
+        if (a.distanceMiles !== b.distanceMiles) return a.distanceMiles - b.distanceMiles;
+        // Tertiary: stable original Snowflake order for equal distances
+        return a._origIdx - b._origIdx;
       });
 
       return res.json({
