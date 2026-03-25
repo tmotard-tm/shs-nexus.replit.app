@@ -2359,12 +2359,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // Fetch Samsara locations (uses cached data — no extra network call)
-      let samsaraMap: Map<string, { latitude: number; longitude: number; address: string }> = new Map();
+      let samsaraMap: Map<string, { latitude: number; longitude: number; address: string; street: string; city: string; state: string; postal: string }> = new Map();
       try {
         const samsaraFetch = await fetchSamsaraLocations();
         samsaraFetch.forEach((data, vehicleNum) => {
           if (data.latitude && data.longitude) {
-            samsaraMap.set(vehicleNum, { latitude: data.latitude, longitude: data.longitude, address: data.address || '' });
+            samsaraMap.set(vehicleNum, {
+              latitude: data.latitude,
+              longitude: data.longitude,
+              address: data.address || '',
+              street: data.street || '',
+              city: data.city || '',
+              state: data.state || '',
+              postal: data.postal || '',
+            });
           }
         });
       } catch {
@@ -2448,7 +2456,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           spareLat = samsaraEntry.latitude;
           spareLon = samsaraEntry.longitude;
           locationSource = 'Samsara';
-          locationAddress = samsaraEntry.address || null;
+          // Prefer full address string; build from components if empty
+          let samAddr = (samsaraEntry.address || '').trim();
+          if (!samAddr) {
+            const samParts = [
+              (samsaraEntry.street || '').trim(),
+              (samsaraEntry.city || '').trim(),
+              [(samsaraEntry.state || '').trim(), (samsaraEntry.postal || '').trim()].filter(Boolean).join(' '),
+            ].filter(Boolean);
+            samAddr = samParts.join(', ');
+          }
+          locationAddress = samAddr || null;
         } else {
           const confirmedCoords = confirmedCoordsMap.get(vNum);
           if (confirmedCoords) {
