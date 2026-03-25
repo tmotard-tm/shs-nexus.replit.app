@@ -106,7 +106,12 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
             {techLine}
             {data.suggestions.map((v) => (
               <div key={v.vehicleNumber} className="flex items-center gap-x-2 rounded-sm bg-muted/50 px-2 py-1.5">
-                <span className="font-mono text-sm font-semibold w-14 shrink-0">{v.vehicleNumber}</span>
+                <button
+                  className="font-mono text-sm font-semibold w-14 shrink-0 text-left hover:underline cursor-pointer"
+                  onClick={() => window.open(`/fleet-scope/dashboard?openTruck=${v.vehicleNumber}`, '_blank')}
+                >
+                  {v.vehicleNumber}
+                </button>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-muted-foreground truncate">{v.interior || "N/A"}</p>
                   {v.distanceMiles !== null && (

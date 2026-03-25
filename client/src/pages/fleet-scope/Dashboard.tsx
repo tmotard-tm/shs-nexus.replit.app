@@ -598,6 +598,27 @@ export default function Dashboard() {
     queryKey: ["/api/fs/trucks"],
   });
 
+  // Auto-open truck detail sheet when the page is loaded with ?openTruck=VEHICLE_NUMBER
+  useEffect(() => {
+    if (!trucks || trucks.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const openTruck = params.get('openTruck');
+    if (!openTruck) return;
+    const normalized = openTruck.replace(/^0+/, '') || openTruck;
+    const match = trucks.find(t => {
+      const tn = (t.truckNumber || '').replace(/^0+/, '') || t.truckNumber;
+      return tn === normalized;
+    });
+    if (match) {
+      setSelectedTruckId(match.id);
+      setDetailPanelOpen(true);
+    }
+    // Clean the param from the URL regardless of whether a match was found
+    params.delete('openTruck');
+    const newSearch = params.toString();
+    window.history.replaceState(null, '', newSearch ? `?${newSearch}` : window.location.pathname);
+  }, [trucks]);
+
   const { data: pickupsThisWeek } = useQuery<{
     count: number;
     label: string;
