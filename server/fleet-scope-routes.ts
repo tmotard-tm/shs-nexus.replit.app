@@ -2291,7 +2291,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       if (upperTitle.includes('TECHNICIAN 1')) {
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
-                 AMS_ZIP_LAT, AMS_ZIP_LON
+                 AMS_ZIP_LAT, AMS_ZIP_LON,
+                 AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE, AMS_CUR_ZIP
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND (UPPER(INTERIOR) = 'UTILITY WITHOUT REF RACKS' OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
@@ -2299,7 +2300,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('TECHNICIAN 3') || upperTitle.includes('HVAC')) {
         step3Sql = `
           SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
-                 AMS_ZIP_LAT, AMS_ZIP_LON
+                 AMS_ZIP_LAT, AMS_ZIP_LON,
+                 AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE, AMS_CUR_ZIP
           FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
           WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
             AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'
@@ -2314,6 +2316,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         INTERIOR: string | null;
         AMS_ZIP_LAT: number | null;
         AMS_ZIP_LON: number | null;
+        AMS_CUR_ADDRESS: string | null;
+        AMS_CUR_CITY: string | null;
+        AMS_CUR_STATE: string | null;
+        AMS_CUR_ZIP: string | null;
       };
       const candidates = await executeQuery<CandidateRow>(step3Sql);
 
@@ -2353,34 +2359,50 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // Fetch Samsara locations (uses cached data — no extra network call)
-      let samsaraMap: Map<string, { latitude: number; longitude: number }> = new Map();
+      let samsaraMap: Map<string, { latitude: number; longitude: number; address: string }> = new Map();
       try {
         const samsaraFetch = await fetchSamsaraLocations();
         samsaraFetch.forEach((data, vehicleNum) => {
           if (data.latitude && data.longitude) {
-            samsaraMap.set(vehicleNum, { latitude: data.latitude, longitude: data.longitude });
+            samsaraMap.set(vehicleNum, { latitude: data.latitude, longitude: data.longitude, address: data.address || '' });
           }
         });
       } catch {
         // Non-fatal
       }
 
-      // Batch-fetch confirmed physical addresses from fs_spare_vehicle_details
+      // Batch-fetch confirmed addresses from Snowflake SPARE_VEHICLE_ASSIGNMENT_STATUS
       const candidateVehicleNums = candidates.map(r =>
         String(r.VEHICLE_NUMBER).replace(/^0+/, '') || String(r.VEHICLE_NUMBER)
       );
+      const paddedCandidateList = candidates.map(r =>
+        String(r.VEHICLE_NUMBER).padStart(6, '0')
+      );
+      type ConfirmedRow = { VEHICLE_NUMBER: string; CONFIRMED_ADDRESS: string | null; CONFIRMED_CONTACT: string | null };
+      let confirmedMap: Map<string, { address: string; contact: string | null }> = new Map();
       let confirmedZipMap: Map<string, string> = new Map();
       try {
-        const spareDetails = await fleetScopeStorage.getSpareVehicleDetails(candidateVehicleNums);
-        for (const detail of spareDetails) {
-          if (detail.physicalAddress) {
-            const zipMatch = detail.physicalAddress.match(/\b(\d{5})(?:-\d{4})?\b/g);
-            const zip = zipMatch ? zipMatch[zipMatch.length - 1] : null;
-            if (zip) {
-              const vNum = String(detail.vehicleNumber).replace(/^0+/, '') || detail.vehicleNumber;
-              confirmedZipMap.set(vNum, zip);
-            }
-          }
+        const inList = paddedCandidateList.map(n => `'${n}'`).join(', ');
+        const confirmedSql = `
+          SELECT VEHICLE_NUMBER, CONFIRMED_ADDRESS, CONFIRMED_CONTACT
+          FROM PARTS_SUPPLYCHAIN.FLEET.SPARE_VEHICLE_ASSIGNMENT_STATUS
+          WHERE LPAD(TRIM(VEHICLE_NUMBER), 6, '0') IN (${inList})
+            AND CONFIRMED_ADDRESS IS NOT NULL
+            AND TRIM(CONFIRMED_ADDRESS) != ''
+          QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY LPAD(TRIM(VEHICLE_NUMBER), 6, '0')
+            ORDER BY ADDRESS_UPDATED_AT DESC NULLS LAST
+          ) = 1
+        `;
+        const confirmedRows = await executeQuery<ConfirmedRow>(confirmedSql);
+        for (const row of confirmedRows) {
+          const addr = (row.CONFIRMED_ADDRESS || '').trim();
+          if (!addr) continue;
+          const vNum = String(row.VEHICLE_NUMBER).replace(/^0+/, '') || String(row.VEHICLE_NUMBER);
+          confirmedMap.set(vNum, { address: addr, contact: (row.CONFIRMED_CONTACT || '').trim() || null });
+          const zipMatch = addr.match(/\b(\d{5})(?:-\d{4})?\b/g);
+          const zip = zipMatch ? zipMatch[zipMatch.length - 1] : null;
+          if (zip) confirmedZipMap.set(vNum, zip);
         }
       } catch {
         // Non-fatal
@@ -2402,13 +2424,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // Score each candidate by distance from the tech.
-      // Resolution priority: Samsara (live GPS) → Confirmed (physicalAddress ZIP) → AMS (Snowflake coords)
+      // Resolution priority: Samsara (live GPS) → Confirmed (SPARE_VEHICLE_ASSIGNMENT_STATUS ZIP) → AMS (Snowflake coords)
       type ScoredCandidate = {
         vehicleNumber: string;
         truckStatus: string | null;
         interior: string | null;
         distanceMiles: number | null;
         locationSource: string | null;
+        locationAddress: string | null;
         _origIdx: number; // for stable sort
       };
 
@@ -2418,22 +2441,41 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         let spareLat: number | null = null;
         let spareLon: number | null = null;
         let locationSource: string | null = null;
+        let locationAddress: string | null = null;
 
         const samsaraEntry = samsaraMap.get(vNum);
         if (samsaraEntry) {
           spareLat = samsaraEntry.latitude;
           spareLon = samsaraEntry.longitude;
           locationSource = 'Samsara';
+          locationAddress = samsaraEntry.address || null;
         } else {
           const confirmedCoords = confirmedCoordsMap.get(vNum);
           if (confirmedCoords) {
             spareLat = confirmedCoords.lat;
             spareLon = confirmedCoords.lng;
             locationSource = 'Confirmed';
+            const confirmedEntry = confirmedMap.get(vNum);
+            if (confirmedEntry) {
+              locationAddress = confirmedEntry.contact
+                ? `${confirmedEntry.address} · ${confirmedEntry.contact}`
+                : confirmedEntry.address;
+            }
           } else if (r.AMS_ZIP_LAT != null && r.AMS_ZIP_LON != null) {
             spareLat = Number(r.AMS_ZIP_LAT);
             spareLon = Number(r.AMS_ZIP_LON);
             locationSource = 'AMS';
+            const amsStreet = (r.AMS_CUR_ADDRESS || '').trim();
+            const amsCityStateZip = [
+              (r.AMS_CUR_CITY || '').trim(),
+              (r.AMS_CUR_STATE || '').trim(),
+              (r.AMS_CUR_ZIP || '').trim(),
+            ].filter(Boolean).join(' ');
+            if (amsStreet && amsCityStateZip) {
+              locationAddress = `${amsStreet}, ${amsCityStateZip}`;
+            } else if (amsStreet || amsCityStateZip) {
+              locationAddress = amsStreet || amsCityStateZip;
+            }
           }
         }
 
@@ -2448,6 +2490,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           interior: r.INTERIOR || null,
           distanceMiles,
           locationSource,
+          locationAddress,
           _origIdx: idx,
         };
       });

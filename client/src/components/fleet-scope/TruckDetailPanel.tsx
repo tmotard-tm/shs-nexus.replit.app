@@ -54,6 +54,7 @@ interface SuggestedVehicle {
   interior: string | null;
   distanceMiles: number | null;
   locationSource: string | null;
+  locationAddress: string | null;
 }
 
 interface SuggestedReplacementsData {
@@ -111,6 +112,9 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
                     <p className="text-xs text-muted-foreground/70 truncate">
                       {v.distanceMiles} mi{v.locationSource ? ` · ${v.locationSource}` : ""}
                     </p>
+                  )}
+                  {v.locationAddress && (
+                    <p className="text-xs text-muted-foreground/70 truncate">{v.locationAddress}</p>
                   )}
                 </div>
                 <Badge variant="outline" className="text-xs py-0 px-1.5 h-5 shrink-0">{v.truckStatus || "Unknown"}</Badge>
