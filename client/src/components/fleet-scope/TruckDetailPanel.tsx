@@ -55,6 +55,7 @@ interface SuggestedVehicle {
   distanceMiles: number | null;
   locationSource: string | null;
   locationAddress: string | null;
+  hasCheckEngine: boolean;
 }
 
 interface SuggestedReplacementsData {
@@ -117,7 +118,15 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
                     <p className="text-xs text-muted-foreground/70 truncate">{v.locationAddress}</p>
                   )}
                 </div>
-                <Badge variant="outline" className="text-xs py-0 px-1.5 h-5 shrink-0">{v.truckStatus || "Unknown"}</Badge>
+                <div className="flex flex-col items-end gap-0.5 shrink-0">
+                  <Badge variant="outline" className="text-xs py-0 px-1.5 h-5">{v.truckStatus || "Unknown"}</Badge>
+                  {v.hasCheckEngine && (
+                    <Badge className="bg-orange-600 text-white text-xs py-0 px-1.5 h-5 flex items-center gap-0.5 border-none">
+                      <Wrench className="h-2.5 w-2.5" />
+                      Check Engine
+                    </Badge>
+                  )}
+                </div>
               </div>
             ))}
           </div>

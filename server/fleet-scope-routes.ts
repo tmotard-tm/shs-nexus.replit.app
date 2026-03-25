@@ -2431,6 +2431,25 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         );
       }
 
+      // Batch-check which candidates have active Check Engine DTCs in SAMSARA_CRITICALITY_SCORE
+      const dtcVehicleSet = new Set<string>();
+      try {
+        const dtcInList = paddedCandidateList.map(n => `'${n}'`).join(', ');
+        const dtcSql = `
+          SELECT TRUCK_NUMBER
+          FROM PARTS_SUPPLYCHAIN.FLEET.SAMSARA_CRITICALITY_SCORE
+          WHERE LPAD(TRIM(TRUCK_NUMBER), 6, '0') IN (${dtcInList})
+        `;
+        type DtcRow = { TRUCK_NUMBER: string };
+        const dtcRows = await executeQuery<DtcRow>(dtcSql);
+        for (const row of dtcRows) {
+          const vNum = String(row.TRUCK_NUMBER).replace(/^0+/, '') || String(row.TRUCK_NUMBER);
+          dtcVehicleSet.add(vNum);
+        }
+      } catch {
+        // Non-fatal — if this fails, check engine deprioritization is skipped
+      }
+
       // Score each candidate by distance from the tech.
       // Resolution priority: Samsara (live GPS) → Confirmed (SPARE_VEHICLE_ASSIGNMENT_STATUS ZIP) → AMS (Snowflake coords)
       type ScoredCandidate = {
@@ -2440,6 +2459,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         distanceMiles: number | null;
         locationSource: string | null;
         locationAddress: string | null;
+        hasCheckEngine: boolean;
         _origIdx: number; // for stable sort
       };
 
@@ -2509,12 +2529,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           distanceMiles,
           locationSource,
           locationAddress,
+          hasCheckEngine: dtcVehicleSet.has(vNum),
           _origIdx: idx,
         };
       });
 
-      // Stable sort: nearest first; null-distance vehicles preserve their original Snowflake order
+      // Sort: healthy trucks first (hasCheckEngine = false before true),
+      // then nearest within each health tier; null-distance vehicles are last within tier.
       scored.sort((a, b) => {
+        // Primary: health tier (no DTC before DTC)
+        if (a.hasCheckEngine !== b.hasCheckEngine) return a.hasCheckEngine ? 1 : -1;
+        // Secondary: distance ascending
         if (a.distanceMiles === null && b.distanceMiles === null) return a._origIdx - b._origIdx;
         if (a.distanceMiles === null) return 1;
         if (b.distanceMiles === null) return -1;
