@@ -109,7 +109,7 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
                 <button
                   type="button"
                   className="font-mono text-sm font-semibold w-14 shrink-0 text-left hover:underline cursor-pointer"
-                  onClick={() => window.open(`/fleet-scope/dashboard?openTruck=${v.vehicleNumber}`, '_blank')}
+                  onClick={() => window.open(`/fleet-management?openTruck=${v.vehicleNumber}`, '_blank')}
                 >
                   {v.vehicleNumber}
                 </button>

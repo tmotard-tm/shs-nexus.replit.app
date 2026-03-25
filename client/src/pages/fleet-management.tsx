@@ -178,7 +178,22 @@ export default function FleetManagement() {
   const isLiveMode = syncStatus?.dataMode === 'live';
   
   const allVehicles = apiResponse?.vehicles || [];
-  
+
+  // Auto-open vehicle detail sheet when page loads with ?openTruck=VEHICLE_NUMBER
+  useEffect(() => {
+    if (allVehicles.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const openTruck = params.get('openTruck');
+    if (!openTruck) return;
+    const normalized = toCanonical(openTruck);
+    const match = allVehicles.find(v => toCanonical(v.vehicleNumber) === normalized);
+    setSearchQuery(openTruck);
+    if (match) setSelectedVehicle(match);
+    params.delete('openTruck');
+    const newSearch = params.toString();
+    window.history.replaceState(null, '', newSearch ? `?${newSearch}` : window.location.pathname);
+  }, [allVehicles]);
+
   // Sync to Holman mutation
   const syncToHolmanMutation = useMutation({
     mutationFn: async ({ vehicleNumber, enterpriseId }: { vehicleNumber: string; enterpriseId?: string | null }) => {
