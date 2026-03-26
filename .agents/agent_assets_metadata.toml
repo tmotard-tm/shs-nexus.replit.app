@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "EjiRdfMjaMBkIoz5B7zTK"
+uri = "file://docs/fleet-truck-database-architecture.md"
+type = "text"
+title = "Fleet Truck Database Architecture"
