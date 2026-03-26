@@ -520,7 +520,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="p-0 flex flex-col sm:max-w-xl" data-testid="panel-truck-detail">
+      <SheetContent side="right" className="p-0 flex flex-col w-[700px] sm:max-w-[700px]" data-testid="panel-truck-detail">
         {truckLoading ? (
           <div className="p-6 space-y-4">
             <Skeleton className="h-8 w-48" />
