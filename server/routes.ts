@@ -9164,6 +9164,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Weekly Offboarding name-set ─────────────────────────────────────────────
+  // Lightweight endpoint returning parsed employee names so the Rentals
+  // dashboard can flag techs who are currently in offboarding. Cached 30 min.
+  let woNameSetCache: { ts: number; data: any } | null = null;
+  const WO_NAME_CACHE_TTL_MS = 30 * 60 * 1000;
+
+  app.get("/api/weekly-offboarding/name-set", requireAuth, async (req: any, res) => {
+    try {
+      if (woNameSetCache && Date.now() - woNameSetCache.ts < WO_NAME_CACHE_TTL_MS) {
+        return res.json(woNameSetCache.data);
+      }
+      const snowflakeService = getSnowflakeService();
+      const rows = await snowflakeService.executeQuery(
+        `SELECT DISTINCT EMPL_NAME
+         FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW
+         WHERE LAST_DATE_WORKED >= '2026-01-01'
+           AND EMPL_NAME IS NOT NULL`
+      ) as any[];
+      // rentalNameParse is declared later in this file but hoisted to the top
+      // of the registerRoutes function scope, so it is safely callable here.
+      const names = rows.map((r: any) => {
+        const raw = (r.EMPL_NAME || '').trim();
+        const { first, last } = rentalNameParse(raw);
+        return { raw, last, first };
+      }).filter((n: any) => n.last);
+      const data = { names };
+      woNameSetCache = { ts: Date.now(), data };
+      res.json(data);
+    } catch (error: any) {
+      console.error('[WO name-set] Error fetching offboarding name set:', error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Weekly Offboarding - Sync/Refresh (same as GET but for POST compatibility)
   app.post("/api/snowflake/sync/weekly-offboarding", requireAuth, async (req: any, res) => {
     try {

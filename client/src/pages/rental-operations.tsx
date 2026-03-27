@@ -211,6 +211,50 @@ export default function RentalOperations() {
     refetchInterval: 5 * 60 * 1000,
   });
 
+  // Fetch weekly offboarding employee names for "T" badge cross-reference
+  const { data: woNameSet } = useQuery<{ names: Array<{ raw: string; last: string; first: string }> }>({
+    queryKey: ["/api/weekly-offboarding/name-set"],
+    staleTime: 30 * 60 * 1000,
+  });
+
+  // Build last-name → first-names lookup from offboarding data
+  const offboardingLastMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const n of woNameSet?.names ?? []) {
+      const key = n.last.toUpperCase();
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(n.first.toUpperCase());
+    }
+    return map;
+  }, [woNameSet]);
+
+  // Parse renterName → { last, first } handling both "FIRST LAST" and "LAST, FIRST"
+  function parseRenterLast(raw: string): { last: string; first: string } {
+    if (!raw) return { last: '', first: '' };
+    const n = raw.trim();
+    if (n.includes(',')) {
+      const commaIdx = n.indexOf(',');
+      const last = n.slice(0, commaIdx).trim().toUpperCase();
+      const first = n.slice(commaIdx + 1).trim().split(/\s+/)[0]?.toUpperCase() ?? '';
+      return { last, first };
+    }
+    const SUFFIXES = new Set(['JR', 'SR', 'II', 'III', 'IV', 'V', 'JR.', 'SR.']);
+    let tokens = n.trim().split(/\s+/).map(t => t.toUpperCase());
+    while (tokens.length > 1 && SUFFIXES.has(tokens[tokens.length - 1])) tokens = tokens.slice(0, -1);
+    return { last: tokens[tokens.length - 1] ?? '', first: tokens[0] ?? '' };
+  }
+
+  // Returns true when the renter is found in the weekly offboarding roster
+  function isOffboardingMatch(renterName: string): boolean {
+    const { last, first } = parseRenterLast(renterName);
+    if (!last) return false;
+    const candidates = offboardingLastMap.get(last);
+    if (!candidates || candidates.length === 0) return false;
+    if (candidates.length === 1) return true;          // unique last name → match
+    if (!first) return false;                          // ambiguous, no first to refine
+    return candidates.includes(first);                 // first+last match
+  }
+
   const qualifyMutation = useMutation({
     mutationFn: (source: string) => apiRequest("POST", "/api/rental-ops/qualify", { source }),
     onSuccess: () => {
@@ -593,7 +637,19 @@ export default function RentalOperations() {
                       ) : sortedOpen.map((r: any, i: number) => (
                         <TableRow key={i} className={rowAgingClass(r.daysOpen || 0)}>
                           <TableCell className="font-mono text-sm">{r.vehicleNumber || "—"}</TableCell>
-                          <TableCell className="max-w-[200px] truncate">{r.renterName || "—"}</TableCell>
+                          <TableCell className="max-w-[220px]">
+                            <span className="flex items-center gap-1.5 truncate">
+                              <span className="truncate">{r.renterName || "—"}</span>
+                              {r.renterName && isOffboardingMatch(r.renterName) && (
+                                <span
+                                  className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 text-[10px] font-bold leading-none"
+                                  title="Tech is in the Weekly Offboarding roster"
+                                >
+                                  T
+                                </span>
+                              )}
+                            </span>
+                          </TableCell>
                           <TableCell className="font-mono text-xs">
                             {r.enterpriseId ? (
                               r.enterpriseIdSource === 'name_last_unique' || r.enterpriseIdSource === 'name_full_unique' ? (
