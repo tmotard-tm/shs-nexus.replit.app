@@ -684,11 +684,14 @@ export default function Dashboard() {
     return map;
   }, [woNameSet]);
 
+  // In-flight guard: prevents duplicate PATCH bursts during rapid refetch/re-render windows
+  const offboardingFlagInFlight = useRef(new Set<string>());
+
   // When offboarding names load, flag any truck whose techName matches (write once, never cleared by sync)
   useEffect(() => {
     if (!trucks || offboardingLastMap.size === 0) return;
     const toFlag = trucks.filter(t => {
-      if (t.offboardingFlagged || !t.techName) return false;
+      if (t.offboardingFlagged || !t.techName || offboardingFlagInFlight.current.has(t.id)) return false;
       const name = t.techName.trim();
       let last: string, first: string;
       if (name.includes(',')) {
@@ -710,11 +713,13 @@ export default function Dashboard() {
       return candidates.includes(first);
     });
     if (toFlag.length === 0) return;
+    toFlag.forEach(t => offboardingFlagInFlight.current.add(t.id));
     Promise.all(
       toFlag.map(t => apiRequest("PATCH", `/api/fs/trucks/${t.id}`, { offboardingFlagged: true }))
     ).then(() => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
     }).catch((err: any) => {
+      toFlag.forEach(t => offboardingFlagInFlight.current.delete(t.id));
       console.error("[Offboarding badge] Failed to set flag:", err);
     });
   }, [trucks, offboardingLastMap]);
