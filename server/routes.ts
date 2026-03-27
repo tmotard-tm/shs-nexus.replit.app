@@ -9165,8 +9165,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ── Weekly Offboarding name-set ─────────────────────────────────────────────
-  // Lightweight endpoint returning parsed employee names so the Rentals
-  // dashboard can flag techs who are currently in offboarding. Cached 30 min.
+  // Returns parsed employee names AND enterprise IDs from the Oracle term roster
+  // so consumers can match by either name (Fleet Scope T badge) or enterprise ID
+  // (Rental Operations T badge). Cached 30 min.
   let woNameSetCache: { ts: number; data: any } | null = null;
   const WO_NAME_CACHE_TTL_MS = 30 * 60 * 1000;
 
@@ -9177,7 +9178,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const snowflakeService = getSnowflakeService();
       const rows = await snowflakeService.executeQuery(
-        `SELECT DISTINCT EMPL_NAME
+        `SELECT DISTINCT EMPL_NAME, ENTERPRISE_ID
          FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW
          WHERE LAST_DATE_WORKED >= '2026-01-01'
            AND EMPL_NAME IS NOT NULL`
@@ -9189,7 +9190,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { first, last } = rentalNameParse(raw);
         return { raw, last, first };
       }).filter((n: any) => n.last);
-      const data = { names };
+      const enterpriseIds = rows
+        .map((r: any) => (r.ENTERPRISE_ID || '').trim().toUpperCase())
+        .filter((id: string) => id.length > 0);
+      const data = { names, enterpriseIds };
       woNameSetCache = { ts: Date.now(), data };
       res.json(data);
     } catch (error: any) {
