@@ -2,7 +2,8 @@ import { getSnowflakeSyncService } from './snowflake-sync-service';
 import { isSnowflakeConfigured } from './snowflake-service';
 import { db } from './db';
 import { queueItems } from '@shared/schema';
-import { eq, and, isNotNull } from 'drizzle-orm';
+import { rentalImports } from '@shared/fleet-scope-schema';
+import { eq, and, isNotNull, desc } from 'drizzle-orm';
 import { getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
 import { storage } from './storage';
 import { createOffboardingQueueTasks } from './create-offboarding-tasks-service';
@@ -401,6 +402,52 @@ async function backfillAllDepartments(): Promise<void> {
   }
 }
 
+/**
+ * Query the database for the most recent rental sync date (EST).
+ * Returns a date string like "2026-03-27" or null if no sync has ever run.
+ * Uses this as restart-safe memory so the in-memory lastSyncDate can be
+ * seeded from the DB on every startup.
+ */
+async function getLastRentalSyncDateFromDb(): Promise<string | null> {
+  try {
+    const [latest] = await db
+      .select({ importedAt: rentalImports.importedAt })
+      .from(rentalImports)
+      .orderBy(desc(rentalImports.importedAt))
+      .limit(1);
+    if (!latest?.importedAt) return null;
+    // Convert the stored UTC timestamp to EST date string
+    const estDate = new Date(latest.importedAt.getTime() - (5 * 60 * 60 * 1000));
+    return getDateString(estDate);
+  } catch (err: any) {
+    console.error('[Scheduler] Could not read last rental sync date from DB:', err?.message);
+    return null;
+  }
+}
+
+/**
+ * Run a catch-up rental sync if one hasn't happened today (EST).
+ * Safe to call on every startup — reads the DB so multiple restarts
+ * in the same day will only trigger one sync.
+ */
+async function runCatchUpRentalSyncIfNeeded(): Promise<void> {
+  if (!isSnowflakeConfigured()) return;
+  try {
+    const lastDbSyncDate = await getLastRentalSyncDateFromDb();
+    const todayStr = getDateString(getESTDate());
+    if (lastDbSyncDate === todayStr) {
+      console.log(`[Scheduler] Rental sync already ran today (${todayStr}), skipping startup catch-up`);
+      return;
+    }
+    console.log(`[Scheduler] Startup catch-up: last rental sync was ${lastDbSyncDate ?? 'never'}, running now...`);
+    const { syncRentalOpsToFleetScope } = await import('./rental-ops-sync');
+    const result = await syncRentalOpsToFleetScope();
+    console.log(`[Scheduler] Startup catch-up complete — Added: ${result.added.length}, Removed: ${result.removed.length}, Date-filled: ${result.updated}, Unchanged: ${result.unchanged}`);
+  } catch (err: any) {
+    console.error('[Scheduler] Startup catch-up rental sync failed (non-fatal):', err?.message);
+  }
+}
+
 export function startSyncScheduler(): void {
   if (schedulerRunning) {
     console.log('[Scheduler] Sync scheduler already running');
@@ -423,14 +470,27 @@ export function startSyncScheduler(): void {
       console.error('[Backfill] Startup backfill failed:', err)
     );
     
-    // Delay the initial check by 5 seconds to let Snowflake fully connect
-    setTimeout(() => {
-      checkAndRunSync();
-    }, 5000);
+    // Seed lastSyncDate from the DB so restarts don't re-fire the 5am sync
+    // on the same day. Then run the normal check 5s later.
+    getLastRentalSyncDateFromDb().then(dbDate => {
+      if (dbDate) {
+        lastSyncDate = dbDate;
+        console.log(`[Scheduler] Seeded lastSyncDate from DB: ${dbDate}`);
+      }
+    }).catch(() => {}).finally(() => {
+      setTimeout(() => { checkAndRunSync(); }, 5000);
+    });
   } else {
     console.log('[Scheduler] Production mode detected - setInterval scheduler disabled');
     console.log('[Scheduler] Syncs should be triggered via Replit Scheduled Deployments');
     console.log('[Scheduler] Configure a scheduled task with: npx tsx server/run-sync.ts');
+    // On every production startup, run a catch-up rental sync if today's hasn't run yet.
+    // The DB is the source of truth, so multiple restarts in one day are safe.
+    setTimeout(() => {
+      runCatchUpRentalSyncIfNeeded().catch(err =>
+        console.error('[Scheduler] Production startup catch-up error:', err?.message)
+      );
+    }, 15000); // 15s delay to let DB and Snowflake fully initialise
   }
 }
 
