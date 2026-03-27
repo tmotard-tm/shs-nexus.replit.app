@@ -9173,26 +9173,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/weekly-offboarding/name-set", requireAuth, async (req: any, res) => {
     try {
+      // Bust stale cache that predates the enterpriseIds field (shape migration guard)
+      if (woNameSetCache && !woNameSetCache.data?.enterpriseIds) {
+        woNameSetCache = null;
+      }
       if (woNameSetCache && Date.now() - woNameSetCache.ts < WO_NAME_CACHE_TTL_MS) {
         return res.json(woNameSetCache.data);
       }
       const snowflakeService = getSnowflakeService();
       const rows = await snowflakeService.executeQuery(
-        `SELECT DISTINCT EMPL_NAME, ENTERPRISE_ID
+        `SELECT EMPL_NAME, ENTERPRISE_ID
          FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW
          WHERE LAST_DATE_WORKED >= '2026-01-01'
            AND EMPL_NAME IS NOT NULL`
       ) as any[];
       // rentalNameParse is declared later in this file but hoisted to the top
       // of the registerRoutes function scope, so it is safely callable here.
-      const names = rows.map((r: any) => {
+      // Build names from unique EMPL_NAME values (same semantics as prior DISTINCT EMPL_NAME query)
+      const namesSeen = new Set<string>();
+      const names: Array<{ raw: string; last: string; first: string }> = [];
+      const eidSet = new Set<string>();
+      for (const r of rows) {
         const raw = (r.EMPL_NAME || '').trim();
-        const { first, last } = rentalNameParse(raw);
-        return { raw, last, first };
-      }).filter((n: any) => n.last);
-      const enterpriseIds = rows
-        .map((r: any) => (r.ENTERPRISE_ID || '').trim().toUpperCase())
-        .filter((id: string) => id.length > 0);
+        const eid = (r.ENTERPRISE_ID || '').trim().toUpperCase();
+        if (eid) eidSet.add(eid);
+        if (raw && !namesSeen.has(raw)) {
+          namesSeen.add(raw);
+          const { first, last } = rentalNameParse(raw);
+          if (last) names.push({ raw, last, first });
+        }
+      }
+      const enterpriseIds = Array.from(eidSet);
       const data = { names, enterpriseIds };
       woNameSetCache = { ts: Date.now(), data };
       res.json(data);
