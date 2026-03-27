@@ -12226,15 +12226,12 @@ Respond ONLY with valid JSON, no other text.`;
     }
   });
 
-  // POST /rental-sync — manually trigger Rental Ops → Fleet Scope auto-sync (admin/manager only)
+  // POST /rental-sync — manually trigger Rental Ops → Fleet Scope auto-sync (any authenticated user)
   app.post("/rental-sync", async (req: any, res) => {
     try {
       const user = req.user;
-      if (!user || !["admin", "manager"].includes(user.role)) {
-        return res.status(403).json({ message: "Admin or manager access required" });
-      }
-
-      console.log(`[RentalSync] Manual sync triggered by ${user.username}`);
+      const triggeredBy = user?.username ?? "unknown";
+      console.log(`[RentalSync] Manual sync triggered by ${triggeredBy}`);
 
       const { syncRentalOpsToFleetScope } = await import("./rental-ops-sync");
       const result = await syncRentalOpsToFleetScope();
