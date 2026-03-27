@@ -598,12 +598,12 @@ export default function RentalOperations() {
                             {r.enterpriseId ? (
                               r.enterpriseIdSource === 'name_last_unique' || r.enterpriseIdSource === 'name_full_unique' ? (
                                 <span
-                                  className="text-muted-foreground italic"
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 font-mono text-xs"
                                   title={r.enterpriseIdSource === 'name_last_unique'
                                     ? `Inferred by unique last name match in TPMS`
                                     : `Inferred by unique first + last name match in TPMS`}
                                 >
-                                  ~{r.enterpriseId}
+                                  <span className="opacity-60 font-sans">~</span>{r.enterpriseId}
                                 </span>
                               ) : (
                                 <span className="text-foreground">{r.enterpriseId}</span>
