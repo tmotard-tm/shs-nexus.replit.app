@@ -13847,6 +13847,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Returns the set of Enterprise IDs currently in open rentals (for cross-app badge on Weekly Offboarding).
+  // Uses the same TPMS name-matching logic as the main open-rentals endpoint.
+  app.get("/api/rental-ops/open-enterprise-ids", requireAuth, async (req: any, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured", enterpriseIds: [] });
+      const sf = getSnowflakeService();
+      await sf.connect();
+
+      const eidCacheKey = `open-eid:${req.query?.fileDate || 'latest'}`;
+      const eidCached = getRentalOpsCache(eidCacheKey);
+      if (eidCached) return res.json({ ...eidCached.data, _cachedAt: eidCached.cachedAt });
+
+      const normV = (v: string) => (v || '').trim().replace(/^0+/, '');
+      const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
+
+      const [ticketRows, holmanRows] = await Promise.all([
+        sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTER_NAME, RENTAL_START_DATE FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
+        sf.executeQuery(`SELECT VEHICLE_NUMBER, ENTERPRISE_ID, RENTAL_VENDOR FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(req.query?.fileDate as string)} LIMIT 5000`) as Promise<any[]>,
+      ]);
+
+      // Deduplicate enterprise ticket rows by vehicle (keep latest rental start date)
+      const entByVehicle = new Map<string, any>();
+      for (const r of ticketRows) {
+        const vn = normV(r.VEHICLE_NUMBER || '');
+        if (!vn) continue;
+        const existing = entByVehicle.get(vn);
+        const rDate = new Date(r.RENTAL_START_DATE || '2000-01-01').getTime();
+        const eDate = existing ? new Date(existing.RENTAL_START_DATE || '2000-01-01').getTime() : 0;
+        if (!existing || rDate > eDate) entByVehicle.set(vn, r);
+      }
+      const allEntVns = new Set(entByVehicle.keys());
+
+      // Build rows for TPMS name enrichment
+      const enrichRows: any[] = Array.from(entByVehicle.values()).map(r => ({
+        renterName: (r.RENTER_NAME || '').trim(),
+        enterpriseId: null as string | null,
+        source: 'enterprise',
+      }));
+      await rentalEnrichEnterpriseIds(sf, enrichRows);
+
+      // Collect all resolved Enterprise IDs (normalized to upper-case for consistent matching)
+      const entIds = new Set<string>();
+      for (const row of enrichRows) {
+        if (row.enterpriseId) entIds.add(String(row.enterpriseId).trim().toUpperCase());
+      }
+
+      // Add Holman segment direct Enterprise IDs
+      for (const r of holmanRows) {
+        const vn = normV(r.VEHICLE_NUMBER || '');
+        if (!vn || isEntVendor(r.RENTAL_VENDOR) || allEntVns.has(vn)) continue;
+        const eid = (r.ENTERPRISE_ID || '').trim().toUpperCase();
+        if (eid) entIds.add(eid);
+      }
+
+      const eidResult = { enterpriseIds: Array.from(entIds) };
+      setRentalOpsCache(eidCacheKey, eidResult);
+      res.json(eidResult);
+    } catch (err: any) {
+      return handleSnowflakeError(err, res);
+    }
+  });
+
   app.get("/api/rental-ops/summary", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");

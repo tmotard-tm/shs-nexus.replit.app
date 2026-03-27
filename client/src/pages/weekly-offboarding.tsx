@@ -89,6 +89,13 @@ export default function WeeklyOffboarding() {
     queryKey: ['/api/weekly-offboarding'],
   });
 
+  // Fetch the set of Enterprise IDs currently in open rentals for the "Rental" badge
+  const { data: openRentalEids } = useQuery<{ enterpriseIds: string[] }>({
+    queryKey: ['/api/rental-ops/open-enterprise-ids'],
+    staleTime: 5 * 60 * 1000,
+  });
+  const openRentalEidSet = new Set<string>((openRentalEids?.enterpriseIds || []).map(id => id.toUpperCase()));
+
   // Collect all truck numbers from termRoster for batch fetch (including manual overrides)
   const truckNumbers = Array.from(new Set([
     ...termRoster.map(entry => entry.truck).filter((truck): truck is string => !!truck),
@@ -592,6 +599,7 @@ export default function WeeklyOffboarding() {
                         <TableHead className="bg-background sticky top-0">Employee Name</TableHead>
                         <TableHead className="w-[120px] bg-background sticky top-0">Enterprise ID</TableHead>
                         <TableHead className="w-[100px] bg-background sticky top-0">Truck</TableHead>
+                        <TableHead className="w-[80px] bg-background sticky top-0">Rental</TableHead>
                         <TableHead className="w-[120px] bg-background sticky top-0">Status</TableHead>
                         <TableHead className="w-[120px] bg-background sticky top-0">
                           <div className="flex items-center gap-1">
@@ -629,6 +637,13 @@ export default function WeeklyOffboarding() {
                                 {!entry.truck && <span className="text-xs text-blue-600 ml-1">(manual)</span>}
                               </span>
                             ) : '-'}
+                          </TableCell>
+                          <TableCell>
+                            {entry.enterpriseId && openRentalEidSet.has(entry.enterpriseId.toUpperCase()) ? (
+                              <Badge className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700">
+                                Rental
+                              </Badge>
+                            ) : null}
                           </TableCell>
                           <TableCell>
                             <Badge variant={getStatusBadgeVariant(entry.emplStatus)}>
