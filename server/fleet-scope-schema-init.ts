@@ -526,6 +526,15 @@ END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS rental_weekly_manual_week_unique
   ON fs_rental_weekly_manual(week_year, week_number);
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'offboarding_flagged'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "offboarding_flagged" boolean DEFAULT false;
+  END IF;
+END $$;
 `;
 
 let initialized = false;

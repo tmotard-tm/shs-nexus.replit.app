@@ -483,6 +483,9 @@ export const trucks = pgTable("fs_trucks", {
   // Snowflake TPMS Assignment Status
   snowflakeAssigned: boolean("snowflake_assigned"), // Y if found in Snowflake TPMS_EXTRACT, N if not
   
+  // Offboarding match — set true when tech name matched weekly offboarding roster; never cleared by sync
+  offboardingFlagged: boolean("offboarding_flagged").default(false),
+  
   // Pick Up Information
   techName: text("tech_name"),
   techPhone: text("tech_phone"),
