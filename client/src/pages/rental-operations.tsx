@@ -125,6 +125,7 @@ export default function RentalOperations() {
   const [openSort, setOpenSort] = useState({ field: "daysOpen", dir: "desc" as "asc" | "desc" });
   const [showRaw, setShowRaw] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "enterprise" | "holman_non_enterprise">("all");
+  const [showTerminatedOnly, setShowTerminatedOnly] = useState(false);
   const [showOos, setShowOos] = useState(true);
   const [selectedFileDate, setSelectedFileDate] = useState<string | null>(null);
 
@@ -256,7 +257,8 @@ export default function RentalOperations() {
       sourceFilter === "all" ? true :
       sourceFilter === "enterprise" ? r.source === "enterprise" :
       r.source === "holman_non_enterprise" || r.source === "holman_raw";
-    return matchesSearch && matchesSource;
+    const matchesTerminated = !showTerminatedOnly || (r.enterpriseId && offboardingEidSet.has(r.enterpriseId.toUpperCase()));
+    return matchesSearch && matchesSource && matchesTerminated;
   });
 
   const sortedOpen = [...openRows].sort((a: any, b: any) => {
@@ -565,6 +567,14 @@ export default function RentalOperations() {
                     title={showRaw ? "Showing all raw Holman PO lines" : "Showing valid rentals (Excel formula)"}
                   >
                     {showRaw ? "Raw Holman Data" : "Valid Rentals"}
+                  </button>
+                  <button
+                    onClick={() => setShowTerminatedOnly(v => !v)}
+                    className={`text-xs px-2 py-1 rounded border transition-colors flex items-center gap-1 ${showTerminatedOnly ? "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300" : "bg-muted text-muted-foreground border-muted-foreground/30"}`}
+                    title={showTerminatedOnly ? "Showing only terminated-tech rentals" : "Show only rentals with a terminated tech (T badge)"}
+                  >
+                    <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 text-[9px] font-bold leading-none">T</span>
+                    {showTerminatedOnly ? "Terminated Only" : "Terminated"}
                   </button>
                   <div className="relative ml-auto w-56">
                     <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
