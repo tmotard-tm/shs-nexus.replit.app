@@ -13445,13 +13445,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const toEnrich = rows.filter(r => r.source === 'enterprise' && !r.enterpriseId);
     if (!toEnrich.length) return;
     try {
+      // Fetch all TPMS tech records — no LIMIT so no silent misses.
       const tpmsRows = await sf.executeQuery(
-        `SELECT ENTERPRISE_ID, FULL_NAME FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT WHERE ENTERPRISE_ID IS NOT NULL LIMIT 10000`
+        `SELECT ENTERPRISE_ID, FULL_NAME FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT WHERE ENTERPRISE_ID IS NOT NULL`
       ) as any[];
+
+      // Deduplicate by Enterprise ID first.  A tech appears once per truck in
+      // TPMS_EXTRACT; without dedup the same person would create multiple
+      // candidates for their last name and cause false name_ambiguous outcomes.
+      const seenEntIds = new Set<string>();
       const lastNameMap = new Map<string, Array<{ enterpriseId: string; firstName: string }>>();
       for (const t of tpmsRows) {
         if (!t.ENTERPRISE_ID || !t.FULL_NAME) continue;
         const entId = String(t.ENTERPRISE_ID).trim();
+        if (seenEntIds.has(entId)) continue;
+        seenEntIds.add(entId);
         const { first, last } = rentalNameParse(String(t.FULL_NAME));
         if (!last) continue;
         if (!lastNameMap.has(last)) lastNameMap.set(last, []);
