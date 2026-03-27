@@ -9182,7 +9182,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const snowflakeService = getSnowflakeService();
       const rows = await snowflakeService.executeQuery(
-        `SELECT EMPL_NAME, ENTERPRISE_ID
+        `SELECT DISTINCT EMPL_NAME, ENTERPRISE_ID
          FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW
          WHERE LAST_DATE_WORKED >= '2026-01-01'
            AND EMPL_NAME IS NOT NULL`
