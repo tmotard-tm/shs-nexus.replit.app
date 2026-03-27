@@ -1258,7 +1258,24 @@ export default function Dashboard() {
     setIsConsolidateDialogOpen(false);
   };
 
-  // Sync declined repairs mutation - updates trucks with "Decline and Submit for Sale" POs to "Declined Repair" status
+  const syncRentalsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/fs/rental-sync", {});
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/rentals/summary"] });
+      toast({
+        title: "Rental sync complete",
+        description: data.message || `${data.added} added, ${data.removed} removed`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Rental sync failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const syncDeclinedMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest('POST', '/api/fs/pos/sync-declined-repairs', {});
@@ -1980,6 +1997,18 @@ export default function Dashboard() {
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <h1 className="text-xl font-semibold mr-auto">Rentals Dashboard</h1>
           
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => syncRentalsMutation.mutate()}
+            disabled={syncRentalsMutation.isPending}
+            title="Pull latest open rentals from Snowflake — adds new trucks, removes returned ones, fills Date in Repair for new entries"
+            data-testid="button-sync-rentals"
+          >
+            <RefreshCw className={`w-3 h-3 mr-1 ${syncRentalsMutation.isPending ? "animate-spin" : ""}`} />
+            {syncRentalsMutation.isPending ? "Syncing…" : "Sync Rentals"}
+          </Button>
+
           <Button 
             variant="outline" 
             size="sm"
