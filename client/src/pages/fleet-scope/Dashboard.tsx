@@ -981,6 +981,11 @@ export default function Dashboard() {
     // Multi-column sorting - both sorts can be active simultaneously
     // Primary sort is Date In Repair, secondary sort is Reg. Expiry (or vice versa if only one is active)
     return filtered.sort((a, b) => {
+      // Always float terminated-tech (offboardingFlagged) trucks to the top
+      if (a.offboardingFlagged !== b.offboardingFlagged) {
+        return a.offboardingFlagged ? -1 : 1;
+      }
+
       // First apply Date In Repair sort if active
       if (dateRepairSortOrder) {
         const dateA = parseDate(a.datePutInRepair);
@@ -2933,7 +2938,9 @@ export default function Dashboard() {
                             <tr
                               key={truck.id}
                               className={`hover-elevate transition-colors cursor-pointer ${
-                                index % 2 === 0 ? "bg-background" : "bg-muted/30"
+                                truck.offboardingFlagged
+                                  ? "bg-red-50 dark:bg-red-950/20 border-l-2 border-l-red-400 dark:border-l-red-600"
+                                  : index % 2 === 0 ? "bg-background" : "bg-muted/30"
                               }`}
                               data-testid={`row-truck-${startIndex + index}`}
                               onClick={(e) => {
