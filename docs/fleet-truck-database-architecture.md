@@ -1199,4 +1199,80 @@ All three routes log to the `operation_events` PostgreSQL table for auditing. Ea
 
 ---
 
+## Cross-App Sync — Nexus Weekly Offboarding → Fleet Scope Spares Tab
+
+When a user edits certain fields in the **Nexus Weekly Offboarding tab**, those changes are pushed in real time to the **Fleet Scope Spares tab** via a direct HTTP API call from the Nexus backend to Fleet Scope's public API. This is the only cross-application write path in the system.
+
+### Trigger
+
+User saves editable fields on a row in the Weekly Offboarding table (Nexus frontend):
+
+| Nexus Field | Nexus Internal Name | What It Represents |
+|---|---|---|
+| Keys | `keys` | Whether truck keys are present |
+| Repair Status | `repaired` | State of body/repair work |
+| New Location / Address | `nexusNewLocation` | Where the truck is parked |
+| Contact Info | `nexusNewLocationContact` | Who to contact for pickup |
+| Comments | `comments` | General open-text notes |
+| Post-Offboard Status | `postOffboardedStatus` | Fleet team workflow status (e.g. "Sent to PMF", "Reserved for new hire") |
+
+### Step 1 — Nexus saves locally
+
+`PUT /api/vehicle-nexus-data/:vehicleNumber` (Nexus backend, `server/routes.ts`)
+
+Saves all fields to the **PostgreSQL `vehicle_nexus_data` table** in Nexus's own database.
+
+### Step 2 — Nexus calls Fleet Scope's public API
+
+Immediately after the local save, Nexus makes a fire-and-forget `POST` to:
+
+```
+POST https://fleet-scope.replit.app/api/public/spares/{vehicleNumber}
+X-API-Key: <X_API_Key env var in Nexus = FS_PUBLIC_SPARES_API_KEY env var in Fleet Scope>
+```
+
+The payload is built with value translation so Nexus's internal enum strings are mapped to Fleet Scope's display values before sending:
+
+| Payload Field | Source Field | Example Value Translation |
+|---|---|---|
+| `keys` | `keys` | `"present"` → `"Present"` · `"not_present"` → `"Not Present"` · `"unknown"` → `"Unknown/would not check"` |
+| `repaired` | `repaired` | `"complete"` → `"Complete"` · `"in_process"` → `"In Process"` · `"unknown_if_needed"` → `"Unknown if needed"` · `"declined"` → `"Declined"` |
+| `contact` | `nexusNewLocationContact` | Passed through as-is |
+| `confirmedAddress` | `nexusNewLocation` | Passed through as-is |
+| `generalComments` | `comments` | Passed through as-is |
+| `fleetTeamComments` | `postOffboardedStatus` | `"sent_to_pmf"` → `"Sent to PMF"` · `"reserved_for_new_hire"` → `"Reserved for new hire"` · `"available_for_rental_pmf"` → `"Available to assign or send to PMF"` · `"in_repair"` → `"In repair"` · `"not_found"` → `"Not found"` · `"sent_to_auction"` → `"Sent to auction"` · `"assigned_to_tech_in_rental"` → `"Assigned to rental"` |
+
+**Null values are omitted** — only fields that are non-null in the Nexus payload will overwrite anything in Fleet Scope. This means sending a partial update never accidentally clears fields the Nexus user didn't touch.
+
+### Step 3 — Fleet Scope receives and saves
+
+`POST /api/public/spares/:vehicleNumber` (Fleet Scope backend, `server/fleet-scope-routes.ts`)
+
+1. **Auth check** — validates `X-API-Key` header against `FS_PUBLIC_SPARES_API_KEY` env var.
+2. **Normalize vehicle number** — pads to 6 digits (e.g. `61850` → `061850`).
+3. **Value re-mapping** — Fleet Scope re-normalizes the incoming values using its own value alias tables (case-insensitive, snake_case tolerant) for an extra safety layer.
+4. **PostgreSQL write** — upserts the provided fields into `fs_spare_vehicle_details`:
+   - `keysStatus` ← mapped `keys`
+   - `repairCompleted` ← mapped `repaired`
+   - `contactNamePhone` ← `contact`
+   - `physicalAddress` ← `confirmedAddress`
+   - `generalComments` ← `generalComments`
+   - `johnsComments` ← mapped `fleetTeamComments`
+5. **Snowflake background sync** — after the HTTP response is sent, fires a `MERGE INTO SPARE_VEHICLE_ASSIGNMENT_STATUS` for all provided fields (same fire-and-forget pattern as the Spares tab's own PATCH routes).
+
+### What the Spares tab user sees
+
+The next time the Spares tab loads or refreshes, the row for that truck reflects the values set in the Weekly Offboarding tab — with no manual copy-paste required. Fields edited in Fleet Scope directly are **not overwritten** unless the Nexus user explicitly provides a value for that field.
+
+### Authentication / Configuration
+
+| App | Env Var | Role |
+|---|---|---|
+| Nexus | `X_API_Key` | The API key sent in the `X-API-Key` header |
+| Fleet Scope | `FS_PUBLIC_SPARES_API_KEY` | The expected value validated on receipt |
+
+Both env vars must contain the same string for the integration to work. If `X_API_Key` is missing in Nexus, the call is skipped with a warning log. If `FS_PUBLIC_SPARES_API_KEY` is missing in Fleet Scope, the endpoint returns `503`.
+
+---
+
 *PostgreSQL tables documented above. Snowflake section added from `server/fleet-scope-routes.ts`, `server/rental-ops-sync.ts`, `server/snowflake-sync-service.ts`, `server/fleet-operations-service.ts`, `server/tpms-service.ts`.*
