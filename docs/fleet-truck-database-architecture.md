@@ -658,4 +658,545 @@ Manually entered weekly rental metrics (unique per `week_year` + `week_number`).
 
 ---
 
-*File generated from `shared/fleet-scope-schema.ts`*
+---
+
+# Snowflake Tables & Views — Read Reference
+
+All Snowflake queries execute through `server/fleet-scope-snowflake.ts → executeQuery()`, which delegates to the shared `SnowflakeService` singleton.  
+Connection credentials are set via env vars: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY` / `SNOWFLAKE_PRIVATE_KEY_PATH`.
+
+---
+
+## Database: `PARTS_SUPPLYCHAIN`
+
+### Schema `SOFTEON` — TPMS & AMS System Tables
+
+#### `PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT`
+Primary source for current tech-to-truck assignments. Refreshed by Softeon nightly.
+
+| Column | Description |
+|---|---|
+| `TRUCK_NO` | 6-digit padded truck number (e.g. `"036023"`) |
+| `TRUCK_LU` | Alternate truck number column (used in some queries) |
+| `ENTERPRISE_ID` | Tech enterprise ID |
+| `FULL_NAME` | Tech full name |
+| `TECH_NO` | Tech number |
+| `MOBILEPHONENUMBER` | Tech mobile phone |
+| `MANAGER_NAME` | Direct manager name |
+| `MANAGER_ENT_ID` | Manager's enterprise ID (used to look up manager phone) |
+| `PRIMARY_STATE` | Tech's primary state (for `tech_state` on `fs_trucks`) |
+| `FILE_DATE` | Extract date (used with `QUALIFY ROW_NUMBER()` for dedup) |
+
+**Used for:**
+- Populating `tech_name`, `tech_phone`, `tech_lead_name`, `snowflake_assigned` on `fs_trucks` (daily scheduler + manual sync)
+- Checking if a spare vehicle is assigned (Spares cleanup logic)
+- Decommissioning tech-match lookups
+- Registration tab tech address lookups
+- Assignment check for BYOV trucks
+- Rental dashboard assigned-status refresh
+
+**Note:** Also referenced as `PARTS_SUPPLYCHAIN.FLEET.TPMS_EXTRACT` in a few Spares-specific queries — both schemas resolve to the same underlying data.
+
+---
+
+#### `PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED`
+Historical last-known assignment for any truck, including trucks that are no longer actively assigned. Same column shape as `TPMS_EXTRACT`.
+
+**Used for:**
+- Tech specialty (JOBTITLE) lookups: cross-joins with `ORA_TECH_HIRE_ROSTER_VW` when the truck is not in the current extract
+- Batch JOBTITLE resolution for fleet dashboard cards
+
+---
+
+#### `PARTS_SUPPLYCHAIN.SOFTEON.AIMS_TECH_INFO`
+AMS system tech records — used as the AMS tech data source for the termination/separation sync.
+
+| Key Columns | Description |
+|---|---|
+| `ENTERPRISE_ID` | Tech enterprise ID (join key) |
+| `EMPLOYEE_STATUS` | Current employment status in AMS |
+| `ADDRESS_*` | Tech address fields |
+
+**Used for:** Separation enrichment sync (`syncSeparationsToNexus`) — joins with `AIMS_TRUCK_INFO` to pull tech-to-truck data for termed techs.
+
+---
+
+#### `PARTS_SUPPLYCHAIN.SOFTEON.AIMS_TRUCK_INFO`
+AMS system truck records — companion to `AIMS_TECH_INFO`.
+
+| Key Columns | Description |
+|---|---|
+| `ENTERPRISE_ID` | Tech enterprise ID (join key) |
+| `TRUCK_NUMBER` | Truck number assigned to tech |
+| `VIN` | Vehicle VIN |
+
+**Used for:** Same separation enrichment sync as `AIMS_TECH_INFO` — LEFT JOIN to get truck/VIN data for each termed tech.
+
+---
+
+#### `PARTS_SUPPLYCHAIN.SOFTEON.PISR_SKU_DETAIL`
+Parts on-hand inventory detail from Softeon's PISR extract.
+
+| Key Columns | Description |
+|---|---|
+| `ENTERPRISE_ID` | Tech enterprise ID |
+| `SKU` | Part number |
+| `QTY_ON_HAND` | Quantity on hand |
+| `EXTRACT_DATE` | Date of extract (latest date selected with `MAX(EXTRACT_DATE)`) |
+
+**Used for:** Separation/offboarding sync — calculates parts inventory exposure for termed techs (joined with `MASTER_SKU_LIST` and `DIM_PRODUCT_CATEGORY`).
+
+---
+
+### Schema `FLEET` — Fleet Operations Tables & Views
+
+#### `PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES`
+Full fleet vehicle registry combining Holman, AMS, and TPMS data. Primary source for VIN, make, model, and AMS address across the whole app.
+
+| Key Columns | Description |
+|---|---|
+| `VEHICLE_NUMBER` | 6-digit padded vehicle number |
+| `VIN` | Vehicle VIN |
+| `MAKE_NAME` | Vehicle make |
+| `MODEL_NAME` | Vehicle model |
+| `YEAR` | Model year |
+| `TRUCK_STATUS` | Fleet status string |
+| `TPMS_ASSIGNED` | `"Assigned"` / `"Unassigned"` / other |
+| `AMS_CUR_ADDRESS` | Current street address from AMS |
+| `AMS_CUR_CITY` | AMS city |
+| `AMS_CUR_STATE` | AMS state (used as `tech_state` fallback) |
+| `AMS_CUR_ZIP` | AMS ZIP |
+| `TRUCK_DISTRICT` | Fleet district |
+
+**Used for:**
+- VIN/make/model lookups when adding trucks to the dashboard
+- Tech state fallback when `TPMS_EXTRACT.PRIMARY_STATE` is blank
+- Fleet weekly snapshot counts (assigned vs. unassigned)
+- Fleet overview statistics (all-vehicles page)
+- Samsara GPS data enrichment (location reverse-geocode)
+- Registration tab all-vehicle list
+
+---
+
+#### `PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES`
+Snowflake view — all vehicles currently not assigned to a technician. The primary source for the **Spares tab** vehicle list.
+
+| Key Columns | Description |
+|---|---|
+| `VEHICLE_NUMBER` | Vehicle number |
+| `VIN` | Vehicle VIN |
+| `MAKE_NAME` | Make |
+| `MODEL_NAME` | Model |
+| `TRUCK_DISTRICT` | District |
+| `TRUCK_STATUS` | Status |
+| `AMS_CUR_ADDRESS` | Current AMS address |
+| `AMS_CUR_CITY` | AMS city |
+| `AMS_CUR_STATE` | AMS state |
+| `AMS_CUR_ZIP` | AMS ZIP |
+
+**Used for:** Spares tab vehicle list (joined with `SPARE_VEHICLE_ASSIGNMENT_STATUS` for editable fields). Also used in the Spares cleanup check (trucks NOT in this view + in `TPMS_EXTRACT` = confirmed assigned).
+
+---
+
+#### `PARTS_SUPPLYCHAIN.FLEET.SPARE_VEHICLE_ASSIGNMENT_STATUS`
+Snowflake table for editable spare-vehicle annotations (confirmed address, keys status, repair status, comments). This is the **only Snowflake table the app writes to**.
+
+| Column | Description |
+|---|---|
+| `VEHICLE_NUMBER` | Vehicle number (partition key for dedup) |
+| `CONFIRMED_ADDRESS` | Manually confirmed physical address |
+| `ADDRESS_UPDATED_AT` | When address was last set |
+| `KEYS_STATUS` | Keys present status |
+| `REPAIRED_STATUS` | Repair completion status |
+| `REGISTRATION_RENEWAL_DATE` | Reg renewal date |
+| `CONFIRMED_CONTACT` | Contact name & phone |
+| `ONGOING_COMMENTS` | General comments |
+| `FLEET_TEAM_FINAL_COMMENTS` | Fleet team (John's) comments |
+| `MANUAL_EDIT_TIMESTAMP` | Timestamp of last manual field edit |
+| `UPDATED_AT` | Record update timestamp |
+
+**Written by:** See [Writeback section](#snowflake-writeback--spare_vehicle_assignment_status) below.
+
+---
+
+#### `PARTS_SUPPLYCHAIN.FLEET.HOLMAN_VEHICLES`
+Holman's vehicle registry — canonical source for VINs keyed by Holman's 5-digit vehicle number.
+
+| Key Columns | Description |
+|---|---|
+| `HOLMAN_VEHICLE_NUMBER` | 5-digit Holman vehicle number |
+| `VIN` | Vehicle VIN |
+| `VEHICLE_YEAR` | Model year |
+| `VEHICLE_MAKE` | Make |
+| `VEHICLE_MODEL` | Model |
+
+**Used for:**
+- Decommissioning workflow: VIN lookups for each truck going through decommissioning
+- Registration tab: joining to get VINs for all fleet vehicles
+- Fleet-ops: resolving Holman vehicle number from local cache before making assignment updates
+
+---
+
+#### `PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS`
+Holman purchase order / work order details for repair tracking.
+
+| Key Columns | Description |
+|---|---|
+| `HOLMAN_VEHICLE_NUMBER` | Holman vehicle number |
+| `ODOMETER` | Odometer at time of PO |
+| `PO_DATE` | PO creation date |
+| `PO_NUMBER` | PO number |
+| `PO_STATUS` | Status of the PO |
+| `TOTAL_AMOUNT` | PO total dollar amount |
+
+**Used for:**
+- PO status panel on fleet dashboard truck cards (latest open PO per vehicle)
+- PO priority sorting in the fleet dashboard
+- Decommissioning PO history lookup
+
+---
+
+#### `PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT`
+Holman's list of rental trucks currently in service (not returned).
+
+| Key Columns | Description |
+|---|---|
+| `VEHICLE_NO` | Vehicle number |
+| `VENDOR` | Rental vendor (`"Enterprise"` or other) |
+| `OPEN_DATE` | When rental opened |
+| `TICKET_NO` | Rental ticket / reference number |
+
+**Used for:** Rental Ops sync (`syncRentalOpsToFleetScope`) — Holman non-Enterprise records are included if no matching Enterprise ticket exists for the same vehicle (Enterprise takes precedence).
+
+---
+
+#### `PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT`
+Enterprise Rent-A-Car open rental tickets.
+
+| Key Columns | Description |
+|---|---|
+| `VEHICLE_NO` | Vehicle number |
+| `OPEN_DATE` | When rental opened |
+| `TICKET_NO` | Enterprise ticket number |
+| `VENDOR` | Always `"Enterprise"` |
+
+**Used for:** Rental Ops sync — Enterprise records are imported first; Holman records for the same vehicle number are skipped if an Enterprise record already exists (de-dup logic).
+
+---
+
+#### `PARTS_SUPPLYCHAIN.FLEET.SAMSARA_CRITICALITY_SCORE`
+Samsara DTC (diagnostic trouble code) criticality scores for fleet vehicles.
+
+| Key Columns | Description |
+|---|---|
+| `VEHICLE_NUMBER` | Vehicle number |
+| `DTC_CODE` | Diagnostic code |
+| `CRITICALITY` | Score or level |
+| `UPDATED_AT` | When score was last updated |
+
+**Used for:** Fleet Finder (truck availability lookup) — checks if BYOV candidate trucks have active Check Engine DTCs that would disqualify them from assignment.
+
+---
+
+#### `PARTS_SUPPLYCHAIN.FLEET.AMS_XLS_EXPORTS`
+AMS system vehicle data exports (periodic XLS exports loaded into Snowflake). Third-tier fallback for `tech_state`.
+
+| Key Columns | Description |
+|---|---|
+| `VEHICLE_NUMBER` | Vehicle number |
+| `CURRENT_ADDRESS` | Full address string (state parsed from this) |
+
+**Used for:** Tech state sync — when `TPMS_EXTRACT.PRIMARY_STATE` and `REPLIT_ALL_VEHICLES.AMS_CUR_STATE` are both blank, the state is parsed from the address string in this table.
+
+---
+
+#### `PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS`
+Complete tech directory for employment lookups.
+
+| Key Columns | Description |
+|---|---|
+| `ENTERPRISE_ID` | Tech enterprise ID |
+| `FULL_NAME` | Tech full name |
+| `JOBTITLE` | Job title / specialty |
+| `DISTRICT` | District |
+
+**Used for:** Fleet Finder — looks up a truck's current tech and JOBTITLE from this table (via `TPMS_EXTRACT_LAST_ASSIGNED → DRIVELINE_ALL_TECHS`) to determine if an Interior Tech or Exterior Tech is needed.
+
+---
+
+### Schema `ANAPLAN` — Supply Chain Planning Tables
+
+#### `PARTS_SUPPLYCHAIN.ANAPLAN.NTAO_FIELD_VIEW_ASSORTMENT`
+NTAO (parts assortment) data per technician truck.
+
+| Key Columns | Description |
+|---|---|
+| `ENTERPRISE_ID` | Tech enterprise ID |
+| `ON_HAND` | Quantity on hand |
+| `CURRENT_TRUCK_CUFT` | Cubic feet of parts in the truck |
+
+**Used for:** Decommissioning — syncs `parts_count` (sum of `ON_HAND`) and `parts_space` (`CURRENT_TRUCK_CUFT`) for each decommissioning vehicle, so the fleet team knows parts exposure before recovering the truck.
+
+---
+
+#### `PARTS_SUPPLYCHAIN.ANAPLAN.MASTER_SKU_LIST`
+Master product/SKU reference list from Anaplan.
+
+| Key Columns | Description |
+|---|---|
+| `SKU` | Part number |
+| `CURRENT_DAT` | Date (latest date selected with `MAX(CURRENT_DAT)`) |
+| `CATEGORY` | Product category |
+
+**Used for:** Separation/offboarding sync — joins with `PISR_SKU_DETAIL` to enrich parts-on-hand data with category and description for termed tech exposure reports.
+
+---
+
+### Schema `NTAO`
+
+#### `PARTS_SUPPLYCHAIN.NTAO.DIM_PRODUCT_CATEGORY`
+Product category dimension table.
+
+| Key Columns | Description |
+|---|---|
+| `CATEGORY_ID` | Category ID (join key) |
+| `CATEGORY_NAME` | Category name |
+
+**Used for:** Same separation sync enrichment join chain: `PISR_SKU_DETAIL → MASTER_SKU_LIST → DIM_PRODUCT_CATEGORY`.
+
+---
+
+## Database: `PRD_TECH_RECRUITMENT`
+
+### Schema `BATCH_VIEWS` — HR System Views
+
+#### `PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_HIRE_ROSTER_VW`
+Oracle HR hire roster view — current and historical tech employment records.
+
+| Key Columns | Description |
+|---|---|
+| `ENTERPRISE_ID` | Tech enterprise ID |
+| `JOBTITLE` | Job title (Interior Tech, Exterior Tech, etc.) |
+| `LAST_HIRE_DT` | Last hire date (used in `QUALIFY` dedup) |
+
+**Used for:** Tech specialty (JOBTITLE) lookup in fleet dashboard — used when determining if a truck needs an Interior or Exterior tech for assignment.
+
+---
+
+#### `PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW`
+Oracle HR termination roster view — recently termed technicians.
+
+| Key Columns | Description |
+|---|---|
+| `EMPLID` | Employee ID (join to contact view) |
+| `ENTERPRISE_ID` | Tech enterprise ID |
+| `NAME` | Full name |
+| `TERM_DATE` | Termination date |
+| `DISTRICT` | District |
+
+**Used for:** Termination sync (`syncTermedTechsToNexus`) — source of newly termed techs to create offboarding workflows in Nexus.
+
+---
+
+#### `PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW`
+Last known contact information for any tech (active or termed).
+
+| Key Columns | Description |
+|---|---|
+| `EMPLID` | Employee ID (join key to term roster) |
+| `ENTERPRISE_ID` | Tech enterprise ID |
+| `PERSONAL_EMAIL` | Personal email address |
+| `MOBILE_PHONE` | Mobile phone number |
+
+**Used for:** Joined with both term roster and separation views to enrich offboarding records with contact details.
+
+---
+
+### Schema `FLEET_DETAILS`
+
+#### `PRD_TECH_RECRUITMENT.FLEET_DETAILS.SEPARATION_FLEET_DETAILS`
+Fleet-specific separation data for each separation event.
+
+| Key Columns | Description |
+|---|---|
+| `EMPLID` | Employee ID |
+| `ENTERPRISE_ID` | Tech enterprise ID |
+| `SEPARATION_DATE` | Date of separation |
+| `TRUCK_NUMBER` | Truck number at time of separation |
+| `VIN` | VIN at separation |
+
+**Used for:** Separation sync and enrichment — the authoritative source for which truck/VIN a tech had at the time of their separation. Joined with `ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW` for contact info.
+
+---
+
+---
+
+# Writeback & External API POST Operations
+
+This section covers every place Nexus/Fleet Scope **writes data** to an external system — either back to Snowflake, or to an external REST API (TPMS, AMS, Holman).
+
+---
+
+## Snowflake Writeback — `SPARE_VEHICLE_ASSIGNMENT_STATUS`
+
+The **only** Snowflake table the app writes to. All writes use a `MERGE INTO` pattern (upsert by `VEHICLE_NUMBER`).
+
+| Trigger | API Route | Fields Written |
+|---|---|---|
+| User updates keys/repair/contact/comments in Spares tab | `PATCH /api/fs/spares/status` | `KEYS_STATUS`, `REPAIRED_STATUS`, `REGISTRATION_RENEWAL_DATE`, `CONFIRMED_CONTACT`, `ONGOING_COMMENTS`, `FLEET_TEAM_FINAL_COMMENTS`, `MANUAL_EDIT_TIMESTAMP`, `UPDATED_AT` |
+| User sets confirmed address in Spares tab | `PATCH /api/fs/spares/confirmed-address` | `CONFIRMED_ADDRESS`, `ADDRESS_UPDATED_AT`, `UPDATED_AT` |
+| User adds a manual truck via "Add Truck" button | `POST /api/fs/spares/add-manual` | `CONFIRMED_ADDRESS`, `ADDRESS_UPDATED_AT`, `UPDATED_AT` (only if address provided) |
+| Bulk import from spreadsheet in Spares tab | `POST /api/fs/spares/bulk-import` | All editable spare vehicle fields |
+
+All writes run **after** the HTTP response is sent (fire-and-forget background sync) so they don't block the UI. PostgreSQL `fs_spare_vehicle_details` is always updated first and acts as the primary fast-read store.
+
+---
+
+## TPMS API Writeback
+
+The TPMS system is accessed via an external REST API (`TPMS_API_ENDPOINT`). Authentication uses a JWT token (`TPMS_AUTH_ENDPOINT` + `TPMS_AUTHORIZATION`).
+
+### `PUT /techinfo` — Update Tech Address or Truck Assignment
+
+Called via `tpmsService.updateTechInfo()`.
+
+**Request fields:**
+| Field | Description |
+|---|---|
+| `ldapId` | Tech LDAP ID (UPPERCASE) |
+| `truckNo` | Truck number |
+| `districtNo` | District number |
+| `addresses` | Array of address objects (home, mail, etc.) with type code |
+| `updatedBy` | Who initiated the update |
+
+**Triggered by:**
+- `PUT /api/tpms/techinfo` — direct tech info update endpoint
+- `POST /api/fleet-ops/assign` — automatically updates truck assignment in TPMS when a new tech is assigned
+- `POST /api/fleet-ops/unassign` — clears truck assignment for the tech in TPMS
+- `POST /api/fleet-ops/update-address` — writes the new address into TPMS for the tech
+
+---
+
+### `POST /temptruckassign` — Temporary Truck Assignment
+
+Called via `tpmsService.tempTruckAssign(ldapId, distNo, truckNo)`.
+
+**Request fields:**
+| Field | Description |
+|---|---|
+| `ldapId` | Tech LDAP ID |
+| `distNo` | District number |
+| `truckNo` | Truck number to assign |
+
+**Triggered by:**
+- `POST /api/tpms/vehicles/:truckNo/assign` — direct assign endpoint in TPMS routes
+- `POST /api/tpms/temp-truck-assign` — standalone assign-by-LDAP endpoint
+- `POST /api/fleet-ops/assign` — called as part of the multi-system fleet-ops assign flow
+
+---
+
+## AMS API Writeback
+
+AMS (Asset Management System) is accessed via an external REST API. Auth uses credentials from `AMS_*` env vars.
+
+### Tech Assignment Update
+
+Called via `ams.updateTechAssignment(vin, { enterpriseId, techName, districtNo })`.
+
+**Triggered by:**
+- `POST /api/fleet-ops/assign` — writes the new tech to AMS for the vehicle's VIN
+- `POST /api/fleet-ops/unassign` — clears the tech assignment in AMS (sends null/blank enterpriseId)
+
+---
+
+### User Field Update
+
+Called via `ams.updateUserFields(vin, { ... })`.
+
+**Triggered by:**
+- `POST /api/fleet-ops/update-address` — updates the vehicle's current address in AMS
+- `POST /api/ams/vehicles/:vin/user-updates` — direct AMS user-field update endpoint (repair address, phone, contact name, etc.)
+
+---
+
+### Tech-Initiated Update
+
+Called via `ams.updateTechAssignment(vin, params)` with tech-reported data.
+
+**Triggered by:**
+- `POST /api/ams/vehicles/:vin/tech-update` — tech confirms their truck's address/location
+
+---
+
+### Repair Updates
+
+**Triggered by:**
+- `POST /api/ams/vehicles/:vin/repair-updates` — posts repair status, estimate, shop info to AMS
+- `POST /api/ams/vehicles/:vin/repair-disposition` — posts the repair/sale decision to AMS
+
+---
+
+### Comments
+
+**Triggered by:**
+- `POST /api/ams/vehicles/:vin/comments` — appends a comment to the AMS vehicle record
+
+---
+
+## Holman API Writeback
+
+Holman Fleet Management is accessed via an external REST API (`HOLMAN_API_ENDPOINT`). Auth uses OAuth2 client credentials (`HOLMAN_CLIENT_ID`, `HOLMAN_CLIENT_SECRET`).
+
+All assignment updates go through a **submission + polling** pattern:
+
+1. The update is submitted to Holman → a `holman_submissions` record is created in PostgreSQL
+2. A background polling loop verifies the submission was accepted (up to `HOLMAN_SUBMISSION_EXPIRY_MS`, default 20 min)
+3. The local `holman_vehicles_cache` table is updated optimistically upon submission
+
+### Vehicle Assignment Update
+
+Called via `holmanAssignmentUpdateService.updateVehicleAssignment(holmanVehicleNumber, action, params)`.
+
+| Field | Description |
+|---|---|
+| `holmanVehicleNumber` | 5-digit Holman vehicle number |
+| `action` | `"assign"` or `"unassign"` |
+| `ldapId` | Tech LDAP ID |
+| `techName` | Tech display name |
+
+**Triggered by:**
+- `POST /api/holman/assignments/update` — single vehicle assignment update
+- `POST /api/holman/assignments/update-bulk` — bulk assignment updates (array of vehicles)
+- `POST /api/fleet-ops/assign` — writes the new tech to Holman as part of the multi-system assign flow
+- `POST /api/fleet-ops/unassign` — clears the tech assignment in Holman
+
+---
+
+### Fleet Vehicle Sync (Read + Local Cache Write)
+
+These endpoints pull Holman data and write it to the local PostgreSQL `holman_vehicles_cache` table — they are read-only from Holman's perspective.
+
+| Route | Description |
+|---|---|
+| `POST /api/holman/fleet-vehicles/sync` | Full sync of all Holman vehicles to `holman_vehicles_cache` |
+| `POST /api/holman/fleet-vehicles/incremental-sync` | Incremental sync (only changed records) |
+| `POST /api/holman/fleet-vehicles/sync-odometer` | Sync latest odometer readings |
+| `POST /api/holman/fleet-vehicles/verify-updates` | Re-verify pending Holman submissions |
+
+---
+
+## Fleet Ops Multi-System Orchestration
+
+The three routes below write to **TPMS + AMS + Holman simultaneously** in a single atomic operation. This is the recommended path for all technician assignment changes — direct individual API routes exist for debugging/overrides only.
+
+| Route | TPMS | AMS | Holman | Notes |
+|---|---|---|---|---|
+| `POST /api/fleet-ops/assign` | ✅ `PUT /techinfo` + `POST /temptruckassign` | ✅ `updateTechAssignment()` | ✅ `updateVehicleAssignment("assign")` | Auto-unassigns previous truck if tech already has one |
+| `POST /api/fleet-ops/unassign` | ✅ `PUT /techinfo` (clear truck) | ✅ `updateTechAssignment()` (clear) | ✅ `updateVehicleAssignment("unassign")` | Validates cached LDAP ID before calling TPMS |
+| `POST /api/fleet-ops/update-address` | ✅ `PUT /techinfo` (address upserts) | ✅ `updateUserFields()` | — | Updates home/work address in both systems |
+
+All three routes log to the `operation_events` PostgreSQL table for auditing. Each system result (`tpms`, `ams`, `holman`) is recorded independently — partial success is allowed (one system can fail without blocking others).
+
+---
+
+*PostgreSQL tables documented above. Snowflake section added from `server/fleet-scope-routes.ts`, `server/rental-ops-sync.ts`, `server/snowflake-sync-service.ts`, `server/fleet-operations-service.ts`, `server/tpms-service.ts`.*
