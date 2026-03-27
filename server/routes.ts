@@ -13411,6 +13411,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.status(500).json({ message: err.message });
   }
 
+  // Parse a combined name string into first + last components.
+  // Handles "FIRST LAST", "FIRST MIDDLE LAST", "LAST, FIRST", and trailing suffixes.
+  function rentalNameParse(fullName: string): { first: string; last: string } {
+    if (!fullName) return { first: '', last: '' };
+    const s = fullName.trim().toUpperCase();
+    const SUFFIXES = new Set(['JR', 'SR', 'II', 'III', 'IV', 'V', 'JR.', 'SR.']);
+    const commaIdx = s.indexOf(',');
+    if (commaIdx > 0) {
+      const last = s.slice(0, commaIdx).trim();
+      const firstRaw = s.slice(commaIdx + 1).trim();
+      const firstTokens = firstRaw.split(/\s+/).filter(Boolean);
+      while (firstTokens.length > 1 && SUFFIXES.has(firstTokens[firstTokens.length - 1])) firstTokens.pop();
+      return { first: firstTokens[0] || '', last };
+    }
+    const tokens = s.split(/\s+/).filter(Boolean);
+    if (!tokens.length) return { first: '', last: '' };
+    if (tokens.length === 1) return { first: '', last: tokens[0] };
+    let endIdx = tokens.length - 1;
+    while (endIdx > 0 && SUFFIXES.has(tokens[endIdx])) endIdx--;
+    return { first: tokens[0], last: tokens[endIdx] };
+  }
+
+  // Enrich Enterprise-segment rows (where source='enterprise' and enterpriseId is null)
+  // by matching RENTER_NAME against TPMS_EXTRACT FULL_NAME.
+  // Mutates rows in place; sets enterpriseId and enterpriseIdSource.
+  // Result sources:
+  //   'name_last_unique'  — exactly 1 TPMS tech with that last name
+  //   'name_full_unique'  — unique match after adding first name
+  //   'name_ambiguous'    — multiple TPMS techs share the name, cannot resolve
+  //   'not_found'         — no TPMS tech has that last name
+  async function rentalEnrichEnterpriseIds(sf: any, rows: any[]): Promise<void> {
+    const toEnrich = rows.filter(r => r.source === 'enterprise' && !r.enterpriseId);
+    if (!toEnrich.length) return;
+    try {
+      const tpmsRows = await sf.executeQuery(
+        `SELECT ENTERPRISE_ID, FULL_NAME FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT WHERE ENTERPRISE_ID IS NOT NULL LIMIT 10000`
+      ) as any[];
+      const lastNameMap = new Map<string, Array<{ enterpriseId: string; firstName: string }>>();
+      for (const t of tpmsRows) {
+        if (!t.ENTERPRISE_ID || !t.FULL_NAME) continue;
+        const entId = String(t.ENTERPRISE_ID).trim();
+        const { first, last } = rentalNameParse(String(t.FULL_NAME));
+        if (!last) continue;
+        if (!lastNameMap.has(last)) lastNameMap.set(last, []);
+        lastNameMap.get(last)!.push({ enterpriseId: entId, firstName: first });
+      }
+      for (const row of toEnrich) {
+        const { first, last } = rentalNameParse(row.renterName || '');
+        if (!last) { row.enterpriseIdSource = 'not_found'; continue; }
+        const candidates = lastNameMap.get(last) || [];
+        if (candidates.length === 0) {
+          row.enterpriseIdSource = 'not_found';
+        } else if (candidates.length === 1) {
+          row.enterpriseId = candidates[0].enterpriseId;
+          row.enterpriseIdSource = 'name_last_unique';
+        } else if (first) {
+          const exact = candidates.filter(c => c.firstName === first);
+          if (exact.length === 1) {
+            row.enterpriseId = exact[0].enterpriseId;
+            row.enterpriseIdSource = 'name_full_unique';
+          } else {
+            row.enterpriseIdSource = 'name_ambiguous';
+          }
+        } else {
+          row.enterpriseIdSource = 'name_ambiguous';
+        }
+      }
+    } catch (err: any) {
+      console.warn('[RentalOps] TPMS name enrichment skipped:', err.message);
+    }
+  }
+
   app.get("/api/rental-ops/open", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
@@ -13534,6 +13606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           poCount: 1,
           hasEnterpriseTicket: true,
           source: "enterprise",
+          enterpriseIdSource: null as string | null,
         };
       });
 
@@ -13571,10 +13644,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           poCount: group.length,
           hasEnterpriseTicket: false,
           source: "holman_non_enterprise",
+          enterpriseIdSource: (r.ENTERPRISE_ID ? 'direct' : null) as string | null,
         };
       });
 
       let allData = [...enterpriseSegment, ...holmanSegment];
+
+      // Enrich Enterprise segment rows with Enterprise ID resolved from TPMS name matching
+      await rentalEnrichEnterpriseIds(sf, allData);
+
       let oosCount = 0;
       if (!includeOos) {
         const oosVehicles = await getOosVehicleSet();
@@ -14368,7 +14446,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           vehicleNumber: vn,
           division: "",
           renterName: (r.RENTER_NAME || "").trim(),
-          enterpriseId: "",
+          enterpriseId: null as string | null,
+          source: "enterprise",
           poNumber: holmanPo || "",
           rentalStartDate: originalStartDate || "",
           daysOpen: calcDaysOpen(originalStartDate),
@@ -14397,7 +14476,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           vehicleNumber: vn,
           division: mapDivision(r.DIVISION),
           renterName: `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
-          enterpriseId: (r.ENTERPRISE_ID || "").trim(),
+          enterpriseId: (r.ENTERPRISE_ID || null) as string | null,
+          source: "holman_non_enterprise",
           poNumber: (r.PO_NUMBER || "").replace(/^'/, "").trim(),
           rentalStartDate: startDate || "",
           daysOpen: calcDaysOpen(startDate),
@@ -14406,6 +14486,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       let openData = [...enterpriseSegment, ...holmanSegment];
+
+      // Enrich Enterprise segment rows with Enterprise ID from TPMS name matching
+      await rentalEnrichEnterpriseIds(sf, openData);
+
       const includeOos = req.query?.includeOos === "true";
       if (!includeOos) {
         const oosVehicles = await getOosVehicleSet();

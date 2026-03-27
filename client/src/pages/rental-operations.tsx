@@ -594,7 +594,24 @@ export default function RentalOperations() {
                         <TableRow key={i} className={rowAgingClass(r.daysOpen || 0)}>
                           <TableCell className="font-mono text-sm">{r.vehicleNumber || "—"}</TableCell>
                           <TableCell className="max-w-[200px] truncate">{r.renterName || "—"}</TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">{r.enterpriseId || "—"}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {r.enterpriseId ? (
+                              r.enterpriseIdSource === 'name_last_unique' || r.enterpriseIdSource === 'name_full_unique' ? (
+                                <span
+                                  className="text-muted-foreground italic"
+                                  title={r.enterpriseIdSource === 'name_last_unique'
+                                    ? `Inferred by unique last name match in TPMS`
+                                    : `Inferred by unique first + last name match in TPMS`}
+                                >
+                                  ~{r.enterpriseId}
+                                </span>
+                              ) : (
+                                <span className="text-foreground">{r.enterpriseId}</span>
+                              )
+                            ) : (
+                              <span className="text-muted-foreground/50">—</span>
+                            )}
+                          </TableCell>
                           <TableCell className="font-mono text-xs">{r.poNumber || "—"}</TableCell>
                           <TableCell className="text-sm">{formatDate(r.rentalStartDate)}</TableCell>
                           <TableCell><DaysBadge days={r.daysOpen || 0} /></TableCell>
