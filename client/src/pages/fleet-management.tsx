@@ -1931,7 +1931,7 @@ export default function FleetManagement() {
                     <Button size="sm" className="w-full" onClick={() => openModal("assign")} data-testid="button-fleet-assign">
                       <UserPlus className="h-4 w-4 mr-1.5" />Assign Tech
                     </Button>
-                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("unassign")} disabled={!selectedVehicle.tpmsAssignedTechId && !selectedVehicle.holmanTechAssigned} data-testid="button-fleet-unassign">
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("unassign")} disabled={!selectedVehicle.tpmsAssignedTechId?.trim() && !selectedVehicle.holmanTechAssigned?.trim()} data-testid="button-fleet-unassign">
                       <UserX className="h-4 w-4 mr-1.5" />Unassign Tech
                     </Button>
                     <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("poHistory")} data-testid="button-po-history">
@@ -2560,7 +2560,7 @@ export default function FleetManagement() {
               <DialogFooter>
                 <Button variant="outline" onClick={() => setActiveModal(null)}>Cancel</Button>
                 <Button
-                  disabled={!assignLdap || fleetOpMutation.isPending}
+                  disabled={!assignLdap.trim() || fleetOpMutation.isPending}
                   onClick={() => fleetOpMutation.mutate({
                     endpoint: "/api/fleet-ops/assign",
                     body: { truckNumber: selectedVehicle?.vehicleNumber, ldapId: assignLdap, districtNo: assignDistrict, techName: assignTechName, notes: assignNotes },
@@ -2614,10 +2614,17 @@ export default function FleetManagement() {
                 <Button
                   variant="destructive"
                   disabled={fleetOpMutation.isPending}
-                  onClick={() => fleetOpMutation.mutate({
-                    endpoint: "/api/fleet-ops/unassign",
-                    body: { truckNumber: selectedVehicle?.vehicleNumber, ldapId: selectedVehicle?.tpmsAssignedTechId || selectedVehicle?.holmanTechAssigned, notes: unassignNotes },
-                  })}
+                  onClick={() => {
+                    const ldapId = selectedVehicle?.tpmsAssignedTechId?.trim() || selectedVehicle?.holmanTechAssigned?.trim();
+                    if (!ldapId) {
+                      toast({ title: "No technician LDAP ID found — try refreshing", variant: "destructive" });
+                      return;
+                    }
+                    fleetOpMutation.mutate({
+                      endpoint: "/api/fleet-ops/unassign",
+                      body: { truckNumber: selectedVehicle?.vehicleNumber, ldapId, notes: unassignNotes },
+                    });
+                  }}
                 >
                   {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <UserX className="h-4 w-4 mr-1.5" />}
                   Unassign from All Systems

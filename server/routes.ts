@@ -14875,8 +14875,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/fleet-ops/assign", requireAuth, async (req: any, res) => {
     try {
       const { truckNumber, ldapId, districtNo, techName, notes } = req.body;
-      if (!truckNumber || !ldapId || !districtNo) {
-        return res.status(400).json({ message: "truckNumber, ldapId, and districtNo are required" });
+      if (!truckNumber || !ldapId) {
+        return res.status(400).json({ message: "truckNumber and ldapId are required" });
       }
       const requestedBy = req.user?.username || "unknown";
       const result = await fleetOpsService.assignTech({ truckNumber, ldapId, districtNo, techName: techName || ldapId, requestedBy, notes });

@@ -8,7 +8,7 @@ import { toCanonical, toHolmanRef, toTpmsRef, toDisplayNumber, normalizeEnterpri
 interface AssignTechParams {
   truckNumber: string;
   ldapId: string;
-  districtNo: string;
+  districtNo?: string;
   techName: string;
   requestedBy: string;
   notes?: string;
