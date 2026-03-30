@@ -10935,7 +10935,7 @@ Respond ONLY with valid JSON, no other text.`;
   // Import registration dates from pasted data
   app.post("/registration/import", async (req, res) => {
     try {
-      const { data } = req.body;
+      const { data, overwrite = false } = req.body;
       
       if (!data || typeof data !== 'string') {
         return res.status(400).json({ message: "No data provided" });
@@ -10998,8 +10998,7 @@ Respond ONLY with valid JSON, no other text.`;
           .limit(1);
         
         if (existing.length > 0) {
-          // Only update if registrationRenewalDate is missing
-          if (!existing[0].registrationRenewalDate) {
+          if (!existing[0].registrationRenewalDate || overwrite) {
             await getDb().update(spareVehicleDetails)
               .set({ registrationRenewalDate: parsedDate })
               .where(eq(spareVehicleDetails.vehicleNumber, vehicleNumber));

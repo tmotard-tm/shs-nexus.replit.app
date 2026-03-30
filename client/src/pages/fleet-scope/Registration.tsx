@@ -168,6 +168,7 @@ export default function Registration() {
   const [daysToExpirySort, setDaysToExpirySort] = useState<"none" | "asc" | "desc">("none");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [pasteData, setPasteData] = useState("");
+  const [overwriteDates, setOverwriteDates] = useState(false);
   const { toast } = useToast();
 
   // Refs for synchronized scrollbar
@@ -238,8 +239,8 @@ export default function Registration() {
   }, [data]);
 
   const importMutation = useMutation({
-    mutationFn: async (data: string) => {
-      const response = await apiRequest("POST", "/api/fs/registration/import", { data });
+    mutationFn: async ({ data, overwrite }: { data: string; overwrite: boolean }) => {
+      const response = await apiRequest("POST", "/api/fs/registration/import", { data, overwrite });
       return response.json();
     },
     onSuccess: (result) => {
@@ -253,6 +254,7 @@ export default function Registration() {
       });
       setImportDialogOpen(false);
       setPasteData("");
+      setOverwriteDates(false);
       queryClient.invalidateQueries({ queryKey: ["/api/fs/registration"] });
     },
     onError: (error: Error) => {
@@ -741,7 +743,7 @@ export default function Registration() {
                 <DialogTitle>Import Registration Dates</DialogTitle>
                 <DialogDescription>
                   Paste tab-separated data with Vehicle Number and Registration Renewal Date columns.
-                  Dates should be in M/D/YYYY format. Missing dates will be populated for matching trucks.
+                  Dates should be in M/D/YYYY format. Copy directly from Excel — headers are skipped automatically.
                 </DialogDescription>
               </DialogHeader>
               <Textarea
@@ -751,18 +753,36 @@ export default function Registration() {
                 className="min-h-[200px] font-mono text-sm"
                 data-testid="textarea-paste-data"
               />
+              <div className="flex items-center gap-2 pt-1">
+                <Checkbox
+                  id="overwrite-dates"
+                  checked={overwriteDates}
+                  onCheckedChange={(checked) => setOverwriteDates(checked === true)}
+                  data-testid="checkbox-overwrite-dates"
+                />
+                <label
+                  htmlFor="overwrite-dates"
+                  className="text-sm text-slate-700 dark:text-slate-300 cursor-pointer select-none"
+                >
+                  Replace existing dates
+                </label>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  (by default, trucks that already have a date are skipped)
+                </span>
+              </div>
               <DialogFooter>
                 <Button
                   variant="outline"
                   onClick={() => {
                     setImportDialogOpen(false);
                     setPasteData("");
+                    setOverwriteDates(false);
                   }}
                 >
                   Cancel
                 </Button>
                 <Button
-                  onClick={() => importMutation.mutate(pasteData)}
+                  onClick={() => importMutation.mutate({ data: pasteData, overwrite: overwriteDates })}
                   disabled={!pasteData.trim() || importMutation.isPending}
                   data-testid="button-submit-import"
                 >
