@@ -7057,7 +7057,10 @@ Respond ONLY with valid JSON, no other text.`;
         const repairTruck = repairShopTruckMap.get(vehicleNumber);
         const isInUnassignedVehicles = unassignedVehicleSet.has(vehicleNumber);
         
+        const amsRepair = (r.TRUCK_STATUS?.toString() || '').toLowerCase().includes('repair');
+
         if (isInRepairShop && repairTruck) {
+          // Fleet Scope manually-tracked repair shop entry — highest priority
           generalStatus = 'Vehicles in a repair shop';
           const isInDeclineAndSale = declineAndSaleTruckNumbers.has(vehicleNumber);
           subStatus = getRepairSubStatus(repairTruck.mainStatus, repairTruck.subStatus, repairTruck.pickUpSlotBooked, isInDeclineAndSale);
@@ -7090,6 +7093,15 @@ Respond ONLY with valid JSON, no other text.`;
         } else if (isInUnassignedVehicles && !isPmfVehicle) {
           generalStatus = 'Vehicles in storage';
           subStatus = 'Other Local Parking';
+        }
+
+        // AMS TRUCK_STATUS override: if AMS reports the vehicle is in repair, classify it as
+        // "Vehicles in a repair shop" regardless of assignment status or other signals.
+        // This catches vehicles not yet entered in the Fleet Scope DB (fs_trucks) but
+        // whose repair status is known from AMS — and keeps the scorecard and map in sync.
+        if (amsRepair && generalStatus !== 'Vehicles in a repair shop') {
+          generalStatus = 'Vehicles in a repair shop';
+          subStatus = '';
         }
         
         // Determine Last Known Location by comparing timestamps from all sources
