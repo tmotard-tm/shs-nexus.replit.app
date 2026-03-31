@@ -292,6 +292,7 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
   const visibleCategories = externalVisibleCategories || allCategoryKeys;
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [center, setCenter] = useState<[number, number]>(DEFAULT_CENTER);
+  const [spareExpanded, setSpareExpanded] = useState<{ confirmed: boolean; needs: boolean }>({ confirmed: false, needs: false });
 
   const statusKeys: CategoryKey[] = ['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'];
 
@@ -473,6 +474,54 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
     return data;
   }, [vehicles, byovVehicleNumbers, byovInTpmsSet, byovTechnicians]);
 
+  // Compute per-AMS-truckStatus breakdown for the two spare categories
+  const spareBreakdown = useMemo(() => {
+    const aOnly = visibleCategories.has('assigned') && !visibleCategories.has('unassigned');
+    const uOnly = visibleCategories.has('unassigned') && !visibleCategories.has('assigned');
+    const confirmed: Record<string, number> = {};
+    const needs: Record<string, number> = {};
+
+    for (const vehicle of vehicles) {
+      const vNum = vehicle.vehicleNumber?.toString().padStart(6, '0');
+      if (byovVehicleNumbers.has(vNum)) continue;
+      const state = vehicle.locationState?.toUpperCase().trim();
+      if (!state || !stateCoordinates[state]) continue;
+
+      const isAssigned = vehicle.assignmentStatus === 'Assigned';
+      if (aOnly && !isAssigned) continue;
+      if (uOnly && isAssigned) continue;
+
+      const amsStatus = (vehicle.truckStatus || '').toLowerCase().trim();
+      let spareCategory: 'confirmed' | 'needs' | null = null;
+
+      if (amsStatus === 'spare' || amsStatus.startsWith('spare ')) {
+        const src = (vehicle.locationSource || '').toLowerCase();
+        const hasConfirmedAddress = src === 'confirmed' || src === 'both';
+        const hasRecentSamsara = isSamsaraWithin10Days(vehicle.lastSamsaraSignal);
+        spareCategory = (hasConfirmedAddress || hasRecentSamsara) ? 'confirmed' : 'needs';
+      } else if (!amsStatus.includes('repair') && vehicle.generalStatus === 'Vehicles in storage') {
+        const src = (vehicle.locationSource || '').toLowerCase();
+        const hasConfirmedAddress = src === 'confirmed' || src === 'both';
+        const hasRecentSamsara = isSamsaraWithin10Days(vehicle.lastSamsaraSignal);
+        spareCategory = (hasConfirmedAddress || hasRecentSamsara) ? 'confirmed' : 'needs';
+      }
+
+      if (spareCategory) {
+        const label = vehicle.truckStatus?.trim() || 'Unknown';
+        if (spareCategory === 'confirmed') {
+          confirmed[label] = (confirmed[label] || 0) + 1;
+        } else {
+          needs[label] = (needs[label] || 0) + 1;
+        }
+      }
+    }
+
+    return {
+      confirmed: Object.entries(confirmed).sort((a, b) => b[1] - a[1]),
+      needs: Object.entries(needs).sort((a, b) => b[1] - a[1]),
+    };
+  }, [vehicles, byovVehicleNumbers, visibleCategories]);
+
   const statesWithData = Object.keys(stateData);
   
   if (statesWithData.length === 0) {
@@ -607,36 +656,91 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
 
         {/* Status category toggles */}
         <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-          {statusKeys.map(k => categories.find(c => c.key === k)!).filter(Boolean).map(cat => (
-            <div
-              key={cat.key}
-              role="button"
-              tabIndex={0}
-              onClick={() => toggleCategory(cat.key)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(cat.key); } }}
-              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border cursor-pointer select-none transition-opacity ${
-                visibleCategories.has(cat.key)
-                  ? `${cat.bgClass} ${cat.borderClass} opacity-100`
-                  : 'bg-muted/30 border-muted opacity-50'
-              }`}
-              data-testid={`filter-map-${cat.key}`}
-            >
-              <Checkbox
-                checked={visibleCategories.has(cat.key)}
-                onCheckedChange={() => toggleCategory(cat.key)}
-                className="h-3.5 w-3.5 pointer-events-none"
-                data-testid={`checkbox-map-${cat.key}`}
-              />
-              <div className={`w-5 h-5 rounded-full ${visibleCategories.has(cat.key) ? cat.dotClass : 'bg-muted-foreground/30'} flex items-center justify-center text-white font-bold text-[7px] shadow-sm`}>
-                {totals[cat.key].toLocaleString()}
+          {statusKeys.map(k => categories.find(c => c.key === k)!).filter(Boolean).map(cat => {
+            const isSpare = cat.key === 'confirmedSpare' || cat.key === 'needsReconfirmation';
+            const spareKey = cat.key === 'confirmedSpare' ? 'confirmed' : 'needs';
+            return (
+              <div
+                key={cat.key}
+                role="button"
+                tabIndex={0}
+                onClick={() => toggleCategory(cat.key)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(cat.key); } }}
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border cursor-pointer select-none transition-opacity ${
+                  visibleCategories.has(cat.key)
+                    ? `${cat.bgClass} ${cat.borderClass} opacity-100`
+                    : 'bg-muted/30 border-muted opacity-50'
+                }`}
+                data-testid={`filter-map-${cat.key}`}
+              >
+                <Checkbox
+                  checked={visibleCategories.has(cat.key)}
+                  onCheckedChange={() => toggleCategory(cat.key)}
+                  className="h-3.5 w-3.5 pointer-events-none"
+                  data-testid={`checkbox-map-${cat.key}`}
+                />
+                <div className={`w-5 h-5 rounded-full ${visibleCategories.has(cat.key) ? cat.dotClass : 'bg-muted-foreground/30'} flex items-center justify-center text-white font-bold text-[7px] shadow-sm`}>
+                  {totals[cat.key].toLocaleString()}
+                </div>
+                <span className={`font-medium text-xs ${visibleCategories.has(cat.key) ? cat.textClass : 'text-muted-foreground'}`}>
+                  {cat.label}
+                </span>
+                {isSpare && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="Show breakdown by AMS truck status"
+                    onClick={(e) => { e.stopPropagation(); setSpareExpanded(prev => ({ ...prev, [spareKey]: !prev[spareKey] })); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setSpareExpanded(prev => ({ ...prev, [spareKey]: !prev[spareKey] })); } }}
+                    className="ml-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 p-0.5"
+                  >
+                    {spareExpanded[spareKey] ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  </span>
+                )}
               </div>
-              <span className={`font-medium text-xs ${visibleCategories.has(cat.key) ? cat.textClass : 'text-muted-foreground'}`}>
-                {cat.label}
-              </span>
-            </div>
-          ))}
+            );
+          })}
           <span className="text-xs text-muted-foreground self-center">({statesWithData.length} states)</span>
         </div>
+
+        {/* AMS truck status breakdown for spare categories */}
+        {(spareExpanded.confirmed || spareExpanded.needs) && (
+          <div className="mt-2 flex gap-6 flex-wrap">
+            {spareExpanded.confirmed && spareBreakdown.confirmed.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-purple-500 shrink-0" />
+                  <span className="text-xs font-semibold text-purple-700 dark:text-purple-300">Spare – Location Confirmed</span>
+                </div>
+                <div className="flex flex-wrap gap-1 pl-3.5">
+                  {spareBreakdown.confirmed.map(([label, count]) => (
+                    <span key={label} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 text-xs">
+                      <span className="text-purple-700 dark:text-purple-300">{label}</span>
+                      <span className="font-mono font-bold text-purple-900 dark:text-purple-100">{count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {spareExpanded.needs && spareBreakdown.needs.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-pink-500 shrink-0" />
+                  <span className="text-xs font-semibold text-pink-700 dark:text-pink-300">Spare – Needs Confirming</span>
+                </div>
+                <div className="flex flex-wrap gap-1 pl-3.5">
+                  {spareBreakdown.needs.map(([label, count]) => (
+                    <span key={label} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800 text-xs">
+                      <span className="text-pink-700 dark:text-pink-300">{label}</span>
+                      <span className="font-mono font-bold text-pink-900 dark:text-pink-100">{count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {onMapFiltersChange && (
           <p className="text-xs text-muted-foreground mt-1">
             Click bubbles or states to filter the table below (multi-select supported)
