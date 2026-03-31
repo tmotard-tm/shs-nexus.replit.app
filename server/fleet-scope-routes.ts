@@ -7096,6 +7096,14 @@ Respond ONLY with valid JSON, no other text.`;
           subStatus = 'Other Local Parking';
         }
 
+        // TPMS is authoritative for "On Road": if a vehicle is not assigned in TPMS_EXTRACT
+        // it should never be classified as On Road, regardless of what AMS TRUCK_STATUS says
+        // (e.g. "Assigned to Tech" in AMS but absent from TPMS means the truck is not active).
+        if (generalStatus === 'On Road' && !isAssigned) {
+          generalStatus = 'Vehicles in storage';
+          subStatus = 'Other Local Parking';
+        }
+
         // AMS TRUCK_STATUS override: if AMS reports the vehicle is in repair, classify it as
         // "Vehicles in a repair shop" regardless of assignment status or other signals.
         // This catches vehicles not yet entered in the Fleet Scope DB (fs_trucks) but
