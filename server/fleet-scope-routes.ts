@@ -6725,9 +6725,10 @@ Respond ONLY with valid JSON, no other text.`;
             let tpmsAssignedSet = new Set<string>();
             if (byovTruckIds.length > 0) {
               try {
-                // Pad truck IDs to 6 digits for TPMS lookup (they may be stored as 088xxx)
-                const paddedIds = byovTruckIds.map((id: string) => id.padStart(6, '0'));
-                const quotedIds = paddedIds.map((id: string) => `'${id}'`).join(', ');
+                // TPMS stores TRUCK_LU without leading zeros (e.g. "88186" not "088186")
+                // normalizeFleetId strips leading zeros to match TPMS format exactly
+                const normalizedForQuery = byovTruckIds.map((id: string) => normalizeFleetId(id));
+                const quotedIds = normalizedForQuery.map((id: string) => `'${id}'`).join(', ');
                 const tpmsQuery = `
                   SELECT DISTINCT TRUCK_LU 
                   FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT 
