@@ -711,11 +711,6 @@ export default function AllVehicles() {
                       <p className="text-xs text-green-600 dark:text-green-500">
                         {((locationCounts.onRoad / locationCounts.total) * 100).toFixed(1)}% of total
                       </p>
-                      {locationCounts.byovTotal > 0 && (
-                        <p className="text-xs text-green-600/70 dark:text-green-500/70 mt-1">
-                          + {locationCounts.byovTotal.toLocaleString()} BYOV tracked separately
-                        </p>
-                      )}
                     </CardContent>
                   </Card>
                 )}
