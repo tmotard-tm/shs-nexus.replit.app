@@ -92,6 +92,6 @@ Preferred communication style: Simple, everyday language.
 -   **AMS (Asset Management System)**: In-Home vehicle management API for search, assignments, repairs, and comments.
 -   **TPMS (Tire Pressure Monitoring System)**: Technician-to-truck assignments and mobile phone numbers, including tech profiles, shipping addresses, and schedules.
 -   **PMF/PARQ AI**: Fleet vehicle availability API.
--   **Fleet Scope Module**: Fully integrated application with its own database, API endpoints, and frontend pages.
+-   **Fleet Scope Module**: Fully integrated application with its own database, API endpoints, and frontend pages. All `fs_` tables are managed via `server/fleet-scope-schema-init.ts` (CREATE TABLE IF NOT EXISTS + conditional ALTER TABLE blocks — not Drizzle migrations). The `getPmfDataset()` call in the `/api/fs/all-vehicles` endpoint is wrapped in a non-fatal try/catch to survive NeonDB cold-start race conditions on server restart.
 -   **SendGrid**: Email delivery for Communication Hub templates.
 -   **Samsara**: Telematics data for vehicle location and status.

@@ -6418,7 +6418,13 @@ Respond ONLY with valid JSON, no other text.`;
       }
       
       // Get PMF asset IDs from local database (excluding "Checked Out" vehicles)
-      const pmfDataset = await fleetScopeStorage.getPmfDataset();
+      // Non-fatal: if PMF table is unavailable (e.g., DB cold-start), continue without PMF overlay
+      let pmfDataset: { rows: any[] } = { rows: [] };
+      try {
+        pmfDataset = await fleetScopeStorage.getPmfDataset();
+      } catch (pmfErr: any) {
+        console.warn("[AllVehicles] PMF data unavailable, skipping overlay:", pmfErr.message);
+      }
       const pmfAssetIds = new Set<string>();
       if (pmfDataset.rows) {
         for (const row of pmfDataset.rows) {
