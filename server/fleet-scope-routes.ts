@@ -6963,6 +6963,7 @@ Respond ONLY with valid JSON, no other text.`;
         assignmentStatus: string;
         generalStatus: string;
         subStatus: string;
+        truckStatus: string;
         lastKnownLocation: string;
         locationSource: string;
         locationUpdatedAt: string | null;
@@ -7331,6 +7332,7 @@ Respond ONLY with valid JSON, no other text.`;
           assignmentStatus,
           generalStatus,
           subStatus,
+          truckStatus: r.TRUCK_STATUS?.toString() || '',
           lastKnownLocation,
           locationSource,
           locationUpdatedAt,

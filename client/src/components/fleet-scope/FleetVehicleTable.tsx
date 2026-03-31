@@ -10,13 +10,14 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Search, MapPin, Car, X, ChevronDown, Filter, ArrowUpDown, ArrowUp, ArrowDown, Map } from 'lucide-react';
-import type { MapSelection, MapFilters, CategoryKey } from '@/components/USMapVehicles';
+import type { MapSelection, MapFilters, CategoryKey } from '@/components/fleet-scope/USMapVehicles';
 
 interface Vehicle {
   vehicleNumber: string;
   assignmentStatus: string;
   generalStatus: string;
   subStatus: string;
+  truckStatus?: string;
   lastKnownLocation: string;
   locationSource: string;
   locationUpdatedAt: string | null;
@@ -403,7 +404,13 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     return 'onRoad';
   }, [rentalTruckNumbers]);
 
-  const allCategoriesVisible = !visibleMapCategories || visibleMapCategories.size === 6;
+  const getVehicleAssignedCategory = useCallback((v: Vehicle): CategoryKey => {
+    return v.assignmentStatus === 'Assigned' ? 'assigned' : 'unassigned';
+  }, []);
+
+  const TOTAL_CATEGORIES = 8;
+  const ALL_CATEGORY_KEYS: CategoryKey[] = ['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation', 'assigned', 'unassigned'];
+  const allCategoriesVisible = !visibleMapCategories || visibleMapCategories.size === TOTAL_CATEGORIES;
   const hasMapFilters = mapSelections.length > 0 || !allCategoriesVisible;
 
   const preFilteredVehicles = useMemo(() => {
@@ -417,10 +424,24 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
         return true;
       });
     }
-    if (visibleMapCategories && visibleMapCategories.size < 6) {
+    if (visibleMapCategories && visibleMapCategories.size < TOTAL_CATEGORIES) {
+      const STATUS_CATS: CategoryKey[] = ['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'];
+      const ASSIGN_CATS: CategoryKey[] = ['assigned', 'unassigned'];
+      const someStatusHidden = STATUS_CATS.some(k => !visibleMapCategories.has(k));
+      const someAssignHidden = ASSIGN_CATS.some(k => !visibleMapCategories.has(k));
+      const anyStatusVisible = STATUS_CATS.some(k => visibleMapCategories.has(k));
+      const anyAssignVisible = ASSIGN_CATS.some(k => visibleMapCategories.has(k));
       result = result.filter(v => {
-        const cat = getVehicleMapCategory(v);
-        return cat ? visibleMapCategories.has(cat) : false;
+        if (someStatusHidden && anyStatusVisible) {
+          const statusCat = getVehicleMapCategory(v);
+          if (!statusCat || !visibleMapCategories.has(statusCat)) return false;
+        }
+        if (someAssignHidden && anyAssignVisible) {
+          const assignedCat = getVehicleAssignedCategory(v);
+          if (!visibleMapCategories.has(assignedCat)) return false;
+        }
+        if (!anyStatusVisible && !anyAssignVisible) return false;
+        return true;
       });
     }
     if (mapSelections.length > 0) {
@@ -428,6 +449,9 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
         const vState = v.locationState?.toUpperCase().trim();
         return mapSelections.some(sel => {
           if (vState !== sel.state) return false;
+          if (sel.category === 'assigned' || sel.category === 'unassigned') {
+            return getVehicleAssignedCategory(v) === sel.category;
+          }
           if (sel.category) {
             return getVehicleMapCategory(v) === sel.category;
           }
@@ -436,7 +460,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
       });
     }
     return result;
-  }, [vehicles, categoryFilter, mapSelections, visibleMapCategories, getVehicleMapCategory, rentalTruckNumbers]);
+  }, [vehicles, categoryFilter, mapSelections, visibleMapCategories, getVehicleMapCategory, getVehicleAssignedCategory, rentalTruckNumbers]);
 
   const filteredVehicles = useMemo(() => {
     let result = preFilteredVehicles.filter(vehicle => {
@@ -617,7 +641,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
             {!allCategoriesVisible && (
               <Badge variant="secondary" className="gap-1 text-xs">
                 <Map className="w-3 h-3" />
-                {visibleMapCategories?.size || 0} of 6 categories
+                {visibleMapCategories?.size || 0} of {TOTAL_CATEGORIES} categories
               </Badge>
             )}
             {mapSelections.map((sel, idx) => (
@@ -628,7 +652,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                 onClick={() => {
                   if (onMapFiltersChange) {
                     const newSelections = mapSelections.filter((_, i) => i !== idx);
-                    const cats = visibleMapCategories || new Set(['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'] as CategoryKey[]);
+                    const cats = visibleMapCategories || new Set(ALL_CATEGORY_KEYS);
                     onMapFiltersChange({ selections: newSelections, visibleCategories: cats });
                   }
                 }}
@@ -646,7 +670,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                 className="h-6 px-2 text-xs text-muted-foreground"
                 onClick={() => onMapFiltersChange({ 
                   selections: [], 
-                  visibleCategories: new Set(['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'] as CategoryKey[])
+                  visibleCategories: new Set(ALL_CATEGORY_KEYS)
                 })}
                 data-testid="button-clear-all-map-filters-table"
               >
@@ -858,8 +882,10 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                           ) : (
                             (() => {
                               const label = vehicle.vin ? amsTruckStatusMap?.[vehicle.vin.trim().toUpperCase()] : undefined;
-                              return label ? (
-                                <span className="text-xs text-foreground whitespace-nowrap">{label}</span>
+                              const fallback = vehicle.truckStatus || undefined;
+                              const display = label || fallback;
+                              return display ? (
+                                <span className="text-xs text-foreground whitespace-nowrap">{display}</span>
                               ) : (
                                 <span className="text-xs text-muted-foreground">-</span>
                               );

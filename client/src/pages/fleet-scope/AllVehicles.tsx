@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,8 +38,8 @@ import {
 // Extract US state abbreviation from BYOV location string (e.g., "Deatsville, AL" -> "AL")
 const extractStateFromLocation = (location: string): string => {
   if (!location) return '';
-  // Match 2-letter state code at the end (e.g., ", AL" or " AL")
-  const match = location.match(/,?\s*([A-Z]{2})$/i);
+  // Match 2-letter state code optionally followed by a ZIP code (e.g., ", AL" or "Alexandria, VA 22312")
+  const match = location.match(/,?\s*([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?$/i);
   if (match) {
     return match[1].toUpperCase();
   }
@@ -51,6 +51,7 @@ interface VehicleTableRow {
   assignmentStatus: string;
   generalStatus: string;
   subStatus: string;
+  truckStatus?: string;
   lastKnownLocation: string;
   locationSource: string;
   locationUpdatedAt: string | null;
@@ -226,6 +227,29 @@ const ACTIVE_DECLINED_REPAIRS = new Set([
   "46559","36605","61365","61290",
 ]);
 
+class MapErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError(_: Error) {
+    return { hasError: true };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[MapErrorBoundary] caught:', error, info.componentStack);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+          Map failed to load. Please refresh the page.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function AllVehicles() {
   const { currentUser } = useUser();
   const { toast } = useToast();
@@ -233,7 +257,7 @@ export default function AllVehicles() {
   const [categoryFilter, setCategoryFilter] = useState<{generalStatus?: string; subStatus?: string; excludePmf?: boolean; isRental?: boolean; label: string} | null>(null);
   const [mapSelections, setMapSelections] = useState<MapSelection[]>([]);
   const [visibleMapCategories, setVisibleMapCategories] = useState<Set<CategoryKey>>(
-    new Set(['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'] as CategoryKey[])
+    new Set(['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation', 'assigned', 'unassigned'] as CategoryKey[])
   );
 
   const handleMapFiltersChange = useCallback((filters: MapFilters) => {
@@ -1336,19 +1360,22 @@ export default function AllVehicles() {
 
               {/* US Map showing vehicle distribution by state */}
               {data.vehicles && data.vehicles.length > 0 && (
-                <USMapVehicles 
-                  vehicles={data.vehicles}
-                  byovTechnicians={data.byov?.technicians?.map(tech => ({
-                    name: tech.name,
-                    truckId: tech.truckId,
-                    location: tech.location,
-                    state: extractStateFromLocation(tech.location)
-                  })) || []}
-                  rentalsByState={rentalsByState}
-                  onMapFiltersChange={handleMapFiltersChange}
-                  activeSelections={mapSelections}
-                  visibleCategories={visibleMapCategories}
-                />
+                <MapErrorBoundary>
+                  <USMapVehicles 
+                    vehicles={data.vehicles}
+                    byovTechnicians={data.byov?.technicians?.map(tech => ({
+                      name: tech.name,
+                      truckId: tech.truckId,
+                      location: tech.location,
+                      state: extractStateFromLocation(tech.location),
+                      inTpms: tech.inTpms
+                    })) || []}
+                    rentalsByState={rentalsByState}
+                    onMapFiltersChange={handleMapFiltersChange}
+                    activeSelections={mapSelections}
+                    visibleCategories={visibleMapCategories}
+                  />
+                </MapErrorBoundary>
               )}
 
               {/* Fleet Vehicle Table */}

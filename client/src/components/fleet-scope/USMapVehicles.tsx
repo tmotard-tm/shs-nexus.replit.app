@@ -15,6 +15,8 @@ interface Vehicle {
   subStatus: string;
   locationState: string;
   locationSource?: string;
+  truckStatus?: string;
+  lastSamsaraSignal?: string | null;
 }
 
 interface ByovTechnician {
@@ -22,6 +24,7 @@ interface ByovTechnician {
   truckId: string;
   location: string;
   state: string;
+  inTpms?: boolean;
 }
 
 export interface MapSelection {
@@ -44,15 +47,21 @@ interface USMapVehiclesProps {
   rentalsByState?: Record<string, number>;
 }
 
-export type CategoryKey = 'onRoad' | 'repairShop' | 'pmf' | 'byov' | 'confirmedSpare' | 'needsReconfirmation';
+export type CategoryKey = 'onRoad' | 'repairShop' | 'pmf' | 'byov' | 'confirmedSpare' | 'needsReconfirmation' | 'assigned' | 'unassigned';
 
-interface StateData {
+type StatusCounts = {
   onRoad: number;
   repairShop: number;
   pmf: number;
   byov: number;
   confirmedSpare: number;
   needsReconfirmation: number;
+};
+
+interface StateData extends StatusCounts {
+  assigned: number;
+  unassigned: number;
+  assignedOnly: StatusCounts;
 }
 
 const stateCoordinates: Record<string, [number, number]> = {
@@ -147,13 +156,22 @@ const isPmfVehicle = (subStatus: string): boolean => {
          lower.includes('locked down');
 };
 
+const isSamsaraWithin10Days = (signal: string | null | undefined): boolean => {
+  if (!signal) return false;
+  const ts = new Date(signal).getTime();
+  if (isNaN(ts)) return false;
+  return Date.now() - ts <= 10 * 24 * 60 * 60 * 1000;
+};
+
 const categoryLabels: Record<CategoryKey, string> = {
   onRoad: 'On Road',
   repairShop: 'Repair Shop',
   pmf: 'PMF',
   byov: 'BYOV',
-  confirmedSpare: 'Confirmed Spare Location',
-  needsReconfirmation: 'Needs Reconfirmation',
+  confirmedSpare: 'Spare - Location Confirmed',
+  needsReconfirmation: 'Spare - Needs Confirming',
+  assigned: 'Assigned',
+  unassigned: 'Unassigned',
 };
 
 const categories: { key: CategoryKey; color: string; stroke: string; label: string; bgClass: string; borderClass: string; dotClass: string; textClass: string }[] = [
@@ -161,8 +179,10 @@ const categories: { key: CategoryKey; color: string; stroke: string; label: stri
   { key: 'repairShop', color: 'rgba(245, 158, 11, 0.9)', stroke: '#d97706', label: 'Repair Shop', bgClass: 'bg-amber-50 dark:bg-amber-900/20', borderClass: 'border-amber-200 dark:border-amber-800', dotClass: 'bg-amber-500', textClass: 'text-amber-700 dark:text-amber-300' },
   { key: 'pmf', color: 'rgba(59, 130, 246, 0.9)', stroke: '#2563eb', label: 'PMF', bgClass: 'bg-blue-50 dark:bg-blue-900/20', borderClass: 'border-blue-200 dark:border-blue-800', dotClass: 'bg-blue-500', textClass: 'text-blue-700 dark:text-blue-300' },
   { key: 'byov', color: 'rgba(20, 184, 166, 0.9)', stroke: '#0d9488', label: 'BYOV', bgClass: 'bg-teal-50 dark:bg-teal-900/20', borderClass: 'border-teal-200 dark:border-teal-800', dotClass: 'bg-teal-500', textClass: 'text-teal-700 dark:text-teal-300' },
-  { key: 'confirmedSpare', color: 'rgba(147, 51, 234, 0.9)', stroke: '#7c3aed', label: 'Confirmed Spare Location', bgClass: 'bg-purple-50 dark:bg-purple-900/20', borderClass: 'border-purple-200 dark:border-purple-800', dotClass: 'bg-purple-500', textClass: 'text-purple-700 dark:text-purple-300' },
-  { key: 'needsReconfirmation', color: 'rgba(236, 72, 153, 0.9)', stroke: '#db2777', label: 'Needs Reconfirmation', bgClass: 'bg-pink-50 dark:bg-pink-900/20', borderClass: 'border-pink-200 dark:border-pink-800', dotClass: 'bg-pink-500', textClass: 'text-pink-700 dark:text-pink-300' },
+  { key: 'confirmedSpare', color: 'rgba(147, 51, 234, 0.9)', stroke: '#7c3aed', label: 'Spare - Location Confirmed', bgClass: 'bg-purple-50 dark:bg-purple-900/20', borderClass: 'border-purple-200 dark:border-purple-800', dotClass: 'bg-purple-500', textClass: 'text-purple-700 dark:text-purple-300' },
+  { key: 'needsReconfirmation', color: 'rgba(236, 72, 153, 0.9)', stroke: '#db2777', label: 'Spare - Needs Confirming', bgClass: 'bg-pink-50 dark:bg-pink-900/20', borderClass: 'border-pink-200 dark:border-pink-800', dotClass: 'bg-pink-500', textClass: 'text-pink-700 dark:text-pink-300' },
+  { key: 'assigned', color: 'rgba(6, 182, 212, 0.9)', stroke: '#0891b2', label: 'Assigned', bgClass: 'bg-cyan-50 dark:bg-cyan-900/20', borderClass: 'border-cyan-200 dark:border-cyan-800', dotClass: 'bg-cyan-500', textClass: 'text-cyan-700 dark:text-cyan-300' },
+  { key: 'unassigned', color: 'rgba(239, 68, 68, 0.9)', stroke: '#dc2626', label: 'Unassigned', bgClass: 'bg-red-50 dark:bg-red-900/20', borderClass: 'border-red-200 dark:border-red-800', dotClass: 'bg-red-500', textClass: 'text-red-700 dark:text-red-300' },
 ];
 
 const DEFAULT_CENTER: [number, number] = [-96, 38];
@@ -273,6 +293,8 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [center, setCenter] = useState<[number, number]>(DEFAULT_CENTER);
 
+  const statusKeys: CategoryKey[] = ['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'];
+
   const toggleCategory = (key: CategoryKey) => {
     if (!onMapFiltersChange) return;
     const next = new Set(visibleCategories);
@@ -280,6 +302,9 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
       next.delete(key);
     } else {
       next.add(key);
+      if (key === 'assigned') {
+        statusKeys.forEach(k => next.add(k));
+      }
     }
     onMapFiltersChange({ selections: activeSelections, visibleCategories: next });
   };
@@ -350,6 +375,19 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
     return set;
   }, [byovTechnicians]);
 
+  const byovInTpmsSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const tech of byovTechnicians) {
+      if (tech.inTpms && tech.truckId) {
+        set.add(tech.truckId.toString().padStart(6, '0'));
+      }
+    }
+    return set;
+  }, [byovTechnicians]);
+
+  const emptyStatusCounts = (): StatusCounts => ({ onRoad: 0, repairShop: 0, pmf: 0, byov: 0, confirmedSpare: 0, needsReconfirmation: 0 });
+  const emptyStateData = (): StateData => ({ ...emptyStatusCounts(), assigned: 0, unassigned: 0, assignedOnly: emptyStatusCounts() });
+
   const stateData = useMemo(() => {
     const data: Record<string, StateData> = {};
     const countedVehicleNumbers = new Set<string>();
@@ -359,35 +397,58 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
       if (!state || !stateCoordinates[state]) continue;
       
       if (!data[state]) {
-        data[state] = { onRoad: 0, repairShop: 0, pmf: 0, byov: 0, confirmedSpare: 0, needsReconfirmation: 0 };
+        data[state] = emptyStateData();
       }
 
       const vNum = vehicle.vehicleNumber?.toString().padStart(6, '0');
       countedVehicleNumbers.add(vNum);
       const isByov = byovVehicleNumbers.has(vNum);
+      // For BYOV trucks, use TPMS_EXTRACT membership as the assignment signal
+      // For all other vehicles, use the Holman fleet assignmentStatus
+      const isAssigned = isByov ? byovInTpmsSet.has(vNum) : vehicle.assignmentStatus === 'Assigned';
 
+      let statusKey: keyof StatusCounts | null = null;
       if (isByov) {
-        data[state].byov++;
+        statusKey = 'byov';
+      } else if (vehicle.generalStatus === 'PMF' || isPmfVehicle(vehicle.subStatus)) {
+        statusKey = 'pmf';
       } else if (vehicle.generalStatus === 'On Road') {
-        data[state].onRoad++;
-      } else if (vehicle.generalStatus === 'Vehicles in a repair shop') {
-        data[state].repairShop++;
-      } else if (vehicle.generalStatus === 'Vehicles in storage') {
-        if (isPmfVehicle(vehicle.subStatus)) {
-          data[state].pmf++;
-        } else {
-          const src = (vehicle.locationSource || '').toLowerCase();
-          const hasConfirmedLocation = src === 'confirmed' || src === 'both';
-          if (hasConfirmedLocation) {
-            data[state].confirmedSpare++;
-          } else {
-            data[state].needsReconfirmation++;
-          }
-        }
-      } else if (vehicle.generalStatus === 'PMF') {
-        data[state].pmf++;
+        // Assigned On Road vehicles keep their generalStatus — don't override with AMS
+        statusKey = 'onRoad';
       } else {
-        data[state].onRoad++;
+        // Use AMS truck status (truckStatus) for unassigned spare/storage/repair vehicles
+        const amsStatus = (vehicle.truckStatus || '').toLowerCase().trim();
+        if (amsStatus === 'spare' || amsStatus.startsWith('spare ')) {
+          // AMS "Spare": split by location confirmation
+          // Confirmed = has a confirmed address OR has a Samsara signal within the last 10 days
+          const src = (vehicle.locationSource || '').toLowerCase();
+          const hasConfirmedAddress = src === 'confirmed' || src === 'both';
+          const hasRecentSamsara = isSamsaraWithin10Days(vehicle.lastSamsaraSignal);
+          statusKey = (hasConfirmedAddress || hasRecentSamsara) ? 'confirmedSpare' : 'needsReconfirmation';
+        } else if (amsStatus.includes('repair') || vehicle.generalStatus === 'Vehicles in a repair shop') {
+          statusKey = 'repairShop';
+        } else if (vehicle.generalStatus === 'Vehicles in storage') {
+          // Storage vehicles with no AMS "Spare" status: still split by location
+          const src = (vehicle.locationSource || '').toLowerCase();
+          const hasConfirmedAddress = src === 'confirmed' || src === 'both';
+          const hasRecentSamsara = isSamsaraWithin10Days(vehicle.lastSamsaraSignal);
+          statusKey = (hasConfirmedAddress || hasRecentSamsara) ? 'confirmedSpare' : 'needsReconfirmation';
+        } else {
+          statusKey = 'onRoad';
+        }
+      }
+
+      if (statusKey) {
+        data[state][statusKey]++;
+        if (isAssigned) {
+          data[state].assignedOnly[statusKey]++;
+        }
+      }
+
+      if (isAssigned) {
+        data[state].assigned++;
+      } else {
+        data[state].unassigned++;
       }
     }
 
@@ -397,14 +458,17 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
       const vNum = tech.truckId?.toString().padStart(6, '0');
       if (!countedVehicleNumbers.has(vNum)) {
         if (!data[techState]) {
-          data[techState] = { onRoad: 0, repairShop: 0, pmf: 0, byov: 0, confirmedSpare: 0, needsReconfirmation: 0 };
+          data[techState] = emptyStateData();
         }
         data[techState].byov++;
+        if (tech.inTpms) {
+          data[techState].assignedOnly.byov++;
+        }
       }
     }
     
     return data;
-  }, [vehicles, byovVehicleNumbers, byovTechnicians]);
+  }, [vehicles, byovVehicleNumbers, byovInTpmsSet, byovTechnicians]);
 
   const statesWithData = Object.keys(stateData);
   
@@ -412,26 +476,41 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
     return null;
   }
 
+  const assignedToggleOn = visibleCategories.has('assigned');
+  const unassignedToggleOn = visibleCategories.has('unassigned');
+  const assignedOnlyMode = assignedToggleOn && !unassignedToggleOn;
+
+  const getEffectiveCount = (key: CategoryKey, data: StateData): number => {
+    if (key === 'assigned' || key === 'unassigned') return data[key];
+    if (assignedOnlyMode) return data.assignedOnly[key as keyof StatusCounts];
+    return data[key as keyof StatusCounts];
+  };
+
   const totals: Record<CategoryKey, number> = {
-    onRoad: 0, repairShop: 0, pmf: 0, byov: 0, confirmedSpare: 0, needsReconfirmation: 0
+    onRoad: 0, repairShop: 0, pmf: 0, byov: 0, confirmedSpare: 0, needsReconfirmation: 0, assigned: 0, unassigned: 0
   };
   for (const s of Object.values(stateData)) {
     for (const key of Object.keys(totals) as CategoryKey[]) {
-      totals[key] += s[key];
+      totals[key] += getEffectiveCount(key, s);
     }
   }
 
-  const allKeys: CategoryKey[] = categories.map(c => c.key);
+  const visibleCats = categories.filter(c => {
+    if (!visibleCategories.has(c.key)) return false;
+    if (c.key === 'assigned') return false;
+    return true;
+  });
+
+  const bubbleKeys = visibleCats.map(c => c.key);
   const maxCount = Math.max(
-    ...Object.values(stateData).flatMap(s => allKeys.map(k => s[k]))
+    ...Object.values(stateData).flatMap(s => bubbleKeys.map(k => getEffectiveCount(k, s))),
+    1
   );
   
   const getRadius = (count: number) => {
     if (count === 0) return 0;
     return Math.max(5, Math.min(14, 5 + (count / maxCount) * 9));
   };
-
-  const visibleCats = categories.filter(c => visibleCategories.has(c.key));
 
   return (
     <Card className="mb-4" data-testid="card-us-map-vehicles">
@@ -472,15 +551,48 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
             </div>
           )}
         </div>
-        <div className="flex items-center gap-3 mt-2 flex-wrap">
-          {categories.map(cat => (
+        <div className="flex items-start gap-2 mt-2 flex-wrap">
+          {/* Assigned group: Assigned toggle + 6 status category toggles */}
+          <div className="flex items-center gap-1.5 flex-wrap border border-cyan-200 dark:border-cyan-800 rounded-lg px-2 py-1 bg-cyan-50/40 dark:bg-cyan-900/10">
+            {(['assigned', ...statusKeys] as CategoryKey[]).map(k => categories.find(c => c.key === k)!).filter(Boolean).map(cat => (
+              <div
+                key={cat.key}
+                role="button"
+                tabIndex={0}
+                onClick={() => toggleCategory(cat.key)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(cat.key); } }}
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border cursor-pointer select-none transition-opacity ${
+                  visibleCategories.has(cat.key)
+                    ? `${cat.bgClass} ${cat.borderClass} opacity-100`
+                    : 'bg-muted/30 border-muted opacity-50'
+                }`}
+                data-testid={`filter-map-${cat.key}`}
+              >
+                <Checkbox
+                  checked={visibleCategories.has(cat.key)}
+                  onCheckedChange={() => toggleCategory(cat.key)}
+                  className="h-3.5 w-3.5 pointer-events-none"
+                  data-testid={`checkbox-map-${cat.key}`}
+                />
+                <div className={`w-5 h-5 rounded-full ${visibleCategories.has(cat.key) ? cat.dotClass : 'bg-muted-foreground/30'} flex items-center justify-center text-white font-bold text-[7px] shadow-sm`}>
+                  {totals[cat.key].toLocaleString()}
+                </div>
+                <span className={`font-medium text-xs ${visibleCategories.has(cat.key) ? cat.textClass : 'text-muted-foreground'}`}>
+                  {cat.key === 'assigned' ? <strong>{cat.label}</strong> : cat.label}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Unassigned toggle (separate) */}
+          {categories.filter(c => c.key === 'unassigned').map(cat => (
             <div
               key={cat.key}
               role="button"
               tabIndex={0}
               onClick={() => toggleCategory(cat.key)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(cat.key); } }}
-              className={`flex items-center gap-2 px-2.5 py-1 rounded-full border cursor-pointer select-none transition-opacity ${
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border cursor-pointer select-none transition-opacity ${
                 visibleCategories.has(cat.key)
                   ? `${cat.bgClass} ${cat.borderClass} opacity-100`
                   : 'bg-muted/30 border-muted opacity-50'
@@ -501,7 +613,8 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
               </span>
             </div>
           ))}
-          <span className="text-xs text-muted-foreground">({statesWithData.length} states)</span>
+
+          <span className="text-xs text-muted-foreground self-center">({statesWithData.length} states)</span>
         </div>
         {onMapFiltersChange && (
           <p className="text-xs text-muted-foreground mt-1">
@@ -620,7 +733,7 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                 const data = stateData[state];
                 if (!coords) return null;
                 
-                const activeCategories = visibleCats.filter(c => data[c.key] > 0);
+                const activeCategories = visibleCats.filter(c => getEffectiveCount(c.key, data) > 0);
                 const circleCount = activeCategories.length;
                 
                 if (circleCount === 0) return null;
@@ -646,7 +759,7 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                 }
                 
                 const leftmostOffset = offsets[0] || 0;
-                const leftmostRadius = activeCategories.length > 0 ? getRadius(data[activeCategories[0].key]) : 5;
+                const leftmostRadius = activeCategories.length > 0 ? getRadius(getEffectiveCount(activeCategories[0].key, data)) : 5;
                 const labelXOffset = leftmostOffset - (leftmostRadius / 12) - 0.5;
                 
                 return (
@@ -669,7 +782,7 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                     )}
                     
                     {activeCategories.map((cat, idx) => {
-                      const count = data[cat.key];
+                      const count = getEffectiveCount(cat.key, data);
                       const radius = getRadius(count);
                       const offset = offsets[idx] || 0;
                       const isActive = isSelectionActive(state, cat.key);
