@@ -21,6 +21,211 @@ function getDb() {
   return fsDb;
 }
 
+// ---------------------------------------------------------------------------
+// Shared helper: build full registration data without going through HTTP.
+// Used by both the authenticated /registration route and the public
+// /public/registrations endpoint so neither has to round-trip through the
+// Express auth middleware.
+// ---------------------------------------------------------------------------
+async function buildRegistrationData(): Promise<{
+  trucks: {
+    truckNumber: string;
+    tagState: string;
+    district: string;
+    assignmentStatus: string;
+    regExpDate: string;
+    state: string;
+    ldap: string;
+    techName: string;
+    techPhone: string;
+    techAddress: string;
+    initialTextSent: boolean;
+    timeSlotConfirmed: boolean;
+    timeSlotValue: string;
+    submittedToHolman: boolean;
+    submittedToHolmanAt: any;
+    alreadySent: boolean;
+    comments: string;
+    techLeadName: string;
+    techLeadPhone: string;
+    inRepairShop: boolean;
+  }[];
+  declinedTrucks: string[];
+}> {
+  // 1. TPMS_EXTRACT — tech assignments + contact details
+  const tpmsQuery = `
+    SELECT
+      TRUCK_LU,
+      FULL_NAME,
+      MOBILEPHONENUMBER,
+      PRIMARYADDR1,
+      PRIMARYADDR2,
+      PRIMARYCITY,
+      PRIMARYSTATE,
+      PRIMARYZIP,
+      MANAGER_NAME,
+      MANAGER_ENT_ID,
+      ENTERPRISE_ID,
+      DISTRICT
+    FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+  `;
+  const tpmsData = await executeQuery<{
+    TRUCK_LU: string;
+    FULL_NAME: string | null;
+    MOBILEPHONENUMBER: string | null;
+    PRIMARYADDR1: string | null;
+    PRIMARYADDR2: string | null;
+    PRIMARYCITY: string | null;
+    PRIMARYSTATE: string | null;
+    PRIMARYZIP: string | null;
+    MANAGER_NAME: string | null;
+    MANAGER_ENT_ID: string | null;
+    ENTERPRISE_ID: string | null;
+    DISTRICT: string | null;
+  }>(tpmsQuery);
+
+  const enterpriseIdToPhone = new Map<string, string>();
+  for (const row of tpmsData) {
+    const entId = row.ENTERPRISE_ID?.toString().trim();
+    const phone = row.MOBILEPHONENUMBER?.toString().trim();
+    if (entId && phone) enterpriseIdToPhone.set(entId, phone);
+  }
+
+  const tpmsLookup = new Map<string, {
+    techName: string; techPhone: string; fullAddress: string;
+    state: string; techLeadName: string; techLeadPhone: string;
+    district: string; ldap: string;
+  }>();
+  for (const row of tpmsData) {
+    const truckNum = row.TRUCK_LU?.toString().padStart(6, '0') || '';
+    if (!truckNum) continue;
+    const addressParts = [
+      row.PRIMARYADDR1?.trim(), row.PRIMARYADDR2?.trim(),
+      row.PRIMARYCITY?.trim(), row.PRIMARYSTATE?.trim(), row.PRIMARYZIP?.trim()
+    ].filter(Boolean);
+    const managerEntId = row.MANAGER_ENT_ID?.toString().trim();
+    const managerPhone = managerEntId ? (enterpriseIdToPhone.get(managerEntId) || '') : '';
+    const district = row.DISTRICT?.toString().trim().replace(/^0+/, '') || '';
+    tpmsLookup.set(truckNum, {
+      techName: row.FULL_NAME?.toString().trim() || '',
+      techPhone: row.MOBILEPHONENUMBER?.toString().trim() || '',
+      fullAddress: addressParts.join(', '),
+      state: row.PRIMARYSTATE?.toString().trim() || '',
+      techLeadName: row.MANAGER_NAME?.toString().trim() || '',
+      techLeadPhone: managerPhone,
+      district,
+      ldap: row.ENTERPRISE_ID?.toString().trim() || ''
+    });
+  }
+
+  // 2. Holman — tag state
+  const holmanTagStateData = await executeQuery<{
+    HOLMAN_VEHICLE_NUMBER: string; TAG_STATE_PROVINCE: string | null;
+  }>(`SELECT HOLMAN_VEHICLE_NUMBER, TAG_STATE_PROVINCE
+      FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_VEHICLES
+      WHERE HOLMAN_VEHICLE_NUMBER IS NOT NULL`);
+  const tagStateLookup = new Map<string, string>();
+  for (const row of holmanTagStateData) {
+    const rawNum = row.HOLMAN_VEHICLE_NUMBER?.toString().replace(/\D/g, '') || '';
+    if (!rawNum) continue;
+    const truckNum = rawNum.padStart(6, '0');
+    if (row.TAG_STATE_PROVINCE) tagStateLookup.set(truckNum, row.TAG_STATE_PROVINCE.toString().trim());
+  }
+
+  // 3. All unique truck numbers from multiple sources
+  const allTruckNumbers = new Set<string>();
+
+  const allVehiclesData = await executeQuery<{ VEHICLE_NUMBER: string }>(
+    `SELECT DISTINCT VEHICLE_NUMBER FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES WHERE VEHICLE_NUMBER IS NOT NULL`
+  );
+  for (const row of allVehiclesData) {
+    const num = row.VEHICLE_NUMBER?.toString().padStart(6, '0');
+    if (num) allTruckNumbers.add(num);
+  }
+
+  const sparesQueryResult = await getDb().select({
+    vehicleNumber: spareVehicleDetails.vehicleNumber,
+    registrationRenewalDate: spareVehicleDetails.registrationRenewalDate
+  }).from(spareVehicleDetails);
+  const spareRegDateLookup = new Map<string, Date | null>();
+  for (const spare of sparesQueryResult) {
+    const num = spare.vehicleNumber?.toString().padStart(6, '0');
+    if (num) { allTruckNumbers.add(num); spareRegDateLookup.set(num, spare.registrationRenewalDate); }
+  }
+
+  const localTrucks = await fleetScopeStorage.getAllTrucks();
+  const trucksRegDateLookup = new Map<string, string | null>();
+  const trucksInRepairShop = new Set<string>();
+  for (const truck of localTrucks) {
+    const num = truck.truckNumber?.toString().padStart(6, '0');
+    if (num) {
+      allTruckNumbers.add(num);
+      trucksRegDateLookup.set(num, truck.holmanRegExpiry || null);
+      if (truck.repairAddress && truck.repairAddress.trim()) trucksInRepairShop.add(num);
+    }
+  }
+
+  for (const truckNum of tpmsLookup.keys()) allTruckNumbers.add(truckNum);
+
+  // 4. Registration tracking records
+  const trackingData = await getDb().select().from(registrationTracking);
+  const trackingLookup = new Map(trackingData.map(t => [t.truckNumber, t]));
+
+  // 5. Build truck list
+  const trucks = [];
+  for (const truckNumber of allTruckNumbers) {
+    const tpmsInfo = tpmsLookup.get(truckNumber);
+    const tracking = trackingLookup.get(truckNumber);
+    let regExpDate: string | null = null;
+    const spareRegDate = spareRegDateLookup.get(truckNumber);
+    if (spareRegDate) regExpDate = spareRegDate.toISOString().split('T')[0];
+    if (!regExpDate) regExpDate = trucksRegDateLookup.get(truckNumber) || null;
+    trucks.push({
+      truckNumber,
+      tagState: tagStateLookup.get(truckNumber) || '',
+      district: tpmsInfo?.district || '',
+      assignmentStatus: tpmsInfo ? 'Assigned' : 'Unassigned',
+      regExpDate: regExpDate || '',
+      state: tpmsInfo?.state || '',
+      ldap: tpmsInfo?.ldap || '',
+      techName: tpmsInfo?.techName || '',
+      techPhone: tpmsInfo?.techPhone || '',
+      techAddress: tpmsInfo?.fullAddress || '',
+      initialTextSent: tracking?.initialTextSent || false,
+      timeSlotConfirmed: tracking?.timeSlotConfirmed || false,
+      timeSlotValue: tracking?.timeSlotValue || '',
+      submittedToHolman: tracking?.submittedToHolman || false,
+      submittedToHolmanAt: tracking?.submittedToHolmanAt || null,
+      alreadySent: tracking?.alreadySent || false,
+      comments: tracking?.comments || '',
+      techLeadName: tpmsInfo?.techLeadName || '',
+      techLeadPhone: tpmsInfo?.techLeadPhone || '',
+      inRepairShop: trucksInRepairShop.has(truckNumber)
+    });
+  }
+  trucks.sort((a, b) => a.truckNumber.localeCompare(b.truckNumber));
+
+  // 6. Declined trucks from POs
+  const allPurchaseOrders = await fleetScopeStorage.getAllPurchaseOrders();
+  const declinedTrucks: string[] = [];
+  for (const po of allPurchaseOrders) {
+    if (po.finalApproval === "Decline and Submit for Sale") {
+      try {
+        const rawData = po.rawData ? JSON.parse(po.rawData) : {};
+        const vehicleNo = rawData["Vehicle_No"] || rawData["Vehicle No"] || rawData["VEHICLE_NO"] || rawData["vehicle_no"] || "";
+        if (vehicleNo) {
+          const normalized = vehicleNo.toString().padStart(6, '0');
+          if (normalized !== '000000') declinedTrucks.push(normalized);
+        }
+      } catch (e) {
+        // skip invalid JSON
+      }
+    }
+  }
+
+  return { trucks, declinedTrucks };
+}
+
 // Configure multer for file uploads (memory storage for processing)
 const upload = multer({ 
   storage: multer.memoryStorage(),
@@ -1346,18 +1551,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  app.get("/public/registrations", async (req, res) => {
+  app.get("/public/registrations", async (_req, res) => {
     try {
-      const internalUrl = `${req.protocol}://${req.get('host')}/api/fs/registration`;
-      const response = await fetch(internalUrl);
-      if (!response.ok) {
-        throw new Error(`Internal registration endpoint returned ${response.status}`);
-      }
-      const regData = await response.json() as { trucks: any[]; declinedTrucks: string[] };
-
-      const data = regData.trucks
-        .filter((t: any) => !t.truckNumber.startsWith('088'))
-        .map((t: any) => ({
+      const { trucks } = await buildRegistrationData();
+      const data = trucks
+        .filter(t => !t.truckNumber.startsWith('088'))
+        .map(t => ({
           truckNumber: t.truckNumber,
           assignmentStatus: t.assignmentStatus,
           regExpiryDate: t.regExpDate || null,
@@ -1370,11 +1569,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           techLeadPhone: t.techLeadPhone || null,
           inRepairShop: t.inRepairShop,
         }));
-
-      res.json({
-        count: data.length,
-        data,
-      });
+      res.json({ count: data.length, data });
     } catch (error: any) {
       console.error("Error fetching public registration data:", error);
       res.status(500).json({ message: "Failed to fetch registration data" });
@@ -1383,21 +1578,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   app.get("/public/registrations/:truckNumber", async (req, res) => {
     try {
-      const { truckNumber } = req.params;
-      const normalized = truckNumber.padStart(6, '0');
-
-      const internalUrl = `${req.protocol}://${req.get('host')}/api/fs/registration`;
-      const response = await fetch(internalUrl);
-      if (!response.ok) {
-        throw new Error(`Internal registration endpoint returned ${response.status}`);
-      }
-      const regData = await response.json() as { trucks: any[] };
-
-      const truck = regData.trucks.find((t: any) => t.truckNumber === normalized);
+      const normalized = req.params.truckNumber.padStart(6, '0');
+      const { trucks } = await buildRegistrationData();
+      const truck = trucks.find(t => t.truckNumber === normalized);
       if (!truck) {
         return res.status(404).json({ message: "Truck not found in registration data" });
       }
-
       res.json({
         truckNumber: truck.truckNumber,
         assignmentStatus: truck.assignmentStatus,
@@ -10605,268 +10791,20 @@ Respond ONLY with valid JSON, no other text.`;
   });
 
   // Registration tab - get all unique trucks with assignment status and tech details
-  app.get("/registration", async (req, res) => {
+  app.get("/registration", async (_req, res) => {
     try {
-      console.log("[Registration] Fetching all trucks with tech details from TPMS_EXTRACT...");
-      
-      // Query TPMS_EXTRACT for all tech assignments with address info and manager info
-      const tpmsQuery = `
-        SELECT 
-          TRUCK_LU,
-          FULL_NAME,
-          MOBILEPHONENUMBER,
-          PRIMARYADDR1,
-          PRIMARYADDR2,
-          PRIMARYCITY,
-          PRIMARYSTATE,
-          PRIMARYZIP,
-          MANAGER_NAME,
-          MANAGER_ENT_ID,
-          ENTERPRISE_ID,
-          DISTRICT
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-      `;
-      
-      const tpmsData = await executeQuery<{
-        TRUCK_LU: string;
-        FULL_NAME: string | null;
-        MOBILEPHONENUMBER: string | null;
-        PRIMARYADDR1: string | null;
-        PRIMARYADDR2: string | null;
-        PRIMARYCITY: string | null;
-        PRIMARYSTATE: string | null;
-        PRIMARYZIP: string | null;
-        MANAGER_NAME: string | null;
-        MANAGER_ENT_ID: string | null;
-        ENTERPRISE_ID: string | null;
-        DISTRICT: string | null;
-      }>(tpmsQuery);
-      
-      // Build lookup map for ENTERPRISE_ID -> MOBILEPHONENUMBER (for manager phone lookup)
-      const enterpriseIdToPhone = new Map<string, string>();
-      for (const row of tpmsData) {
-        const entId = row.ENTERPRISE_ID?.toString().trim();
-        const phone = row.MOBILEPHONENUMBER?.toString().trim();
-        if (entId && phone) {
-          enterpriseIdToPhone.set(entId, phone);
-        }
-      }
-      
-      // Build lookup map from TPMS data (assigned trucks)
-      const tpmsLookup = new Map<string, {
-        techName: string;
-        techPhone: string;
-        fullAddress: string;
-        state: string;
-        techLeadName: string;
-        techLeadPhone: string;
-        district: string;
-        ldap: string;
-      }>();
-      
-      for (const row of tpmsData) {
-        const truckNum = row.TRUCK_LU?.toString().padStart(6, '0') || '';
-        if (!truckNum) continue;
-        
-        // Build full address from components
-        const addressParts = [
-          row.PRIMARYADDR1?.trim(),
-          row.PRIMARYADDR2?.trim(),
-          row.PRIMARYCITY?.trim(),
-          row.PRIMARYSTATE?.trim(),
-          row.PRIMARYZIP?.trim()
-        ].filter(Boolean);
-        
-        const fullAddress = addressParts.join(', ');
-        
-        // Manager phone lookup: use MANAGER_ENT_ID to find phone number from enterpriseIdToPhone map
-        const managerEntId = row.MANAGER_ENT_ID?.toString().trim();
-        const managerPhone = managerEntId ? (enterpriseIdToPhone.get(managerEntId) || '') : '';
-        
-        // Remove leading zeros from district
-        const district = row.DISTRICT?.toString().trim().replace(/^0+/, '') || '';
-        
-        tpmsLookup.set(truckNum, {
-          techName: row.FULL_NAME?.toString().trim() || '',
-          techPhone: row.MOBILEPHONENUMBER?.toString().trim() || '',
-          fullAddress,
-          state: row.PRIMARYSTATE?.toString().trim() || '',
-          techLeadName: row.MANAGER_NAME?.toString().trim() || '',
-          techLeadPhone: managerPhone,
-          district,
-          ldap: row.ENTERPRISE_ID?.toString().trim() || ''
-        });
-      }
-      
-      console.log(`[Registration] Found ${tpmsLookup.size} assigned trucks in TPMS_EXTRACT`);
-      
-      // Query Holman for TAG_STATE_PROVINCE
-      const holmanTagStateQuery = `
-        SELECT HOLMAN_VEHICLE_NUMBER, TAG_STATE_PROVINCE
-        FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_VEHICLES
-        WHERE HOLMAN_VEHICLE_NUMBER IS NOT NULL
-      `;
-      
-      const holmanTagStateData = await executeQuery<{
-        HOLMAN_VEHICLE_NUMBER: string;
-        TAG_STATE_PROVINCE: string | null;
-      }>(holmanTagStateQuery);
-      
-      // Build lookup map for tag state (normalize truck numbers for matching)
-      // Use the same normalization as registration truckNumber: padStart(6, '0')
-      const tagStateLookup = new Map<string, string>();
-      for (const row of holmanTagStateData) {
-        // Normalize: remove non-digits, then padStart to 6 for consistent matching
-        const rawNum = row.HOLMAN_VEHICLE_NUMBER?.toString().replace(/\D/g, '') || '';
-        if (!rawNum) continue;
-        const truckNum = rawNum.padStart(6, '0');
-        if (row.TAG_STATE_PROVINCE) {
-          tagStateLookup.set(truckNum, row.TAG_STATE_PROVINCE.toString().trim());
-        }
-      }
-      
-      console.log(`[Registration] Found ${tagStateLookup.size} trucks with tag state in Holman`);
-      
-      // Get all unique truck numbers from multiple sources
-      const allTruckNumbers = new Set<string>();
-      
-      // 1. From All Vehicles (REPLIT_ALL_VEHICLES)
-      const allVehiclesQuery = `
-        SELECT DISTINCT VEHICLE_NUMBER 
-        FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
-        WHERE VEHICLE_NUMBER IS NOT NULL
-      `;
-      const allVehiclesData = await executeQuery<{ VEHICLE_NUMBER: string }>(allVehiclesQuery);
-      for (const row of allVehiclesData) {
-        const num = row.VEHICLE_NUMBER?.toString().padStart(6, '0');
-        if (num) allTruckNumbers.add(num);
-      }
-      
-      // 2. From Spares (spare_vehicle_details table) - query directly with registration date
-      const sparesQueryResult = await getDb().select({ 
-        vehicleNumber: spareVehicleDetails.vehicleNumber,
-        registrationRenewalDate: spareVehicleDetails.registrationRenewalDate
-      }).from(spareVehicleDetails);
-      
-      // Build lookup for spare registration dates
-      const spareRegDateLookup = new Map<string, Date | null>();
-      for (const spare of sparesQueryResult) {
-        const num = spare.vehicleNumber?.toString().padStart(6, '0');
-        if (num) {
-          allTruckNumbers.add(num);
-          spareRegDateLookup.set(num, spare.registrationRenewalDate);
-        }
-      }
-      
-      // 3. From local trucks table (also has holmanRegExpiry and repairAddress)
-      const localTrucks = await fleetScopeStorage.getAllTrucks();
-      const trucksRegDateLookup = new Map<string, string | null>();
-      const trucksInRepairShop = new Set<string>();
-      for (const truck of localTrucks) {
-        const num = truck.truckNumber?.toString().padStart(6, '0');
-        if (num) {
-          allTruckNumbers.add(num);
-          trucksRegDateLookup.set(num, truck.holmanRegExpiry || null);
-          // Check if truck has a repair address (indicating it's in a repair shop)
-          if (truck.repairAddress && truck.repairAddress.trim()) {
-            trucksInRepairShop.add(num);
-          }
-        }
-      }
-      
-      // 4. Add any trucks from TPMS that might not be in other sources
-      for (const truckNum of tpmsLookup.keys()) {
-        allTruckNumbers.add(truckNum);
-      }
-      
-      console.log(`[Registration] Total unique trucks: ${allTruckNumbers.size}`);
-      
-      // Fetch registration tracking data
-      const trackingData = await getDb().select().from(registrationTracking);
-      const trackingLookup = new Map(trackingData.map(t => [t.truckNumber, t]));
-      
-      // Build registration data with reg expiry date
-      const registrationData = [];
-      for (const truckNumber of allTruckNumbers) {
-        const tpmsInfo = tpmsLookup.get(truckNumber);
-        const isAssigned = !!tpmsInfo;
-        const tracking = trackingLookup.get(truckNumber);
-        
-        // Get registration expiry date from multiple sources (prioritize spare_vehicle_details, then trucks table)
-        let regExpDate: string | null = null;
-        
-        // First check spare_vehicle_details
-        const spareRegDate = spareRegDateLookup.get(truckNumber);
-        if (spareRegDate) {
-          regExpDate = spareRegDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-        }
-        
-        // If not found, check trucks table (holmanRegExpiry)
-        if (!regExpDate) {
-          const trucksRegDate = trucksRegDateLookup.get(truckNumber);
-          if (trucksRegDate) {
-            regExpDate = trucksRegDate;
-          }
-        }
-        
-        registrationData.push({
-          truckNumber,
-          tagState: tagStateLookup.get(truckNumber) || '',
-          district: tpmsInfo?.district || '',
-          assignmentStatus: isAssigned ? 'Assigned' : 'Unassigned',
-          regExpDate: regExpDate || '',
-          state: tpmsInfo?.state || '',
-          ldap: tpmsInfo?.ldap || '',
-          techName: tpmsInfo?.techName || '',
-          techPhone: tpmsInfo?.techPhone || '',
-          techAddress: tpmsInfo?.fullAddress || '',
-          initialTextSent: tracking?.initialTextSent || false,
-          timeSlotConfirmed: tracking?.timeSlotConfirmed || false,
-          timeSlotValue: tracking?.timeSlotValue || '',
-          submittedToHolman: tracking?.submittedToHolman || false,
-          submittedToHolmanAt: tracking?.submittedToHolmanAt || null,
-          alreadySent: tracking?.alreadySent || false,
-          comments: tracking?.comments || '',
-          techLeadName: tpmsInfo?.techLeadName || '',
-          techLeadPhone: tpmsInfo?.techLeadPhone || '',
-          inRepairShop: trucksInRepairShop.has(truckNumber)
-        });
-      }
-      
-      // Sort by truck number
-      registrationData.sort((a, b) => a.truckNumber.localeCompare(b.truckNumber));
-      
-      // Get declined trucks from purchase orders (repairs tab - trucks with finalApproval = "Decline and Submit for Sale")
-      const allPurchaseOrders = await fleetScopeStorage.getAllPurchaseOrders();
-      const declinedFromRepairs: string[] = [];
-      for (const po of allPurchaseOrders) {
-        if (po.finalApproval === "Decline and Submit for Sale") {
-          try {
-            const rawData = po.rawData ? JSON.parse(po.rawData) : {};
-            const vehicleNo = rawData["Vehicle_No"] || rawData["Vehicle No"] || rawData["VEHICLE_NO"] || rawData["vehicle_no"] || "";
-            if (vehicleNo) {
-              const normalized = vehicleNo.toString().padStart(6, '0');
-              if (normalized !== '000000') {
-                declinedFromRepairs.push(normalized);
-              }
-            }
-          } catch (e) {
-            // Skip entries with invalid JSON
-            console.warn(`[Registration] Could not parse rawData for PO ${po.poNumber}`);
-          }
-        }
-      }
-      
+      console.log("[Registration] Fetching registration data...");
+      const { trucks, declinedTrucks } = await buildRegistrationData();
+      console.log(`[Registration] Total unique trucks: ${trucks.length}`);
       res.json({
-        trucks: registrationData,
-        declinedTrucks: declinedFromRepairs,
+        trucks,
+        declinedTrucks,
         summary: {
-          total: registrationData.length,
-          assigned: registrationData.filter(t => t.assignmentStatus === 'Assigned').length,
-          unassigned: registrationData.filter(t => t.assignmentStatus === 'Unassigned').length
+          total: trucks.length,
+          assigned: trucks.filter(t => t.assignmentStatus === 'Assigned').length,
+          unassigned: trucks.filter(t => t.assignmentStatus === 'Unassigned').length
         }
       });
-      
     } catch (error: any) {
       console.error("[Registration] Error:", error);
       res.status(500).json({ message: error.message });
