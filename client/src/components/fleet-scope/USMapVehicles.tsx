@@ -62,6 +62,7 @@ interface StateData extends StatusCounts {
   assigned: number;
   unassigned: number;
   assignedOnly: StatusCounts;
+  unassignedOnly: StatusCounts;
 }
 
 const stateCoordinates: Record<string, [number, number]> = {
@@ -302,9 +303,6 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
       next.delete(key);
     } else {
       next.add(key);
-      if (key === 'assigned') {
-        statusKeys.forEach(k => next.add(k));
-      }
     }
     onMapFiltersChange({ selections: activeSelections, visibleCategories: next });
   };
@@ -386,7 +384,7 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
   }, [byovTechnicians]);
 
   const emptyStatusCounts = (): StatusCounts => ({ onRoad: 0, repairShop: 0, pmf: 0, byov: 0, confirmedSpare: 0, needsReconfirmation: 0 });
-  const emptyStateData = (): StateData => ({ ...emptyStatusCounts(), assigned: 0, unassigned: 0, assignedOnly: emptyStatusCounts() });
+  const emptyStateData = (): StateData => ({ ...emptyStatusCounts(), assigned: 0, unassigned: 0, assignedOnly: emptyStatusCounts(), unassignedOnly: emptyStatusCounts() });
 
   const stateData = useMemo(() => {
     const data: Record<string, StateData> = {};
@@ -442,6 +440,8 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
         data[state][statusKey]++;
         if (isAssigned) {
           data[state].assignedOnly[statusKey]++;
+        } else {
+          data[state].unassignedOnly[statusKey]++;
         }
       }
 
@@ -463,6 +463,10 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
         data[techState].byov++;
         if (tech.inTpms) {
           data[techState].assignedOnly.byov++;
+          data[techState].assigned++;
+        } else {
+          data[techState].unassignedOnly.byov++;
+          data[techState].unassigned++;
         }
       }
     }
@@ -478,11 +482,15 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
 
   const assignedToggleOn = visibleCategories.has('assigned');
   const unassignedToggleOn = visibleCategories.has('unassigned');
+  // "assigned only" = assigned on AND unassigned off; vice-versa for unassigned only
+  // If both are on (or both off) show full counts
   const assignedOnlyMode = assignedToggleOn && !unassignedToggleOn;
+  const unassignedOnlyMode = unassignedToggleOn && !assignedToggleOn;
 
   const getEffectiveCount = (key: CategoryKey, data: StateData): number => {
     if (key === 'assigned' || key === 'unassigned') return data[key];
     if (assignedOnlyMode) return data.assignedOnly[key as keyof StatusCounts];
+    if (unassignedOnlyMode) return data.unassignedOnly[key as keyof StatusCounts];
     return data[key as keyof StatusCounts];
   };
 
@@ -495,9 +503,14 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
     }
   }
 
+  // Grand totals for the assignment toggle labels (always full fleet, not filtered)
+  const grandAssigned = Object.values(stateData).reduce((s, d) => s + d.assigned, 0);
+  const grandUnassigned = Object.values(stateData).reduce((s, d) => s + d.unassigned, 0);
+
+  // Assigned / Unassigned are overarching filters — never rendered as map bubbles
   const visibleCats = categories.filter(c => {
     if (!visibleCategories.has(c.key)) return false;
-    if (c.key === 'assigned') return false;
+    if (c.key === 'assigned' || c.key === 'unassigned') return false;
     return true;
   });
 
@@ -537,12 +550,12 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                   <X className="w-3 h-3" />
                 </Badge>
               ))}
-              {(activeSelections.length > 0 || visibleCategories.size < categories.length) && (
+              {(activeSelections.length > 0 || assignedToggleOn || unassignedToggleOn || statusKeys.some(k => !visibleCategories.has(k))) && (
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-6 px-2 text-xs text-muted-foreground"
-                  onClick={() => onMapFiltersChange({ selections: [], visibleCategories: new Set(categories.map(c => c.key)) })}
+                  onClick={() => onMapFiltersChange({ selections: [], visibleCategories: new Set(statusKeys) })}
                   data-testid="button-clear-all-map-filters"
                 >
                   Clear All
@@ -551,41 +564,51 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
             </div>
           )}
         </div>
-        <div className="flex items-start gap-2 mt-2 flex-wrap">
-          {/* Assigned group: Assigned toggle + 6 status category toggles */}
-          <div className="flex items-center gap-1.5 flex-wrap border border-cyan-200 dark:border-cyan-800 rounded-lg px-2 py-1 bg-cyan-50/40 dark:bg-cyan-900/10">
-            {(['assigned', ...statusKeys] as CategoryKey[]).map(k => categories.find(c => c.key === k)!).filter(Boolean).map(cat => (
-              <div
-                key={cat.key}
-                role="button"
-                tabIndex={0}
-                onClick={() => toggleCategory(cat.key)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(cat.key); } }}
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border cursor-pointer select-none transition-opacity ${
-                  visibleCategories.has(cat.key)
-                    ? `${cat.bgClass} ${cat.borderClass} opacity-100`
-                    : 'bg-muted/30 border-muted opacity-50'
-                }`}
-                data-testid={`filter-map-${cat.key}`}
-              >
-                <Checkbox
-                  checked={visibleCategories.has(cat.key)}
-                  onCheckedChange={() => toggleCategory(cat.key)}
-                  className="h-3.5 w-3.5 pointer-events-none"
-                  data-testid={`checkbox-map-${cat.key}`}
-                />
-                <div className={`w-5 h-5 rounded-full ${visibleCategories.has(cat.key) ? cat.dotClass : 'bg-muted-foreground/30'} flex items-center justify-center text-white font-bold text-[7px] shadow-sm`}>
-                  {totals[cat.key].toLocaleString()}
-                </div>
-                <span className={`font-medium text-xs ${visibleCategories.has(cat.key) ? cat.textClass : 'text-muted-foreground'}`}>
-                  {cat.key === 'assigned' ? <strong>{cat.label}</strong> : cat.label}
-                </span>
-              </div>
-            ))}
-          </div>
+        {/* Overarching assignment filter toggles */}
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
+          <span className="text-xs font-medium text-muted-foreground">Filter:</span>
+          <button
+            onClick={() => toggleCategory('assigned')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors select-none ${
+              assignedToggleOn
+                ? 'bg-cyan-100 dark:bg-cyan-900/40 border-cyan-400 dark:border-cyan-600 text-cyan-700 dark:text-cyan-300'
+                : 'bg-muted/20 border-muted text-muted-foreground hover:bg-muted/40'
+            }`}
+            data-testid="filter-map-assigned"
+          >
+            Assigned
+            <span className={`rounded-full px-1.5 py-0 text-[10px] font-mono tabular-nums ${
+              assignedToggleOn ? 'bg-cyan-200 dark:bg-cyan-800 text-cyan-800 dark:text-cyan-200' : 'bg-muted text-muted-foreground'
+            }`}>
+              {grandAssigned.toLocaleString()}
+            </span>
+          </button>
+          <button
+            onClick={() => toggleCategory('unassigned')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors select-none ${
+              unassignedToggleOn
+                ? 'bg-red-100 dark:bg-red-900/40 border-red-400 dark:border-red-600 text-red-700 dark:text-red-300'
+                : 'bg-muted/20 border-muted text-muted-foreground hover:bg-muted/40'
+            }`}
+            data-testid="filter-map-unassigned"
+          >
+            Unassigned
+            <span className={`rounded-full px-1.5 py-0 text-[10px] font-mono tabular-nums ${
+              unassignedToggleOn ? 'bg-red-200 dark:bg-red-800 text-red-800 dark:text-red-200' : 'bg-muted text-muted-foreground'
+            }`}>
+              {grandUnassigned.toLocaleString()}
+            </span>
+          </button>
+          {(assignedOnlyMode || unassignedOnlyMode) && (
+            <span className="text-[10px] text-muted-foreground italic">
+              — showing {assignedOnlyMode ? 'assigned' : 'unassigned'} vehicles only
+            </span>
+          )}
+        </div>
 
-          {/* Unassigned toggle (separate) */}
-          {categories.filter(c => c.key === 'unassigned').map(cat => (
+        {/* Status category toggles */}
+        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+          {statusKeys.map(k => categories.find(c => c.key === k)!).filter(Boolean).map(cat => (
             <div
               key={cat.key}
               role="button"
@@ -613,7 +636,6 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
               </span>
             </div>
           ))}
-
           <span className="text-xs text-muted-foreground self-center">({statesWithData.length} states)</span>
         </div>
         {onMapFiltersChange && (

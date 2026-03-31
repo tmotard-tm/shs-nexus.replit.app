@@ -257,7 +257,7 @@ export default function AllVehicles() {
   const [categoryFilter, setCategoryFilter] = useState<{generalStatus?: string; subStatus?: string; excludePmf?: boolean; isRental?: boolean; label: string} | null>(null);
   const [mapSelections, setMapSelections] = useState<MapSelection[]>([]);
   const [visibleMapCategories, setVisibleMapCategories] = useState<Set<CategoryKey>>(
-    new Set(['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation', 'assigned', 'unassigned'] as CategoryKey[])
+    new Set(['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'] as CategoryKey[])
   );
 
   const handleMapFiltersChange = useCallback((filters: MapFilters) => {
