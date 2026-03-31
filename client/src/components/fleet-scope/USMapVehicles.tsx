@@ -150,8 +150,7 @@ const isPmfVehicle = (subStatus: string): boolean => {
   const lower = subStatus.toLowerCase();
   return lower.includes('pmf') || 
          lower.includes('process at pmf') || 
-         lower.includes('available to redeploy') || 
-         lower.includes('unavailable') ||
+         lower.includes('available to redeploy') ||
          lower.includes('pending pickup') ||
          lower.includes('pending arrival') ||
          lower.includes('locked down');
