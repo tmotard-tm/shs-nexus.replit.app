@@ -389,15 +389,31 @@ export default function AllVehicles() {
   const locationCounts = useMemo(() => {
     if (!data?.vehicles) return null;
     const vehicles = data.vehicles;
-    
+
+    // Build a BYOV vehicle-number set so we can exclude them from the status
+    // buckets — mirrors exactly what the map does (BYOV is checked first there).
+    const byovVehicleNumbers = new Set<string>();
+    for (const tech of (data.byov?.technicians ?? [])) {
+      if (tech.truckId) {
+        byovVehicleNumbers.add(tech.truckId.toString().padStart(6, '0'));
+      }
+    }
+
     let onRoad = 0;
     let repairShop = 0;
     let pmfTotal = 0;
     let otherParking = 0;
+    let byovTotal = 0;
     
     const repairStatuses: Record<string, number> = {};
     
     for (const v of vehicles) {
+      const vNum = v.vehicleNumber?.toString().padStart(6, '0');
+      if (vNum && byovVehicleNumbers.has(vNum)) {
+        byovTotal++;
+        continue;
+      }
+
       if (v.generalStatus === 'On Road') {
         onRoad++;
       } else if (v.generalStatus === 'Vehicles in a repair shop') {
@@ -419,8 +435,8 @@ export default function AllVehicles() {
       }
     }
     
-    return { onRoad, repairShop, pmfTotal, otherParking, repairStatuses, total: vehicles.length };
-  }, [data?.vehicles]);
+    return { onRoad, repairShop, pmfTotal, otherParking, byovTotal, repairStatuses, total: vehicles.length };
+  }, [data?.vehicles, data?.byov?.technicians]);
 
   const rentalTruckSet = useMemo(() => {
     if (!data?.rentalTruckNumbers) return new Set<string>();
