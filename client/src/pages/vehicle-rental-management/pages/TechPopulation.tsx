@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, RefreshCw, CheckCircle, AlertCircle, ChevronDown } from "lucide-react";
+import { Upload, RefreshCw, CheckCircle, AlertCircle, Download } from "lucide-react";
 import { StatusPill } from "../components/status-pill";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
@@ -143,6 +143,43 @@ export default function TechPopulation() {
     return true;
   });
 
+  const exportCsv = () => {
+    const headers = [
+      "LDAP", "Name", "Market", "Tenure (mo)", "Gate 1 Net", "Gate 1 Class",
+      "Gate 2 Score", "Gate 2 Exempt", "New Hire Exempt",
+      "DCA Review", "Status", "Rental Start", "Date Added",
+    ];
+    const escape = (v: string | number | null | undefined) => {
+      if (v == null) return "";
+      const s = String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n")
+        ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = displayRows.map((t) => [
+      t.ldap,
+      t.name,
+      t.market ?? "",
+      t.tenureMonths ?? "",
+      t.gate1AdjustedNet ?? "",
+      t.gate1Classification ?? "",
+      t.gate2WeightedScore != null ? Number(t.gate2WeightedScore).toFixed(3) : "",
+      t.gate2Exempt ? "Yes" : "No",
+      t.newHireExempt ? "Yes" : "No",
+      t.dcaReviewOutcome ?? "",
+      t.currentStatus,
+      t.rentalStartDate ?? "",
+      t.createdAt ? new Date(t.createdAt).toLocaleDateString("en-US") : "",
+    ].map(escape).join(","));
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `tech-population-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const syncMutation = useMutation({
     mutationFn: async () => {
       const r1 = await apiRequest("POST", "/api/vrm/sync/roster");
@@ -231,6 +268,20 @@ export default function TechPopulation() {
         </div>
         <div className="flex items-center gap-2">
           <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileChange} />
+          <button
+            onClick={exportCsv}
+            disabled={displayRows.length === 0}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg"
+            style={{
+              fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 13,
+              color: colors.inkSoft, backgroundColor: colors.background,
+              border: `1px solid ${colors.rule}`, cursor: displayRows.length === 0 ? "not-allowed" : "pointer",
+              opacity: displayRows.length === 0 ? 0.5 : 1,
+            }}
+          >
+            <Download className="h-4 w-4" />
+            Export CSV
+          </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={importMutation.isPending}
