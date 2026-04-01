@@ -7,6 +7,7 @@ import {
   getAutoFlaggedTechIds,
   getTechById,
   getTechByLdap,
+  getTechDetail,
   upsertTech,
   updateTechStatus,
   getOutreachLog,
@@ -24,8 +25,10 @@ import {
   createEscalation,
   updateEscalation,
   confirmEpv,
+  addRentalDecision,
+  listRentalDecisions,
 } from "./storage";
-import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores } from "./snowflake-queries";
+import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck } from "./snowflake-queries";
 import { generateAuditPdf } from "./pdf-generator";
 import {
   vrmTechs, vrmOutreachLog, vrmEscalations, vrmExceptionCases, vrmReachabilityLog, vrmSmsMessages,
@@ -314,6 +317,7 @@ export function registerVrmRoutes(): Router {
         await upsertTech({
           ...tech,
           gate1AdjustedNet: String(nr.adj_net),
+          gate1PayrollCost: String(Number(nr.labor_direct) + Number(nr.labor_benefits)),
           gate1Classification: classification as any,
           dcaReviewOutcome: classification && classification !== "profitable" ? "pending" : tech.dcaReviewOutcome,
         });
@@ -349,6 +353,153 @@ export function registerVrmRoutes(): Router {
         upserted++;
       }
       res.json({ ok: true, upserted, total: rows.length });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Outreach flag & tracking ────────────────────────────────────────────────
+
+  /**
+   * POST /api/vrm/outreach-upload
+   * Accepts { ldaps: string[] } and sets outreach_flagged = true for each match.
+   * Does NOT clear other techs — additive only.
+   */
+  router.post("/outreach-upload", async (req, res) => {
+    try {
+      const { ldaps } = req.body;
+      if (!Array.isArray(ldaps) || ldaps.length === 0)
+        return res.status(400).json({ error: "ldaps array required" });
+      let flagged = 0;
+      for (const raw of ldaps) {
+        const ldap = (raw || "").trim().toUpperCase();
+        if (!ldap) continue;
+        const tech = await getTechByLdap(ldap);
+        if (!tech) continue;
+        await db.update(vrmTechs).set({ outreachFlagged: true, updatedAt: new Date() }).where(eq(vrmTechs.ldap, ldap));
+        flagged++;
+      }
+      res.json({ ok: true, flagged, total: ldaps.length });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * PATCH /api/vrm/techs/:id/outreach-flag
+   * Toggles or explicitly sets outreach_flagged for a single tech.
+   * Body: { outreachFlagged: boolean }
+   */
+  router.patch("/techs/:id/outreach-flag", async (req, res) => {
+    try {
+      const tech = await getTechById(req.params.id);
+      if (!tech) return res.status(404).json({ error: "Tech not found" });
+      const newVal = req.body.outreachFlagged !== undefined
+        ? Boolean(req.body.outreachFlagged)
+        : !tech.outreachFlagged;
+      const [updated] = await db
+        .update(vrmTechs)
+        .set({ outreachFlagged: newVal, updatedAt: new Date() })
+        .where(eq(vrmTechs.id, req.params.id))
+        .returning();
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * PATCH /api/vrm/techs/:id/tracking
+   * Updates returnedRental and/or escalationPath.
+   * Body: { returnedRental?: boolean, escalationPath?: string | null }
+   */
+  router.patch("/techs/:id/tracking", async (req, res) => {
+    try {
+      const tech = await getTechById(req.params.id);
+      if (!tech) return res.status(404).json({ error: "Tech not found" });
+      const updates: Record<string, any> = { updatedAt: new Date() };
+      if (req.body.returnedRental !== undefined) updates.returnedRental = Boolean(req.body.returnedRental);
+      if ("escalationPath" in req.body) updates.escalationPath = req.body.escalationPath ?? null;
+      const [updated] = await db
+        .update(vrmTechs)
+        .set(updates)
+        .where(eq(vrmTechs.id, req.params.id))
+        .returning();
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * GET /api/vrm/techs/:id/detail
+   * Returns full tech record + latest SMS sent date + latest inbound response status.
+   */
+  router.get("/techs/:id/detail", async (req, res) => {
+    try {
+      const detail = await getTechDetail(req.params.id);
+      if (!detail) return res.status(404).json({ error: "Tech not found" });
+      res.json(detail);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Profitability check (new rental requests) ─────────────────────────────
+
+  /**
+   * POST /api/vrm/profitability/check
+   * Accepts { ldaps: string[] }, returns 90-day profitability waterfall + scorecard.
+   */
+  router.post("/profitability/check", async (req, res) => {
+    try {
+      const { ldaps } = req.body;
+      if (!Array.isArray(ldaps) || ldaps.length === 0)
+        return res.status(400).json({ error: "ldaps array required" });
+      const cleaned = ldaps.map((l: string) => (l || "").trim().toUpperCase()).filter(Boolean);
+      const rows = await fetchProfitabilityCheck(cleaned);
+      res.json({ rows });
+    } catch (e: any) {
+      console.error("[VRM] profitability/check error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/vrm/profitability/log
+   * Records an approval/denial decision for a rental request.
+   */
+  router.post("/profitability/log", async (req, res) => {
+    try {
+      const { techLdap, techName, dailyNetWithRental, recommendation, decision, decidedByName, notes, scorecardScore, tenureMonths } = req.body;
+      if (!techLdap || !decision || !decidedByName)
+        return res.status(400).json({ error: "techLdap, decision, and decidedByName required" });
+      const row = await addRentalDecision({
+        techLdap,
+        techName: techName ?? null,
+        dailyNetWithRental: dailyNetWithRental != null ? String(dailyNetWithRental) : null,
+        recommendation: recommendation ?? "Unknown",
+        decision,
+        decidedByName,
+        notes: notes ?? null,
+        scorecardScore: scorecardScore != null ? String(scorecardScore) : null,
+        tenureMonths: tenureMonths ?? null,
+      });
+      res.json(row);
+    } catch (e: any) {
+      console.error("[VRM] profitability/log error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * GET /api/vrm/profitability/log
+   * Returns recent rental approval/denial decisions.
+   */
+  router.get("/profitability/log", async (_req, res) => {
+    try {
+      const rows = await listRentalDecisions(100);
+      res.json({ rows });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

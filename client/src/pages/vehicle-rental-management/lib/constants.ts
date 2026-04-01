@@ -7,6 +7,7 @@ import {
   ShieldAlert,
   GraduationCap,
   FileBarChart,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 
@@ -93,7 +94,8 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { label: "Dashboard", path: "/vehicle-rental-management", icon: LayoutDashboard },
-  { label: "Tech Population", path: "/vehicle-rental-management/tech-population", icon: Users },
+  { label: "New Rentals", path: "/vehicle-rental-management/new-rentals", icon: TrendingUp },
+  { label: "Active Rentals", path: "/vehicle-rental-management/tech-population", icon: Users },
   { label: "Outreach", path: "/vehicle-rental-management/outreach", icon: MessageSquare },
   { label: "Escalations", path: "/vehicle-rental-management/escalations", icon: AlertTriangle },
   { label: "DCA Review", path: "/vehicle-rental-management/dca-review", icon: ClipboardCheck },

@@ -10,6 +10,7 @@ import Escalations from "./pages/Escalations";
 import DCAReview from "./pages/DCAReview";
 import ExceptionCases from "./pages/ExceptionCases";
 import Reports from "./pages/Reports";
+import NewRentals from "./pages/NewRentals";
 
 function getPageTitle(path: string): string {
   if (path === "/vehicle-rental-management" || path === "/vehicle-rental-management/") return "Dashboard";
@@ -29,6 +30,7 @@ export default function RouteReadyLayout() {
         <main className="flex-1 overflow-auto" style={{ padding: 32 }}>
           <Switch>
             <Route path="/vehicle-rental-management" component={Dashboard} />
+            <Route path="/vehicle-rental-management/new-rentals" component={NewRentals} />
             <Route path="/vehicle-rental-management/tech-population" component={TechPopulation} />
             <Route path="/vehicle-rental-management/outreach" component={Outreach} />
             <Route path="/vehicle-rental-management/escalations" component={Escalations} />

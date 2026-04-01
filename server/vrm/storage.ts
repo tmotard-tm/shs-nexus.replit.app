@@ -11,8 +11,10 @@ import {
   vrmSmsTemplates,
   vrmTechNotes,
   vrmShopContactLog,
+  vrmRentalDecisions,
   type VrmTech,
   type InsertVrmTech,
+  type InsertVrmRentalDecision,
 } from "../../shared/vrm-schema";
 
 // ─── Dashboard queries ────────────────────────────────────────────────────────
@@ -178,15 +180,48 @@ export async function getTechByLdap(ldap: string) {
 export async function upsertTech(data: InsertVrmTech): Promise<VrmTech> {
   const existing = await getTechByLdap(data.ldap);
   if (existing) {
+    // Preserve manual tracking fields — never overwrite from sync
+    const merged = {
+      ...data,
+      outreachFlagged: data.outreachFlagged ?? existing.outreachFlagged,
+      returnedRental: data.returnedRental ?? existing.returnedRental,
+      escalationPath: data.escalationPath ?? existing.escalationPath,
+      updatedAt: new Date(),
+    };
     const [updated] = await db
       .update(vrmTechs)
-      .set({ ...data, updatedAt: new Date() })
+      .set(merged)
       .where(eq(vrmTechs.ldap, data.ldap))
       .returning();
     return updated;
   }
   const [created] = await db.insert(vrmTechs).values(data).returning();
   return created;
+}
+
+export async function getTechDetail(id: string) {
+  const tech = await getTechById(id);
+  if (!tech) return null;
+
+  const [latestOutbound] = await db
+    .select()
+    .from(vrmSmsMessages)
+    .where(and(eq(vrmSmsMessages.techId, id), eq(vrmSmsMessages.direction, "outbound")))
+    .orderBy(desc(vrmSmsMessages.createdAt))
+    .limit(1);
+
+  const [latestInbound] = await db
+    .select()
+    .from(vrmSmsMessages)
+    .where(and(eq(vrmSmsMessages.techId, id), eq(vrmSmsMessages.direction, "inbound")))
+    .orderBy(desc(vrmSmsMessages.createdAt))
+    .limit(1);
+
+  return {
+    ...tech,
+    smsSentAt: latestOutbound?.createdAt ?? null,
+    smsResponse: latestInbound?.responseStatus ?? null,
+  };
 }
 
 export async function updateTechStatus(
@@ -403,4 +438,19 @@ export async function confirmEpv(escalationId: string, techId: string) {
     })
     .where(eq(vrmEscalations.id, escalationId));
   await updateTechStatus(techId, "epv_issued", "system", "EPV confirmed");
+}
+
+// ─── Rental decisions ────────────────────────────────────────────────────────
+
+export async function addRentalDecision(data: InsertVrmRentalDecision) {
+  const [row] = await db.insert(vrmRentalDecisions).values(data).returning();
+  return row;
+}
+
+export async function listRentalDecisions(limit = 50) {
+  return db
+    .select()
+    .from(vrmRentalDecisions)
+    .orderBy(desc(vrmRentalDecisions.createdAt))
+    .limit(limit);
 }

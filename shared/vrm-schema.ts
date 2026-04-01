@@ -126,6 +126,7 @@ export const vrmTechs = pgTable("vrm_techs", {
   rentalStartDate: date("rental_start_date"),
   dailyRentalRate: decimal("daily_rental_rate", { precision: 10, scale: 2 }).default("78.00"),
   gate1AdjustedNet: decimal("gate1_adjusted_net", { precision: 12, scale: 2 }),
+  gate1PayrollCost: decimal("gate1_payroll_cost", { precision: 12, scale: 2 }),
   gate1Classification: vrmGate1ClassEnum("gate1_classification"),
   gate2Exempt: boolean("gate2_exempt").notNull().default(false),
   gate2WeightedScore: decimal("gate2_weighted_score", { precision: 6, scale: 3 }),
@@ -141,6 +142,9 @@ export const vrmTechs = pgTable("vrm_techs", {
   shopDropoffDate: date("shop_dropoff_date"),
   shopEstimatedReady: date("shop_estimated_ready"),
   primaryZip: varchar("primary_zip", { length: 20 }),
+  outreachFlagged: boolean("outreach_flagged").notNull().default(false),
+  returnedRental: boolean("returned_rental").notNull().default(false),
+  escalationPath: varchar("escalation_path", { length: 50 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -274,6 +278,22 @@ export const vrmTechNotes = pgTable("vrm_tech_notes", {
   techIdIdx: index("vrm_tech_notes_tech_idx").on(table.techId),
 }));
 
+export const vrmRentalDecisions = pgTable("vrm_rental_decisions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  techLdap: varchar("tech_ldap", { length: 50 }).notNull(),
+  techName: varchar("tech_name", { length: 255 }),
+  dailyNetWithRental: decimal("daily_net_with_rental", { precision: 10, scale: 2 }),
+  recommendation: varchar("recommendation", { length: 20 }).notNull(),
+  decision: varchar("decision", { length: 20 }).notNull(),
+  decidedByName: varchar("decided_by_name", { length: 255 }).notNull(),
+  notes: text("notes"),
+  scorecardScore: decimal("scorecard_score", { precision: 6, scale: 3 }),
+  tenureMonths: integer("tenure_months"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  ldapIdx: index("vrm_rental_decisions_ldap_idx").on(table.techLdap),
+}));
+
 // ─── Insert schemas ────────────────────────────────────────────────────────────
 
 export const insertVrmTechSchema = createInsertSchema(vrmTechs).omit({
@@ -314,6 +334,11 @@ export const insertVrmReachabilityLogSchema = createInsertSchema(vrmReachability
   createdAt: true,
 });
 
+export const insertVrmRentalDecisionSchema = createInsertSchema(vrmRentalDecisions).omit({
+  id: true,
+  createdAt: true,
+});
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type VrmTech = typeof vrmTechs.$inferSelect;
@@ -324,3 +349,5 @@ export type VrmExceptionCase = typeof vrmExceptionCases.$inferSelect;
 export type VrmSmsTemplate = typeof vrmSmsTemplates.$inferSelect;
 export type VrmTechNote = typeof vrmTechNotes.$inferSelect;
 export type VrmSmsMessage = typeof vrmSmsMessages.$inferSelect;
+export type VrmRentalDecision = typeof vrmRentalDecisions.$inferSelect;
+export type InsertVrmRentalDecision = z.infer<typeof insertVrmRentalDecisionSchema>;
