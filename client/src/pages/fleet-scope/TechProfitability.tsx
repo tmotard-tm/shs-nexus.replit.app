@@ -306,6 +306,12 @@ export default function TechProfitability() {
                   Loading profitability…
                 </div>
               )}
+              {profitError && !loadingProfit && (
+                <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Profitability data unavailable — showing rental data only
+                </div>
+              )}
               <span className="text-xs text-muted-foreground ml-auto">
                 {sorted.length} of {merged.length} rows
               </span>

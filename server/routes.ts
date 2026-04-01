@@ -14059,7 +14059,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!ldap) continue;
 
         const daysOpen   = Number(row.DAYS_OPEN || row.days_open || 0);
-        const hasData    = row.HAS_DATA === true || row.has_data === true || row.HAS_DATA === "true";
+        const rawHasData = row.HAS_DATA ?? row.has_data;
+        const hasData    = rawHasData === true || rawHasData === 1
+          || String(rawHasData).toLowerCase() === "true"
+          || String(rawHasData).toLowerCase() === "1";
         const completes  = Number(row.COMPLETES || row.completes || 0);
         const totalSos   = Number(row.TOTAL_SOS || row.total_sos || 0);
         const totalRev   = Number(row.TOTAL_REVENUE || row.total_revenue || 0);
