@@ -258,6 +258,11 @@ export function registerVrmRoutes(): Router {
         if (newHireExempt) currentStatus = "exempt_new_hire";
         else if (gate2Exempt) currentStatus = "exempt_scorecard";
 
+        // #region agent log
+        if (ldap === 'JMUDGET' || ldap === 'RRUSYN1') {
+          fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'routes.ts:sync-roster',message:'Roster row for debug tech',data:{ldap,RENTAL_START_DATE:row.RENTAL_START_DATE,DAYS_OPEN:row.DAYS_OPEN,rentalStart,rentalCostWouldBe:(row.DAYS_OPEN||0)*78},timestamp:Date.now(),hypothesisId:'H-A-H-B'})}).catch(()=>{});
+        }
+        // #endregion
         await upsertTech({
           ldap,
           name: row.RENTER_NAME || ldap,

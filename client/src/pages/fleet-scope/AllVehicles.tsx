@@ -403,6 +403,8 @@ export default function AllVehicles() {
     let repairShop = 0;
     let pmfTotal = 0;
     let otherParking = 0;
+    let spareConfirmed = 0;
+    let spareNeedsConfirming = 0;
     let byovTotal = 0;
     
     const repairStatuses: Record<string, number> = {};
@@ -424,6 +426,7 @@ export default function AllVehicles() {
         pmfTotal++;
       } else if (v.generalStatus === 'Spare-Location confirmed' || v.generalStatus === 'Spare-Needs confirming') {
         otherParking++;
+        spareConfirmed++;
       } else if (v.generalStatus === 'Vehicles in storage') {
         const lower = (v.subStatus || '').toLowerCase();
         const isPmf = lower.includes('pmf') || lower.includes('process at pmf') || lower.includes('available to redeploy') || lower.includes('pending pickup') || lower.includes('pending arrival') || lower.includes('locked down');
@@ -431,13 +434,14 @@ export default function AllVehicles() {
           pmfTotal++;
         } else {
           otherParking++;
+          spareNeedsConfirming++;
         }
       } else {
         onRoad++;
       }
     }
     
-    return { onRoad, repairShop, pmfTotal, otherParking, byovTotal, repairStatuses, total: vehicles.length };
+    return { onRoad, repairShop, pmfTotal, otherParking, spareConfirmed, spareNeedsConfirming, byovTotal, repairStatuses, total: vehicles.length };
   }, [data?.vehicles, data?.byov?.technicians]);
 
   const rentalTruckSet = useMemo(() => {
@@ -808,6 +812,26 @@ export default function AllVehicles() {
                       <p className="text-xs text-purple-600 dark:text-purple-500">
                         {((locationCounts.otherParking / locationCounts.total) * 100).toFixed(1)}% of total
                       </p>
+                      <div className="mt-2 space-y-1 border-t border-purple-200 dark:border-purple-700 pt-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                            <span className="inline-block w-2 h-2 rounded-full bg-purple-500" />
+                            Location Confirmed
+                          </span>
+                          <span className="text-xs font-semibold text-purple-700 dark:text-purple-300">
+                            {locationCounts.spareConfirmed.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-pink-600 dark:text-pink-400 flex items-center gap-1">
+                            <span className="inline-block w-2 h-2 rounded-full bg-pink-400" />
+                            Needs Confirming
+                          </span>
+                          <span className="text-xs font-semibold text-pink-700 dark:text-pink-300">
+                            {locationCounts.spareNeedsConfirming.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
                 )}

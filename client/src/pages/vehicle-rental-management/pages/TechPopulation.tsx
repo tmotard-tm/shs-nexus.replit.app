@@ -168,7 +168,6 @@ export default function TechPopulation() {
       t.dcaReviewOutcome ?? "",
       t.currentStatus,
       t.rentalStartDate ?? "",
-      t.createdAt ? new Date(t.createdAt).toLocaleDateString("en-US") : "",
     ].map(escape).join(","));
     const csv = [headers.join(","), ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
