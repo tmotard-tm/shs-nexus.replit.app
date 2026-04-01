@@ -145,10 +145,16 @@ export default function TechProfitability() {
 
   const techsParam = useMemo(() => {
     if (!openData?.data) return null;
-    const techs = openData.data
-      .filter(r => r.enterpriseId && r.daysOpen > 0)
-      .map(r => ({ id: r.enterpriseId!.toUpperCase(), daysOpen: r.daysOpen }));
-    if (techs.length === 0) return null;
+    // Deduplicate by enterprise ID — same tech may appear multiple times (multiple open rentals).
+    // Use the maximum daysOpen across all their rentals for the Snowflake date-window query.
+    const techMap = new Map<string, number>();
+    for (const r of openData.data) {
+      if (!r.enterpriseId || !(r.daysOpen > 0)) continue;
+      const key = r.enterpriseId.toUpperCase();
+      techMap.set(key, Math.max(techMap.get(key) ?? 0, r.daysOpen));
+    }
+    if (techMap.size === 0) return null;
+    const techs = Array.from(techMap.entries()).map(([id, daysOpen]) => ({ id, daysOpen }));
     return JSON.stringify(techs);
   }, [openData]);
 
@@ -191,10 +197,14 @@ export default function TechProfitability() {
         case "vehicleNumber": av = a.vehicleNumber || ""; bv = b.vehicleNumber || ""; break;
         case "renterName": av = a.renterName || ""; bv = b.renterName || ""; break;
         case "enterpriseId": av = a.enterpriseId || ""; bv = b.enterpriseId || ""; break;
+        case "ticketPo": av = (a.ticketNumber || a.poNumber || ""); bv = (b.ticketNumber || b.poNumber || ""); break;
+        case "startDate": av = (a.originalStartDate || a.rentalStartDate || ""); bv = (b.originalStartDate || b.rentalStartDate || ""); break;
         case "daysOpen": av = a.daysOpen || 0; bv = b.daysOpen || 0; break;
+        case "source": av = a.source || ""; bv = b.source || ""; break;
         case "totalRevenue": av = a.profit?.totalRevenue ?? -Infinity; bv = b.profit?.totalRevenue ?? -Infinity; break;
         case "pptProfit": av = a.profit?.pptProfit ?? -Infinity; bv = b.profit?.pptProfit ?? -Infinity; break;
         case "rentalCost": av = a.profit?.rentalCost ?? -Infinity; bv = b.profit?.rentalCost ?? -Infinity; break;
+        case "fuelEst": av = a.profit?.fuelEst ?? -Infinity; bv = b.profit?.fuelEst ?? -Infinity; break;
         case "truckExpense": av = a.profit?.truckExpense ?? -Infinity; bv = b.profit?.truckExpense ?? -Infinity; break;
         case "adjNet": av = a.profit?.adjNet ?? -Infinity; bv = b.profit?.adjNet ?? -Infinity; break;
         case "status": av = a.profit?.status ?? "No Data"; bv = b.profit?.status ?? "No Data"; break;
@@ -314,10 +324,10 @@ export default function TechProfitability() {
                       <TableHead className="whitespace-nowrap">Vehicle #<SortBtn field="vehicleNumber" sort={sort} onSort={handleSort} /></TableHead>
                       <TableHead className="whitespace-nowrap">Tech / Renter<SortBtn field="renterName" sort={sort} onSort={handleSort} /></TableHead>
                       <TableHead className="whitespace-nowrap">Enterprise ID<SortBtn field="enterpriseId" sort={sort} onSort={handleSort} /></TableHead>
-                      <TableHead className="whitespace-nowrap">Ticket / PO</TableHead>
-                      <TableHead className="whitespace-nowrap">Start Date</TableHead>
+                      <TableHead className="whitespace-nowrap">Ticket / PO<SortBtn field="ticketPo" sort={sort} onSort={handleSort} /></TableHead>
+                      <TableHead className="whitespace-nowrap">Start Date<SortBtn field="startDate" sort={sort} onSort={handleSort} /></TableHead>
                       <TableHead className="whitespace-nowrap">Days Open<SortBtn field="daysOpen" sort={sort} onSort={handleSort} /></TableHead>
-                      <TableHead className="whitespace-nowrap">Source</TableHead>
+                      <TableHead className="whitespace-nowrap">Source<SortBtn field="source" sort={sort} onSort={handleSort} /></TableHead>
                       <TableHead className="whitespace-nowrap border-l">
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -348,6 +358,15 @@ export default function TechProfitability() {
                       <TableHead className="whitespace-nowrap">
                         <Tooltip>
                           <TooltipTrigger asChild>
+                            <span className="cursor-help">Fuel Est<Info className="h-3 w-3 inline ml-1 opacity-50" /></span>
+                          </TooltipTrigger>
+                          <TooltipContent>Completed SOs × $10 estimated fuel cost</TooltipContent>
+                        </Tooltip>
+                        <SortBtn field="fuelEst" sort={sort} onSort={handleSort} />
+                      </TableHead>
+                      <TableHead className="whitespace-nowrap">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
                             <span className="cursor-help">Truck Exp<Info className="h-3 w-3 inline ml-1 opacity-50" /></span>
                           </TooltipTrigger>
                           <TooltipContent>Total truck allocation expense from IHR unit economics</TooltipContent>
@@ -359,7 +378,7 @@ export default function TechProfitability() {
                           <TooltipTrigger asChild>
                             <span className="cursor-help">Adj Net<Info className="h-3 w-3 inline ml-1 opacity-50" /></span>
                           </TooltipTrigger>
-                          <TooltipContent>PPT + Truck − (Completes × $10 fuel) − Rental Cost</TooltipContent>
+                          <TooltipContent>PPT + Truck − Fuel Est − Rental Cost</TooltipContent>
                         </Tooltip>
                         <SortBtn field="adjNet" sort={sort} onSort={handleSort} />
                       </TableHead>
@@ -372,14 +391,14 @@ export default function TechProfitability() {
                     {isLoading ? (
                       Array.from({ length: 8 }).map((_, i) => (
                         <TableRow key={i}>
-                          {Array.from({ length: 13 }).map((__, j) => (
+                          {Array.from({ length: 14 }).map((__, j) => (
                             <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                           ))}
                         </TableRow>
                       ))
                     ) : sorted.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={13} className="text-center text-muted-foreground py-12">
+                        <TableCell colSpan={14} className="text-center text-muted-foreground py-12">
                           No rows match your search
                         </TableCell>
                       </TableRow>
@@ -445,18 +464,18 @@ export default function TechProfitability() {
                                 </Tooltip>
                               )}
                             </TableCell>
-                            <TableCell className="font-mono">
+                            <TableCell className="font-mono text-muted-foreground">
                               {loadingProfit ? <Skeleton className="h-4 w-14" /> : hasProfit ? (
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <span>{fmt$(p!.truckExpense)}</span>
+                                    <span>{fmt$(p!.fuelEst)}</span>
                                   </TooltipTrigger>
-                                  <TooltipContent>
-                                    Fuel est: {fmtFull$(p!.fuelEst)} ({p!.completes} × $10)<br/>
-                                    Truck − Fuel: {fmtFull$(p!.truckExpense - p!.fuelEst)}
-                                  </TooltipContent>
+                                  <TooltipContent>{p!.completes} completes × $10 = {fmtFull$(p!.fuelEst)}</TooltipContent>
                                 </Tooltip>
                               ) : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell className="font-mono">
+                              {loadingProfit ? <Skeleton className="h-4 w-14" /> : hasProfit ? fmt$(p!.truckExpense) : <span className="text-muted-foreground">—</span>}
                             </TableCell>
                             <TableCell className={`font-mono ${adjNetColor}`}>
                               {loadingProfit ? <Skeleton className="h-4 w-16" /> : hasProfit ? (
