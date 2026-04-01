@@ -13967,6 +13967,150 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/rental-ops/profitability", requireAuth, async (req: any, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+
+      // Expect JSON body: [{id: "KLARMAY", daysOpen: 258}, ...]
+      // Passed as query param "techs" (URL-encoded JSON) to keep it a GET
+      const techsParam = req.query?.techs as string;
+      if (!techsParam) return res.status(400).json({ message: "Missing 'techs' query param" });
+
+      let techList: Array<{ id: string; daysOpen: number }>;
+      try {
+        techList = JSON.parse(techsParam);
+      } catch {
+        return res.status(400).json({ message: "Invalid JSON in 'techs' param" });
+      }
+
+      // Filter to only techs that actually have an enterprise ID and valid daysOpen
+      const validTechs = techList.filter(t => t.id && t.daysOpen > 0);
+      if (validTechs.length === 0) return res.json({ profitability: {} });
+
+      const sf = getSnowflakeService();
+      await sf.connect();
+
+      // Build VALUES clause: each tech gets (ldap, days_open)
+      const valuesRows = validTechs
+        .map(t => `('${t.id.replace(/'/g, "''")}', ${Math.round(t.daysOpen)})`)
+        .join(",\n        ");
+
+      const sql = `
+        WITH rental_techs AS (
+          SELECT column1 AS tech_ldap, column2::INTEGER AS days_open
+          FROM VALUES
+            ${valuesRows}
+        ),
+        financials AS (
+          SELECT
+            f.TECH_LDAP,
+            COUNT(CASE WHEN f.SO_STS_DESC = 'CO - Complete' THEN 1 END) AS completes,
+            COUNT(*)                                                      AS total_sos,
+            SUM(f.TOTAL_REVENUE)                                          AS total_revenue,
+            SUM(f.LABOR_REVENUE)                                          AS labor_revenue,
+            SUM(f.PARTS_REVENUE)                                          AS parts_revenue,
+            SUM(f.OTHER_REVENUE)                                          AS other_revenue,
+            SUM(f.LABOR_DIRECT_EXPENSE)                                   AS labor_direct,
+            SUM(f.LABOR_BENEFITS_EXPENSE)                                 AS labor_benefits,
+            SUM(COALESCE(f.TOTAL_PARTS_COGS_EXPENSE, 0)
+              + COALESCE(f.TOTAL_PARTS_COGS_EXPENSE_UNDISPOSITIONED, 0))  AS parts_cogs,
+            SUM(f.TOTAL_SHIPPING_FORWARD_EXPENSE)                         AS parts_shipping,
+            SUM(f.TOTAL_TRUCK_EXPENSE)                                    AS truck_expense,
+            SUM(f.PPT_COSTS)                                              AS ppt_costs,
+            SUM(f.PPT_PROFIT)                                             AS ppt_profit
+          FROM FINANCE_ANALYTICS.ADHOC_TBLS.IHR_UNIT_ECONOMICS f
+          INNER JOIN rental_techs rt
+            ON UPPER(f.TECH_LDAP) = UPPER(rt.tech_ldap)
+            AND f.SO_STS_DT >= DATEADD('day', -rt.days_open, CURRENT_DATE())
+            AND f.SO_STS_DT <= CURRENT_DATE()
+          GROUP BY f.TECH_LDAP
+        )
+        SELECT
+          rt.tech_ldap,
+          rt.days_open,
+          (fin.tech_ldap IS NOT NULL)                   AS has_data,
+          COALESCE(fin.completes, 0)                    AS completes,
+          COALESCE(fin.total_sos, 0)                    AS total_sos,
+          ROUND(COALESCE(fin.total_revenue, 0), 2)      AS total_revenue,
+          ROUND(COALESCE(fin.labor_revenue, 0), 2)      AS labor_revenue,
+          ROUND(COALESCE(fin.parts_revenue, 0), 2)      AS parts_revenue,
+          ROUND(COALESCE(fin.other_revenue, 0), 2)      AS other_revenue,
+          ROUND(COALESCE(fin.labor_direct, 0), 2)       AS labor_direct,
+          ROUND(COALESCE(fin.labor_benefits, 0), 2)     AS labor_benefits,
+          ROUND(COALESCE(fin.parts_cogs, 0), 2)         AS parts_cogs,
+          ROUND(COALESCE(fin.parts_shipping, 0), 2)     AS parts_shipping,
+          ROUND(COALESCE(fin.truck_expense, 0), 2)      AS truck_expense,
+          ROUND(COALESCE(fin.ppt_costs, 0), 2)          AS ppt_costs,
+          ROUND(COALESCE(fin.ppt_profit, 0), 2)         AS ppt_profit
+        FROM rental_techs rt
+        LEFT JOIN financials fin
+          ON UPPER(rt.tech_ldap) = UPPER(fin.tech_ldap)
+        ORDER BY rt.tech_ldap
+      `;
+
+      const rows = await sf.executeQuery(sql) as any[];
+
+      const DAILY_RENTAL_COST = 80;
+
+      const profitability: Record<string, any> = {};
+      for (const row of rows) {
+        const ldap = String(row.TECH_LDAP || row.tech_ldap || "").toUpperCase();
+        if (!ldap) continue;
+
+        const daysOpen   = Number(row.DAYS_OPEN || row.days_open || 0);
+        const hasData    = row.HAS_DATA === true || row.has_data === true || row.HAS_DATA === "true";
+        const completes  = Number(row.COMPLETES || row.completes || 0);
+        const totalSos   = Number(row.TOTAL_SOS || row.total_sos || 0);
+        const totalRev   = Number(row.TOTAL_REVENUE || row.total_revenue || 0);
+        const laborRev   = Number(row.LABOR_REVENUE || row.labor_revenue || 0);
+        const partsRev   = Number(row.PARTS_REVENUE || row.parts_revenue || 0);
+        const otherRev   = Number(row.OTHER_REVENUE || row.other_revenue || 0);
+        const laborDir   = Number(row.LABOR_DIRECT || row.labor_direct || 0);
+        const laborBen   = Number(row.LABOR_BENEFITS || row.labor_benefits || 0);
+        const partsCogs  = Number(row.PARTS_COGS || row.parts_cogs || 0);
+        const partsShip  = Number(row.PARTS_SHIPPING || row.parts_shipping || 0);
+        const truckExp   = Number(row.TRUCK_EXPENSE || row.truck_expense || 0);
+        const pptProfit  = Number(row.PPT_PROFIT || row.ppt_profit || 0);
+
+        const rentalCost = daysOpen * DAILY_RENTAL_COST;
+        const fuelEst    = completes * 10;
+        const adjNet     = pptProfit + truckExp - fuelEst - rentalCost;
+
+        let status: string;
+        if (!hasData) status = "No Data";
+        else if (adjNet < 0) status = "Underwater";
+        else if (adjNet <= 5000) status = "Marginal";
+        else status = "Profitable";
+
+        profitability[ldap] = {
+          hasData,
+          daysOpen,
+          completes,
+          totalSos,
+          totalRevenue: totalRev,
+          laborRevenue: laborRev,
+          partsRevenue: partsRev,
+          otherRevenue: otherRev,
+          laborDirect: laborDir,
+          laborBenefits: laborBen,
+          partsCogs,
+          partsShipping: partsShip,
+          truckExpense: truckExp,
+          pptProfit,
+          rentalCost,
+          fuelEst,
+          adjNet: Math.round(adjNet * 100) / 100,
+          status,
+        };
+      }
+
+      res.json({ profitability });
+    } catch (err: any) {
+      return handleSnowflakeError(err, res);
+    }
+  });
+
   app.get("/api/rental-ops/summary", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");

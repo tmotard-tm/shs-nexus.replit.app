@@ -60,6 +60,7 @@ Preferred communication style: Simple, everyday language.
 -   **Vehicle Disposition**: Displays read-only disposition status in the Assets Queue.
 -   **Fleet Operations Command Center**: Unified hub for fleet operations, replacing manual workflows, with modules for Rental Operations, PO Tracking, Cross-System Tech Assignment, and Cross-System Address Management.
     -   **Rental Operations Hub**: Reads Snowflake pipeline tables for rental reports, offering a multi-tab UI and data qualification.
+    -   **Tech Profitability Page** (Fleet Scope `/fleet-scope/rental-profitability`): Dedicated page under the Repair Pipeline sidebar group. Joins open rental data with Snowflake `FINANCE_ANALYTICS.ADHOC_TBLS.IHR_UNIT_ECONOMICS` per tech. Displays a unified searchable/sortable table with rental fields + profitability waterfall columns (Total Revenue, PPT Profit, Rental Cost $80/day, Fuel Est, Truck Expense, Adj Net) and a color-coded status (Profitable >$5k, Marginal $0-$5k, Underwater <$0). Uses Method B (clean swap): Adj Net = PPT + Truck − (Completes×$10) − Rental Cost. Backend endpoint: `GET /api/rental-ops/profitability`.
     -   **PO Tracking**: Syncs Holman PO details from Snowflake and displays them in Fleet Management.
     -   **Cross-System Tech Assignment**: Single-operation assignment/unassignment/transfer across TPMS, Holman, and AMS with partial failure reporting.
     -   **Cross-System Address Management**: Updates addresses in TPMS and AMS simultaneously.

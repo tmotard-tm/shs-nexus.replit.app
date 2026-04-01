@@ -57,6 +57,7 @@ const navGroups = [
     label: "Repair Pipeline",
     items: [
       { title: "Rentals Dashboard", href: "/fleet-scope/dashboard", icon: LayoutDashboard },
+      { title: "Tech Profitability", href: "/fleet-scope/rental-profitability", icon: TrendingUp },
       { title: "Purchase Orders", href: "/fleet-scope/pos", icon: Receipt },
       { title: "Decommissioning", href: "/fleet-scope/decommissioning", icon: Trash2 },
     ],
