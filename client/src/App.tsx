@@ -97,6 +97,16 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
+// VRM gets its own shell (RouteReadyLayout has its own sidebar — no parent sidebar)
+function VRMProtectedRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <RoleProtectedRoute>
+      <PreviewModeBanner />
+      {children}
+    </RoleProtectedRoute>
+  );
+}
+
 function Router() {
   return (
     <Switch>
@@ -358,10 +368,16 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/vehicle-rental-management">
-        <ProtectedRoute>
+      <Route path="/vehicle-rental-management/:rest*">
+        <VRMProtectedRoute>
           <VehicleRentalManagement />
-        </ProtectedRoute>
+        </VRMProtectedRoute>
+      </Route>
+
+      <Route path="/vehicle-rental-management">
+        <VRMProtectedRoute>
+          <VehicleRentalManagement />
+        </VRMProtectedRoute>
       </Route>
 
       <Route path="/field-mapping">

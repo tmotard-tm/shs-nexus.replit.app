@@ -1,5 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { registerVrmRoutes } from "./vrm/routes";
+import { initVrmSchema } from "./vrm/init-schema";
 import crypto from 'crypto';
 import { storage } from "./storage";
 import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema, securityQuestionSetupSchema, PREDEFINED_SECURITY_QUESTIONS, StoredSecurityQuestion } from "@shared/schema";
@@ -499,6 +501,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[Fleet-Scope] Routes mounted at /api/fs/*");
   } else {
     console.log("[Fleet-Scope] Skipped — Fleet-Scope DB not configured (set DATABASE_URL)");
+  }
+
+  // Mount VRM (Rental Reduction) routes at /api/vrm/*
+  try {
+    await initVrmSchema();
+    const vrmRouter = registerVrmRoutes();
+    app.use("/api/vrm", vrmRouter);
+    console.log("[VRM] Routes mounted at /api/vrm/*");
+  } catch (e: any) {
+    console.error("[VRM] Failed to initialise:", e.message);
   }
 
   // SAML SSO INTEGRATION - Initialize passport and SAML strategy
