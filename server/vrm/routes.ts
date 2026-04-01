@@ -231,12 +231,14 @@ export function registerVrmRoutes(): Router {
    */
   router.post("/sync/roster", async (_req, res) => {
     try {
-      const [roster, scorecardRows] = await Promise.all([
+      const [roster, scorecardRows, planningAreas] = await Promise.all([
         fetchRentalRoster(),
         fetchScorecardScores(),
+        db.execute(sql`SELECT UPPER(tech_racfid) AS ldap, planning_area_name FROM all_techs WHERE planning_area_name IS NOT NULL`),
       ]);
 
       const scorecardMap = new Map(scorecardRows.map((r) => [(r.ldap_id || "").trim().toUpperCase(), r]).filter(([k]) => k));
+      const planningAreaMap = new Map((planningAreas.rows as any[]).map((r) => [r.ldap as string, r.planning_area_name as string]));
 
       let upserted = 0;
       for (const row of roster) {
@@ -259,6 +261,7 @@ export function registerVrmRoutes(): Router {
         await upsertTech({
           ldap,
           name: row.RENTER_NAME || ldap,
+          market: planningAreaMap.get(ldap.toUpperCase()) ?? undefined,
           rentalStartDate: rentalStart,
           tenureMonths,
           newHireExempt,

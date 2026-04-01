@@ -44,9 +44,6 @@ export interface ScorecardRow {
 export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
   if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
   const svc = getSnowflakeService();
-  // Fetch one row first to discover available columns for market
-  const sample = await svc.executeQuery(`SELECT * FROM PARTS_SUPPLYCHAIN.FLEET.VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS LIMIT 1`) as any[];
-  if (sample.length > 0) console.log("[VRM] Roster view columns:", Object.keys(sample[0]).join(", "));
   const rows = await svc.executeQuery(`
     SELECT
       ENTERPRISE_ID,
