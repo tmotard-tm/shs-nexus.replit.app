@@ -263,6 +263,7 @@ export function registerVrmRoutes(): Router {
           tenureMonths,
           newHireExempt,
           gate2Exempt,
+          gate2WeightedScore: sc?.weighted_score != null ? String(sc.weighted_score) : undefined,
           currentStatus: currentStatus as any,
           primaryZip: row.PRIMARY_ZIP ?? undefined,
         });
