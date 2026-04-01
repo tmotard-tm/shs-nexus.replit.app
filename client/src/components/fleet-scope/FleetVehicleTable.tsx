@@ -60,9 +60,18 @@ const isPmfSubStatus = (subStatus: string): boolean => {
          lower.includes('process at pmf') || 
          lower.includes('available to redeploy') || 
          lower.includes('unavailable') ||
+         lower.includes('reserved') ||
          lower.includes('pending pickup') ||
          lower.includes('pending arrival') ||
          lower.includes('locked down');
+};
+
+const getSpareDisplayLabel = (vehicle: { generalStatus: string; subStatus: string; locationSource: string }): string => {
+  if (vehicle.generalStatus !== 'Vehicles in storage') return vehicle.generalStatus;
+  if (isPmfSubStatus(vehicle.subStatus)) return vehicle.generalStatus;
+  const src = (vehicle.locationSource || '').toLowerCase();
+  if (src === 'confirmed' || src === 'both') return 'Spare - Location Confirmed';
+  return 'Spare - Needs Confirming';
 };
 
 interface FleetVehicleTableProps {
@@ -135,11 +144,6 @@ function ColumnFilterPopover({ title, options, selectedValues, onToggle, onClear
                   onCheckedChange={() => onToggle(option)}
                 />
                 <span className="flex-1 truncate">{option}</span>
-                {option === 'Vehicles in storage' && (
-                  <span className="px-1.5 py-0.5 text-[10px] rounded bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 whitespace-nowrap">
-                    Sum of spares
-                  </span>
-                )}
               </label>
             ))}
           </div>
@@ -333,7 +337,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
   }, [vehicles]);
 
   const uniqueGeneralStatuses = useMemo(() => {
-    const statuses = new Set(vehicles.map(v => v.generalStatus).filter(Boolean));
+    const statuses = new Set(vehicles.map(v => getSpareDisplayLabel(v)).filter(Boolean));
     if (rentalTruckNumbers.size > 0) {
       statuses.add('Rental');
     }
@@ -480,7 +484,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
       
       const matchesAssignment = assignmentFilters.size === 0 || assignmentFilters.has(vehicle.assignmentStatus);
       const matchesGeneralStatus = generalStatusFilters.size === 0 || 
-        generalStatusFilters.has(vehicle.generalStatus) || 
+        generalStatusFilters.has(getSpareDisplayLabel(vehicle)) || 
         (generalStatusFilters.has('Rental') && rentalTruckNumbers.has(vehicle.vehicleNumber?.toString().padStart(6, '0')));
       const matchesSubStatus = subStatusFilters.size === 0 || subStatusFilters.has(vehicle.subStatus);
       const matchesCategory = categoryFilters.size === 0 || categoryFilters.has(vehicle.inventoryProductCategory);
@@ -526,6 +530,8 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
   };
 
   const getGeneralStatusBadgeColor = (status: string) => {
+    if (status === 'Spare - Location Confirmed') return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400';
+    if (status === 'Spare - Needs Confirming') return 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-400';
     if (status === 'Vehicles in storage') return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
     if (status === 'Vehicles in a repair shop') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
     return 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400';
@@ -894,8 +900,8 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                         </TableCell>
                         <TableCell>
                           {vehicle.generalStatus && (
-                            <Badge className={getGeneralStatusBadgeColor(vehicle.generalStatus)}>
-                              {vehicle.generalStatus}
+                            <Badge className={getGeneralStatusBadgeColor(getSpareDisplayLabel(vehicle))}>
+                              {getSpareDisplayLabel(vehicle)}
                             </Badge>
                           )}
                         </TableCell>

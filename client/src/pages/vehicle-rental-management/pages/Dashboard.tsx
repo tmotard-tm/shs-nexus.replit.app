@@ -84,6 +84,7 @@ const gateOptions = [
 function ActionMenu({ techId, onViewRecord }: { techId: string; onViewRecord: () => void }) {
   const [open, setOpen] = useState(false);
   const actions = ["View Record", "Send Text", "Log Call", "Escalate", "Open Exception"];
+
   return (
     <div className="relative">
       <button
@@ -323,7 +324,6 @@ export default function Dashboard() {
           </thead>
           <tbody>
             {techsLoading ? (
-              // Skeleton rows
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i}>
                   {Array.from({ length: 8 }).map((_, j) => (
