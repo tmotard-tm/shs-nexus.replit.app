@@ -398,6 +398,8 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     const ss = v.subStatus || '';
     if (gs === 'On Road') return 'onRoad';
     if (gs === 'Vehicles in a repair shop') return 'repairShop';
+    if (gs === 'Spare-Location confirmed') return 'confirmedSpare';
+    if (gs === 'Spare-Needs confirming') return 'needsReconfirmation';
     if (gs === 'Vehicles in storage') {
       if (isPmfSubStatus(ss)) return 'pmf';
       const src = (v.locationSource || '').toLowerCase();
@@ -422,7 +424,14 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     if (categoryFilter) {
       result = result.filter(v => {
         if (categoryFilter.isRental) return rentalTruckNumbers.has(v.vehicleNumber?.toString().padStart(6, '0'));
-        if (categoryFilter.generalStatus && v.generalStatus !== categoryFilter.generalStatus) return false;
+        if (categoryFilter.generalStatus) {
+          // 'Spare-Location confirmed' and 'Spare-Needs confirming' are sub-classifications of
+          // the 'Vehicles in storage' bucket, so include them when filtering by 'Vehicles in storage'.
+          const isSpareVariant =
+            categoryFilter.generalStatus === 'Vehicles in storage' &&
+            (v.generalStatus === 'Spare-Location confirmed' || v.generalStatus === 'Spare-Needs confirming');
+          if (!isSpareVariant && v.generalStatus !== categoryFilter.generalStatus) return false;
+        }
         if (categoryFilter.subStatus && v.subStatus !== categoryFilter.subStatus) return false;
         if (categoryFilter.excludePmf && isPmfSubStatus(v.subStatus || '')) return false;
         return true;
@@ -533,6 +542,8 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     if (status === 'Spare - Location Confirmed') return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400';
     if (status === 'Spare - Needs Confirming') return 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-400';
     if (status === 'Vehicles in storage') return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+    if (status === 'Spare-Location confirmed') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
+    if (status === 'Spare-Needs confirming') return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
     if (status === 'Vehicles in a repair shop') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
     return 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400';
   };

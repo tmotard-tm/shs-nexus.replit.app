@@ -7072,10 +7072,9 @@ Respond ONLY with valid JSON, no other text.`;
             if (isAssigned) {
               generalStatus = 'On Road';
               subStatus = '';
-            } else {
-              generalStatus = 'Vehicles in storage';
-              subStatus = 'Unavailable';
             }
+            // Unassigned PMF "Unavailable" vehicles fall through with no status set here,
+            // so they are treated as regular unassigned spares (same path as non-PMF unassigned vehicles).
           } else if (lowerPmfStatus === 'reserved') {
             generalStatus = 'Vehicles in storage';
             subStatus = 'Reserved';
@@ -7174,6 +7173,18 @@ Respond ONLY with valid JSON, no other text.`;
               timestamp: amsTs,
               timestampStr: amsUpdate?.toString() || null
             });
+
+            // Unassigned storage vehicles with an AMS location updated within 20 days
+            // are considered location-confirmed spares.
+            const twentyDaysMs = 20 * 24 * 60 * 60 * 1000;
+            if (
+              !isAssigned &&
+              generalStatus === 'Vehicles in storage' &&
+              subStatus !== 'Reserved' &&
+              Date.now() - amsTs <= twentyDaysMs
+            ) {
+              generalStatus = 'Spare-Location confirmed';
+            }
           }
         }
         
@@ -7228,6 +7239,30 @@ Respond ONLY with valid JSON, no other text.`;
                 timestampStr: samsaraData.timestamp
               });
             }
+            
+            // Unassigned storage vehicles with a Samsara signal in the last 10 days
+            // are considered location-confirmed spares.
+            const tenDaysMs = 10 * 24 * 60 * 60 * 1000;
+            if (
+              !isAssigned &&
+              generalStatus === 'Vehicles in storage' &&
+              subStatus !== 'Reserved' &&
+              Date.now() - samsaraTs <= tenDaysMs
+            ) {
+              generalStatus = 'Spare-Location confirmed';
+            }
+          }
+        }
+
+        // For unassigned storage vehicles not already promoted by recent Samsara,
+        // check for a confirmed address from SPARE_VEHICLE_ASSIGNMENT_STATUS.
+        // Vehicles with neither source are "Spare-Needs confirming".
+        // PMF "Reserved" stays as-is since it is actively managed by PMF.
+        if (!isAssigned && generalStatus === 'Vehicles in storage' && subStatus !== 'Reserved') {
+          if (spareVehicleLocationMap.has(vehicleNumber)) {
+            generalStatus = 'Spare-Location confirmed';
+          } else {
+            generalStatus = 'Spare-Needs confirming';
           }
         }
         

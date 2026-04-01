@@ -422,6 +422,8 @@ export default function AllVehicles() {
         repairStatuses[sub] = (repairStatuses[sub] || 0) + 1;
       } else if (v.generalStatus === 'PMF') {
         pmfTotal++;
+      } else if (v.generalStatus === 'Spare-Location confirmed' || v.generalStatus === 'Spare-Needs confirming') {
+        otherParking++;
       } else if (v.generalStatus === 'Vehicles in storage') {
         const lower = (v.subStatus || '').toLowerCase();
         const isPmf = lower.includes('pmf') || lower.includes('process at pmf') || lower.includes('available to redeploy') || lower.includes('pending pickup') || lower.includes('pending arrival') || lower.includes('locked down');
@@ -515,7 +517,10 @@ export default function AllVehicles() {
     );
 
     const fleetCoord = unplugged.filter((v: any) =>
-      v.generalStatus?.toLowerCase() === 'vehicles in storage' && getDaysDark(v) >= 90
+      (v.generalStatus?.toLowerCase() === 'vehicles in storage' ||
+       v.generalStatus === 'Spare-Location confirmed' ||
+       v.generalStatus === 'Spare-Needs confirming') &&
+      getDaysDark(v) >= 90
     );
 
     const districtCounts: Record<string, number> = {};

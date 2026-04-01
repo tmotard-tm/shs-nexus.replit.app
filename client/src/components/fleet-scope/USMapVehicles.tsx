@@ -425,6 +425,10 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
           statusKey = (hasConfirmedAddress || hasRecentSamsara) ? 'confirmedSpare' : 'needsReconfirmation';
         } else if (amsStatus.includes('repair') || vehicle.generalStatus === 'Vehicles in a repair shop') {
           statusKey = 'repairShop';
+        } else if (vehicle.generalStatus === 'Spare-Location confirmed') {
+          statusKey = 'confirmedSpare';
+        } else if (vehicle.generalStatus === 'Spare-Needs confirming') {
+          statusKey = 'needsReconfirmation';
         } else if (vehicle.generalStatus === 'Vehicles in storage') {
           // Storage vehicles with no AMS "Spare" status: still split by location
           const src = (vehicle.locationSource || '').toLowerCase();
@@ -499,11 +503,21 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
         const hasConfirmedAddress = src === 'confirmed' || src === 'both';
         const hasRecentSamsara = isSamsaraWithin10Days(vehicle.lastSamsaraSignal);
         spareCategory = (hasConfirmedAddress || hasRecentSamsara) ? 'confirmed' : 'needs';
-      } else if (!amsStatus.includes('repair') && vehicle.generalStatus === 'Vehicles in storage') {
-        const src = (vehicle.locationSource || '').toLowerCase();
-        const hasConfirmedAddress = src === 'confirmed' || src === 'both';
-        const hasRecentSamsara = isSamsaraWithin10Days(vehicle.lastSamsaraSignal);
-        spareCategory = (hasConfirmedAddress || hasRecentSamsara) ? 'confirmed' : 'needs';
+      } else if (!amsStatus.includes('repair') && (
+        vehicle.generalStatus === 'Vehicles in storage' ||
+        vehicle.generalStatus === 'Spare-Location confirmed' ||
+        vehicle.generalStatus === 'Spare-Needs confirming'
+      )) {
+        if (vehicle.generalStatus === 'Spare-Location confirmed') {
+          spareCategory = 'confirmed';
+        } else if (vehicle.generalStatus === 'Spare-Needs confirming') {
+          spareCategory = 'needs';
+        } else {
+          const src = (vehicle.locationSource || '').toLowerCase();
+          const hasConfirmedAddress = src === 'confirmed' || src === 'both';
+          const hasRecentSamsara = isSamsaraWithin10Days(vehicle.lastSamsaraSignal);
+          spareCategory = (hasConfirmedAddress || hasRecentSamsara) ? 'confirmed' : 'needs';
+        }
       }
 
       if (spareCategory) {
