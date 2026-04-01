@@ -128,6 +128,7 @@ export const vrmTechs = pgTable("vrm_techs", {
   gate1AdjustedNet: decimal("gate1_adjusted_net", { precision: 12, scale: 2 }),
   gate1Classification: vrmGate1ClassEnum("gate1_classification"),
   gate2Exempt: boolean("gate2_exempt").notNull().default(false),
+  gate2WeightedScore: decimal("gate2_weighted_score", { precision: 6, scale: 3 }),
   newHireExempt: boolean("new_hire_exempt").notNull().default(false),
   dcaReviewOutcome: vrmDcaOutcomeEnum("dca_review_outcome").default("pending"),
   dcaReviewNotes: text("dca_review_notes"),

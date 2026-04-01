@@ -57,7 +57,7 @@ function InlineNotes({ techId, initial }: { techId: string; initial: string | nu
     mutationFn: () =>
       apiRequest("PATCH", `/api/vrm/dca-review/${techId}`, { outcome: undefined, notes: val }).then((r) => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/dca-review"] });
+      qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string).startsWith("/api/vrm/dca-review") });
       setEditing(false);
     },
   });
@@ -73,7 +73,7 @@ function InlineNotes({ techId, initial }: { techId: string; initial: string | nu
           style={{ fontFamily: fonts.dmSans, fontSize: 12, border: `1px solid ${colors.accent}`, borderRadius: 4, padding: "2px 6px", outline: "none", width: 200, color: colors.ink }}
         />
         <button onClick={() => mutation.mutate()} style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 500, color: "#FFFFFF", backgroundColor: colors.accent, border: "none", borderRadius: 4, padding: "2px 8px", cursor: "pointer" }}>✓</button>
-        <button onClick={() => setEditing(false)} style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, backgroundColor: "none", border: "none", cursor: "pointer" }}>✕</button>
+        <button onClick={() => setEditing(false)} style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, backgroundColor: "transparent", border: "none", cursor: "pointer" }}>✕</button>
       </div>
     );
   }
@@ -102,7 +102,7 @@ function ActionButtons({ tech }: { tech: DcaTech }) {
         notes: tech.dcaReviewNotes,
         changedByName: "Fleet Team",
       });
-      qc.invalidateQueries({ queryKey: ["/api/vrm/dca-review"] });
+      qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string).startsWith("/api/vrm/dca-review") });
     } finally {
       setLoading(null);
     }

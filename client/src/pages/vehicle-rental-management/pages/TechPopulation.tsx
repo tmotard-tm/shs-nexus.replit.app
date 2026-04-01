@@ -115,7 +115,7 @@ export default function TechPopulation() {
     },
     onSuccess: (data) => {
       setSyncMessage(`Sync complete — ${data.roster.upserted ?? 0} roster records, ${data.net.updated ?? 0} net records updated`);
-      qc.invalidateQueries({ queryKey: ["/api/vrm/techs"] });
+      qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string).startsWith("/api/vrm/techs") });
       setTimeout(() => setSyncMessage(null), 6000);
     },
     onError: (e: any) => setSyncMessage(`Sync failed: ${e.message}`),
@@ -136,7 +136,7 @@ export default function TechPopulation() {
     },
     onSuccess: (data) => {
       setImportSummary(data);
-      qc.invalidateQueries({ queryKey: ["/api/vrm/techs"] });
+      qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string).startsWith("/api/vrm/techs") });
     },
     onError: (e: any) => setSyncMessage(`Import failed: ${e.message}`),
   });

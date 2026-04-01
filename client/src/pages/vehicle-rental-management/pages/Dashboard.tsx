@@ -5,7 +5,6 @@ import { StatCard } from "../components/stat-card";
 import { StatusPill } from "../components/status-pill";
 import { TechRecordPanel } from "../components/tech-record-panel";
 import { fonts, colors } from "../lib/constants";
-import type { GateClassification } from "../lib/constants";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

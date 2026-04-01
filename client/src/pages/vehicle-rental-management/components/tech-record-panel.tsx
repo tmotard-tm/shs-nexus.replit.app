@@ -342,9 +342,17 @@ function OutreachLogTab({ techId }: { techId: string }) {
 }
 
 function ExceptionCaseTab({ techId }: { techId: string }) {
-  const { data: ec } = useQuery<ExceptionCase | null>({
+  const { data: ec, isLoading } = useQuery<ExceptionCase | null>({
     queryKey: [`/api/vrm/techs/${techId}/exception-case`],
   });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-pulse" style={{ fontFamily: fonts.dmSans, fontSize: 14, color: colors.inkMuted }}>Loading exception case...</div>
+      </div>
+    );
+  }
 
   if (!ec) {
     return (

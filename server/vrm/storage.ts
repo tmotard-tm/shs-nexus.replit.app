@@ -379,9 +379,13 @@ export async function updateEscalation(
   escalationId: string,
   data: { carlOutcomeNotes?: string; status?: string },
 ) {
+  const setValues: Record<string, any> = { updatedAt: new Date() };
+  if (data.carlOutcomeNotes !== undefined) setValues.carlOutcomeNotes = data.carlOutcomeNotes;
+  if (data.status !== undefined) setValues.status = data.status;
+
   const [updated] = await db
     .update(vrmEscalations)
-    .set({ ...data as any, updatedAt: new Date() })
+    .set(setValues)
     .where(eq(vrmEscalations.id, escalationId))
     .returning();
   return updated;

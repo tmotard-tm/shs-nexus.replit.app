@@ -71,7 +71,7 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
   if (ldaps.length === 0) return [];
   const svc = getSnowflakeService();
 
-  // Build rental_techs CTE from provided LDAPs joined to the view
+  const ldapList = ldaps.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const rows = await svc.executeQuery(`
     WITH rental_techs AS (
       SELECT
@@ -82,6 +82,7 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
       FROM PARTS_SUPPLYCHAIN.FLEET.VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS
       WHERE ENTERPRISE_ID IS NOT NULL
         AND ENTERPRISE_ID != ''
+        AND ENTERPRISE_ID IN (${ldapList})
     ),
     financials AS (
       SELECT
@@ -104,19 +105,19 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
       GROUP BY f.TECH_LDAP
     )
     SELECT
-      rt.tech_ldap,
-      rt.days_in_rental,
-      COALESCE(fin.completes, 0)                                             AS completes,
-      COALESCE(fin.total_sos, 0)                                             AS total_sos,
-      ROUND(COALESCE(fin.total_revenue, 0), 2)                              AS total_revenue,
-      ROUND(COALESCE(fin.labor_direct, 0), 2)                               AS labor_direct,
-      ROUND(COALESCE(fin.labor_benefits, 0), 2)                             AS labor_benefits,
-      ROUND(COALESCE(fin.parts_cogs, 0), 2)                                 AS parts_cogs,
-      ROUND(COALESCE(fin.parts_shipping, 0), 2)                             AS parts_shipping,
-      ROUND(COALESCE(fin.truck_expense, 0), 2)                              AS truck_expense,
-      ROUND(COALESCE(fin.ppt_profit, 0), 2)                                 AS ppt_profit,
-      COALESCE(fin.completes, 0) * 10                                        AS fuel_est,
-      ROUND(rt.rental_cost, 2)                                               AS rental_cost,
+      rt.tech_ldap                                                           AS "tech_ldap",
+      rt.days_in_rental                                                      AS "days_in_rental",
+      COALESCE(fin.completes, 0)                                             AS "completes",
+      COALESCE(fin.total_sos, 0)                                             AS "total_sos",
+      ROUND(COALESCE(fin.total_revenue, 0), 2)                              AS "total_revenue",
+      ROUND(COALESCE(fin.labor_direct, 0), 2)                               AS "labor_direct",
+      ROUND(COALESCE(fin.labor_benefits, 0), 2)                             AS "labor_benefits",
+      ROUND(COALESCE(fin.parts_cogs, 0), 2)                                 AS "parts_cogs",
+      ROUND(COALESCE(fin.parts_shipping, 0), 2)                             AS "parts_shipping",
+      ROUND(COALESCE(fin.truck_expense, 0), 2)                              AS "truck_expense",
+      ROUND(COALESCE(fin.ppt_profit, 0), 2)                                 AS "ppt_profit",
+      COALESCE(fin.completes, 0) * 10                                        AS "fuel_est",
+      ROUND(rt.rental_cost, 2)                                               AS "rental_cost",
       -- Method C: clean rebuild, no truck addback
       ROUND(
         COALESCE(fin.total_revenue, 0)
@@ -126,7 +127,7 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
         - COALESCE(fin.parts_shipping, 0)
         - (COALESCE(fin.completes, 0) * 10)
         - rt.rental_cost
-      , 2)                                                                    AS adj_net,
+      , 2)                                                                    AS "adj_net",
       CASE
         WHEN fin.tech_ldap IS NULL THEN 'No Data'
         WHEN (
@@ -148,10 +149,10 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
           - rt.rental_cost
         ) <= 5000    THEN 'Marginal'
         ELSE 'Profitable'
-      END                                                                     AS status
+      END                                                                     AS "status"
     FROM rental_techs rt
     LEFT JOIN financials fin ON rt.tech_ldap = fin.tech_ldap
-    ORDER BY adj_net ASC NULLS LAST
+    ORDER BY 13 ASC NULLS LAST
   `) as AdjustedNetRow[];
 
   return rows;
@@ -191,6 +192,8 @@ export async function fetchScorecardScores(): Promise<ScorecardRow[]> {
       FROM IH_DATASCIENCE.HS_REFERENCE.daily_assigns_dcr_temp_new AS dcr_inner
       WHERE dcr_inner.TIMEWINDOW IN ('ALL-YTD')
         AND dcr_inner.BUSUNIT = 'InHomeRepair'
+        AND dcr_inner.LDAP_ID IS NOT NULL
+        AND dcr_inner.LDAP_ID != ''
         AND dcr_inner.ACCTG_DT >= (
           SELECT MIN(ACCTG_DT)
           FROM PRD_DB2.HS_DW_TBLS.NPMATFISCALDT_NEW
@@ -250,16 +253,16 @@ export async function fetchScorecardScores(): Promise<ScorecardRow[]> {
       FROM dcr
     )
     SELECT
-      ldap_id,
-      tech_name,
-      tenure_yrs,
+      ldap_id                                                               AS "ldap_id",
+      tech_name                                                             AS "tech_name",
+      tenure_yrs                                                            AS "tenure_yrs",
       -- Normalise over active weight (85 without CSAT). When CSAT added: divide by 100.
-      ROUND((completion_pts + p2r_pts + recall_pts + pm_pts + d2c_pts) / 85.0, 3) AS weighted_score,
+      ROUND((completion_pts + p2r_pts + recall_pts + pm_pts + d2c_pts) / 85.0, 3) AS "weighted_score",
       CASE WHEN (completion_pts + p2r_pts + recall_pts + pm_pts + d2c_pts) / 85.0 >= 4.0
         THEN TRUE ELSE FALSE
-      END                                                                   AS is_exempt
+      END                                                                   AS "is_exempt"
     FROM scored
-    ORDER BY weighted_score DESC
+    ORDER BY 4 DESC
   `) as ScorecardRow[];
 
   return rows;

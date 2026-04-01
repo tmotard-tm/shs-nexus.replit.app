@@ -84,7 +84,7 @@ export default function Outreach() {
     if (templates.length > 0 && !selectedTemplateId) {
       setSelectedTemplateId(templates[0].id);
     }
-  }, [templates]);
+  }, [templates, selectedTemplateId]);
 
   const sendMutation = useMutation({
     mutationFn: () =>
@@ -93,6 +93,7 @@ export default function Outreach() {
         templateId: selectedTemplateId,
         body: messageBody,
         teamLeadCcd: teamLeadConfirmed,
+        sentByName: "Fleet Team",
       }).then((r) => r.json()),
     onSuccess: () => {
       setSendSuccess(true);

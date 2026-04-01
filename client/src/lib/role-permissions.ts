@@ -495,6 +495,11 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     return !!perms.sidebar.tpms;
   }
 
+  // Vehicle Rental Management module - all sub-routes share the same permission flag
+  if (route === '/vehicle-rental-management' || route.startsWith('/vehicle-rental-management/')) {
+    return !!perms.quickActions.vehicleRentalManagement;
+  }
+
   // Handle wildcard patterns for forms - all authenticated users can access forms
   if (route.startsWith('/forms/')) {
     return true;

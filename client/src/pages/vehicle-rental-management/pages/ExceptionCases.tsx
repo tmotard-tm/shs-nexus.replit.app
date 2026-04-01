@@ -364,7 +364,6 @@ export default function ExceptionCases() {
     refetchInterval: 30000,
   });
 
-  const now = new Date();
   const activeCases = cases.filter((c) => c.status !== "closed");
   const approaching = activeCases.filter((c) => daysOpen(c.openDate) >= 55).length;
   const reviewDue = activeCases.filter((c) => !c.review21DayCompleted && daysOpen(c.openDate) >= 21).length;

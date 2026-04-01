@@ -34,27 +34,14 @@ import {
 export function registerVrmRoutes(): Router {
   const router = Router();
 
-  // #region agent log
-  fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'server/vrm/routes.ts:register',message:'VRM router created',data:{},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
   // ─── Dashboard ──────────────────────────────────────────────────────────────
 
   // GET /api/vrm/dashboard/stats
   router.get("/dashboard/stats", async (_req, res) => {
-    // #region agent log
-    fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'server/vrm/routes.ts:stats',message:'GET /dashboard/stats called',data:{},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     try {
       const stats = await getDashboardStats();
-      // #region agent log
-      fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'server/vrm/routes.ts:stats-ok',message:'stats success',data:{stats},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       res.json(stats);
     } catch (e: any) {
-      // #region agent log
-      fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'server/vrm/routes.ts:stats-err',message:'stats error',data:{error:e.message},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       console.error("[VRM] stats error:", e.message);
       res.status(500).json({ error: e.message });
     }
@@ -62,9 +49,6 @@ export function registerVrmRoutes(): Router {
 
   // GET /api/vrm/techs — paginated, filterable
   router.get("/techs", async (req, res) => {
-    // #region agent log
-    fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'server/vrm/routes.ts:techs',message:'GET /techs called',data:{query:req.query},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     try {
       const { status, market, gate, search, page, pageSize } = req.query as Record<string, string>;
       const { rows, total } = await listTechs({
@@ -252,7 +236,7 @@ export function registerVrmRoutes(): Router {
         fetchScorecardScores(),
       ]);
 
-      const scorecardMap = new Map(scorecardRows.map((r) => [r.ldap_id.trim().toUpperCase(), r]));
+      const scorecardMap = new Map(scorecardRows.map((r) => [(r.ldap_id || "").trim().toUpperCase(), r]).filter(([k]) => k));
 
       let upserted = 0;
       for (const row of roster) {
@@ -298,8 +282,7 @@ export function registerVrmRoutes(): Router {
    */
   router.post("/sync/adjusted-net", async (_req, res) => {
     try {
-      // Get all in-scope LDAPs (not already exempt)
-      const { rows } = await listTechs({ pageSize: 1000 });
+      const { rows } = await listTechs({ pageSize: 10000 });
       const ldaps = rows
         .filter((t) => !t.newHireExempt && !t.gate2Exempt)
         .map((t) => t.ldap);
@@ -370,18 +353,16 @@ export function registerVrmRoutes(): Router {
    */
   router.post("/sms/send", async (req, res) => {
     try {
-      const { techId, body, teamLeadCcd, templateId } = req.body;
+      const { techId, body, teamLeadCcd, templateId, sentByName } = req.body;
       if (!techId || !body) return res.status(400).json({ error: "techId and body required" });
-      if (!teamLeadCcd) return res.status(400).json({ error: "Team lead CC required" });
+      if (teamLeadCcd !== true) return res.status(400).json({ error: "Team lead CC required" });
 
-      // Try Twilio if configured
       let twilioSid: string | undefined;
       const twilioSid_ = process.env.VRM_TWILIO_ACCOUNT_SID || process.env.FS_TWILIO_ACCOUNT_SID;
       const twilioAuth = process.env.VRM_TWILIO_AUTH_TOKEN || process.env.FS_TWILIO_AUTH_TOKEN;
       const twilioFrom = process.env.VRM_TWILIO_FROM || process.env.FS_TWILIO_FROM;
 
       if (twilioSid_ && twilioAuth && twilioFrom) {
-        // Would call Twilio SDK here — skipping actual call so no credentials are required
         twilioSid = `demo_${Date.now()}`;
       }
 
@@ -390,12 +371,12 @@ export function registerVrmRoutes(): Router {
         direction: "outbound",
         body,
         twilioSid,
-        teamLeadCcd: Boolean(teamLeadCcd),
+        sentByName: sentByName || "Fleet Team",
+        teamLeadCcd: true,
         responseStatus: "pending",
       }).returning();
 
-      // Log to outreach log
-      await addOutreachEntry({ techId, actionType: "text_sent", outcome: "Outbound SMS sent", performedByName: req.body.sentByName });
+      await addOutreachEntry({ techId, actionType: "text_sent", outcome: "Outbound SMS sent", performedByName: sentByName || "Fleet Team" });
 
       res.json(msg);
     } catch (e: any) {
@@ -479,12 +460,15 @@ export function registerVrmRoutes(): Router {
 
   router.post("/exception-cases", async (req, res) => {
     try {
-      const { techId, exceptionType, openDate } = req.body;
+      const { techId, exceptionType, openDate, pairingPartnerLdap, pairingPartnerName, pairingStartDate, baseWeeklyPay } = req.body;
       const [ec] = await db.insert(vrmExceptionCases).values({
         techId,
         exceptionType,
         openDate: openDate ?? new Date().toISOString().split("T")[0],
-        ...req.body,
+        pairingPartnerLdap: pairingPartnerLdap ?? null,
+        pairingPartnerName: pairingPartnerName ?? null,
+        pairingStartDate: pairingStartDate ?? null,
+        baseWeeklyPay: baseWeeklyPay ?? null,
       }).returning();
 
       const status = exceptionType === "paired" ? "exception_paired" : "exception_home_learning";

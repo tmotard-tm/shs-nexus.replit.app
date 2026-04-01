@@ -100,6 +100,10 @@ export default function Reports() {
     setPdfLoading(true);
     try {
       const resp = await fetch(`/api/vrm/reports/tech-audit/${auditTech.id}/pdf`);
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`PDF generation failed: ${errText || resp.statusText}`);
+      }
       const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -107,6 +111,9 @@ export default function Reports() {
       a.download = `audit-${auditTech.ldap}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error("[VRM] PDF download error:", err.message);
+      alert(`Failed to generate PDF: ${err.message}`);
     } finally {
       setPdfLoading(false);
     }
