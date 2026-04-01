@@ -147,7 +147,7 @@ export default function TechPopulation() {
     const headers = [
       "LDAP", "Name", "Market", "Tenure (mo)", "Gate 1 Net", "Gate 1 Class",
       "Gate 2 Score", "Gate 2 Exempt", "New Hire Exempt",
-      "DCA Review", "Status", "Rental Start", "Date Added",
+      "DCA Review", "Status", "Rental Start",
     ];
     const escape = (v: string | number | null | undefined) => {
       if (v == null) return "";
@@ -379,7 +379,7 @@ export default function TechPopulation() {
               <th style={colStyle}>New Hire</th>
               <th style={colStyle}>DCA Review</th>
               <th style={colStyle}>Status</th>
-              <th style={colStyle}>Date Added</th>
+              <th style={colStyle}>Rental Start</th>
             </tr>
           </thead>
           <tbody>
@@ -436,8 +436,8 @@ export default function TechPopulation() {
                   <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
                     <StatusPill status={tech.currentStatus} />
                   </td>
-                  <td style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
-                    {tech.createdAt ? new Date(tech.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                  <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
+                    {tech.rentalStartDate ? new Date(tech.rentalStartDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
                   </td>
                 </tr>
               ))

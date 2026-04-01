@@ -1,4 +1,4 @@
 #!/bin/bash
 set -e
 npm install
-npm run db:push -- --force
+echo "No" | npm run db:push -- --force
