@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, RefreshCw, CheckCircle, AlertCircle, Clock, ChevronDown } from "lucide-react";
+import { Upload, RefreshCw, CheckCircle, AlertCircle, ChevronDown } from "lucide-react";
 import { StatusPill } from "../components/status-pill";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
@@ -16,6 +16,7 @@ interface TechPopRow {
   gate1AdjustedNet: string | null;
   gate1Classification: string | null;
   gate2Exempt: boolean;
+  gate2WeightedScore: string | null;
   newHireExempt: boolean;
   dcaReviewOutcome: string | null;
   currentStatus: string;
@@ -48,14 +49,29 @@ function Gate1Pill({ classification, net }: { classification: string | null; net
   );
 }
 
-function Gate2Pill({ exempt, newHire }: { exempt: boolean; newHire: boolean }) {
+function Gate2Pill({ exempt, newHire, score }: { exempt: boolean; newHire: boolean; score: string | null }) {
   if (newHire) return <StatusPill status="exempt_new_hire" />;
-  if (exempt) return <StatusPill status="exempt_scorecard" />;
+  if (exempt) return (
+    <div className="flex flex-col gap-1">
+      <StatusPill status="exempt_scorecard" />
+      {score != null && (
+        <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.green }}>
+          {Number(score).toFixed(2)}
+        </span>
+      )}
+    </div>
+  );
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5" style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11, color: colors.inkSoft, backgroundColor: colors.surface, borderRadius: 6 }}>
-      <CheckCircle className="h-3 w-3" style={{ color: colors.inkMuted }} />
-      Assessed
-    </span>
+    <div className="flex flex-col gap-1">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5" style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11, color: colors.inkSoft, backgroundColor: colors.surface, borderRadius: 6 }}>
+        In Scope
+      </span>
+      {score != null && (
+        <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
+          {Number(score).toFixed(2)}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -81,13 +97,35 @@ function ImportSummary({ summary, onClose }: { summary: { upserted: number; tota
   );
 }
 
+const STATUS_OPTIONS = [
+  { value: "", label: "All Statuses" },
+  { value: "in_rental", label: "In Rental" },
+  { value: "byov_enrolled", label: "BYOV Enrolled" },
+  { value: "exception_paired", label: "Exception — Paired" },
+  { value: "exception_home_learning", label: "Exception — Home Learning" },
+  { value: "escalated_carl", label: "Escalated to Carl" },
+  { value: "epv_issued", label: "EPV Issued" },
+  { value: "resolved", label: "Resolved" },
+  { value: "exempt_scorecard", label: "Exempt — Scorecard" },
+  { value: "exempt_new_hire", label: "Exempt — New Hire" },
+];
+
+const GATE_OPTIONS = [
+  { value: "", label: "All Gate Classes" },
+  { value: "underwater", label: "Underwater" },
+  { value: "marginal", label: "Marginal" },
+  { value: "profitable", label: "Profitable" },
+];
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function TechPopulation() {
   const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"action" | "all">("action");
   const [importSummary, setImportSummary] = useState<{ upserted: number; total: number } | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [gateFilter, setGateFilter] = useState("");
+  const [search, setSearch] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: allTechs = [], isLoading } = useQuery<TechPopRow[]>({
@@ -95,17 +133,15 @@ export default function TechPopulation() {
     select: (data: any) => (data as any).rows ?? [],
   });
 
-  // Action list = techs that need review: underwater/marginal, not exempt, DCA pending/cleared
-  const actionList = allTechs.filter((t) =>
-    !t.newHireExempt &&
-    !t.gate2Exempt &&
-    (t.gate1Classification === "underwater" || t.gate1Classification === "marginal") &&
-    t.currentStatus !== "byov_enrolled" &&
-    t.currentStatus !== "resolved" &&
-    t.currentStatus !== "epv_issued"
-  );
-
-  const displayRows = activeTab === "action" ? actionList : allTechs;
+  const displayRows = allTechs.filter((t) => {
+    if (statusFilter && t.currentStatus !== statusFilter) return false;
+    if (gateFilter && t.gate1Classification !== gateFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!t.name.toLowerCase().includes(q) && !t.ldap.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
 
   const syncMutation = useMutation({
     mutationFn: async () => {
@@ -147,22 +183,22 @@ export default function TechPopulation() {
     e.target.value = "";
   };
 
-  const tabStyle = (active: boolean): React.CSSProperties => ({
+  const selectStyle: React.CSSProperties = {
     fontFamily: fonts.dmSans,
-    fontWeight: active ? 500 : 400,
-    fontSize: 14,
-    color: active ? colors.ink : colors.inkMuted,
-    paddingBottom: 10,
-    paddingLeft: 4,
-    paddingRight: 4,
-    background: "none",
-    borderTop: "none",
-    borderLeft: "none",
-    borderRight: "none",
-    borderBottom: active ? `2px solid ${colors.ink}` : "2px solid transparent",
+    fontWeight: 400,
+    fontSize: 13,
+    color: colors.ink,
+    backgroundColor: colors.background,
+    border: `1px solid ${colors.rule}`,
+    borderRadius: 8,
+    padding: "6px 28px 6px 10px",
+    height: 34,
+    appearance: "none" as any,
     cursor: "pointer",
-    transition: "color 100ms",
-  });
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238891A4' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "right 8px center",
+  };
 
   const colStyle: React.CSSProperties = {
     fontFamily: fonts.dmSans,
@@ -187,7 +223,10 @@ export default function TechPopulation() {
             Tech Population
           </h1>
           <p style={{ fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 14, color: colors.inkMuted, marginTop: 4 }}>
-            Eligibility gates and action list for all rental technicians
+            All active rental technicians from{" "}
+            <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft }}>
+              VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS
+            </span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -237,42 +276,43 @@ export default function TechPopulation() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-6 mb-6" style={{ borderBottom: `1px solid ${colors.rule}` }}>
-        <button style={tabStyle(activeTab === "action")} onClick={() => setActiveTab("action")}>
-          Action List
-          {!isLoading && (
-            <span className="ml-2 px-1.5 py-0.5 rounded-full" style={{
-              fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
-              color: colors.background, backgroundColor: colors.red,
-            }}>
-              {actionList.length}
-            </span>
-          )}
-        </button>
-        <button style={tabStyle(activeTab === "all")} onClick={() => setActiveTab("all")}>
-          All Techs
-          <span className="ml-2 px-1.5 py-0.5 rounded-full" style={{
-            fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
-            color: colors.inkMuted, backgroundColor: colors.surface,
-          }}>
-            {allTechs.length}
-          </span>
-        </button>
-      </div>
-
-      {/* Eligibility legend */}
-      <div className="flex items-center gap-6 mb-4">
-        {[
-          { icon: <CheckCircle className="h-3.5 w-3.5" style={{ color: colors.green }} />, label: "Profitable — out of scope" },
-          { icon: <Clock className="h-3.5 w-3.5" style={{ color: colors.amber }} />, label: "Marginal — in scope" },
-          { icon: <AlertCircle className="h-3.5 w-3.5" style={{ color: colors.red }} />, label: "Underwater — in scope" },
-        ].map(({ icon, label }) => (
-          <div key={label} className="flex items-center gap-1.5">
-            {icon}
-            <span style={{ fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 12, color: colors.inkMuted }}>{label}</span>
-          </div>
-        ))}
+      {/* Filter bar */}
+      <div className="flex items-center gap-3 mb-5">
+        <div style={{ position: "relative", flex: "0 0 260px" }}>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name or LDAP…"
+            style={{
+              width: "100%",
+              fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink,
+              backgroundColor: colors.background,
+              border: `1px solid ${colors.rule}`, borderRadius: 8,
+              padding: "6px 10px", height: 34, outline: "none",
+            }}
+          />
+        </div>
+        <div style={{ position: "relative" }}>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={selectStyle}>
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+        <div style={{ position: "relative" }}>
+          <select value={gateFilter} onChange={(e) => setGateFilter(e.target.value)} style={selectStyle}>
+            {GATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+        {(statusFilter || gateFilter || search) && (
+          <button
+            onClick={() => { setStatusFilter(""); setGateFilter(""); setSearch(""); }}
+            style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+          >
+            Clear filters
+          </button>
+        )}
+        <span style={{ marginLeft: "auto", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+          {isLoading ? "Loading…" : `${displayRows.length} of ${allTechs.length} technicians`}
+        </span>
       </div>
 
       {/* Table */}
@@ -293,7 +333,7 @@ export default function TechPopulation() {
           </thead>
           <tbody>
             {isLoading ? (
-              Array.from({ length: 6 }).map((_, i) => (
+              Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i}>
                   {Array.from({ length: 9 }).map((_, j) => (
                     <td key={j} style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
@@ -305,9 +345,9 @@ export default function TechPopulation() {
             ) : displayRows.length === 0 ? (
               <tr>
                 <td colSpan={9} style={{ padding: "48px 16px", textAlign: "center", fontFamily: fonts.dmSans, fontSize: 14, color: colors.inkMuted }}>
-                  {activeTab === "action"
-                    ? "No techs require action — run Sync Eligibility to refresh"
-                    : "No technicians found — use Import CSV or Sync Eligibility to populate"}
+                  {allTechs.length === 0
+                    ? "No technicians found — click Sync Eligibility to pull from Snowflake"
+                    : "No technicians match the current filters"}
                 </td>
               </tr>
             ) : (
@@ -332,7 +372,7 @@ export default function TechPopulation() {
                     <Gate1Pill classification={tech.gate1Classification} net={tech.gate1AdjustedNet} />
                   </td>
                   <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
-                    <Gate2Pill exempt={tech.gate2Exempt} newHire={tech.newHireExempt} />
+                    <Gate2Pill exempt={tech.gate2Exempt} newHire={tech.newHireExempt} score={tech.gate2WeightedScore} />
                   </td>
                   <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
                     {tech.newHireExempt
@@ -354,12 +394,6 @@ export default function TechPopulation() {
           </tbody>
         </table>
       </div>
-
-      {!isLoading && displayRows.length > 0 && (
-        <p style={{ fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 13, color: colors.inkMuted, marginTop: 12 }}>
-          Showing {displayRows.length} technician{displayRows.length !== 1 ? "s" : ""}
-        </p>
-      )}
     </div>
   );
 }
