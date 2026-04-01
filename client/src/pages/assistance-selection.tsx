@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { usePermissions } from "@/hooks/use-permissions";
-import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench, CalendarPlus, CalendarMinus } from "lucide-react";
+import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench, CalendarPlus, CalendarMinus, Car } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { FilteredMap } from "@/components/vehicle-map-filters";
@@ -52,6 +52,7 @@ export default function AssistanceSelection() {
     { value: "weekly-offboarding", label: "Weekly Offboarding", icon: CalendarMinus, color: "bg-rose-600 hover:bg-rose-700", action: () => setLocation("/weekly-offboarding"), permissionKey: "weeklyOffboarding" as const },
     { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-600 hover:bg-blue-700", action: () => setLocation("/create-vehicle-location"), permissionKey: "createVehicle" as const },
     { value: "fleet-scope", label: "Fleet Scope", icon: Wrench, color: "bg-amber-600 hover:bg-amber-700", action: () => setLocation("/fleet-scope"), permissionKey: "fleetScope" as const },
+    { value: "vehicle-rental-management", label: "Vehicle Rental Management", icon: Car, color: "bg-teal-600 hover:bg-teal-700", action: () => setLocation("/rental-operations"), permissionKey: "vehicleRentalManagement" as const },
   ];
 
   const workflowOptions = useMemo(() => {
