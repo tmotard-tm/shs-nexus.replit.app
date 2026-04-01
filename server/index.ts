@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
+import { createTestUsers } from "./create-test-users";
 import { EMBEDDED_TEMPLATES } from "../shared/templates-embedded";
 import { TemplateLoader } from "../shared/template-loader";
 import type { InsertTemplateWithId } from "../shared/schema";
@@ -243,6 +244,15 @@ async function patchStoredRolePermissions() {
 
   // Seed templates during startup
   await seedTemplatesOnStartup();
+
+  // Ensure test users exist (dev/staging only — no-ops in production)
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      await createTestUsers();
+    } catch (err: any) {
+      console.error("⚠️ Test user seeding failed:", err.message);
+    }
+  }
 
   // Seed communication hub default templates (creates missing ones)
   try {
