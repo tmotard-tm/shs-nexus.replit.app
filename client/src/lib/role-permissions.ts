@@ -472,6 +472,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/rental-dashboard': () => perms.sidebar.dashboards.rentalReductionDash,
     '/reporting': () => perms.sidebar.dashboards.reporting,
     '/rental-operations': () => perms.sidebar.management.rentalOperations,
+    '/vehicle-rental-management': () => perms.quickActions.vehicleRentalManagement,
     '/samsara-integration': () => perms.sidebar.management.integrations,
     '/parq-integration': () => perms.sidebar.management.integrations,
     '/ams-integration': () => perms.sidebar.management.integrations,
