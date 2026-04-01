@@ -50,6 +50,7 @@ import FleetManagement from "@/pages/fleet-management";
 import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import WeeklyOffboarding from "@/pages/weekly-offboarding";
 import RentalOperations from "@/pages/rental-operations";
+import VehicleRentalManagement from "@/pages/vehicle-rental-management";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import Reporting from "@/pages/reporting";
@@ -354,6 +355,12 @@ function Router() {
       <Route path="/rental-operations">
         <ProtectedRoute>
           <RentalOperations />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/vehicle-rental-management">
+        <ProtectedRoute>
+          <VehicleRentalManagement />
         </ProtectedRoute>
       </Route>
 
