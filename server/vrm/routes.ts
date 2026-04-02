@@ -13,7 +13,6 @@ import {
   getOutreachLog,
   addOutreachEntry,
   getStatusHistory,
-  getSmsTemplates,
   getTechNotes,
   addTechNote,
   getExceptionCase,
@@ -33,7 +32,7 @@ import {
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck } from "./snowflake-queries";
 import { generateAuditPdf } from "./pdf-generator";
 import {
-  vrmTechs, vrmOutreachLog, vrmEscalations, vrmExceptionCases, vrmReachabilityLog, vrmSmsMessages,
+  vrmTechs, vrmOutreachLog, vrmEscalations, vrmExceptionCases, vrmReachabilityLog,
 } from "../../shared/vrm-schema";
 
 export function registerVrmRoutes(): Router {
@@ -155,16 +154,6 @@ export function registerVrmRoutes(): Router {
       const { newStatus, changedByName, reason } = req.body;
       await updateTechStatus(req.params.id, newStatus, changedByName, reason);
       res.json({ ok: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // ─── SMS Templates ──────────────────────────────────────────────────────────
-
-  router.get("/sms-templates", async (_req, res) => {
-    try {
-      res.json(await getSmsTemplates());
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -560,91 +549,6 @@ export function registerVrmRoutes(): Router {
     }
   });
 
-  // ─── SMS ─────────────────────────────────────────────────────────────────────
-
-  /**
-   * POST /api/vrm/sms/send
-   * Sends via Twilio if env vars present; otherwise logs to DB only (demo mode).
-   */
-  router.post("/sms/send", async (req, res) => {
-    try {
-      const { techId, body, teamLeadCcd, templateId, sentByName } = req.body;
-      if (!techId || !body) return res.status(400).json({ error: "techId and body required" });
-      if (teamLeadCcd !== true) return res.status(400).json({ error: "Team lead CC required" });
-
-      let twilioSid: string | undefined;
-      const twilioSid_ = process.env.VRM_TWILIO_ACCOUNT_SID || process.env.FS_TWILIO_ACCOUNT_SID;
-      const twilioAuth = process.env.VRM_TWILIO_AUTH_TOKEN || process.env.FS_TWILIO_AUTH_TOKEN;
-      const twilioFrom = process.env.VRM_TWILIO_FROM || process.env.FS_TWILIO_FROM;
-
-      if (twilioSid_ && twilioAuth && twilioFrom) {
-        twilioSid = `demo_${Date.now()}`;
-      }
-
-      const [msg] = await db.insert(vrmSmsMessages).values({
-        techId,
-        direction: "outbound",
-        body,
-        twilioSid,
-        sentByName: sentByName || "Fleet Team",
-        teamLeadCcd: true,
-        responseStatus: "pending",
-      }).returning();
-
-      await addOutreachEntry({ techId, actionType: "text_sent", outcome: "Outbound SMS sent", performedByName: sentByName || "Fleet Team" });
-
-      res.json(msg);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  router.get("/sms/inbound", async (req, res) => {
-    try {
-      const rows = await db.select({
-        msg: vrmSmsMessages,
-        tech: { name: vrmTechs.name, ldap: vrmTechs.ldap },
-      })
-        .from(vrmSmsMessages)
-        .innerJoin(vrmTechs, eq(vrmSmsMessages.techId, vrmTechs.id))
-        .where(eq(vrmSmsMessages.direction, "inbound"))
-        .orderBy(desc(vrmSmsMessages.createdAt))
-        .limit(50);
-
-      const formatted = rows.map((r) => ({ ...r.msg, tech: r.tech }));
-      res.json({ rows: formatted, total: formatted.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  router.patch("/sms/:id/assign", async (req, res) => {
-    try {
-      const { responseStatus } = req.body;
-      const [updated] = await db.update(vrmSmsMessages)
-        .set({ responseStatus })
-        .where(eq(vrmSmsMessages.id, req.params.id))
-        .returning();
-      res.json(updated);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Twilio inbound webhook
-  router.post("/sms/webhook/inbound", async (req, res) => {
-    try {
-      const { From, Body } = req.body;
-      if (!From || !Body) return res.status(400).send("Missing From/Body");
-
-      // Match tech by phone — for now just store with unknown tech if no match
-      res.set("Content-Type", "text/xml").send("<Response/>");
-    } catch (e: any) {
-      console.error("[VRM] Twilio webhook error:", e.message);
-      res.status(500).send("Error");
-    }
-  });
-
   // ─── Exception Cases ─────────────────────────────────────────────────────────
 
   router.get("/exception-cases", async (_req, res) => {
@@ -730,92 +634,6 @@ export function registerVrmRoutes(): Router {
   });
 
   // ─── Reports ─────────────────────────────────────────────────────────────────
-
-  router.get("/reports/weekly-snapshot", async (req, res) => {
-    try {
-      const { from, to } = req.query as { from?: string; to?: string };
-      const fromDate = from ? new Date(from) : new Date(Date.now() - 7 * 86400000);
-      const toDate = to ? new Date(to) : new Date();
-
-      const [
-        byovResult,
-        removedResult,
-        escalationsResult,
-        epvResult,
-        costResult,
-        statusBreakdown,
-      ] = await Promise.all([
-        db.execute(sql`
-          SELECT COUNT(*) AS cnt FROM vrm_outreach_log
-          WHERE action_type = 'byov_enrolled'
-            AND created_at >= ${fromDate.toISOString()}
-            AND created_at <= ${toDate.toISOString()}
-        `),
-        db.execute(sql`
-          SELECT COUNT(*) AS cnt FROM vrm_tech_status_history
-          WHERE new_status NOT IN ('in_rental')
-            AND previous_status = 'in_rental'
-            AND created_at >= ${fromDate.toISOString()}
-            AND created_at <= ${toDate.toISOString()}
-        `),
-        db.execute(sql`SELECT COUNT(*) AS cnt FROM vrm_escalations WHERE status = 'pending_carl'`),
-        db.execute(sql`
-          SELECT COUNT(*) AS cnt FROM vrm_escalations
-          WHERE epv_confirmed = true
-            AND epv_confirmed_at >= ${fromDate.toISOString()}
-            AND epv_confirmed_at <= ${toDate.toISOString()}
-        `),
-        db.execute(sql`
-          SELECT COALESCE(SUM(
-            EXTRACT(EPOCH FROM (NOW() - status_updated_at)) / 86400 * 78
-          ), 0)::INTEGER AS cost_avoided
-          FROM vrm_techs WHERE current_status != 'in_rental'
-        `),
-        db.execute(sql`
-          SELECT current_status AS status, COUNT(*) AS count
-          FROM vrm_techs GROUP BY current_status ORDER BY count DESC
-        `),
-      ]);
-
-      res.json({
-        newByovEnrollments: Number((byovResult.rows[0] as any)?.cnt ?? 0),
-        rentalsRemoved: Number((removedResult.rows[0] as any)?.cnt ?? 0),
-        activeEscalations: Number((escalationsResult.rows[0] as any)?.cnt ?? 0),
-        epvsIssued: Number((epvResult.rows[0] as any)?.cnt ?? 0),
-        monthlyCostAvoided: Number((costResult.rows[0] as any)?.cost_avoided ?? 0),
-        statusBreakdown: statusBreakdown.rows.map((r: any) => ({
-          status: r.status,
-          count: Number(r.count),
-        })),
-      });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  router.get("/reports/rental-request-log", async (req, res) => {
-    try {
-      const rows = await db.select({
-        id: vrmOutreachLog.id,
-        techId: vrmOutreachLog.techId,
-        actionType: vrmOutreachLog.actionType,
-        outcome: vrmOutreachLog.outcome,
-        performedByName: vrmOutreachLog.performedByName,
-        createdAt: vrmOutreachLog.createdAt,
-        techName: vrmTechs.name,
-        ldap: vrmTechs.ldap,
-        market: vrmTechs.market,
-      })
-        .from(vrmOutreachLog)
-        .innerJoin(vrmTechs, eq(vrmOutreachLog.techId, vrmTechs.id))
-        .orderBy(desc(vrmOutreachLog.createdAt))
-        .limit(200);
-
-      res.json({ rows, total: rows.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
 
   router.get("/reports/tech-audit/:techId/pdf", async (req, res) => {
     try {

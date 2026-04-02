@@ -1,12 +1,9 @@
 import {
   LayoutDashboard,
   Users,
-  MessageSquare,
   AlertTriangle,
   ClipboardCheck,
   ShieldAlert,
-  GraduationCap,
-  FileBarChart,
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
@@ -96,10 +93,7 @@ export const navItems: NavItem[] = [
   { label: "Dashboard", path: "/vehicle-rental-management", icon: LayoutDashboard },
   { label: "New Rentals", path: "/vehicle-rental-management/new-rentals", icon: TrendingUp },
   { label: "Active Rentals", path: "/vehicle-rental-management/tech-population", icon: Users },
-  { label: "Outreach", path: "/vehicle-rental-management/outreach", icon: MessageSquare },
   { label: "Escalations", path: "/vehicle-rental-management/escalations", icon: AlertTriangle },
   { label: "DCA Review", path: "/vehicle-rental-management/dca-review", icon: ClipboardCheck },
   { label: "Exception Cases", path: "/vehicle-rental-management/exception-cases", icon: ShieldAlert },
-  { label: "Skill Builder", path: "/vehicle-rental-management/skill-builder", icon: GraduationCap, wip: true },
-  { label: "Reports", path: "/vehicle-rental-management/reports", icon: FileBarChart, wip: true },
 ];

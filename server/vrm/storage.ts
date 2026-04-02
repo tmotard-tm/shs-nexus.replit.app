@@ -8,7 +8,6 @@ import {
   vrmExceptionCases,
   vrmReachabilityLog,
   vrmSmsMessages,
-  vrmSmsTemplates,
   vrmTechNotes,
   vrmShopContactLog,
   vrmRentalDecisions,
@@ -287,12 +286,6 @@ export async function getStatusHistory(techId: string) {
     .from(vrmTechStatusHistory)
     .where(eq(vrmTechStatusHistory.techId, techId))
     .orderBy(desc(vrmTechStatusHistory.createdAt));
-}
-
-// ─── SMS templates ────────────────────────────────────────────────────────────
-
-export async function getSmsTemplates() {
-  return db.select().from(vrmSmsTemplates).orderBy(vrmSmsTemplates.name);
 }
 
 // ─── Notes ────────────────────────────────────────────────────────────────────

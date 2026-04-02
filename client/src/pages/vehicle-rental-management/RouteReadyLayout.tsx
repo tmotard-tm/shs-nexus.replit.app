@@ -5,11 +5,9 @@ import { WipPlaceholder } from "./components/wip-placeholder";
 import { colors, navItems } from "./lib/constants";
 import Dashboard from "./pages/Dashboard";
 import TechPopulation from "./pages/TechPopulation";
-import Outreach from "./pages/Outreach";
 import Escalations from "./pages/Escalations";
 import DCAReview from "./pages/DCAReview";
 import ExceptionCases from "./pages/ExceptionCases";
-import Reports from "./pages/Reports";
 import NewRentals from "./pages/NewRentals";
 
 function getPageTitle(path: string): string {
@@ -32,14 +30,9 @@ export default function RouteReadyLayout() {
             <Route path="/vehicle-rental-management" component={Dashboard} />
             <Route path="/vehicle-rental-management/new-rentals" component={NewRentals} />
             <Route path="/vehicle-rental-management/tech-population" component={TechPopulation} />
-            <Route path="/vehicle-rental-management/outreach" component={Outreach} />
             <Route path="/vehicle-rental-management/escalations" component={Escalations} />
             <Route path="/vehicle-rental-management/dca-review" component={DCAReview} />
             <Route path="/vehicle-rental-management/exception-cases" component={ExceptionCases} />
-            <Route path="/vehicle-rental-management/reports" component={Reports} />
-            <Route path="/vehicle-rental-management/skill-builder">
-              <WipPlaceholder moduleName="Skill Builder" />
-            </Route>
             <Route>
               <WipPlaceholder moduleName="Page Not Found" />
             </Route>

@@ -271,14 +271,6 @@ export const vrmShopContactLog = pgTable("vrm_shop_contact_log", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const vrmSmsTemplates = pgTable("vrm_sms_templates", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: varchar("name", { length: 100 }).notNull(),
-  body: text("body").notNull(),
-  version: integer("version").notNull().default(1),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
 export const vrmTechNotes = pgTable("vrm_tech_notes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   techId: varchar("tech_id").notNull().references(() => vrmTechs.id),
@@ -379,7 +371,6 @@ export type InsertVrmTech = z.infer<typeof insertVrmTechSchema>;
 export type VrmOutreachLog = typeof vrmOutreachLog.$inferSelect;
 export type VrmEscalation = typeof vrmEscalations.$inferSelect;
 export type VrmExceptionCase = typeof vrmExceptionCases.$inferSelect;
-export type VrmSmsTemplate = typeof vrmSmsTemplates.$inferSelect;
 export type VrmTechNote = typeof vrmTechNotes.$inferSelect;
 export type VrmSmsMessage = typeof vrmSmsMessages.$inferSelect;
 export type VrmRentalDecision = typeof vrmRentalDecisions.$inferSelect;

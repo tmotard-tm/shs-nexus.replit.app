@@ -227,16 +227,6 @@ export async function initVrmSchema(): Promise<void> {
   `);
 
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS vrm_sms_templates (
-      id         VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-      name       VARCHAR(100) NOT NULL,
-      body       TEXT NOT NULL,
-      version    INTEGER NOT NULL DEFAULT 1,
-      created_at TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-  `);
-
-  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS vrm_tech_notes (
       id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       tech_id     VARCHAR NOT NULL REFERENCES vrm_techs(id),
@@ -275,31 +265,6 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_exception_cases_tech_idx ON vrm_exception_cases(tech_id);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_escalations_tech_idx ON vrm_escalations(tech_id);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_tech_notes_tech_idx ON vrm_tech_notes(tech_id);`);
-
-  // Seed SMS templates if empty
-  const existing = await db.execute(sql`SELECT COUNT(*) as cnt FROM vrm_sms_templates`);
-  const count = Number((existing.rows[0] as any).cnt);
-  if (count === 0) {
-    await db.execute(sql`
-      INSERT INTO vrm_sms_templates (name, body, version) VALUES
-      (
-        'Option A',
-        'Hi [First Name], this is [Name] from the Transformco fleet team. I''m reaching out because we''ve reviewed rental support across the team and the numbers aren''t where they need to be to justify continuing the rental. We''re removing your rental support and want to offer you BYOV as the path forward — it keeps you on the road and earning. If there are circumstances that make that difficult, reach out to me directly and we''ll review your situation. You can reach me at [number].',
-        1
-      ),
-      (
-        'Option B',
-        'Hi [First Name], this is [Name] from the Transformco fleet team. Following a review of our rental program, we''ve found that the rental isn''t working financially at this time. As a result we''re removing your rental support. BYOV is available to you and keeps you on the road and earning — we can get you set up quickly. If that''s not something you can do right now, contact me directly and we''ll take a look at your options. You can reach me at [number].',
-        1
-      ),
-      (
-        'Option C',
-        'Hi [First Name], this is [Name] from the Transformco fleet team. We''ve completed a review of rental support and the cost of your rental isn''t being sustained by your current earnings. We''re removing the rental and offering you BYOV as the way to stay on the road. If there''s a reason that doesn''t work for you, get in touch directly and we''ll go through it together. You can reach me at [number].',
-        1
-      );
-    `);
-    console.log("[VRM] Seeded 3 SMS templates");
-  }
 
   console.log("[VRM] Schema initialised");
 }
