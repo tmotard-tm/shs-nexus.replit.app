@@ -2530,8 +2530,8 @@ export default function FleetManagement() {
                           setAmsEditTruckStatus(matchLookup(truckStatusLookup, amsVehicle?.TruckStatus));
                           const tv = amsVehicle?.TheftVerified;
                           setAmsEditTheftVerified(tv === true || tv === "Y" ? "Y" : tv === false || tv === "N" ? "N" : "");
-                          setAmsEditKeyAddress(amsVehicle?.KeyAddress || amsVehicle?.keyAddress || "");
-                          setAmsEditKeyZip(amsVehicle?.KeyZip || amsVehicle?.keyZip || "");
+                          setAmsEditKeyAddress(amsVehicle?.KeyLocAddress || amsVehicle?.KeyAddress || amsVehicle?.keyAddress || "");
+                          setAmsEditKeyZip(amsVehicle?.KeyLocZip || amsVehicle?.KeyZip || amsVehicle?.keyZip || "");
                           setAmsEditStorageCost(amsVehicle?.StorageCost != null ? String(amsVehicle.StorageCost) : "");
                           setAmsEditVehicleRuns(matchLookup(vehicleRunsLookup, amsVehicle?.VehicleRuns));
                           setAmsEditVehicleLooks(matchLookup(vehicleLooksLookup, amsVehicle?.VehicleLooks));
