@@ -497,8 +497,7 @@ export default function FleetManagement() {
   function dtcBadgeClass(score: number): string {
     if (score >= 5) return 'bg-red-600 text-white';
     if (score >= 3) return 'bg-orange-500 text-white';
-    if (score >= 2) return 'bg-yellow-400 text-black';
-    return 'bg-blue-500 text-white';
+    return 'bg-yellow-400 text-black';
   }
 
   // POs for selected vehicle
