@@ -174,13 +174,21 @@ function MismatchAssignmentSection({ vehicle }: { vehicle: FleetVehicle }) {
           techId={vehicle.holmanTechAssigned?.trim() || ""}
           techName={vehicle.holmanTechName?.trim() || ""}
         />
-        <SystemCol
-          icon={<Link2 className="h-3 w-3 text-purple-500" />}
-          label="TPMS"
-          labelColor="text-purple-600 dark:text-purple-400"
-          techId={vehicle.tpmsAssignedTechId?.trim() || ""}
-          techName={vehicle.tpmsAssignedTechName?.trim() || ""}
-        />
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-1 flex-wrap">
+            <Link2 className="h-3 w-3 text-purple-500 shrink-0" />
+            <span className="text-xs font-medium text-purple-600 dark:text-purple-400">TPMS</span>
+            <span className="text-[10px] font-semibold bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded px-1 leading-tight">authoritative</span>
+          </div>
+          {vehicle.tpmsAssignedTechId?.trim() ? (
+            <>
+              <p className="text-xs font-medium leading-tight">{vehicle.tpmsAssignedTechName?.trim() || vehicle.tpmsAssignedTechId}</p>
+              <p className="text-xs text-muted-foreground font-mono leading-tight">{vehicle.tpmsAssignedTechId}</p>
+            </>
+          ) : (
+            <p className="text-xs text-orange-500 flex items-center gap-0.5"><XCircle className="h-3 w-3" />Unassigned</p>
+          )}
+        </div>
         <SystemCol
           icon={<Database className="h-3 w-3 text-emerald-500" />}
           label="AMS"
