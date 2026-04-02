@@ -673,6 +673,12 @@ export default function Dashboard() {
     staleTime: 30 * 60 * 1000,
   });
 
+  // Fetch HR tech status (L/P/S) for tech leave/suspension badges
+  const { data: hrTechStatusMap } = useQuery<Record<string, string>>({
+    queryKey: ["/api/hr/tech-status"],
+    staleTime: 30 * 60 * 1000,
+  });
+
   // Build uppercased enterprise ID set from offboarding roster for O(1) lookup
   const offboardingEidSet = useMemo(() => {
     return new Set<string>((woNameSet?.enterpriseIds ?? []).map(id => id.toUpperCase()));
@@ -702,6 +708,23 @@ export default function Dashboard() {
     }
     return set;
   }, [rentalOpenData, offboardingEidSet]);
+
+  // Build map of normalized truck number → HR status (L/P/S) for trucks whose tech is on leave/suspended
+  const hrStatusVehicleMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!hrTechStatusMap) return map;
+    for (const r of rentalOpenData?.data ?? []) {
+      if (r.enterpriseId) {
+        const status = hrTechStatusMap[r.enterpriseId.toUpperCase()];
+        if (status) {
+          const raw = (r.vehicleNumber || r.vehicleNumberPadded || "").toString();
+          const normalized = raw.replace(/^0+/, "") || "0";
+          if (normalized !== "0") map.set(normalized, status);
+        }
+      }
+    }
+    return map;
+  }, [rentalOpenData, hrTechStatusMap]);
 
   // Build last-name → first-names lookup from offboarding data
   const offboardingLastMap = useMemo(() => {
@@ -1011,10 +1034,13 @@ export default function Dashboard() {
     // Multi-column sorting - both sorts can be active simultaneously
     // Primary sort is Date In Repair, secondary sort is Reg. Expiry (or vice versa if only one is active)
     return filtered.sort((a, b) => {
-      // Always float terminated-tech trucks to the top — union of offboardingFlagged (DB field)
-      // and terminatedVehicleSet (rental-ops cross-reference, drives the T badge)
-      const aTerminated = a.offboardingFlagged || terminatedVehicleSet.has(a.truckNumber?.replace(/^0+/, '') || '0');
-      const bTerminated = b.offboardingFlagged || terminatedVehicleSet.has(b.truckNumber?.replace(/^0+/, '') || '0');
+      // Always float terminated-tech trucks to the top — union of offboardingFlagged (DB field),
+      // terminatedVehicleSet (rental-ops cross-reference, drives the T badge),
+      // and hrStatusVehicleMap (L/P/S HR status badges)
+      const aNorm = a.truckNumber?.replace(/^0+/, '') || '0';
+      const bNorm = b.truckNumber?.replace(/^0+/, '') || '0';
+      const aTerminated = a.offboardingFlagged || terminatedVehicleSet.has(aNorm) || hrStatusVehicleMap.has(aNorm);
+      const bTerminated = b.offboardingFlagged || terminatedVehicleSet.has(bNorm) || hrStatusVehicleMap.has(bNorm);
       if (aTerminated !== bTerminated) {
         return aTerminated ? -1 : 1;
       }
@@ -1070,7 +1096,7 @@ export default function Dashboard() {
       
       return 0;
     });
-  }, [trucks, debouncedSearch, mainStatusFilter, subStatusFilter, issueFilter, truckNumberFilter, columnStatusFilter, callStatusFilter, ownerFilter, regStickerFilter, completedFilter, amsFilter, regExpiryFilter, assignedFilter, upsStatusFilter, pickSlotFilter, gaveHolmanFilter, holmanStatusFilter, scraperStatusMap, spareVanFilter, regTestSlotFilter, stateFilter, regionFilter, byovFilter, byovEnrollmentMap, regExpirySortOrder, dateRepairSortOrder, billPaidSortOrder, terminatedVehicleSet]);
+  }, [trucks, debouncedSearch, mainStatusFilter, subStatusFilter, issueFilter, truckNumberFilter, columnStatusFilter, callStatusFilter, ownerFilter, regStickerFilter, completedFilter, amsFilter, regExpiryFilter, assignedFilter, upsStatusFilter, pickSlotFilter, gaveHolmanFilter, holmanStatusFilter, scraperStatusMap, spareVanFilter, regTestSlotFilter, stateFilter, regionFilter, byovFilter, byovEnrollmentMap, regExpirySortOrder, dateRepairSortOrder, billPaidSortOrder, terminatedVehicleSet, hrStatusVehicleMap]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredTrucks.length / TRUCKS_PER_PAGE);
@@ -3030,6 +3056,26 @@ export default function Dashboard() {
                                           T
                                         </span>
                                       )}
+                                      {(() => {
+                                        const norm = truck.truckNumber.replace(/^0+/, '') || '0';
+                                        const hrStatus = hrStatusVehicleMap.get(norm);
+                                        if (!hrStatus) return null;
+                                        return (
+                                          <span
+                                            className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold leading-none ${
+                                              hrStatus === 'L'
+                                                ? 'bg-amber-100 dark:bg-amber-900/40 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300'
+                                                : hrStatus === 'P'
+                                                  ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                                                  : 'bg-orange-100 dark:bg-orange-900/40 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300'
+                                            }`}
+                                            title={hrStatus === 'L' ? 'Tech is on Leave' : hrStatus === 'P' ? 'Tech is on Paid Leave' : 'Tech is Suspended'}
+                                            data-testid={`badge-hr-status-vehicle-${index}`}
+                                          >
+                                            {hrStatus}
+                                          </span>
+                                        );
+                                      })()}
                                     </span>
                                     {truck.techState && (
                                       <span className="text-[10px] text-muted-foreground font-medium flex items-center gap-1" data-testid={`text-tech-state-${index}`}>
