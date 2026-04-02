@@ -816,20 +816,6 @@ export default function WeeklyOffboarding() {
                     ) : (
                       <div className="space-y-3">
                         <div>
-                          <Label className="text-xs text-muted-foreground">Where are the tools &amp; parts being left?</Label>
-                          <Select value={nexusToolsLocation} onValueChange={setNexusToolsLocation}>
-                            <SelectTrigger className="mt-1" data-testid="select-tools-parts-location">
-                              <SelectValue placeholder="Select location..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">-- None --</SelectItem>
-                              <SelectItem value="in_the_truck">In the truck</SelectItem>
-                              <SelectItem value="techs_home">Tech's home</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div>
                           <Label className="text-xs text-muted-foreground">Post-Offboarded Status</Label>
                           <Select value={nexusStatus} onValueChange={setNexusStatus}>
                             <SelectTrigger className="mt-1" data-testid="select-nexus-status">
@@ -918,6 +904,20 @@ export default function WeeklyOffboarding() {
                             data-testid="textarea-nexus-comments"
                           />
                           <p className="text-xs text-muted-foreground text-right mt-1">{nexusComments.length}/400</p>
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Where are the tools &amp; parts being left?</Label>
+                          <Select value={nexusToolsLocation} onValueChange={setNexusToolsLocation}>
+                            <SelectTrigger className="mt-1" data-testid="select-tools-parts-location">
+                              <SelectValue placeholder="Select location..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">-- None --</SelectItem>
+                              <SelectItem value="in_the_truck">In the truck</SelectItem>
+                              <SelectItem value="techs_home">Tech's home</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
 
                         <div>
