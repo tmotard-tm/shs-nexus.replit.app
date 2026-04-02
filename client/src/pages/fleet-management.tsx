@@ -407,10 +407,13 @@ export default function FleetManagement() {
   const [unassignNotes, setUnassignNotes] = useState("");
 
   // PO History filter state
+  const [poFiltersExpanded, setPoFiltersExpanded] = useState(false);
   const [poFilterDateFrom, setPoFilterDateFrom] = useState("");
   const [poFilterDateTo, setPoFilterDateTo] = useState("");
   const [poFilterPoNumber, setPoFilterPoNumber] = useState("");
   const [poFilterVendor, setPoFilterVendor] = useState("");
+  const [poFilterPoType, setPoFilterPoType] = useState("");
+  const [poFilterAtaCode, setPoFilterAtaCode] = useState("");
   const [poFilterStatus, setPoFilterStatus] = useState<string[]>([]);
   const [poFilterStatusOpen, setPoFilterStatusOpen] = useState(false);
   const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set());
@@ -2812,100 +2815,121 @@ export default function FleetManagement() {
             </DialogDescription>
           </DialogHeader>
 
-          {/* Filter bar */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-1">
-            <div>
-              <Label className="text-xs text-muted-foreground">Date From</Label>
-              <Input
-                type="date"
-                className="mt-1 h-8 text-xs"
-                value={poFilterDateFrom}
-                onChange={e => setPoFilterDateFrom(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Date To</Label>
-              <Input
-                type="date"
-                className="mt-1 h-8 text-xs"
-                value={poFilterDateTo}
-                onChange={e => setPoFilterDateTo(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">PO #</Label>
-              <Input
-                className="mt-1 h-8 text-xs"
-                placeholder="Search PO number..."
-                value={poFilterPoNumber}
-                onChange={e => setPoFilterPoNumber(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Vendor</Label>
-              <Input
-                className="mt-1 h-8 text-xs"
-                placeholder="Search vendor..."
-                value={poFilterVendor}
-                onChange={e => setPoFilterVendor(e.target.value)}
-              />
-            </div>
-            <div className="relative">
-              <Label className="text-xs text-muted-foreground">Status</Label>
-              <button
-                type="button"
-                className="mt-1 h-8 w-full text-xs rounded-md border border-input bg-background px-2 text-left flex items-center justify-between gap-1 truncate"
-                onClick={() => setPoFilterStatusOpen(o => !o)}
-              >
-                <span className="truncate">
-                  {poFilterStatus.length === 0
-                    ? "All statuses"
-                    : poFilterStatus.map(s => s.split(" ").map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(" ")).join(", ")}
-                </span>
-                <span className="text-muted-foreground shrink-0">▾</span>
-              </button>
-              {poFilterStatusOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setPoFilterStatusOpen(false)} />
-                  <div className="absolute z-50 mt-1 w-full rounded-md border border-input bg-background shadow-md">
-                  {[
-                    { value: "APPROVED", label: "Approved" },
-                    { value: "OPEN", label: "Open" },
-                    { value: "HOLD", label: "Hold" },
-                    { value: "BILL HOLD", label: "Bill Hold" },
-                    { value: "PAID", label: "Paid" },
-                    { value: "VOID", label: "Void" },
-                    { value: "SUSPENDED", label: "Suspended" },
-                  ].map(opt => (
-                    <label key={opt.value} className="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-muted">
-                      <input
-                        type="checkbox"
-                        className="h-3 w-3 accent-primary"
-                        checked={poFilterStatus.includes(opt.value)}
-                        onChange={() => {
-                          setPoFilterStatus(prev =>
-                            prev.includes(opt.value) ? prev.filter(s => s !== opt.value) : [...prev, opt.value]
-                          );
-                        }}
-                      />
-                      {opt.label}
-                    </label>
-                  ))}
+          {/* Filter bar — compact collapsible */}
+          {(() => {
+            const activeCount = [poFilterPoNumber, poFilterVendor, poFilterPoType, poFilterAtaCode, poFilterDateFrom, poFilterDateTo].filter(Boolean).length + poFilterStatus.length;
+            const clearAll = () => { setPoFilterPoNumber(""); setPoFilterVendor(""); setPoFilterPoType(""); setPoFilterAtaCode(""); setPoFilterDateFrom(""); setPoFilterDateTo(""); setPoFilterStatus([]); setPoFilterStatusOpen(false); };
+            return (
+              <>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPoFiltersExpanded(o => !o)}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Filter className="h-3 w-3" />
+                    Filters
+                    {activeCount > 0 && (
+                      <span className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">{activeCount}</span>
+                    )}
+                    {poFiltersExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  </button>
+                  {activeCount > 0 && (
+                    <button type="button" onClick={clearAll} className="text-xs text-muted-foreground hover:text-foreground underline">
+                      Clear all
+                    </button>
+                  )}
+                </div>
+
+                {poFiltersExpanded && (
+                  <div className="flex flex-wrap gap-1.5 p-2 rounded-md border bg-muted/30">
+                    <Input
+                      className="h-7 text-xs w-28"
+                      placeholder="PO #"
+                      value={poFilterPoNumber}
+                      onChange={e => setPoFilterPoNumber(e.target.value)}
+                    />
+                    <Input
+                      className="h-7 text-xs w-36"
+                      placeholder="Vendor"
+                      value={poFilterVendor}
+                      onChange={e => setPoFilterVendor(e.target.value)}
+                    />
+                    <Input
+                      className="h-7 text-xs w-24"
+                      placeholder="ATA Code"
+                      value={poFilterAtaCode}
+                      onChange={e => setPoFilterAtaCode(e.target.value)}
+                    />
+                    <select
+                      className="h-7 text-xs rounded-md border border-input bg-background px-2 w-36"
+                      value={poFilterPoType}
+                      onChange={e => setPoFilterPoType(e.target.value)}
+                    >
+                      <option value="">All types</option>
+                      <option value="rental">Rental</option>
+                      <option value="maintenance">Maintenance</option>
+                      <option value="other">Other</option>
+                    </select>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className="h-7 text-xs rounded-md border border-input bg-background px-2 flex items-center gap-1 w-36"
+                        onClick={() => setPoFilterStatusOpen(o => !o)}
+                      >
+                        <span className="truncate flex-1 text-left">
+                          {poFilterStatus.length === 0 ? "All statuses" : `${poFilterStatus.length} status${poFilterStatus.length > 1 ? "es" : ""}`}
+                        </span>
+                        <span className="text-muted-foreground shrink-0">▾</span>
+                      </button>
+                      {poFilterStatusOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setPoFilterStatusOpen(false)} />
+                          <div className="absolute z-50 mt-1 min-w-[140px] rounded-md border border-input bg-background shadow-md">
+                            {[
+                              { value: "APPROVED", label: "Approved" },
+                              { value: "OPEN", label: "Open" },
+                              { value: "HOLD", label: "Hold" },
+                              { value: "BILL HOLD", label: "Bill Hold" },
+                              { value: "PAID", label: "Paid" },
+                              { value: "VOID", label: "Void" },
+                              { value: "SUSPENDED", label: "Suspended" },
+                            ].map(opt => (
+                              <label key={opt.value} className="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-muted">
+                                <input
+                                  type="checkbox"
+                                  className="h-3 w-3 accent-primary"
+                                  checked={poFilterStatus.includes(opt.value)}
+                                  onChange={() => setPoFilterStatus(prev =>
+                                    prev.includes(opt.value) ? prev.filter(s => s !== opt.value) : [...prev, opt.value]
+                                  )}
+                                />
+                                {opt.label}
+                              </label>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <Input
+                      type="date"
+                      className="h-7 text-xs w-34"
+                      placeholder="From"
+                      value={poFilterDateFrom}
+                      onChange={e => setPoFilterDateFrom(e.target.value)}
+                    />
+                    <Input
+                      type="date"
+                      className="h-7 text-xs w-34"
+                      placeholder="To"
+                      value={poFilterDateTo}
+                      onChange={e => setPoFilterDateTo(e.target.value)}
+                    />
                   </div>
-                </>
-              )}
-            </div>
-          </div>
-          {(poFilterDateFrom || poFilterDateTo || poFilterPoNumber || poFilterVendor || poFilterStatus.length > 0) && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="self-start text-xs h-7 text-muted-foreground"
-              onClick={() => { setPoFilterDateFrom(""); setPoFilterDateTo(""); setPoFilterPoNumber(""); setPoFilterVendor(""); setPoFilterStatus([]); setPoFilterStatusOpen(false); }}
-            >
-              Clear all filters
-            </Button>
-          )}
+                )}
+              </>
+            );
+          })()}
 
           {/* Table */}
           <div className="flex-1 overflow-auto min-h-0">
@@ -2929,9 +2953,15 @@ export default function FleetManagement() {
               }
 
               // Apply filters at the PO group level
-              const filteredGroups = Array.from(groupMap.values()).filter(({ summary }) => {
+              const filteredGroups = Array.from(groupMap.values()).filter(({ summary, lines }) => {
                 if (poFilterPoNumber && !String(summary.poNumber || "").toLowerCase().includes(poFilterPoNumber.toLowerCase())) return false;
                 if (poFilterVendor && !String(summary.vendor || summary.vendorName || "").toLowerCase().includes(poFilterVendor.toLowerCase())) return false;
+                if (poFilterPoType && String(summary.poType || "").toLowerCase() !== poFilterPoType.toLowerCase()) return false;
+                if (poFilterAtaCode) {
+                  const ataSearch = poFilterAtaCode.toLowerCase();
+                  const anyMatch = lines.some(l => String(l.rawData?.ataCode || l.ataCode || "").toLowerCase().includes(ataSearch));
+                  if (!anyMatch) return false;
+                }
                 if (poFilterStatus.length > 0) {
                   const s = String(summary.poStatus || "").toUpperCase();
                   if (!poFilterStatus.some(sel => s === sel.toUpperCase())) return false;
