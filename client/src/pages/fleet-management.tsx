@@ -411,7 +411,8 @@ export default function FleetManagement() {
   const [poFilterDateTo, setPoFilterDateTo] = useState("");
   const [poFilterPoNumber, setPoFilterPoNumber] = useState("");
   const [poFilterVendor, setPoFilterVendor] = useState("");
-  const [poFilterStatus, setPoFilterStatus] = useState("");
+  const [poFilterStatus, setPoFilterStatus] = useState<string[]>([]);
+  const [poFilterStatusOpen, setPoFilterStatusOpen] = useState(false);
   const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set());
 
   // Address form
@@ -2849,27 +2850,55 @@ export default function FleetManagement() {
                 onChange={e => setPoFilterVendor(e.target.value)}
               />
             </div>
-            <div>
+            <div className="relative">
               <Label className="text-xs text-muted-foreground">Status</Label>
-              <select
-                className="mt-1 h-8 w-full text-xs rounded-md border border-input bg-background px-2"
-                value={poFilterStatus}
-                onChange={e => setPoFilterStatus(e.target.value)}
+              <button
+                type="button"
+                className="mt-1 h-8 w-full text-xs rounded-md border border-input bg-background px-2 text-left flex items-center justify-between gap-1 truncate"
+                onClick={() => setPoFilterStatusOpen(o => !o)}
               >
-                <option value="">All statuses</option>
-                <option value="OPEN">Open (Approved / Hold)</option>
-                <option value="BILL HOLD">Bill Hold</option>
-                <option value="CLOSED">Closed</option>
-                <option value="PAID">Paid</option>
-              </select>
+                <span className="truncate">
+                  {poFilterStatus.length === 0
+                    ? "All statuses"
+                    : poFilterStatus.map(s => s === "OPEN" ? "Open" : s === "BILL HOLD" ? "Bill Hold" : s.charAt(0) + s.slice(1).toLowerCase()).join(", ")}
+                </span>
+                <span className="text-muted-foreground shrink-0">▾</span>
+              </button>
+              {poFilterStatusOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setPoFilterStatusOpen(false)} />
+                  <div className="absolute z-50 mt-1 w-full rounded-md border border-input bg-background shadow-md">
+                  {[
+                    { value: "OPEN", label: "Open (Approved / Hold)" },
+                    { value: "BILL HOLD", label: "Bill Hold" },
+                    { value: "CLOSED", label: "Closed" },
+                    { value: "PAID", label: "Paid" },
+                  ].map(opt => (
+                    <label key={opt.value} className="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-muted">
+                      <input
+                        type="checkbox"
+                        className="h-3 w-3 accent-primary"
+                        checked={poFilterStatus.includes(opt.value)}
+                        onChange={() => {
+                          setPoFilterStatus(prev =>
+                            prev.includes(opt.value) ? prev.filter(s => s !== opt.value) : [...prev, opt.value]
+                          );
+                        }}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
-          {(poFilterDateFrom || poFilterDateTo || poFilterPoNumber || poFilterVendor || poFilterStatus) && (
+          {(poFilterDateFrom || poFilterDateTo || poFilterPoNumber || poFilterVendor || poFilterStatus.length > 0) && (
             <Button
               size="sm"
               variant="ghost"
               className="self-start text-xs h-7 text-muted-foreground"
-              onClick={() => { setPoFilterDateFrom(""); setPoFilterDateTo(""); setPoFilterPoNumber(""); setPoFilterVendor(""); setPoFilterStatus(""); }}
+              onClick={() => { setPoFilterDateFrom(""); setPoFilterDateTo(""); setPoFilterPoNumber(""); setPoFilterVendor(""); setPoFilterStatus([]); setPoFilterStatusOpen(false); }}
             >
               Clear all filters
             </Button>
@@ -2900,11 +2929,13 @@ export default function FleetManagement() {
               const filteredGroups = Array.from(groupMap.values()).filter(({ summary }) => {
                 if (poFilterPoNumber && !String(summary.poNumber || "").toLowerCase().includes(poFilterPoNumber.toLowerCase())) return false;
                 if (poFilterVendor && !String(summary.vendor || summary.vendorName || "").toLowerCase().includes(poFilterVendor.toLowerCase())) return false;
-                if (poFilterStatus) {
+                if (poFilterStatus.length > 0) {
                   const s = String(summary.poStatus || "").toUpperCase();
-                  if (poFilterStatus === "OPEN") {
-                    if (s !== "APPROVED" && s !== "HOLD") return false;
-                  } else if (s !== poFilterStatus.toUpperCase()) return false;
+                  const matches = poFilterStatus.some(sel => {
+                    if (sel === "OPEN") return s === "APPROVED" || s === "HOLD";
+                    return s === sel.toUpperCase();
+                  });
+                  if (!matches) return false;
                 }
                 const poDate = summary.poDate || summary.openDate || summary.date || "";
                 if (poFilterDateFrom && poDate && poDate < poFilterDateFrom) return false;
