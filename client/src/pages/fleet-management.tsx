@@ -2860,7 +2860,7 @@ export default function FleetManagement() {
                 <span className="truncate">
                   {poFilterStatus.length === 0
                     ? "All statuses"
-                    : poFilterStatus.map(s => s === "OPEN" ? "Open" : s === "BILL HOLD" ? "Bill Hold" : s.charAt(0) + s.slice(1).toLowerCase()).join(", ")}
+                    : poFilterStatus.map(s => s.split(" ").map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(" ")).join(", ")}
                 </span>
                 <span className="text-muted-foreground shrink-0">▾</span>
               </button>
@@ -2869,9 +2869,10 @@ export default function FleetManagement() {
                   <div className="fixed inset-0 z-40" onClick={() => setPoFilterStatusOpen(false)} />
                   <div className="absolute z-50 mt-1 w-full rounded-md border border-input bg-background shadow-md">
                   {[
-                    { value: "OPEN", label: "Open (Approved / Hold)" },
+                    { value: "APPROVED", label: "Approved" },
+                    { value: "OPEN", label: "Open" },
+                    { value: "HOLD", label: "Hold" },
                     { value: "BILL HOLD", label: "Bill Hold" },
-                    { value: "CLOSED", label: "Closed" },
                     { value: "PAID", label: "Paid" },
                   ].map(opt => (
                     <label key={opt.value} className="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-muted">
@@ -2931,11 +2932,7 @@ export default function FleetManagement() {
                 if (poFilterVendor && !String(summary.vendor || summary.vendorName || "").toLowerCase().includes(poFilterVendor.toLowerCase())) return false;
                 if (poFilterStatus.length > 0) {
                   const s = String(summary.poStatus || "").toUpperCase();
-                  const matches = poFilterStatus.some(sel => {
-                    if (sel === "OPEN") return s === "APPROVED" || s === "HOLD";
-                    return s === sel.toUpperCase();
-                  });
-                  if (!matches) return false;
+                  if (!poFilterStatus.some(sel => s === sel.toUpperCase())) return false;
                 }
                 const poDate = summary.poDate || summary.openDate || summary.date || "";
                 if (poFilterDateFrom && poDate && poDate < poFilterDateFrom) return false;
