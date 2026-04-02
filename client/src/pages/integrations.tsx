@@ -368,6 +368,36 @@ export default function Integrations() {
     },
   });
 
+  const tpmsRefreshMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/tpms/refresh-mismatches");
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/tpms/cache/stats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+      if (data.success) {
+        toast({
+          title: "TPMS Mismatch Refresh Complete",
+          description: `Snowflake: ${data.snowflakeResolved} resolved · Delta: ${data.deltaResolved} resolved · API: ${data.apiResolved} resolved · Still mismatched: ${data.stillMismatched}`,
+        });
+      } else {
+        toast({
+          title: "TPMS Refresh Failed",
+          description: data.errors?.join(', ') || "Refresh did not complete successfully",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "TPMS Refresh Failed",
+        description: error.message || "Failed to run mismatch refresh",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.endpoint) {
@@ -464,67 +494,18 @@ export default function Integrations() {
                     Access fleet management systems, data warehouses, and third-party integrations
                   </CardDescription>
                 </div>
-                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button data-testid="button-add-api">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add API
-                    </Button>
-                  </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle data-testid="text-add-api-title">Add API Configuration</DialogTitle>
-                    <DialogDescription>
-                      Configure a new external API connection
-                    </DialogDescription>
-                  </DialogHeader>
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="name">Name *</Label>
-                      <Input
-                        id="name"
-                        value={formData.name}
-                        onChange={(e) => handleInputChange("name", e.target.value)}
-                        placeholder="e.g., Salesforce API"
-                        data-testid="input-api-name"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="endpoint">Endpoint *</Label>
-                      <Input
-                        id="endpoint"
-                        value={formData.endpoint}
-                        onChange={(e) => handleInputChange("endpoint", e.target.value)}
-                        placeholder="https://api.example.com"
-                        data-testid="input-api-endpoint"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="apiKey">API Key</Label>
-                      <Input
-                        id="apiKey"
-                        type="password"
-                        value={formData.apiKey}
-                        onChange={(e) => handleInputChange("apiKey", e.target.value)}
-                        placeholder="Enter API key"
-                        data-testid="input-api-key"
-                      />
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="isActive"
-                        checked={formData.isActive}
-                        onCheckedChange={(value) => handleInputChange("isActive", value)}
-                        data-testid="switch-is-active"
-                      />
-                      <Label htmlFor="isActive">Active</Label>
-                    </div>
-                    <Button type="submit" className="w-full" data-testid="button-submit-api">
-                      Add Configuration
-                    </Button>
-                  </form>
-                </DialogContent>
-              </Dialog>
+                <Button
+                  onClick={() => tpmsRefreshMutation.mutate()}
+                  disabled={tpmsRefreshMutation.isPending}
+                  data-testid="button-tpms-refresh-mismatches"
+                >
+                  {tpmsRefreshMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                  )}
+                  {tpmsRefreshMutation.isPending ? "Refreshing…" : "Refresh TPMS Mismatches"}
+                </Button>
               </div>
               
               {/* Inline Stats */}
