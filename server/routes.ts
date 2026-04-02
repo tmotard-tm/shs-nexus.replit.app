@@ -13056,6 +13056,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Warm the AMS truck-status cache in the background at startup so the
+  // first real request is served instantly from cache.
+  setImmediate(() => {
+    if (!amsTruckStatusCache) {
+      buildAmsTruckStatusMap()
+        .then(data => {
+          amsTruckStatusCache = { data, builtAt: Date.now() };
+          console.log(`[AMS TruckStatusMap] Cache warmed at startup (${Object.keys(data).length} vehicles)`);
+        })
+        .catch(err => {
+          console.warn('[AMS TruckStatusMap] Startup warm-up failed (will retry on first request):', err.message);
+        });
+    }
+  });
+
   app.get("/api/ams/test", requireAuth, async (req: any, res) => {
     try {
       const result = await amsApiService.testConnection();
