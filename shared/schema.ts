@@ -646,6 +646,7 @@ export const vehicleNexusData = pgTable("vehicle_nexus_data", {
   comments: text("comments"), // Up to 400 characters
   phoneRecoveryInitiated: text("phone_recovery_initiated"), // yes or no
   toolsPartsLocation: text("tools_parts_location"), // in_the_truck or techs_home
+  partsRecoveryInitiated: text("parts_recovery_initiated"), // yes or no
   updatedBy: text("updated_by"), // User who last updated
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

@@ -53,6 +53,7 @@ export default function WeeklyOffboarding() {
   const [nexusComments, setNexusComments] = useState("");
   const [nexusPhoneRecovery, setNexusPhoneRecovery] = useState("");
   const [nexusToolsLocation, setNexusToolsLocation] = useState("");
+  const [nexusPartsRecovery, setNexusPartsRecovery] = useState("");
   const [manualTruck, setManualTruck] = useState("");
 
   const { data: manualTruckOverrides = {} } = useQuery<Record<string, string>>({
@@ -221,6 +222,7 @@ export default function WeeklyOffboarding() {
       setNexusComments(nexusData.comments || "");
       setNexusPhoneRecovery(nexusData.phoneRecoveryInitiated || "");
       setNexusToolsLocation(nexusData.toolsPartsLocation || "");
+      setNexusPartsRecovery(nexusData.partsRecoveryInitiated || "");
     } else {
       setNexusStatus("");
       setNexusLocation("");
@@ -230,6 +232,7 @@ export default function WeeklyOffboarding() {
       setNexusComments("");
       setNexusPhoneRecovery("");
       setNexusToolsLocation("");
+      setNexusPartsRecovery("");
     }
   }, [nexusData, selectedEntry]);
 
@@ -254,6 +257,7 @@ export default function WeeklyOffboarding() {
       comments: string | null;
       phoneRecoveryInitiated: string | null;
       toolsPartsLocation: string | null;
+      partsRecoveryInitiated: string | null;
     }) => {
       return await apiRequest('PUT', `/api/vehicle-nexus-data/${data.vehicleNumber}`, data);
     },
@@ -934,6 +938,20 @@ export default function WeeklyOffboarding() {
                         </div>
 
                         <div>
+                          <Label className="text-xs text-muted-foreground">Parts recovery initiated</Label>
+                          <Select value={nexusPartsRecovery} onValueChange={setNexusPartsRecovery}>
+                            <SelectTrigger className="mt-1" data-testid="select-parts-recovery">
+                              <SelectValue placeholder="Select..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">-- None --</SelectItem>
+                              <SelectItem value="yes">Yes</SelectItem>
+                              <SelectItem value="no">No</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
                           <Label className="text-xs text-muted-foreground">Phone Recovery Initiated</Label>
                           <Select value={nexusPhoneRecovery} onValueChange={setNexusPhoneRecovery}>
                             <SelectTrigger className="mt-1" data-testid="select-phone-recovery">
@@ -958,6 +976,7 @@ export default function WeeklyOffboarding() {
                             comments: nexusComments || null,
                             phoneRecoveryInitiated: nexusPhoneRecovery === '__none__' ? null : (nexusPhoneRecovery || null),
                             toolsPartsLocation: nexusToolsLocation === '__none__' ? null : (nexusToolsLocation || null),
+                            partsRecoveryInitiated: nexusPartsRecovery === '__none__' ? null : (nexusPartsRecovery || null),
                           })}
                           disabled={saveNexusDataMutation.isPending}
                           className="w-full"
