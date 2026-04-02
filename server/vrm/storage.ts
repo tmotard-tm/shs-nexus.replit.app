@@ -11,10 +11,12 @@ import {
   vrmTechNotes,
   vrmShopContactLog,
   vrmRentalDecisions,
+  vrmRentalDecisionActions,
   vrmRentalChecks,
   type VrmTech,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
+  type InsertVrmRentalDecisionAction,
   type InsertVrmRentalCheck,
 } from "../../shared/vrm-schema";
 
@@ -201,28 +203,7 @@ export async function upsertTech(data: InsertVrmTech): Promise<VrmTech> {
 }
 
 export async function getTechDetail(id: string) {
-  const tech = await getTechById(id);
-  if (!tech) return null;
-
-  const [latestOutbound] = await db
-    .select()
-    .from(vrmSmsMessages)
-    .where(and(eq(vrmSmsMessages.techId, id), eq(vrmSmsMessages.direction, "outbound")))
-    .orderBy(desc(vrmSmsMessages.createdAt))
-    .limit(1);
-
-  const [latestInbound] = await db
-    .select()
-    .from(vrmSmsMessages)
-    .where(and(eq(vrmSmsMessages.techId, id), eq(vrmSmsMessages.direction, "inbound")))
-    .orderBy(desc(vrmSmsMessages.createdAt))
-    .limit(1);
-
-  return {
-    ...tech,
-    smsSentAt: latestOutbound?.createdAt ?? null,
-    smsResponse: latestInbound?.responseStatus ?? null,
-  };
+  return getTechById(id);
 }
 
 export async function updateTechStatus(
@@ -448,6 +429,43 @@ export async function listRentalDecisions(limit = 50) {
     .from(vrmRentalDecisions)
     .orderBy(desc(vrmRentalDecisions.createdAt))
     .limit(limit);
+}
+
+export async function getRentalDecision(id: string) {
+  const [row] = await db
+    .select()
+    .from(vrmRentalDecisions)
+    .where(eq(vrmRentalDecisions.id, id))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function updateRentalDecision(
+  id: string,
+  data: Partial<Pick<
+    typeof vrmRentalDecisions.$inferSelect,
+    "smsSentAt" | "smsResponseStatus" | "byovEnrolled" | "returnedRental" | "rentalReturnDate"
+  >>,
+) {
+  const [row] = await db
+    .update(vrmRentalDecisions)
+    .set(data)
+    .where(eq(vrmRentalDecisions.id, id))
+    .returning();
+  return row;
+}
+
+export async function addRentalDecisionAction(data: InsertVrmRentalDecisionAction) {
+  const [row] = await db.insert(vrmRentalDecisionActions).values(data).returning();
+  return row;
+}
+
+export async function listRentalDecisionActions(decisionId: string) {
+  return db
+    .select()
+    .from(vrmRentalDecisionActions)
+    .where(eq(vrmRentalDecisionActions.decisionId, decisionId))
+    .orderBy(vrmRentalDecisionActions.createdAt);
 }
 
 export async function addRentalChecks(rows: InsertVrmRentalCheck[]) {

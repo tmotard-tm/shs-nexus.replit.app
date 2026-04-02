@@ -26,6 +26,10 @@ import {
   confirmEpv,
   addRentalDecision,
   listRentalDecisions,
+  getRentalDecision,
+  updateRentalDecision,
+  addRentalDecisionAction,
+  listRentalDecisionActions,
   addRentalChecks,
   listRentalChecks,
 } from "./storage";
@@ -424,21 +428,29 @@ export function registerVrmRoutes(): Router {
 
   /**
    * PATCH /api/vrm/techs/:id/tracking
-   * Updates returnedRental and/or escalationPath.
-   * Body: { returnedRental?: boolean, escalationPath?: string | null }
+   * Updates outreach tracking fields and/or escalationPath.
+   * Body: { smsSentAt?, smsResponseStatus?, byovEnrolled?, returnedRental?, rentalReturnDate?, escalationPath? }
    */
   router.patch("/techs/:id/tracking", async (req, res) => {
     try {
       const tech = await getTechById(req.params.id);
       if (!tech) return res.status(404).json({ error: "Tech not found" });
       const updates: Record<string, any> = { updatedAt: new Date() };
+      if ("smsSentAt" in req.body) updates.smsSentAt = req.body.smsSentAt ? new Date(req.body.smsSentAt) : null;
+      if ("smsResponseStatus" in req.body) updates.smsResponseStatus = req.body.smsResponseStatus ?? null;
+      if (req.body.byovEnrolled !== undefined) updates.byovEnrolled = Boolean(req.body.byovEnrolled);
       if (req.body.returnedRental !== undefined) updates.returnedRental = Boolean(req.body.returnedRental);
+      if ("rentalReturnDate" in req.body) updates.rentalReturnDate = req.body.rentalReturnDate ?? null;
       if ("escalationPath" in req.body) updates.escalationPath = req.body.escalationPath ?? null;
       const [updated] = await db
         .update(vrmTechs)
         .set(updates)
         .where(eq(vrmTechs.id, req.params.id))
         .returning();
+      // If BYOV enrolled, also update status
+      if (req.body.byovEnrolled === true && tech.currentStatus !== "byov_enrolled") {
+        await updateTechStatus(req.params.id, "byov_enrolled", "system", "Enrolled via tracking panel");
+      }
       res.json(updated);
     } catch (e: any) {
       res.status(500).json({ error: e.message });

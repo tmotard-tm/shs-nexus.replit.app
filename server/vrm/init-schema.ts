@@ -252,6 +252,55 @@ export async function initVrmSchema(): Promise<void> {
     );
   `);
 
+  // vrm_rental_decisions
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rental_decisions (
+      id                      VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      tech_ldap               VARCHAR(50)  NOT NULL,
+      tech_name               VARCHAR(255),
+      daily_net_with_rental   DECIMAL(10,2),
+      recommendation          VARCHAR(20)  NOT NULL,
+      decision                VARCHAR(20)  NOT NULL,
+      decided_by_name         VARCHAR(255) NOT NULL,
+      notes                   TEXT,
+      scorecard_score         DECIMAL(6,3),
+      tenure_months           INTEGER,
+      sms_sent_at             TIMESTAMP,
+      sms_response_status     VARCHAR(50),
+      byov_enrolled           BOOLEAN NOT NULL DEFAULT FALSE,
+      returned_rental         BOOLEAN NOT NULL DEFAULT FALSE,
+      rental_return_date      DATE,
+      created_at              TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_decisions_ldap_idx ON vrm_rental_decisions(tech_ldap);`);
+
+  // vrm_rental_decision_actions
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rental_decision_actions (
+      id                VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      decision_id       VARCHAR NOT NULL REFERENCES vrm_rental_decisions(id),
+      action_type       vrm_outreach_action NOT NULL,
+      notes             TEXT,
+      performed_by_name VARCHAR(255),
+      created_at        TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_decision_actions_decision_idx ON vrm_rental_decision_actions(decision_id);`);
+
+  // New columns on vrm_techs
+  await db.execute(sql`ALTER TABLE vrm_techs ADD COLUMN IF NOT EXISTS rental_return_date DATE;`);
+  await db.execute(sql`ALTER TABLE vrm_techs ADD COLUMN IF NOT EXISTS sms_sent_at TIMESTAMP;`);
+  await db.execute(sql`ALTER TABLE vrm_techs ADD COLUMN IF NOT EXISTS sms_response_status VARCHAR(50);`);
+  await db.execute(sql`ALTER TABLE vrm_techs ADD COLUMN IF NOT EXISTS byov_enrolled BOOLEAN NOT NULL DEFAULT FALSE;`);
+
+  // New columns on vrm_rental_decisions
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS sms_sent_at TIMESTAMP;`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS sms_response_status VARCHAR(50);`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS byov_enrolled BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS returned_rental BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS rental_return_date DATE;`);
+
   // Indexes
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_checks_ldap_idx ON vrm_rental_checks(tech_ldap);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_checks_at_idx ON vrm_rental_checks(checked_at);`);

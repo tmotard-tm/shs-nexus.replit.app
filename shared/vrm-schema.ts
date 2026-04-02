@@ -155,7 +155,11 @@ export const vrmTechs = pgTable("vrm_techs", {
   primaryZip: varchar("primary_zip", { length: 20 }),
   outreachFlagged: boolean("outreach_flagged").notNull().default(false),
   returnedRental: boolean("returned_rental").notNull().default(false),
+  rentalReturnDate: date("rental_return_date"),
   escalationPath: varchar("escalation_path", { length: 50 }),
+  smsSentAt: timestamp("sms_sent_at"),
+  smsResponseStatus: varchar("sms_response_status", { length: 50 }),
+  byovEnrolled: boolean("byov_enrolled").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -292,9 +296,25 @@ export const vrmRentalDecisions = pgTable("vrm_rental_decisions", {
   notes: text("notes"),
   scorecardScore: decimal("scorecard_score", { precision: 6, scale: 3 }),
   tenureMonths: integer("tenure_months"),
+  smsSentAt: timestamp("sms_sent_at"),
+  smsResponseStatus: varchar("sms_response_status", { length: 50 }),
+  byovEnrolled: boolean("byov_enrolled").notNull().default(false),
+  returnedRental: boolean("returned_rental").notNull().default(false),
+  rentalReturnDate: date("rental_return_date"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
   ldapIdx: index("vrm_rental_decisions_ldap_idx").on(table.techLdap),
+}));
+
+export const vrmRentalDecisionActions = pgTable("vrm_rental_decision_actions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  decisionId: varchar("decision_id").notNull().references(() => vrmRentalDecisions.id),
+  actionType: vrmOutreachActionEnum("action_type").notNull(),
+  notes: text("notes"),
+  performedByName: varchar("performed_by_name", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  decisionIdIdx: index("vrm_decision_actions_decision_idx").on(table.decisionId),
 }));
 
 export const vrmRentalChecks = pgTable("vrm_rental_checks", {
@@ -359,6 +379,11 @@ export const insertVrmRentalDecisionSchema = createInsertSchema(vrmRentalDecisio
   createdAt: true,
 });
 
+export const insertVrmRentalDecisionActionSchema = createInsertSchema(vrmRentalDecisionActions).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertVrmRentalCheckSchema = createInsertSchema(vrmRentalChecks).omit({
   id: true,
   checkedAt: true,
@@ -375,5 +400,7 @@ export type VrmTechNote = typeof vrmTechNotes.$inferSelect;
 export type VrmSmsMessage = typeof vrmSmsMessages.$inferSelect;
 export type VrmRentalDecision = typeof vrmRentalDecisions.$inferSelect;
 export type InsertVrmRentalDecision = z.infer<typeof insertVrmRentalDecisionSchema>;
+export type VrmRentalDecisionAction = typeof vrmRentalDecisionActions.$inferSelect;
+export type InsertVrmRentalDecisionAction = z.infer<typeof insertVrmRentalDecisionActionSchema>;
 export type VrmRentalCheck = typeof vrmRentalChecks.$inferSelect;
 export type InsertVrmRentalCheck = z.infer<typeof insertVrmRentalCheckSchema>;
