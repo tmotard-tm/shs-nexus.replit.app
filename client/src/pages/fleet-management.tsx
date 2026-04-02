@@ -2857,9 +2857,7 @@ export default function FleetManagement() {
                 onChange={e => setPoFilterStatus(e.target.value)}
               >
                 <option value="">All statuses</option>
-                <option value="APPROVED">Approved</option>
-                <option value="OPEN">Open</option>
-                <option value="HOLD">Hold</option>
+                <option value="OPEN">Open (Approved / Hold)</option>
                 <option value="BILL HOLD">Bill Hold</option>
                 <option value="CLOSED">Closed</option>
                 <option value="PAID">Paid</option>
@@ -2902,7 +2900,12 @@ export default function FleetManagement() {
               const filteredGroups = Array.from(groupMap.values()).filter(({ summary }) => {
                 if (poFilterPoNumber && !String(summary.poNumber || "").toLowerCase().includes(poFilterPoNumber.toLowerCase())) return false;
                 if (poFilterVendor && !String(summary.vendor || summary.vendorName || "").toLowerCase().includes(poFilterVendor.toLowerCase())) return false;
-                if (poFilterStatus && String(summary.poStatus || "").toUpperCase() !== poFilterStatus.toUpperCase()) return false;
+                if (poFilterStatus) {
+                  const s = String(summary.poStatus || "").toUpperCase();
+                  if (poFilterStatus === "OPEN") {
+                    if (s !== "APPROVED" && s !== "HOLD") return false;
+                  } else if (s !== poFilterStatus.toUpperCase()) return false;
+                }
                 const poDate = summary.poDate || summary.openDate || summary.date || "";
                 if (poFilterDateFrom && poDate && poDate < poFilterDateFrom) return false;
                 if (poFilterDateTo && poDate && poDate > poFilterDateTo) return false;
