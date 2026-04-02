@@ -164,6 +164,7 @@ export default function FleetManagement() {
 
   // Ops Review modal
   const [showOpsReview, setShowOpsReview] = useState(false);
+  const [opsReviewVehicle, setOpsReviewVehicle] = useState<FleetVehicle | null>(null);
   const [opsRefZip, setOpsRefZip] = useState("");
   const [opsRentalSorted, setOpsRentalSorted] = useState<Array<{
     techRacfid: string; techName: string; vehicleNumber: string;
@@ -1381,17 +1382,6 @@ export default function FleetManagement() {
                   <div className="flex items-center gap-2">
                     <Button
                       onClick={() => {
-                        setOpsRefZip(targetZipcode);
-                        setShowOpsReview(true);
-                      }}
-                      variant="outline"
-                      data-testid="button-ops-review"
-                    >
-                      <Users className="h-4 w-4 mr-2" />
-                      Ops Review
-                    </Button>
-                    <Button
-                      onClick={() => {
                         const a = document.createElement("a");
                         a.href = "/api/fleet-vehicles/export.csv";
                         a.download = "";
@@ -1923,7 +1913,25 @@ export default function FleetManagement() {
                           ) : null}
 
                           {/* Action bar */}
-                          <div className="flex items-center justify-end pt-2 border-t">
+                          <div className="flex items-center justify-between pt-2 border-t">
+                            {!vehicle.tpmsAssignedTechId && !vehicle.holmanTechAssigned ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs text-purple-700 border-purple-300 hover:bg-purple-50 dark:text-purple-300 dark:border-purple-700 dark:hover:bg-purple-950"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpsReviewVehicle(vehicle);
+                                  setOpsRefZip(vehicle.zip || targetZipcode);
+                                  setShowOpsReview(true);
+                                }}
+                              >
+                                <Users className="h-3 w-3 mr-1" />
+                                Ops Review
+                              </Button>
+                            ) : (
+                              <span />
+                            )}
                             <div className="flex items-center gap-1">
                               <ViewInventoryButton 
                                 vehicleNumber={vehicle.vehicleNumber} 
@@ -3585,15 +3593,24 @@ export default function FleetManagement() {
       </Dialog>
 
       {/* ── Ops Review Modal ────────────────────────────────────────────────── */}
-      <Dialog open={showOpsReview} onOpenChange={setShowOpsReview}>
+      <Dialog open={showOpsReview} onOpenChange={(open) => { setShowOpsReview(open); if (!open) setOpsReviewVehicle(null); }}>
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0">
           <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <ClipboardList className="h-5 w-5 text-blue-600" />
               Ops Review
+              {opsReviewVehicle && (
+                <span className="text-sm font-normal text-muted-foreground ml-1">
+                  — #{opsReviewVehicle.vehicleNumber}
+                  {opsReviewVehicle.city ? ` · ${opsReviewVehicle.city}, ${opsReviewVehicle.state}` : ''}
+                  {opsReviewVehicle.zip ? ` ${opsReviewVehicle.zip}` : ''}
+                </span>
+              )}
             </DialogTitle>
             <DialogDescription>
-              Techs whose vehicle is currently in rental ops, and active techs without an assigned vehicle.
+              {opsReviewVehicle
+                ? `Techs nearest to vehicle #${opsReviewVehicle.vehicleNumber} who are in rental ops or unassigned and active.`
+                : 'Techs whose vehicle is currently in rental ops, and active techs without an assigned vehicle.'}
             </DialogDescription>
             {/* Reference zip for distance sorting */}
             <div className="flex items-center gap-2 mt-3">
