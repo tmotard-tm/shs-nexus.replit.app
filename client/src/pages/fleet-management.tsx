@@ -467,24 +467,39 @@ export default function FleetManagement() {
   }, [rentalOpsData]);
 
   // Truck numbers with active J1939 fault codes from Samsara live API — used for check engine badges
-  const { data: dtcVehiclesData } = useQuery<{ truckNumbers: string[] }>({
+  const { data: dtcVehiclesData } = useQuery<{
+    truckNumbers: string[];
+    vehicles: { truckNumber: string; severityScore: number; severityLabel: string }[];
+  }>({
     queryKey: ['/api/samsara/dtc-vehicles'],
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const dtcTruckSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const name of dtcVehiclesData?.truckNumbers ?? []) {
-      // Samsara names come in various formats (e.g. "6121", "006121") — normalise all forms
-      const canonical = name.replace(/^0+/, '') || '0';
-      s.add(canonical);
-      s.add(name);
-      s.add(canonical.padStart(5, '0'));
-      s.add(canonical.padStart(6, '0'));
+
+  // Map every canonical form of a truck number → its numeric severity score
+  const dtcScoreMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const v of dtcVehiclesData?.vehicles ?? []) {
+      if (!v.truckNumber) continue;
+      const canonical = v.truckNumber.replace(/^0+/, '') || '0';
+      const score = v.severityScore ?? 0;
+      for (const key of [v.truckNumber, canonical, canonical.padStart(5, '0'), canonical.padStart(6, '0')]) {
+        m.set(key, score);
+      }
     }
-    return s;
+    return m;
   }, [dtcVehiclesData]);
+
+  const dtcTruckSet = useMemo(() => new Set(dtcScoreMap.keys()), [dtcScoreMap]);
+
+  // Score thresholds: higher score → warmer colour → red = critical
+  function dtcBadgeClass(score: number): string {
+    if (score >= 5) return 'bg-red-600 text-white';
+    if (score >= 3) return 'bg-orange-500 text-white';
+    if (score >= 2) return 'bg-yellow-400 text-black';
+    return 'bg-blue-500 text-white';
+  }
 
   // POs for selected vehicle
   const { data: vehiclePOs, isLoading: posLoading } = useQuery<any[]>({
@@ -1638,6 +1653,7 @@ export default function FleetManagement() {
                       || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
                       || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
                     const hasDTC = dtcTruckSet.has(vehicle.vehicleNumber) || dtcTruckSet.has(toCanonical(vehicle.vehicleNumber));
+                    const dtcScore = dtcScoreMap.get(vehicle.vehicleNumber) ?? dtcScoreMap.get(toCanonical(vehicle.vehicleNumber)) ?? 0;
                     
                     return (
                       <Card 
@@ -1686,7 +1702,7 @@ export default function FleetManagement() {
                                 <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
                               )}
                               {hasDTC && (
-                                <Badge className="bg-orange-600 text-white text-xs border-none flex items-center gap-1">
+                                <Badge className={`text-xs border-none flex items-center gap-1 ${dtcBadgeClass(dtcScore)}`}>
                                   <Wrench className="h-3 w-3" />
                                   Check Engine
                                 </Badge>
