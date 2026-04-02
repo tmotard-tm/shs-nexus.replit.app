@@ -39,6 +39,7 @@ interface TechPopRow {
   outreachFlagged: boolean;
   returnedRental: boolean;
   escalationPath: string | null;
+  smsSentAt: string | null;
 }
 
 interface TechDetail extends TechPopRow {
@@ -904,7 +905,6 @@ export default function TechPopulation() {
               <th style={colStyle}>DCA Review</th>
               <th style={colStyle}>Status</th>
               <th style={colStyle}>Rental Start</th>
-              <th style={{ ...colStyle, textAlign: "center" }}>Outreach</th>
             </tr>
           </thead>
           <tbody>
@@ -990,26 +990,6 @@ export default function TechPopulation() {
                   </td>
                   <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
                     {tech.rentalStartDate ? new Date(tech.rentalStartDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
-                  </td>
-                  {/* Outreach flag column — checkbox stops row click propagation */}
-                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, textAlign: "center" }}>
-                    <div
-                      className="flex flex-col items-center gap-1"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {tech.outreachFlagged && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5" style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 10, color: colors.accent, backgroundColor: "#EFF4FF", borderRadius: 6, whiteSpace: "nowrap" }}>
-                          <Flag className="h-2.5 w-2.5" /> Outreach
-                        </span>
-                      )}
-                      <input
-                        type="checkbox"
-                        checked={tech.outreachFlagged}
-                        title={tech.outreachFlagged ? "Remove outreach flag" : "Add outreach flag"}
-                        onChange={() => outreachFlagMutation.mutate({ id: tech.id, current: tech.outreachFlagged })}
-                        style={{ cursor: "pointer", accentColor: colors.accent, width: 14, height: 14 }}
-                      />
-                    </div>
                   </td>
                 </tr>
               ))

@@ -1194,6 +1194,13 @@ export default function NewRentals() {
                           <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{d.techLdap}</span>
                           <ChevronRight size={12} style={{ color: colors.inkMuted, flexShrink: 0 }} />
                         </div>
+                        {d.smsSentAt && (
+                          <div style={{ marginTop: 3 }}>
+                            <span style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 10, color: "#0D9668", backgroundColor: "#ECFDF5", padding: "1px 6px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                              SMS {new Date(d.smsSentAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td style={tdStyle}>{d.techName ?? "—"}</td>
                       <td style={{ ...tdStyle, textAlign: "right", fontWeight: 500 }}>
