@@ -15165,21 +15165,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // PO flags per vehicle — open rental and maintenance PO counts
   app.get("/api/fleet-vehicles/po-flags", requireAuth, async (req: any, res) => {
-    try {
-      // "Open" statuses in Holman are APPROVED, HOLD, BILL HOLD (not literally 'OPEN')
-      // Rental POs are identified by description containing 'RENTAL'
-      // All other open POs are considered maintenance/service
-      const rows = await db.execute(sql`
-        SELECT
-          vehicle_number,
-          CASE WHEN UPPER(description) LIKE '%RENTAL%' THEN 'rental' ELSE 'maintenance' END AS derived_type,
-          COUNT(*) AS cnt
-        FROM holman_po_cache
-        WHERE UPPER(po_status) IN ('APPROVED', 'HOLD', 'BILL HOLD')
-        GROUP BY vehicle_number, derived_type
-      `);
-      const flags: Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }> = {};
-      for (const row of rows.rows as Array<{ vehicle_number: string; derived_type: string; cnt: string | number }>) {
+    type FlagMap = Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }>;
+
+    const buildFlags = (rawRows: Array<{ vehicle_number: string; derived_type: string; cnt: string | number }>) => {
+      const flags: FlagMap = {};
+      for (const row of rawRows) {
         const vn = row.vehicle_number;
         if (!vn) continue;
         if (!flags[vn]) flags[vn] = { hasOpenRental: false, openRentalCount: 0, hasOpenMaintenance: false, openMaintenanceCount: 0 };
@@ -15187,7 +15177,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (row.derived_type === 'rental') { flags[vn].hasOpenRental = true; flags[vn].openRentalCount = cnt; }
         if (row.derived_type === 'maintenance') { flags[vn].hasOpenMaintenance = true; flags[vn].openMaintenanceCount = cnt; }
       }
-      res.json(flags);
+      return flags;
+    };
+
+    // Try Snowflake first (source of truth for open POs)
+    if (isSnowflakeConfigured()) {
+      try {
+        const sf = getSnowflakeService();
+        await sf.connect();
+        const sfRows = await sf.executeQuery(
+          `SELECT
+             HOLMAN_VEHICLE_NUMBER AS vehicle_number,
+             CASE WHEN UPPER(REPAIR_TYPE_DESCRIPTION) LIKE '%RENTAL%'
+                    OR UPPER(ATA_GROUP_DESC) LIKE '%RENTAL%'
+                    OR UPPER(DESCRIPTION) LIKE '%RENTAL%'
+               THEN 'rental' ELSE 'maintenance' END AS derived_type,
+             COUNT(DISTINCT PO_NUMBER) AS cnt
+           FROM ${HOLMAN_PO_ETL_TABLE}
+           WHERE UPPER(PO_STATUS) IN ('APPROVED', 'HOLD', 'BILL HOLD', 'OPEN')
+             AND HOLMAN_VEHICLE_NUMBER IS NOT NULL
+           GROUP BY HOLMAN_VEHICLE_NUMBER, derived_type`
+        ) as Array<{ vehicle_number: string; derived_type: string; cnt: string | number }>;
+        return res.json(buildFlags(sfRows));
+      } catch (sfErr: any) {
+        console.warn("[PO Flags] Snowflake query failed, falling back to local cache:", sfErr.message);
+      }
+    }
+
+    // Fallback: local cache
+    try {
+      // "Open" statuses in Holman are APPROVED, HOLD, BILL HOLD (not literally 'OPEN')
+      // Rental POs are identified by description containing 'RENTAL'
+      const rows = await db.execute(sql`
+        SELECT
+          vehicle_number,
+          CASE WHEN UPPER(description) LIKE '%RENTAL%' THEN 'rental' ELSE 'maintenance' END AS derived_type,
+          COUNT(*) AS cnt
+        FROM holman_po_cache
+        WHERE UPPER(po_status) IN ('APPROVED', 'HOLD', 'BILL HOLD', 'OPEN')
+        GROUP BY vehicle_number, derived_type
+      `);
+      res.json(buildFlags(rows.rows as Array<{ vehicle_number: string; derived_type: string; cnt: string | number }>));
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
