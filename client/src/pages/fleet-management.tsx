@@ -87,6 +87,31 @@ function getAmsLookupLabel(item: any): string {
   return String(item.UniqueID);
 }
 
+const DISTANCE_BANDS = [
+  { key: 'Nearby',    min: 0,   max: 25,       label: 'Nearby',    range: 'Within 25 miles',  color: 'text-green-600',  borderColor: 'border-green-500'  },
+  { key: 'Moderate',  min: 25,  max: 100,      label: 'Moderate',  range: '25 – 100 miles',   color: 'text-yellow-600', borderColor: 'border-yellow-500' },
+  { key: 'Far',       min: 100, max: 300,      label: 'Far',       range: '100 – 300 miles',  color: 'text-orange-600', borderColor: 'border-orange-500' },
+  { key: 'Very Far',  min: 300, max: Infinity, label: 'Very Far',  range: '300+ miles',       color: 'text-red-600',    borderColor: 'border-red-500'    },
+] as const;
+
+function getDistanceBand(miles: number): string {
+  if (miles < 25)  return 'Nearby';
+  if (miles < 100) return 'Moderate';
+  if (miles < 300) return 'Far';
+  return 'Very Far';
+}
+
+// Approximate drive time using tiered avg speeds: city (<25mi=30mph), mixed (<100mi=50mph), highway (55mph)
+function formatDriveTime(miles: number): string {
+  const avgSpeed = miles < 25 ? 30 : miles < 100 ? 50 : 55;
+  const totalMinutes = Math.round((miles / avgSpeed) * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (hours === 0) return `${mins}m`;
+  if (mins === 0) return `${hours}h`;
+  return `${hours}h ${mins}m`;
+}
+
 export default function FleetManagement() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -1641,11 +1666,21 @@ export default function FleetManagement() {
             ) : (
               <>
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {sortedVehicles.slice(0, 99).map((vehicle) => {
+                  {sortedVehicles.slice(0, 99).flatMap((vehicle, index) => {
                     const assignStatus = getAssignmentStatus(vehicle);
                     const ownership = getVehicleOwnership(vehicle.vehicleNumber);
                     const distanceScore = (vehicle as any).distanceScore;
                     const distanceInfo = typeof distanceScore === 'number' && Number.isFinite(distanceScore) ? getDistanceLabel(distanceScore) : null;
+                    const isZipSorted = !!(targetZipcode.trim() && zipSortedVehicles);
+                    const currentBand = isZipSorted && typeof distanceScore === 'number' && Number.isFinite(distanceScore) ? getDistanceBand(distanceScore) : null;
+                    const prevScore = isZipSorted && index > 0 ? (sortedVehicles[index - 1] as any).distanceScore : null;
+                    const prevBand = prevScore != null && Number.isFinite(prevScore) ? getDistanceBand(prevScore) : null;
+                    const showBandHeader = isZipSorted && currentBand && currentBand !== prevBand;
+                    const bandMeta = showBandHeader ? DISTANCE_BANDS.find(b => b.key === currentBand) : null;
+                    const bandCount = showBandHeader ? sortedVehicles.filter(v => {
+                      const s = (v as any).distanceScore;
+                      return typeof s === 'number' && Number.isFinite(s) && getDistanceBand(s) === currentBand;
+                    }).length : 0;
                     const hasMismatch = assignStatus.status === 'mismatch';
                     const poFlags = poFlagsMap.get(vehicle.vehicleNumber);
                     const isInRentalOps = rentalOpsVehicleSet.has(vehicle.vehicleNumber)
@@ -1654,7 +1689,7 @@ export default function FleetManagement() {
                     const hasDTC = dtcTruckSet.has(vehicle.vehicleNumber) || dtcTruckSet.has(toCanonical(vehicle.vehicleNumber));
                     const dtcScore = dtcScoreMap.get(vehicle.vehicleNumber) ?? dtcScoreMap.get(toCanonical(vehicle.vehicleNumber)) ?? 0;
                     
-                    return (
+                    const card = (
                       <Card 
                         key={vehicle.vin} 
                         className={`cursor-pointer hover:shadow-md transition-shadow ${assignStatus.cardBorder} ${assignStatus.cardBg} border-2`}
@@ -1764,8 +1799,10 @@ export default function FleetManagement() {
                               </div>
                               <p className="font-medium">{vehicle.city}, {vehicle.state}</p>
                               <p className="text-muted-foreground">{vehicle.region} / {vehicle.district}</p>
-                              {distanceInfo && (
-                                <p className={`text-xs ${distanceInfo.color}`}>{distanceInfo.label}</p>
+                              {distanceInfo && typeof distanceScore === 'number' && Number.isFinite(distanceScore) && (
+                                <p className={`text-xs font-medium ${distanceInfo.color}`}>
+                                  {Math.round(distanceScore).toLocaleString()} mi · ~{formatDriveTime(distanceScore)}
+                                </p>
                               )}
                             </div>
                             <div className="space-y-1">
@@ -1814,6 +1851,23 @@ export default function FleetManagement() {
                         </CardContent>
                       </Card>
                     );
+
+                    const results: JSX.Element[] = [];
+                    if (showBandHeader && bandMeta) {
+                      results.push(
+                        <div
+                          key={`band-${currentBand}-${index}`}
+                          className={`col-span-full flex items-center gap-3 border-l-4 ${bandMeta.borderColor} pl-3 py-1 ${index > 0 ? 'mt-4' : ''}`}
+                        >
+                          <div>
+                            <h3 className={`font-semibold text-sm ${bandMeta.color}`}>{bandMeta.label}</h3>
+                            <p className="text-xs text-muted-foreground">{bandMeta.range} · {bandCount} vehicle{bandCount !== 1 ? 's' : ''}</p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    results.push(card);
+                    return results;
                   })}
                 </div>
                 
