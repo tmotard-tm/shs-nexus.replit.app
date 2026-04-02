@@ -2953,9 +2953,17 @@ export default function FleetManagement() {
                                   : <span className="text-muted-foreground">—</span>}
                               </td>
                               <td className="py-1.5 px-2">
-                                <span className={`font-medium ${summary.poStatus?.toUpperCase() === 'OPEN' ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}`}>
-                                  {summary.poStatus || "—"}
-                                </span>
+                                {(() => {
+                                  const s = (summary.poStatus || "").toUpperCase();
+                                  if (!s) return <span className="text-muted-foreground">—</span>;
+                                  if (s === "OPEN")
+                                    return <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs border-none">OPEN</Badge>;
+                                  if (s === "APPROVED")
+                                    return <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 text-xs border-none">APPROVED</Badge>;
+                                  if (s === "CLOSED" || s === "PAID")
+                                    return <Badge className="bg-gray-100 text-gray-600 dark:bg-gray-800/50 dark:text-gray-400 text-xs border-none">{summary.poStatus}</Badge>;
+                                  return <Badge variant="secondary" className="text-xs">{summary.poStatus}</Badge>;
+                                })()}
                               </td>
                               <td className="py-1.5 px-2 text-muted-foreground">{summary.poDate || summary.openDate || summary.date || "—"}</td>
                               <td className="py-1.5 px-2 text-right font-medium">{fmtAmt(totalAmt)}</td>
