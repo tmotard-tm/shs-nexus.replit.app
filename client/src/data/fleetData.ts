@@ -34,6 +34,7 @@ export interface FleetVehicle {
   holmanTechName?: string; // Tech name from Holman (firstName + lastName)
   tpmsAssignedTechId?: string;
   tpmsAssignedTechName?: string;
+  statusCode?: number; // Holman vehicle status: 0=New, 1=Active, 2=OOS, 3/4=Sold
 }
 
 // All active vehicles from CSV (vehicles without sale date)

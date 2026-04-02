@@ -15226,6 +15226,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Repair-shop flags — trucks currently in a repair shop (have a repair address in AMS/fleet-scope)
+  app.get("/api/fleet-vehicles/repair-shop-flags", requireAuth, async (_req, res) => {
+    try {
+      const { trucks: fsTrucks } = await import("../shared/fleet-scope-schema");
+      const rows = await db.select({
+        truckNumber: fsTrucks.truckNumber,
+        repairAddress: fsTrucks.repairAddress,
+      }).from(fsTrucks);
+      const flags: Record<string, boolean> = {};
+      for (const row of rows) {
+        if (row.truckNumber) {
+          flags[row.truckNumber] = !!(row.repairAddress && row.repairAddress.trim());
+        }
+      }
+      res.json(flags);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Offboarding flags — trucks flagged during weekly offboarding roster match
+  app.get("/api/fleet-vehicles/offboarding-flags", requireAuth, async (_req, res) => {
+    try {
+      const { trucks: fsTrucks } = await import("../shared/fleet-scope-schema");
+      const rows = await db.select({
+        truckNumber: fsTrucks.truckNumber,
+        offboardingFlagged: fsTrucks.offboardingFlagged,
+      }).from(fsTrucks);
+      const flags: Record<string, boolean> = {};
+      for (const row of rows) {
+        if (row.truckNumber) {
+          flags[row.truckNumber] = !!row.offboardingFlagged;
+        }
+      }
+      res.json(flags);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/fleet-vehicles/export.csv", requireAuth, async (req: any, res) => {
     try {
       // DISTINCT ON ensures one row per vehicle even if TPMS has multiple records (keyed by enterprise_id AND truck_number)

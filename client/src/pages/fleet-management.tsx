@@ -250,6 +250,12 @@ export default function FleetManagement() {
   const [poMaintFilter, setPoMaintFilter] = useState("all");
   const [dtcFilter, setDtcFilter] = useState("all");
 
+  // Status field filters
+  const [holmanStatusFilter, setHolmanStatusFilter] = useState("all");
+  const [amsTruckStatusFilter, setAmsTruckStatusFilter] = useState("all");
+  const [amsRepairShopFilter, setAmsRepairShopFilter] = useState("all");
+  const [offboardingFilter, setOffboardingFilter] = useState("all");
+
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
   // Ops Review modal
@@ -590,6 +596,58 @@ export default function FleetManagement() {
     }
     return m;
   }, [poFlagsData]);
+
+  // AMS Truck Status map — VIN → human-readable status label (batch, 30-min cache)
+  const { data: amsTruckStatusData } = useQuery<Record<string, string | null>>({
+    queryKey: ['/api/ams/truck-status-map'],
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const amsTruckStatusOptions = useMemo(() => {
+    if (!amsTruckStatusData) return [];
+    return [...new Set(Object.values(amsTruckStatusData).filter((v): v is string => !!v))].sort();
+  }, [amsTruckStatusData]);
+
+  // Repair-shop flags — truck number → boolean (in repair shop)
+  const { data: repairShopFlagsData } = useQuery<Record<string, boolean>>({
+    queryKey: ['/api/fleet-vehicles/repair-shop-flags'],
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const repairShopFlagsMap = useMemo(() => {
+    const m = new Map<string, boolean>();
+    if (!repairShopFlagsData) return m;
+    for (const [rawKey, val] of Object.entries(repairShopFlagsData)) {
+      m.set(rawKey, val);
+      const canonical = toCanonical(rawKey);
+      if (canonical && canonical !== rawKey) m.set(canonical, val);
+      const padded = toDisplayNumber(rawKey);
+      if (padded && padded !== rawKey) m.set(padded, val);
+    }
+    return m;
+  }, [repairShopFlagsData]);
+
+  // Offboarding flags — truck number → boolean (offboarding flagged)
+  const { data: offboardingFlagsData } = useQuery<Record<string, boolean>>({
+    queryKey: ['/api/fleet-vehicles/offboarding-flags'],
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const offboardingFlagsMap = useMemo(() => {
+    const m = new Map<string, boolean>();
+    if (!offboardingFlagsData) return m;
+    for (const [rawKey, val] of Object.entries(offboardingFlagsData)) {
+      m.set(rawKey, val);
+      const canonical = toCanonical(rawKey);
+      if (canonical && canonical !== rawKey) m.set(canonical, val);
+      const padded = toDisplayNumber(rawKey);
+      if (padded && padded !== rawKey) m.set(padded, val);
+    }
+    return m;
+  }, [offboardingFlagsData]);
 
   // Rental Ops open vehicle set — cross-references Rental Operations page open rentals (Snowflake)
   const { data: rentalOpsData } = useQuery<{ vehicleNumbers: string[] }>({
@@ -1123,6 +1181,7 @@ export default function FleetManagement() {
     stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
     holmanTechFilter, tpmsTechFilter, mismatchFilter,
     rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter,
+    holmanStatusFilter, amsTruckStatusFilter, amsRepairShopFilter, offboardingFilter,
   ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0);
 
   // OOS pre-filter — exclude out-of-service vehicles unless toggle is on
@@ -1219,6 +1278,29 @@ export default function FleetManagement() {
         (dtcFilter === "yes" && hasDTCF) ||
         (dtcFilter === "no" && !hasDTCF);
 
+      // Status field filters
+      const matchesHolmanStatus = holmanStatusFilter === "all" ||
+        String(vehicle.statusCode ?? 1) === holmanStatusFilter;
+
+      const vehicleVinUpper = (vehicle.vin || '').toUpperCase();
+      const amsTruckLabel = amsTruckStatusData?.[vehicleVinUpper] ?? null;
+      const matchesAmsTruckStatus = amsTruckStatusFilter === "all" ||
+        (amsTruckLabel != null && amsTruckLabel.toLowerCase() === amsTruckStatusFilter.toLowerCase());
+
+      const isInRepairShop = repairShopFlagsMap.get(vehicle.vehicleNumber)
+        ?? repairShopFlagsMap.get(toCanonical(vehicle.vehicleNumber))
+        ?? false;
+      const matchesAmsRepairShop = amsRepairShopFilter === "all" ||
+        (amsRepairShopFilter === "yes" && isInRepairShop) ||
+        (amsRepairShopFilter === "no" && !isInRepairShop);
+
+      const isOffboardingFlagged = offboardingFlagsMap.get(vehicle.vehicleNumber)
+        ?? offboardingFlagsMap.get(toCanonical(vehicle.vehicleNumber))
+        ?? false;
+      const matchesOffboarding = offboardingFilter === "all" ||
+        (offboardingFilter === "yes" && isOffboardingFlagged) ||
+        (offboardingFilter === "no" && !isOffboardingFlagged);
+
       // Stat card quick-filter
       const tpmsId2 = vehicle.tpmsAssignedTechId?.trim() || '';
       const holmanId2 = vehicle.holmanTechAssigned?.trim() || '';
@@ -1241,6 +1323,7 @@ export default function FleetManagement() {
              matchesState && matchesCity && matchesLicenseState && matchesRegion && matchesDivision && matchesDistrict &&
              matchesHolmanTech && matchesTpmsTech && matchesMismatch &&
              matchesRentalOps && matchesPoRental && matchesPoMaint && matchesDTC &&
+             matchesHolmanStatus && matchesAmsTruckStatus && matchesAmsRepairShop && matchesOffboarding &&
              matchesStatCard;
     });
   }, [activeVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
@@ -1249,6 +1332,8 @@ export default function FleetManagement() {
       stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
       holmanTechFilter, tpmsTechFilter, mismatchFilter,
       rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter,
+      holmanStatusFilter, amsTruckStatusFilter, amsTruckStatusData, amsRepairShopFilter, repairShopFlagsMap,
+      offboardingFilter, offboardingFlagsMap,
       statCardFilter,
       rentalOpsVehicleSet, poFlagsMap, dtcTruckSet]);
 
@@ -1370,6 +1455,10 @@ export default function FleetManagement() {
     setPoRentalFilter("all");
     setPoMaintFilter("all");
     setDtcFilter("all");
+    setHolmanStatusFilter("all");
+    setAmsTruckStatusFilter("all");
+    setAmsRepairShopFilter("all");
+    setOffboardingFilter("all");
   };
 
   const getAssignmentStatus = (vehicle: FleetVehicle) => {
@@ -1874,6 +1963,53 @@ export default function FleetManagement() {
                             <SelectItem value="all">All TPMS techs</SelectItem>
                             <SelectItem value="unassigned">Unassigned</SelectItem>
                             {filterOptions.tpmsTechs.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Row 5 — Status fields */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Select value={holmanStatusFilter} onValueChange={setHolmanStatusFilter}>
+                          <SelectTrigger className="h-7 text-xs w-40" data-testid="select-holman-status-filter">
+                            <SelectValue placeholder="Holman Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Holman statuses</SelectItem>
+                            <SelectItem value="1">Active</SelectItem>
+                            <SelectItem value="0">New</SelectItem>
+                            <SelectItem value="2">Inactive / Out of Service</SelectItem>
+                            <SelectItem value="3">Sold</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={amsTruckStatusFilter} onValueChange={setAmsTruckStatusFilter}>
+                          <SelectTrigger className="h-7 text-xs w-44" data-testid="select-ams-truck-status-filter">
+                            <SelectValue placeholder="AMS Truck Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All AMS truck statuses</SelectItem>
+                            {amsTruckStatusOptions.map(o => (
+                              <SelectItem key={o} value={o.toLowerCase()}>{o}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select value={amsRepairShopFilter} onValueChange={setAmsRepairShopFilter}>
+                          <SelectTrigger className="h-7 text-xs w-40" data-testid="select-ams-repair-shop-filter">
+                            <SelectValue placeholder="AMS Repair Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All (repair shop)</SelectItem>
+                            <SelectItem value="yes">In Repair Shop</SelectItem>
+                            <SelectItem value="no">Not in Repair Shop</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={offboardingFilter} onValueChange={setOffboardingFilter}>
+                          <SelectTrigger className="h-7 text-xs w-40" data-testid="select-offboarding-filter">
+                            <SelectValue placeholder="Offboarding Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All (offboarding)</SelectItem>
+                            <SelectItem value="yes">Offboarding Flagged</SelectItem>
+                            <SelectItem value="no">Not Flagged</SelectItem>
                           </SelectContent>
                         </Select>
                         <div className="flex-1" />
