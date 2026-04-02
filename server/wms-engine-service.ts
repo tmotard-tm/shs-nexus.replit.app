@@ -195,7 +195,7 @@ async function apiFetch(path: string, opts: ApiFetchOpts = {}, retry = true): Pr
 export interface TruckRequest {
   useCaseId?: string;
   name: string;
-  locationId: string;
+  locationId?: string;
   description?: string;
   isActive: boolean;
   subsidiary?: string;
