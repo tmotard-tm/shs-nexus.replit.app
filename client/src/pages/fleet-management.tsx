@@ -486,53 +486,58 @@ export default function FleetManagement() {
 
   // Debounced LDAP field: name search when input looks like a name, ID lookup otherwise
   useEffect(() => {
-    if (!assignLdap || assignLdap.length < 2) {
+    const q = assignLdap.trim();
+    if (!q || q.length < 2) {
       setAssignLookupStatus("idle");
       setTechNameSuggestions([]);
       setShowNameDropdown(false);
       return;
     }
-    // Detect name-like input: contains lowercase, space, or comma
-    const looksLikeName = /[a-z\s,]/.test(assignLdap);
-    if (looksLikeName) {
-      // Name search mode — show dropdown on the LDAP field
-      const timer = setTimeout(async () => {
-        try {
-          const res = await fetch(`/api/vehicle-assignments/search/technicians?q=${encodeURIComponent(assignLdap)}`, { credentials: "include" });
-          const json = await res.json();
-          const results = json.data ?? json.technicians ?? [];
-          setTechNameSuggestions(results);
-          setShowNameDropdown(results.length > 0);
-          setAssignLookupStatus("idle");
-        } catch {
-          setTechNameSuggestions([]);
-        }
-      }, 350);
-      return () => clearTimeout(timer);
-    } else {
-      // ID lookup mode — look up by enterprise ID
-      setTechNameSuggestions([]);
-      setShowNameDropdown(false);
-      if (assignLdap.length < 3) return;
+
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    // Always run a name search — covers partial names typed in any case
+    timers.push(setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/vehicle-assignments/search/technicians?q=${encodeURIComponent(q)}`, { credentials: "include" });
+        const json = await res.json();
+        const results = json.data ?? json.technicians ?? [];
+        setTechNameSuggestions(results);
+        setShowNameDropdown(results.length > 0);
+      } catch {
+        setTechNameSuggestions([]);
+      }
+    }, 350));
+
+    // Also run an exact ID lookup for any single-word input (no spaces) — backend normalises to uppercase
+    const looksLikeId = q.length >= 3 && !/\s/.test(q);
+    if (looksLikeId) {
       setAssignLookupStatus("loading");
-      const timer = setTimeout(async () => {
+      timers.push(setTimeout(async () => {
         try {
-          const res = await fetch(`/api/all-techs/lookup/${encodeURIComponent(assignLdap.trim())}`, { credentials: "include" });
+          const res = await fetch(`/api/all-techs/lookup/${encodeURIComponent(q.toUpperCase())}`, { credentials: "include" });
           const json = await res.json();
           if (json.found) {
             setAssignLookupStatus("found");
             assignAutoFilledRef.current = true;
             setAssignTechName(json.techName || `${json.firstName ?? ""} ${json.lastName ?? ""}`.trim());
             if (!assignDistrict && json.districtNo) setAssignDistrict(String(json.districtNo));
+            // Exact match found — collapse the name suggestions
+            setShowNameDropdown(false);
+            setTechNameSuggestions([]);
           } else {
             setAssignLookupStatus("notfound");
+            // "Not found" as ID — keep name suggestions visible so user can pick
           }
         } catch {
           setAssignLookupStatus("idle");
         }
-      }, 450);
-      return () => clearTimeout(timer);
+      }, 450));
+    } else {
+      setAssignLookupStatus("idle");
     }
+
+    return () => timers.forEach(clearTimeout);
   }, [assignLdap]);
 
   function selectTechSuggestion(tech: any) {
@@ -3004,19 +3009,14 @@ export default function FleetManagement() {
                   <div ref={nameDropdownRef} className="relative mt-1">
                     <Input
                       value={assignLdap}
-                      onChange={e => {
-                        const val = e.target.value;
-                        const looksLikeName = /[a-z\s,]/.test(val);
-                        setAssignLdap(looksLikeName ? val : val.toUpperCase());
-                        if (!looksLikeName) setAssignLookupStatus("idle");
-                      }}
-                      placeholder="ID or type a name…"
+                      onChange={e => { setAssignLdap(e.target.value); setAssignLookupStatus("idle"); }}
+                      placeholder="Enterprise ID or search by name…"
                       className={assignLookupStatus === "found" ? "border-green-500 pr-7" : assignLookupStatus === "notfound" ? "border-amber-400 pr-7" : ""}
                       autoComplete="off"
                     />
                     {assignLookupStatus === "loading" && <Loader2 className="absolute right-2 top-2.5 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                     {assignLookupStatus === "found" && <CheckCircle className="absolute right-2 top-2.5 h-3.5 w-3.5 text-green-500" />}
-                    {assignLookupStatus === "notfound" && <span className="absolute right-2 top-2 text-[10px] text-amber-600">Not found</span>}
+                    {assignLookupStatus === "notfound" && !showNameDropdown && <span className="absolute right-2 top-2 text-[10px] text-amber-600">Not found</span>}
                     {showNameDropdown && techNameSuggestions.length > 0 && (
                       <div className="absolute z-50 w-full mt-1 rounded-md border bg-popover shadow-lg max-h-48 overflow-y-auto">
                         {techNameSuggestions.slice(0, 8).map((tech, i) => (
