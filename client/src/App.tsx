@@ -51,6 +51,7 @@ import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import WeeklyOffboarding from "@/pages/weekly-offboarding";
 import RentalOperations from "@/pages/rental-operations";
 import VehicleRentalManagement from "@/pages/vehicle-rental-management";
+import WmsEngine from "@/pages/wms-engine";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import Reporting from "@/pages/reporting";
@@ -378,6 +379,14 @@ function Router() {
         <VRMProtectedRoute>
           <VehicleRentalManagement />
         </VRMProtectedRoute>
+      </Route>
+
+      <Route path="/wms-engine">
+        <ProtectedRoute>
+          <MainContent>
+            <WmsEngine />
+          </MainContent>
+        </ProtectedRoute>
       </Route>
 
       <Route path="/field-mapping">

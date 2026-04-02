@@ -29,6 +29,7 @@ import { segnoApiService } from "./segno-api-service";
 import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
 import { registerFleetScopeRoutes } from "./fleet-scope-routes";
+import { registerWmsRoutes } from "./wms-engine-routes";
 import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
 import { fsDb } from "./fleet-scope-db";
 import { initFleetScopeSchema } from "./fleet-scope-schema-init";
@@ -512,6 +513,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   } catch (e: any) {
     console.error("[VRM] Failed to initialise:", e.message);
   }
+
+  // Mount WMS Engine routes at /api/wms/*
+  const wmsRouter = registerWmsRoutes(requireAuth);
+  app.use("/api/wms", wmsRouter);
+  console.log("[WMS Engine] Routes mounted at /api/wms/*");
 
   // SAML SSO INTEGRATION - Initialize passport and SAML strategy
   const samlStrategy = createSamlStrategy();

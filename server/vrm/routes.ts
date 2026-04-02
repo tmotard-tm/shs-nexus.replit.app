@@ -27,6 +27,8 @@ import {
   confirmEpv,
   addRentalDecision,
   listRentalDecisions,
+  addRentalChecks,
+  listRentalChecks,
 } from "./storage";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck } from "./snowflake-queries";
 import { generateAuditPdf } from "./pdf-generator";
@@ -481,9 +483,39 @@ export function registerVrmRoutes(): Router {
         return res.status(400).json({ error: "ldaps array required" });
       const cleaned = ldaps.map((l: string) => (l || "").trim().toUpperCase()).filter(Boolean);
       const rows = await fetchProfitabilityCheck(cleaned);
+
+      // Auto-save every evaluated tech with the date
+      const checkRecords = rows.map((r: any) => ({
+        techLdap: r.tech_ldap,
+        techName: r.tech_name ?? null,
+        dailyNetWithRental: r.daily_net_with_rental != null ? String(r.daily_net_with_rental) : null,
+        dailyNetBeforeRental: r.daily_net_before_rental != null ? String(r.daily_net_before_rental) : null,
+        recommendation: r.recommendation,
+        scorecardScore: r.scorecard_score != null ? String(r.scorecard_score) : null,
+        tenureMonths: r.tenure_months ?? null,
+        completes: r.completes ?? null,
+        lookbackDays: r.lookback_days ?? null,
+      }));
+      addRentalChecks(checkRecords).catch((err) =>
+        console.error("[VRM] failed to save rental checks:", err.message),
+      );
+
       res.json({ rows });
     } catch (e: any) {
       console.error("[VRM] profitability/check error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * GET /api/vrm/profitability/checks
+   * Returns history of all profitability evaluations (auto-saved on each check).
+   */
+  router.get("/profitability/checks", async (_req, res) => {
+    try {
+      const rows = await listRentalChecks(200);
+      res.json({ rows });
+    } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });

@@ -515,6 +515,15 @@ export const PAGES: PageDefinition[] = [
     permissionKey: "fleetScope",
   },
   {
+    key: "wmsEngine",
+    label: "WMS Engine",
+    description: "Warehouse Management System — NetSuite truck locations and tech-to-truck assignments",
+    path: "/wms-engine",
+    icon: Database,
+    category: "management",
+    permissionKey: "wmsEngine",
+  },
+  {
     key: "tpmsModule",
     label: "TPMS",
     description: "Technician Profile Management System",

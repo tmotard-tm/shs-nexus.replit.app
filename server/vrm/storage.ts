@@ -12,9 +12,11 @@ import {
   vrmTechNotes,
   vrmShopContactLog,
   vrmRentalDecisions,
+  vrmRentalChecks,
   type VrmTech,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
+  type InsertVrmRentalCheck,
 } from "../../shared/vrm-schema";
 
 // ─── Dashboard queries ────────────────────────────────────────────────────────
@@ -452,5 +454,18 @@ export async function listRentalDecisions(limit = 50) {
     .select()
     .from(vrmRentalDecisions)
     .orderBy(desc(vrmRentalDecisions.createdAt))
+    .limit(limit);
+}
+
+export async function addRentalChecks(rows: InsertVrmRentalCheck[]) {
+  if (!rows.length) return [];
+  return db.insert(vrmRentalChecks).values(rows).returning();
+}
+
+export async function listRentalChecks(limit = 100) {
+  return db
+    .select()
+    .from(vrmRentalChecks)
+    .orderBy(desc(vrmRentalChecks.checkedAt))
     .limit(limit);
 }

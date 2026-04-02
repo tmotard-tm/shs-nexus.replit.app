@@ -41,6 +41,18 @@ interface DecisionRow {
   createdAt: string;
 }
 
+interface CheckRow {
+  id: string;
+  techLdap: string;
+  techName: string | null;
+  dailyNetWithRental: string | null;
+  recommendation: string;
+  scorecardScore: string | null;
+  tenureMonths: number | null;
+  completes: number | null;
+  checkedAt: string;
+}
+
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
 const fmt$ = (v: number | null | undefined) =>
@@ -244,6 +256,18 @@ export default function NewRentals() {
   });
 
   const decisionLog = logQuery.data?.rows ?? [];
+
+  // ── Check history query ────────────────────────────────────────────────────
+
+  const checksQuery = useQuery<{ rows: CheckRow[] }>({
+    queryKey: ["/api/vrm/profitability/checks"],
+    queryFn: async () => {
+      const res = await fetch("/api/vrm/profitability/checks");
+      if (!res.ok) throw new Error("Failed to load check history");
+      return res.json();
+    },
+  });
+  const checkHistory = checksQuery.data?.rows ?? [];
 
   // ── CSV export ─────────────────────────────────────────────────────────────
 

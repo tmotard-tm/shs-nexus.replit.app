@@ -305,6 +305,23 @@ export const vrmRentalDecisions = pgTable("vrm_rental_decisions", {
   ldapIdx: index("vrm_rental_decisions_ldap_idx").on(table.techLdap),
 }));
 
+export const vrmRentalChecks = pgTable("vrm_rental_checks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  techLdap: varchar("tech_ldap", { length: 50 }).notNull(),
+  techName: varchar("tech_name", { length: 255 }),
+  dailyNetWithRental: decimal("daily_net_with_rental", { precision: 10, scale: 2 }),
+  dailyNetBeforeRental: decimal("daily_net_before_rental", { precision: 10, scale: 2 }),
+  recommendation: varchar("recommendation", { length: 20 }).notNull(),
+  scorecardScore: decimal("scorecard_score", { precision: 6, scale: 3 }),
+  tenureMonths: integer("tenure_months"),
+  completes: integer("completes"),
+  lookbackDays: integer("lookback_days"),
+  checkedAt: timestamp("checked_at").defaultNow().notNull(),
+}, (table) => ({
+  ldapIdx: index("vrm_rental_checks_ldap_idx").on(table.techLdap),
+  checkedAtIdx: index("vrm_rental_checks_at_idx").on(table.checkedAt),
+}));
+
 // ─── Insert schemas ────────────────────────────────────────────────────────────
 
 export const insertVrmTechSchema = createInsertSchema(vrmTechs).omit({
@@ -350,6 +367,11 @@ export const insertVrmRentalDecisionSchema = createInsertSchema(vrmRentalDecisio
   createdAt: true,
 });
 
+export const insertVrmRentalCheckSchema = createInsertSchema(vrmRentalChecks).omit({
+  id: true,
+  checkedAt: true,
+});
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type VrmTech = typeof vrmTechs.$inferSelect;
@@ -362,3 +384,5 @@ export type VrmTechNote = typeof vrmTechNotes.$inferSelect;
 export type VrmSmsMessage = typeof vrmSmsMessages.$inferSelect;
 export type VrmRentalDecision = typeof vrmRentalDecisions.$inferSelect;
 export type InsertVrmRentalDecision = z.infer<typeof insertVrmRentalDecisionSchema>;
+export type VrmRentalCheck = typeof vrmRentalChecks.$inferSelect;
+export type InsertVrmRentalCheck = z.infer<typeof insertVrmRentalCheckSchema>;
