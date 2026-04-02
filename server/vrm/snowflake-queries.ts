@@ -391,12 +391,34 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0 - 78, 2)
                                                                           AS "daily_net_with_rental",
       CASE
-        WHEN fin.TECH_LDAP IS NULL THEN 'No Data'
+        WHEN fin.TECH_LDAP IS NULL AND sc.LDAP_ID IS NULL THEN 'No Data'
         WHEN (COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
           - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
           - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0 - 78 >= 0
-        THEN 'Approve' ELSE 'Deny'
-      END                                                                 AS "recommendation"
+          THEN 'Approve'
+        WHEN sc.tenure_months < 6                                          THEN 'Approve'
+        WHEN sc.scorecard_score >= 4.0                                     THEN 'Approve'
+        ELSE 'Deny'
+      END                                                                  AS "recommendation",
+      -- New hire exempt: tenure < 6 months, financially negative, has at least DCR data
+      CASE
+        WHEN sc.tenure_months < 6
+          AND sc.LDAP_ID IS NOT NULL
+          AND (COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+            - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
+            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0 - 78 < 0
+        THEN TRUE ELSE FALSE
+      END                                                                  AS "new_hire_exempt",
+      -- Scorecard exempt: score >= 4.0, not a new hire, financially negative, has DCR data
+      CASE
+        WHEN sc.scorecard_score >= 4.0
+          AND COALESCE(sc.tenure_months, 99) >= 6
+          AND sc.LDAP_ID IS NOT NULL
+          AND (COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+            - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
+            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0 - 78 < 0
+        THEN TRUE ELSE FALSE
+      END                                                                  AS "scorecard_exempt"
     FROM financials fin
     FULL OUTER JOIN scored sc ON fin.TECH_LDAP = sc.LDAP_ID
     ORDER BY 17 ASC NULLS LAST

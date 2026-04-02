@@ -25,6 +25,8 @@ interface ProfitRow {
   daily_net_before_rental: number;
   daily_net_with_rental: number;
   recommendation: "Approve" | "Deny" | "No Data";
+  new_hire_exempt: boolean;
+  scorecard_exempt: boolean;
 }
 
 interface DecisionRow {
