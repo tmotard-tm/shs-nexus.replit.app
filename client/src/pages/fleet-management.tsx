@@ -237,7 +237,7 @@ export default function FleetManagement() {
   const [districtFilter, setDistrictFilter] = useState("all");
   
   // Stat card quick-filter (clicking a summary card filters the grid)
-  const [statCardFilter, setStatCardFilter] = useState<"all"|"assigned"|"unassigned"|"mismatch"|"rental">("all");
+  const [statCardFilter, setStatCardFilter] = useState<"all"|"assigned"|"unassigned"|"mismatch"|"rental"|"maintenance"|"dtc">("all");
 
   // Tech Assignment filters
   const [holmanTechFilter, setHolmanTechFilter] = useState("all");
@@ -1228,10 +1228,12 @@ export default function FleetManagement() {
         || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
       const matchesStatCard =
         statCardFilter === "all" ||
-        (statCardFilter === "assigned"   && !!tpmsId2) ||
-        (statCardFilter === "unassigned" && !tpmsId2) ||
-        (statCardFilter === "mismatch"   && isMismatchSC) ||
-        (statCardFilter === "rental"     && isRentalSC);
+        (statCardFilter === "assigned"     && !!tpmsId2) ||
+        (statCardFilter === "unassigned"   && !tpmsId2) ||
+        (statCardFilter === "mismatch"     && isMismatchSC) ||
+        (statCardFilter === "rental"       && isRentalSC) ||
+        (statCardFilter === "maintenance"  && !!(poFlagsMap.get(vehicle.vehicleNumber)?.hasOpenMaintenance)) ||
+        (statCardFilter === "dtc"          && hasDTCF);
 
       return matchesSearch && matchesMake && matchesModel && matchesYear && matchesColor &&
              matchesProgram && matchesBranding && matchesInterior && matchesTuneStatus &&
@@ -1403,6 +1405,12 @@ export default function FleetManagement() {
     rentalOpsVehicleSet.has(toCanonical(v.vehicleNumber)) ||
     rentalOpsVehicleSet.has(toDisplayNumber(v.vehicleNumber))
   ).length;
+  const maintenanceCount = activeVehicles.filter(v =>
+    poFlagsMap.get(v.vehicleNumber)?.hasOpenMaintenance
+  ).length;
+  const dtcCount = activeVehicles.filter(v =>
+    dtcTruckSet.has(v.vehicleNumber) || dtcTruckSet.has(toCanonical(v.vehicleNumber))
+  ).length;
 
   return (
     <MainContent>
@@ -1415,7 +1423,7 @@ export default function FleetManagement() {
         <div className="max-w-7xl mx-auto">
           <div className="space-y-6">
             {/* Stats Cards — clickable quick-filters */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
               {/* Total Vehicles — clears filter */}
               <Card
                 onClick={() => setStatCardFilter("all")}
@@ -1478,6 +1486,35 @@ export default function FleetManagement() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-orange-600">{rentalCount}</p>
+                </CardContent>
+              </Card>
+
+              {/* Maintenance */}
+              <Card
+                onClick={() => setStatCardFilter(statCardFilter === "maintenance" ? "all" : "maintenance")}
+                className={`cursor-pointer transition-all hover:shadow-md select-none border-amber-200 bg-amber-50/50 dark:bg-amber-950/10 ${statCardFilter === "maintenance" ? "ring-2 ring-offset-1 ring-amber-500" : ""}`}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-amber-600">Maintenance</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-amber-600">{maintenanceCount}</p>
+                </CardContent>
+              </Card>
+
+              {/* Check Engine */}
+              <Card
+                onClick={() => setStatCardFilter(statCardFilter === "dtc" ? "all" : "dtc")}
+                className={`cursor-pointer transition-all hover:shadow-md select-none border-rose-200 bg-rose-50/50 dark:bg-rose-950/10 ${statCardFilter === "dtc" ? "ring-2 ring-offset-1 ring-rose-500" : ""}`}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-rose-600 flex items-center gap-1">
+                    <Wrench className="h-3.5 w-3.5" />
+                    Check Engine
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-rose-600">{dtcCount}</p>
                 </CardContent>
               </Card>
             </div>
