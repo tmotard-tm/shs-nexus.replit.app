@@ -467,24 +467,42 @@ export default function FleetManagement() {
   }, [rentalOpsData]);
 
   // Truck numbers with active J1939 fault codes from Samsara live API — used for check engine badges
-  const { data: dtcVehiclesData } = useQuery<{ truckNumbers: string[] }>({
+  const { data: dtcVehiclesData } = useQuery<{
+    truckNumbers: string[];
+    vehicles: { truckNumber: string; severityScore: number; severityLabel: string }[];
+  }>({
     queryKey: ['/api/samsara/dtc-vehicles'],
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const dtcTruckSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const name of dtcVehiclesData?.truckNumbers ?? []) {
-      // Samsara names come in various formats (e.g. "6121", "006121") — normalise all forms
-      const canonical = name.replace(/^0+/, '') || '0';
-      s.add(canonical);
-      s.add(name);
-      s.add(canonical.padStart(5, '0'));
-      s.add(canonical.padStart(6, '0'));
+
+  // Map canonical truck number → severity label for badge colouring
+  const dtcSeverityMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const v of dtcVehiclesData?.vehicles ?? []) {
+      if (!v.truckNumber) continue;
+      const canonical = v.truckNumber.replace(/^0+/, '') || '0';
+      const label = v.severityLabel ?? 'DTC_ONLY';
+      m.set(canonical, label);
+      m.set(v.truckNumber, label);
+      m.set(canonical.padStart(5, '0'), label);
+      m.set(canonical.padStart(6, '0'), label);
     }
-    return s;
+    return m;
   }, [dtcVehiclesData]);
+
+  const dtcTruckSet = useMemo(() => new Set(dtcSeverityMap.keys()), [dtcSeverityMap]);
+
+  function dtcBadgeClass(severityLabel: string | undefined): string {
+    switch (severityLabel) {
+      case 'STOP':      return 'bg-red-600 text-white';
+      case 'PROTECT':   return 'bg-orange-500 text-white';
+      case 'WARNING':   return 'bg-yellow-400 text-black';
+      case 'EMISSIONS': return 'bg-amber-500 text-white';
+      default:          return 'bg-blue-600 text-white'; // DTC_ONLY or unknown
+    }
+  }
 
   // POs for selected vehicle
   const { data: vehiclePOs, isLoading: posLoading } = useQuery<any[]>({
@@ -1638,6 +1656,7 @@ export default function FleetManagement() {
                       || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
                       || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
                     const hasDTC = dtcTruckSet.has(vehicle.vehicleNumber) || dtcTruckSet.has(toCanonical(vehicle.vehicleNumber));
+                    const dtcSeverity = dtcSeverityMap.get(vehicle.vehicleNumber) ?? dtcSeverityMap.get(toCanonical(vehicle.vehicleNumber));
                     
                     return (
                       <Card 
@@ -1686,9 +1705,9 @@ export default function FleetManagement() {
                                 <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
                               )}
                               {hasDTC && (
-                                <Badge className="bg-orange-600 text-white text-xs border-none flex items-center gap-1">
+                                <Badge className={`text-xs border-none flex items-center gap-1 ${dtcBadgeClass(dtcSeverity)}`}>
                                   <Wrench className="h-3 w-3" />
-                                  Check Engine
+                                  {dtcSeverity === 'STOP' ? 'STOP' : dtcSeverity === 'PROTECT' ? 'PROTECT' : dtcSeverity === 'WARNING' ? 'WARNING' : dtcSeverity === 'EMISSIONS' ? 'Emissions' : 'Check Engine'}
                                 </Badge>
                               )}
                             </div>
