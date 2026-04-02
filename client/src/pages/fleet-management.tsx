@@ -1933,40 +1933,12 @@ export default function FleetManagement() {
                         data-testid={`card-vehicle-${vehicle.vehicleNumber}`}
                       >
                         <CardContent className="p-4 space-y-3">
-                          {/* Header: Vehicle Info + Badges */}
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-2">
-                              <Car className="h-5 w-5 text-muted-foreground" />
-                              <div>
-                                <p className="font-semibold text-sm">{vehicle.modelYear} {vehicle.makeName} {vehicle.modelName}</p>
-                                <p className="text-xs text-muted-foreground font-mono">#{vehicle.vehicleNumber}</p>
-                              </div>
-                            </div>
-                            <div className="flex flex-col gap-1 items-end">
-                              {(vehicle.statusCode === 2 || vehicle.outOfServiceDate) && (
-                                <Badge className="bg-amber-600 text-white border-amber-700 text-xs">Out of Service</Badge>
-                              )}
-                              <Badge className={assignStatus.color + ' border text-xs'}>
-                                {assignStatus.label}
-                              </Badge>
-                              <Badge variant="outline" className="text-xs">
-                                {ownership.type}
-                              </Badge>
-                              {poFlags?.hasOpenRental && !isInRentalOps && (
-                                <Badge className="bg-red-600 text-white text-xs border-none">RENTAL ({poFlags.openRentalCount})</Badge>
-                              )}
-                              {poFlags?.hasOpenMaintenance && (
-                                <Badge className="bg-amber-500 text-white text-xs border-none">MAINT ({poFlags.openMaintenanceCount})</Badge>
-                              )}
-                              {isInRentalOps && (
-                                <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
-                              )}
-                              {hasDTC && (
-                                <Badge className={`text-xs border-none flex items-center gap-1 ${dtcBadgeClass(dtcScore)}`}>
-                                  <Wrench className="h-3 w-3" />
-                                  Check Engine
-                                </Badge>
-                              )}
+                          {/* Header: Vehicle Info */}
+                          <div className="flex items-center gap-2">
+                            <Car className="h-5 w-5 text-muted-foreground shrink-0" />
+                            <div>
+                              <p className="font-semibold text-sm">{vehicle.modelYear} {vehicle.makeName} {vehicle.modelName}</p>
+                              <p className="text-xs text-muted-foreground font-mono">#{vehicle.vehicleNumber}</p>
                             </div>
                           </div>
                           
@@ -2033,6 +2005,34 @@ export default function FleetManagement() {
                               {vehicle.odometerSource && <span>· {vehicle.odometerSource}</span>}
                             </div>
                           ) : null}
+
+                          {/* Badges row */}
+                          <div className="flex flex-wrap gap-1 pt-2 border-t">
+                            {(vehicle.statusCode === 2 || vehicle.outOfServiceDate) && (
+                              <Badge className="bg-amber-600 text-white border-amber-700 text-xs">Out of Service</Badge>
+                            )}
+                            <Badge className={assignStatus.color + ' border text-xs'}>
+                              {assignStatus.label}
+                            </Badge>
+                            <Badge variant="outline" className="text-xs">
+                              {ownership.type}
+                            </Badge>
+                            {poFlags?.hasOpenRental && !isInRentalOps && (
+                              <Badge className="bg-red-600 text-white text-xs border-none">RENTAL ({poFlags.openRentalCount})</Badge>
+                            )}
+                            {poFlags?.hasOpenMaintenance && (
+                              <Badge className="bg-amber-500 text-white text-xs border-none">MAINT ({poFlags.openMaintenanceCount})</Badge>
+                            )}
+                            {isInRentalOps && (
+                              <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
+                            )}
+                            {hasDTC && (
+                              <Badge className={`text-xs border-none flex items-center gap-1 ${dtcBadgeClass(dtcScore)}`}>
+                                <Wrench className="h-3 w-3" />
+                                Check Engine
+                              </Badge>
+                            )}
+                          </div>
 
                           {/* Action bar */}
                           <div className="flex items-center justify-end pt-2 border-t">
