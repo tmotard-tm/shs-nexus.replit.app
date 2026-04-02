@@ -24,7 +24,6 @@ import {
   UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench, Download,
   Users, PhoneCall, ClipboardList
 } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { TelematicsButton } from "@/components/telematics-button";
@@ -177,6 +176,7 @@ export default function FleetManagement() {
     mainPhone: string; cellPhone: string; distanceMiles: number;
   }>>([]);
   const [opsSorting, setOpsSorting] = useState(false);
+  const [opsListFilter, setOpsListFilter] = useState<"all" | "rental" | "unassigned">("all");
   const [showOos, setShowOos] = useState(false);
   
   // Quick lookup state
@@ -653,6 +653,16 @@ export default function FleetManagement() {
 
     return () => { cancelled = true; };
   }, [showOpsReview, opsRefZip, opsRawRentalTechs, opsRawUnassigned]);
+
+  // Merged + re-sorted combined list for the unified Ops Review view
+  const opsCombinedList = useMemo(() => {
+    type RentalRow = (typeof opsRentalSorted)[0] & { kind: "rental"; employeeId?: string; districtNo?: string; planningAreaName?: string; mainPhone?: string; cellPhone?: string };
+    type UnassignedRow = (typeof opsUnassignedSorted)[0] & { kind: "unassigned"; vehicleNumber?: string };
+    const rental: RentalRow[] = opsRentalSorted.map(r => ({ ...r, kind: "rental" as const }));
+    const unassigned: UnassignedRow[] = opsUnassignedSorted.map(u => ({ ...u, kind: "unassigned" as const }));
+    const merged = ([...rental, ...unassigned] as (RentalRow | UnassignedRow)[]);
+    return merged.sort((a, b) => a.distanceMiles - b.distanceMiles);
+  }, [opsRentalSorted, opsUnassignedSorted]);
 
   // Score thresholds: higher score → warmer colour → red = critical
   function dtcBadgeClass(score: number): string {
@@ -3631,107 +3641,78 @@ export default function FleetManagement() {
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-hidden px-6 pb-6 pt-4">
-            <Tabs defaultValue="rental" className="h-full flex flex-col">
-              <TabsList className="shrink-0 w-fit mb-4">
-                <TabsTrigger value="rental" className="gap-2">
-                  <Car className="h-4 w-4" />
-                  In Rentals
-                  <Badge variant="secondary" className="ml-1">{opsRentalSorted.length}</Badge>
-                </TabsTrigger>
-                <TabsTrigger value="unassigned" className="gap-2">
-                  <UserX className="h-4 w-4" />
-                  Unassigned Active
-                  <Badge variant="secondary" className="ml-1">{opsUnassignedSorted.length}</Badge>
-                </TabsTrigger>
-              </TabsList>
+          <div className="flex-1 overflow-hidden px-6 pb-6 pt-4 flex flex-col gap-3">
+            {/* Filter bar */}
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              {(["all", "rental", "unassigned"] as const).map(f => {
+                const count = f === "all" ? opsCombinedList.length : f === "rental" ? opsRentalSorted.length : opsUnassignedSorted.length;
+                const label = f === "all" ? "All" : f === "rental" ? "In Rentals" : "Unassigned Active";
+                const active = opsListFilter === f;
+                return (
+                  <button
+                    key={f}
+                    onClick={() => setOpsListFilter(f)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                      active
+                        ? f === "rental"
+                          ? "bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-700"
+                          : f === "unassigned"
+                          ? "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-950 dark:text-purple-300 dark:border-purple-700"
+                          : "bg-primary text-primary-foreground border-primary"
+                        : "bg-transparent text-muted-foreground border-border hover:border-foreground/30"
+                    }`}
+                  >
+                    {f === "rental" && <Car className="h-3 w-3" />}
+                    {f === "unassigned" && <UserX className="h-3 w-3" />}
+                    {label}
+                    <span className={`rounded-full px-1.5 py-0.5 text-xs leading-none ${active ? "bg-white/20" : "bg-muted"}`}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-              {/* ── Techs in Rentals ── */}
-              <TabsContent value="rental" className="flex-1 overflow-y-auto mt-0">
-                {!allTechsRoster && (
-                  <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading tech roster…
-                  </div>
-                )}
-                {allTechsRoster && opsRentalSorted.length === 0 && (
-                  <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm gap-2">
-                    <Car className="h-8 w-8 opacity-40" />
-                    No techs currently have a vehicle in rental ops.
-                  </div>
-                )}
-                <div className="space-y-2">
-                  {opsRentalSorted.map((t, i) => {
-                    const hasDist = t.distanceMiles !== Infinity;
-                    const distLabel = hasDist ? getDistanceLabel(t.distanceMiles) : null;
-                    return (
-                      <div key={t.techRacfid} className="flex items-center gap-3 border rounded-md px-4 py-3 bg-card hover:bg-muted/40 transition-colors">
-                        <span className="text-xs font-mono text-muted-foreground w-6 shrink-0">{i + 1}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium text-sm truncate">{t.techName}</span>
-                            <span className="text-xs font-mono text-muted-foreground">{t.techRacfid}</span>
-                          </div>
-                          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                            <span className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Truck className="h-3 w-3" /> Truck #{t.vehicleNumber}
-                            </span>
-                            {(t.homeCity || t.homeState) && (
-                              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                <Home className="h-3 w-3" />
-                                {[t.homeCity, t.homeState].filter(Boolean).join(', ')}
-                                {t.homePostal && ` ${t.homePostal}`}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          {hasDist ? (
-                            <div>
-                              <span className={`text-sm font-medium ${distLabel!.color}`}>
-                                {t.distanceMiles.toFixed(0)} mi
-                              </span>
-                              <div className={`text-xs ${distLabel!.color}`}>{distLabel!.label}</div>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+            {/* Unified list */}
+            <div className="flex-1 overflow-y-auto">
+              {!allTechsRoster && (
+                <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading tech roster…
                 </div>
-              </TabsContent>
-
-              {/* ── Unassigned Active Techs ── */}
-              <TabsContent value="unassigned" className="flex-1 overflow-y-auto mt-0">
-                {!allTechsRoster && (
-                  <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading tech roster…
-                  </div>
-                )}
-                {allTechsRoster && opsUnassignedSorted.length === 0 && (
-                  <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm gap-2">
-                    <UserX className="h-8 w-8 opacity-40" />
-                    All active techs have a vehicle assigned.
-                  </div>
-                )}
-                <div className="space-y-2">
-                  {opsUnassignedSorted.map((t, i) => {
-                    const hasDist = t.distanceMiles !== Infinity;
+              )}
+              {allTechsRoster && opsCombinedList.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm gap-2">
+                  <Users className="h-8 w-8 opacity-40" />
+                  No techs match the current filter.
+                </div>
+              )}
+              <div className="space-y-2">
+                {opsCombinedList
+                  .filter(t => opsListFilter === "all" || t.kind === opsListFilter)
+                  .map((t, i) => {
+                    const hasDist = t.distanceMiles !== Infinity && Number.isFinite(t.distanceMiles);
                     const distLabel = hasDist ? getDistanceLabel(t.distanceMiles) : null;
-                    const phone = t.cellPhone || t.mainPhone || '';
+                    const phone = ('cellPhone' in t ? t.cellPhone : '') || ('mainPhone' in t ? t.mainPhone : '') || '';
                     return (
-                      <div key={t.techRacfid} className="flex items-center gap-3 border rounded-md px-4 py-3 bg-card hover:bg-muted/40 transition-colors">
-                        <span className="text-xs font-mono text-muted-foreground w-6 shrink-0">{i + 1}</span>
+                      <div key={`${t.kind}-${t.techRacfid}`} className="flex items-start gap-3 border rounded-md px-4 py-3 bg-card hover:bg-muted/40 transition-colors">
+                        <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 pt-0.5">{i + 1}</span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-medium text-sm truncate">{t.techName}</span>
                             <span className="text-xs font-mono text-muted-foreground">{t.techRacfid}</span>
-                            {t.districtNo && (
+                            {t.kind === "rental" ? (
+                              <Badge className="bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950 dark:text-orange-300 text-xs h-5 border">In Rental</Badge>
+                            ) : (
+                              <Badge className="bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-950 dark:text-purple-300 text-xs h-5 border">Unassigned</Badge>
+                            )}
+                            {'districtNo' in t && t.districtNo && (
                               <Badge variant="outline" className="text-xs h-5">District {t.districtNo}</Badge>
                             )}
                           </div>
-                          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                          <div className="flex items-center gap-3 mt-1 flex-wrap">
+                            {t.kind === "rental" && 'vehicleNumber' in t && t.vehicleNumber && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Truck className="h-3 w-3" /> Truck #{t.vehicleNumber}
+                              </span>
+                            )}
                             {(t.homeCity || t.homeState) && (
                               <span className="text-xs text-muted-foreground flex items-center gap-1">
                                 <Home className="h-3 w-3" />
@@ -3741,21 +3722,21 @@ export default function FleetManagement() {
                             )}
                             {phone && (
                               <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                <PhoneCall className="h-3 w-3" />
-                                {phone}
+                                <PhoneCall className="h-3 w-3" />{phone}
                               </span>
                             )}
-                            {t.planningAreaName && (
+                            {'planningAreaName' in t && t.planningAreaName && (
                               <span className="text-xs text-muted-foreground">{t.planningAreaName}</span>
                             )}
                           </div>
                         </div>
-                        <div className="shrink-0 text-right">
+                        <div className="shrink-0 text-right min-w-[72px]">
                           {hasDist ? (
                             <div>
                               <span className={`text-sm font-medium ${distLabel!.color}`}>
-                                {t.distanceMiles.toFixed(0)} mi
+                                {Math.round(t.distanceMiles).toLocaleString()} mi
                               </span>
+                              <div className="text-xs text-muted-foreground">~{formatDriveTime(t.distanceMiles)}</div>
                               <div className={`text-xs ${distLabel!.color}`}>{distLabel!.label}</div>
                             </div>
                           ) : (
@@ -3765,9 +3746,8 @@ export default function FleetManagement() {
                       </div>
                     );
                   })}
-                </div>
-              </TabsContent>
-            </Tabs>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
