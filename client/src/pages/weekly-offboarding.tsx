@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home } from "lucide-react";
+import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -110,6 +110,7 @@ export default function WeeklyOffboarding() {
     postOffboardedStatus: string | null;
     phoneRecoveryInitiated: string | null;
     toolsPartsLocation: string | null;
+    partsRecoveryInitiated: string | null;
     updatedBy: string | null;
   }[]>({
     queryKey: ['/api/vehicle-nexus-data/batch', truckNumbers],
@@ -684,6 +685,7 @@ export default function WeeklyOffboarding() {
                               const nexusInfo = rowTruck ? nexusDataMap.get(rowTruck) : null;
                               const phoneRecovery = nexusInfo?.phoneRecoveryInitiated?.toLowerCase() || null;
                               const toolsLoc = nexusInfo?.toolsPartsLocation || null;
+                              const partsRecovery = nexusInfo?.partsRecoveryInitiated?.toLowerCase() || null;
 
                               const PhoneIcon = phoneRecovery === 'no'
                                 ? <PhoneOff className="w-3 h-3 text-muted-foreground shrink-0" title="Phone recovery: No" />
@@ -693,16 +695,32 @@ export default function WeeklyOffboarding() {
 
                               const ToolsIcon = toolsLoc === 'in_the_truck'
                                 ? (
-                                  <span className="inline-flex items-center shrink-0" title="Tools & parts: In the truck">
-                                    <Wrench className="w-3 h-3 text-amber-600" />
-                                    <Truck className="w-3 h-3 text-amber-600 -ml-px" />
+                                  <span className="inline-flex items-center gap-0.5 shrink-0">
+                                    <span className="inline-flex items-center" title="Tools & parts: In the truck">
+                                      <Wrench className="w-3 h-3 text-amber-600" />
+                                      <Truck className="w-3 h-3 text-amber-600 -ml-px" />
+                                    </span>
+                                    {partsRecovery === 'yes' && (
+                                      <Mail className="w-3 h-3 text-amber-600" title="Parts recovery initiated" />
+                                    )}
                                   </span>
                                 )
                                 : toolsLoc === 'techs_home'
                                 ? (
-                                  <span className="inline-flex items-center shrink-0" title="Tools & parts: Tech's home">
-                                    <Wrench className="w-3 h-3 text-violet-500" />
-                                    <Home className="w-3 h-3 text-violet-500 -ml-px" />
+                                  <span className="inline-flex items-center gap-0.5 shrink-0">
+                                    <span className="inline-flex items-center" title="Tools & parts: Tech's home">
+                                      <Wrench className="w-3 h-3 text-violet-500" />
+                                      <Home className="w-3 h-3 text-violet-500 -ml-px" />
+                                    </span>
+                                    {partsRecovery === 'yes' && (
+                                      <Mail className="w-3 h-3 text-violet-500" title="Parts recovery initiated" />
+                                    )}
+                                  </span>
+                                )
+                                : partsRecovery === 'yes'
+                                ? (
+                                  <span className="inline-flex items-center shrink-0" title="Parts recovery initiated">
+                                    <Mail className="w-3 h-3 text-muted-foreground" />
                                   </span>
                                 )
                                 : null;
