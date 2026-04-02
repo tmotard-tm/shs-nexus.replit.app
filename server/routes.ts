@@ -15213,6 +15213,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // PO flags per vehicle — open rental and maintenance PO counts
+  app.post("/api/fleet-vehicles/resync-assignments", requireAuth, async (req: any, res) => {
+    try {
+      const { vehicleNumber, enterpriseId } = req.body;
+      if (!vehicleNumber) {
+        return res.status(400).json({ success: false, message: 'vehicleNumber required' });
+      }
+
+      const results: { tpms?: any; holman?: string } = {};
+
+      // Re-check TPMS for the enterprise ID (Holman tech assignment)
+      if (enterpriseId) {
+        const eid = String(enterpriseId).trim().toUpperCase();
+        try {
+          const { getTPMSService } = await import("./tpms-service");
+          const tpmsService = getTPMSService();
+          const techInfo = await tpmsService.getTechInfo(eid);
+          await storage.upsertTpmsCachedAssignment({
+            lookupKey:     eid,
+            lookupType:    'enterprise_id',
+            truckNo:       techInfo.truckNo?.trim() || null,
+            enterpriseId:  eid,
+            techId:        techInfo.techId    || null,
+            firstName:     techInfo.firstName  || null,
+            lastName:      techInfo.lastName   || null,
+            districtNo:    techInfo.districtNo || null,
+            contactNo:     techInfo.contactNo  || null,
+            email:         techInfo.email      || null,
+            rawResponse:   JSON.stringify({ ...techInfo, source: 'resync_button' }),
+            status:        'live',
+            lastSuccessAt: new Date(),
+            lastAttemptAt: new Date(),
+            failureCount:  0,
+          });
+          results.tpms = { truckNo: techInfo.truckNo?.trim() || null, techId: techInfo.techId || null };
+        } catch (err: any) {
+          results.tpms = { error: err.message };
+        }
+      } else {
+        results.tpms = { skipped: 'no enterpriseId provided' };
+      }
+
+      // Holman: report live (fleet data is already sourced live from Holman API on each refresh cycle)
+      results.holman = 'live';
+
+      res.json({ success: true, vehicleNumber, ...results });
+    } catch (error: any) {
+      console.error("Error resyncing vehicle assignments:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   app.get("/api/fleet-vehicles/po-flags", requireAuth, async (req: any, res) => {
     type FlagMap = Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }>;
 

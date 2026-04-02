@@ -340,6 +340,27 @@ export default function FleetManagement() {
     window.history.replaceState(null, '', newSearch ? `?${newSearch}` : window.location.pathname);
   }, [allVehicles]);
 
+  // Resync assignments mutation (re-checks TPMS + Holman APIs for selected vehicle)
+  const resyncAssignmentsMutation = useMutation({
+    mutationFn: async ({ vehicleNumber, enterpriseId }: { vehicleNumber: string; enterpriseId?: string | null }) => {
+      const response = await apiRequest('POST', '/api/fleet-vehicles/resync-assignments', { vehicleNumber, enterpriseId });
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+      const tpms = data.tpms;
+      const tpmsMsg = tpms?.error
+        ? `TPMS error: ${tpms.error}`
+        : tpms?.truckNo
+          ? `TPMS truck: ${tpms.truckNo}`
+          : 'TPMS: no truck assigned';
+      toast({ title: "Assignment Resynced", description: `${tpmsMsg} · Holman: live data refreshed` });
+    },
+    onError: (error: any) => {
+      toast({ title: "Resync Failed", description: error.message || "Failed to resync assignments", variant: "destructive" });
+    },
+  });
+
   // Sync to Holman mutation
   const syncToHolmanMutation = useMutation({
     mutationFn: async ({ vehicleNumber, enterpriseId }: { vehicleNumber: string; enterpriseId?: string | null }) => {
@@ -2320,7 +2341,25 @@ export default function FleetManagement() {
 
                 {/* Assignment Info */}
                 <div className="space-y-4">
-                  <h4 className="font-medium text-sm text-muted-foreground">Assignment Details</h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-medium text-sm text-muted-foreground">Assignment Details</h4>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs"
+                      disabled={resyncAssignmentsMutation.isPending}
+                      onClick={() => resyncAssignmentsMutation.mutate({
+                        vehicleNumber: selectedVehicle.vehicleNumber,
+                        enterpriseId: selectedVehicle.holmanTechAssigned,
+                      })}
+                      data-testid="button-resync-assignments"
+                    >
+                      {resyncAssignmentsMutation.isPending
+                        ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        : <RefreshCw className="h-3 w-3 mr-1" />}
+                      {resyncAssignmentsMutation.isPending ? "Resyncing…" : "Resync"}
+                    </Button>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <Card className="p-3">
                       <div className="flex items-center gap-2 mb-2">
@@ -2356,16 +2395,6 @@ export default function FleetManagement() {
                     </Card>
                   </div>
 
-                  {/* Mismatch Warning */}
-                  {getAssignmentStatus(selectedVehicle).status === 'mismatch' && (
-                    <Alert className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
-                      <AlertTriangle className="h-4 w-4 text-amber-600" />
-                      <AlertTitle className="text-amber-800 dark:text-amber-400">Assignment Mismatch</AlertTitle>
-                      <AlertDescription className="text-amber-700 dark:text-amber-300 text-sm">
-                        TPMS and Holman records don't match. Use "Sync to Holman" to update.
-                      </AlertDescription>
-                    </Alert>
-                  )}
                 </div>
 
                 <Separator />
