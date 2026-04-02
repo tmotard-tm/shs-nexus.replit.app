@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { RefreshCw, Database, Users, Wrench, Gauge, CheckCircle, XCircle, Loader2, ArrowUpDown, ArrowUp, ArrowDown, Filter, FileText, DollarSign, Car, Search } from "lucide-react";
 import {
@@ -466,8 +465,6 @@ export default function HolmanIntegration() {
       />
       
       <main className="p-6">
-        <BackButton href="/integrations" />
-        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <Card>
             <CardHeader>

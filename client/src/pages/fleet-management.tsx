@@ -24,7 +24,6 @@ import {
   UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench, Download,
   Users, PhoneCall, ClipboardList
 } from "lucide-react";
-import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { TelematicsButton } from "@/components/telematics-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -1414,8 +1413,6 @@ export default function FleetManagement() {
       
       <main className="p-6">
         <div className="max-w-7xl mx-auto">
-          <BackButton href="/" />
-
           <div className="space-y-6">
             {/* Stats Cards — clickable quick-filters */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">

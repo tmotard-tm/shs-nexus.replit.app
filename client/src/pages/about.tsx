@@ -1,6 +1,5 @@
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
-import { BackButton } from "@/components/ui/back-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { 
@@ -22,8 +21,6 @@ export default function About() {
       <TopBar title="About Nexus" breadcrumbs={["Home", "About"]} />
       
       <main className="p-6 max-w-5xl mx-auto">
-        <BackButton href="/" />
-        
         <div className="space-y-8">
           <div className="text-center space-y-4 py-8">
             <div className="flex justify-center mb-6">

@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import {
   CheckCircle, XCircle, Loader2, RefreshCw, Search,
@@ -186,8 +185,6 @@ export default function SamsaraIntegration() {
     <MainContent>
       <TopBar title="Samsara Integration" breadcrumbs={["Home", "Integrations", "Samsara"]} />
       <main className="p-6">
-        <BackButton href="/integrations" />
-
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-500 font-bold text-xl">

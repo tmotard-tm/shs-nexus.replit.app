@@ -8,7 +8,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import {
   CheckCircle, XCircle, Loader2, RefreshCw, Search, List,
@@ -266,8 +265,6 @@ export default function SegnoIntegration() {
     <MainContent>
       <TopBar title="Segno" breadcrumbs={["Home", "Integrations", "Segno"]} />
       <main className="p-6">
-        <BackButton href="/integrations" />
-
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 bg-violet-500/10 rounded-xl flex items-center justify-center">

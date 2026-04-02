@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
-import { BackButton } from "@/components/ui/back-button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -385,7 +384,6 @@ export default function RentalOperations() {
       <div className="p-4 space-y-4">
         {/* Header controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          <BackButton />
           <div className="flex items-center gap-1.5 text-muted-foreground text-sm">
             <Database className="h-4 w-4" />
             <span>Snowflake Pipeline Tables</span>

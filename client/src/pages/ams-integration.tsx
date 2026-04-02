@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { RefreshCw, Database, Users, Wrench, CheckCircle, XCircle, Loader2, ArrowUpDown, ArrowUp, ArrowDown, Filter, Search, Truck, List } from "lucide-react";
 import {
@@ -322,9 +321,6 @@ export default function AmsIntegration() {
     <div className="min-h-screen">
       <TopBar title="AMS API Integration" subtitle="In-Home Asset Management System" />
       <div className="p-6">
-        <div className="mb-4">
-          <BackButton href="/integrations" label="Back to Integrations" />
-        </div>
 
         <Card>
           <CardHeader>

@@ -12,7 +12,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle, Download, Car, ChevronDown, ChevronUp } from "lucide-react";
-import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -342,8 +341,6 @@ export default function WeeklyOnboarding() {
       
       <main className="p-6">
         <div className="max-w-6xl mx-auto">
-          <BackButton href="/" />
-
           <div className="space-y-6">
             <Card>
               <CardHeader>

@@ -16,7 +16,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User, AlertCircle, Loader2, RefreshCw, Truck, AlertTriangle, Database, CreditCard } from "lucide-react";
 import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
-import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { useToast } from "@/hooks/use-toast";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
@@ -507,8 +506,6 @@ export default function UpdateVehicle() {
       
       <main className="p-6">
         <div className="max-w-6xl mx-auto">
-          <BackButton href="/" />
-
           <div className="space-y-6">
             {/* Search and Filters */}
             <Card>

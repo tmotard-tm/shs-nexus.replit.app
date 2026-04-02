@@ -15,7 +15,6 @@ import {
   CheckCircle, XCircle, Database, Loader2, Eye, UserX, Link2, History
 } from "lucide-react";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
-import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -194,8 +193,6 @@ export default function VehicleAssignments() {
       
       <main className="p-6">
         <div className="max-w-7xl mx-auto">
-          <BackButton href="/" />
-
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card className="col-span-1">

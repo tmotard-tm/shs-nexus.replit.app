@@ -13,7 +13,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { ApiConfiguration, AllTech, SyncLog } from "@shared/schema";
-import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { 
   Plus, Settings, TestTube, Database, ArrowRight, 
@@ -454,8 +453,6 @@ export default function Integrations() {
       />
       
       <main className="p-6">
-        <BackButton href="/" />
-
         {/* Data Integrations */}
         <Card className="mb-6">
           <CardHeader className="pb-4">

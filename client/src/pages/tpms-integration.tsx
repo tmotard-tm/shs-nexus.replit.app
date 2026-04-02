@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -202,7 +201,6 @@ export default function TpmsIntegration() {
           {/* Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <BackButton />
               <div>
                 <h1 className="text-2xl font-bold">TPMS API Integration</h1>
                 <p className="text-muted-foreground text-sm">

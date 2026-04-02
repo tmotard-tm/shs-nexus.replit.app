@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { Car, User } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
@@ -198,7 +197,6 @@ export default function CreateVehicle() {
       
       <main className="p-6">
         <div className="max-w-4xl mx-auto">
-          <BackButton href="/" />
           <Card>
             <CardHeader>
               <div className="flex items-start justify-between">

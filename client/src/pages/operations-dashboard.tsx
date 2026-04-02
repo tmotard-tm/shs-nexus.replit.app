@@ -6,7 +6,6 @@ import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BackButton } from "@/components/ui/back-button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -362,7 +361,6 @@ export default function OperationsDashboard() {
       <MainContent>
         <TopBar title="Operations Dashboard" breadcrumbs={["Home", "Operations Dashboard"]} />
         <div className="p-6">
-          <BackButton href="/dashboard" />
           <div className="text-center py-8">
             <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-destructive mb-2">Access Denied</h2>
@@ -380,7 +378,6 @@ export default function OperationsDashboard() {
       <MainContent>
         <TopBar title="Operations Dashboard" breadcrumbs={["Home", "Operations Dashboard"]} />
         <div className="p-6">
-          <BackButton href="/dashboard" />
           <div className="text-center py-8">
             <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-destructive mb-2">Error Loading Data</h2>
@@ -398,8 +395,6 @@ export default function OperationsDashboard() {
       <TopBar title="Operations Dashboard" breadcrumbs={["Home", "Operations Dashboard"]} />
       
       <main className="p-6 space-y-6">
-        <BackButton href="/dashboard" />
-
         {/* Header with Export Actions */}
         <div className="flex items-center justify-between">
           <div>

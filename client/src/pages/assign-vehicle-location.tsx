@@ -13,7 +13,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { Car, Search, Calendar, MapPin, Settings, Package, Wrench, User, Database, Loader2, RefreshCw, CheckCircle, Truck, CreditCard } from "lucide-react";
 import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
-import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 import { useQuery } from "@tanstack/react-query";
@@ -511,8 +510,6 @@ export default function AssignVehicleLocation() {
       
       <main className="p-6">
         <div className="max-w-6xl mx-auto">
-          <BackButton href="/" />
-
           <div className="space-y-6">
             {/* Vehicle Search and Filters */}
             <div className="space-y-6">

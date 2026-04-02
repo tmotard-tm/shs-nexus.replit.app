@@ -10,7 +10,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, Database, Loader2, AlertCircle, RefreshCw, User, AlertTriangle, Truck, CreditCard } from "lucide-react";
-import { BackButton } from "@/components/ui/back-button";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -203,8 +202,6 @@ export default function ActiveVehicles() {
       
       <main className="p-6">
         <div className="max-w-6xl mx-auto">
-          <BackButton href="/" />
-
           {/* Loading State */}
           {isLoading && (
             <div className="space-y-6">

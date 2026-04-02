@@ -23,7 +23,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { AlertTriangle, Trash2, Loader2, Truck, Clock, User, Calendar, Car, MapPin, ClipboardList, CheckCircle } from "lucide-react";
-import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 import { TechCombobox, TechRosterEntry } from "@/components/ui/tech-combobox";
@@ -608,8 +607,6 @@ export default function OffboardTechnician() {
       
       <main className="p-6">
         <div className="max-w-7xl mx-auto">
-          <BackButton href="/" />
-
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2">
               <Card>

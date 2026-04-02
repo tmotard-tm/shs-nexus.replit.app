@@ -53,7 +53,6 @@ interface FleetVehiclesResponse {
   vehicles: FleetVehicle[];
 }
 import { useAuth } from "@/hooks/use-auth";
-import { BackButton } from "@/components/ui/back-button";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 
@@ -363,8 +362,6 @@ export default function OnboardHire() {
       
       <main className="p-6">
         <div className="max-w-7xl mx-auto">
-          <BackButton href="/" />
-
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Employee Information Form */}
             <div className="lg:col-span-2">

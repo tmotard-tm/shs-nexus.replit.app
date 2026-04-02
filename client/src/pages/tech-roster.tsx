@@ -9,7 +9,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Users, Search, Filter, ChevronDown, ChevronUp, RefreshCw, Clock, AlertCircle, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X, Check, Link2, Link2Off } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -302,8 +301,6 @@ export default function TechRoster() {
       
       <main className="p-6">
         <div className="max-w-6xl mx-auto">
-          <BackButton href="/" />
-
           <div className="space-y-6">
             <Card>
               <CardHeader>

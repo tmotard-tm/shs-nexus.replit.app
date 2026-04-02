@@ -4,7 +4,6 @@ import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BackButton } from "@/components/ui/back-button";
 import { CheckCircle, XCircle, AlertTriangle, Wrench, FileText, Search, Code } from "lucide-react";
 
 interface Finding {
@@ -176,8 +175,6 @@ export default function TestRepairResults() {
       
       <main className="p-6">
         <div className="max-w-6xl mx-auto">
-          <BackButton href="/" />
-
           <div className="space-y-6">
             <Card>
               <CardHeader>
