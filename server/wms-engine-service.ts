@@ -235,7 +235,10 @@ export const wmsEngineService = {
   async getTruck(truckId: string): Promise<any> {
     return apiFetch(
       `/wms-engine/v1/trucks/${encodeURIComponent(truckId)}?useCaseId=${encodeURIComponent(WMS_ENGINE_USE_CASE_ID)}`,
-      { method: "GET" }
+      {
+        method: "GET",
+        body: JSON.stringify({ useCaseId: WMS_ENGINE_USE_CASE_ID }),
+      }
     );
   },
 
@@ -270,7 +273,10 @@ export const wmsEngineService = {
   async getAssignment(techId: string): Promise<NetSuiteTruckAssignmentResponse> {
     return apiFetch(
       `/wms-engine/v1/trucks/assignments/${encodeURIComponent(techId)}?useCaseId=${encodeURIComponent(WMS_ENGINE_USE_CASE_ID)}`,
-      { method: "GET" }
+      {
+        method: "GET",
+        body: JSON.stringify({ useCaseId: WMS_ENGINE_USE_CASE_ID }),
+      }
     );
   },
 
