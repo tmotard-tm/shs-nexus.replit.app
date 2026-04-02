@@ -411,6 +411,7 @@ export default function FleetManagement() {
   const [poFilterDateTo, setPoFilterDateTo] = useState("");
   const [poFilterPoNumber, setPoFilterPoNumber] = useState("");
   const [poFilterVendor, setPoFilterVendor] = useState("");
+  const [poFilterStatus, setPoFilterStatus] = useState("");
   const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set());
 
   // Address form
@@ -2811,7 +2812,7 @@ export default function FleetManagement() {
           </DialogHeader>
 
           {/* Filter bar */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-1">
             <div>
               <Label className="text-xs text-muted-foreground">Date From</Label>
               <Input
@@ -2848,13 +2849,29 @@ export default function FleetManagement() {
                 onChange={e => setPoFilterVendor(e.target.value)}
               />
             </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Status</Label>
+              <select
+                className="mt-1 h-8 w-full text-xs rounded-md border border-input bg-background px-2"
+                value={poFilterStatus}
+                onChange={e => setPoFilterStatus(e.target.value)}
+              >
+                <option value="">All statuses</option>
+                <option value="APPROVED">Approved</option>
+                <option value="OPEN">Open</option>
+                <option value="HOLD">Hold</option>
+                <option value="BILL HOLD">Bill Hold</option>
+                <option value="CLOSED">Closed</option>
+                <option value="PAID">Paid</option>
+              </select>
+            </div>
           </div>
-          {(poFilterDateFrom || poFilterDateTo || poFilterPoNumber || poFilterVendor) && (
+          {(poFilterDateFrom || poFilterDateTo || poFilterPoNumber || poFilterVendor || poFilterStatus) && (
             <Button
               size="sm"
               variant="ghost"
               className="self-start text-xs h-7 text-muted-foreground"
-              onClick={() => { setPoFilterDateFrom(""); setPoFilterDateTo(""); setPoFilterPoNumber(""); setPoFilterVendor(""); }}
+              onClick={() => { setPoFilterDateFrom(""); setPoFilterDateTo(""); setPoFilterPoNumber(""); setPoFilterVendor(""); setPoFilterStatus(""); }}
             >
               Clear all filters
             </Button>
@@ -2885,6 +2902,7 @@ export default function FleetManagement() {
               const filteredGroups = Array.from(groupMap.values()).filter(({ summary }) => {
                 if (poFilterPoNumber && !String(summary.poNumber || "").toLowerCase().includes(poFilterPoNumber.toLowerCase())) return false;
                 if (poFilterVendor && !String(summary.vendor || summary.vendorName || "").toLowerCase().includes(poFilterVendor.toLowerCase())) return false;
+                if (poFilterStatus && String(summary.poStatus || "").toUpperCase() !== poFilterStatus.toUpperCase()) return false;
                 const poDate = summary.poDate || summary.openDate || summary.date || "";
                 if (poFilterDateFrom && poDate && poDate < poFilterDateFrom) return false;
                 if (poFilterDateTo && poDate && poDate > poFilterDateTo) return false;
