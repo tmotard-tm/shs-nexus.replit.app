@@ -668,10 +668,40 @@ export default function Dashboard() {
   });
 
   // Fetch weekly offboarding name set for persistent "T" badge on tech name
-  const { data: woNameSet } = useQuery<{ names: Array<{ raw: string; last: string; first: string }> }>({
+  const { data: woNameSet } = useQuery<{ names: Array<{ raw: string; last: string; first: string }>; enterpriseIds: string[] }>({
     queryKey: ["/api/weekly-offboarding/name-set"],
     staleTime: 30 * 60 * 1000,
   });
+
+  // Build uppercased enterprise ID set from offboarding roster for O(1) lookup
+  const offboardingEidSet = useMemo(() => {
+    return new Set<string>((woNameSet?.enterpriseIds ?? []).map(id => id.toUpperCase()));
+  }, [woNameSet]);
+
+  // Fetch open rental operations data to build terminated-vehicle lookup
+  const { data: rentalOpenData } = useQuery<{ data: any[] }>({
+    queryKey: ["/api/rental-ops/open"],
+    queryFn: async () => {
+      const res = await fetch("/api/rental-ops/open", { credentials: "include" });
+      if (!res.ok) return { data: [] };
+      return res.json();
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Build set of normalized vehicle numbers whose tech is on the offboarding roster
+  const terminatedVehicleSet = useMemo(() => {
+    const set = new Set<string>();
+    if (!offboardingEidSet.size) return set;
+    for (const r of rentalOpenData?.data ?? []) {
+      if (r.enterpriseId && offboardingEidSet.has(r.enterpriseId.toUpperCase())) {
+        const raw = (r.vehicleNumber || r.vehicleNumberPadded || "").toString();
+        const normalized = raw.replace(/^0+/, "") || "0";
+        if (normalized !== "0") set.add(normalized);
+      }
+    }
+    return set;
+  }, [rentalOpenData, offboardingEidSet]);
 
   // Build last-name → first-names lookup from offboarding data
   const offboardingLastMap = useMemo(() => {
@@ -2986,8 +3016,17 @@ export default function Dashboard() {
                               <td className="px-2 py-2">
                                 <div className="flex items-start gap-1">
                                   <div className="flex flex-col">
-                                    <span className="font-mono font-medium text-[15px]" data-testid={`text-truck-number-${index}`}>
+                                    <span className="font-mono font-medium text-[15px] flex items-center gap-1" data-testid={`text-truck-number-${index}`}>
                                       {truck.truckNumber}
+                                      {!truck.offboardingFlagged && terminatedVehicleSet.has(truck.truckNumber.replace(/^0+/, '') || '0') && (
+                                        <span
+                                          className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 text-[10px] font-bold leading-none"
+                                          title="Tech is in the Weekly Offboarding roster"
+                                          data-testid={`badge-offboarding-vehicle-${index}`}
+                                        >
+                                          T
+                                        </span>
+                                      )}
                                     </span>
                                     {truck.techState && (
                                       <span className="text-[10px] text-muted-foreground font-medium flex items-center gap-1" data-testid={`text-tech-state-${index}`}>
