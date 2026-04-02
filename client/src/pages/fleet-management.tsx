@@ -1923,25 +1923,7 @@ export default function FleetManagement() {
                           ) : null}
 
                           {/* Action bar */}
-                          <div className="flex items-center justify-between pt-2 border-t">
-                            {!vehicle.tpmsAssignedTechId && !vehicle.holmanTechAssigned ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs text-purple-700 border-purple-300 hover:bg-purple-50 dark:text-purple-300 dark:border-purple-700 dark:hover:bg-purple-950"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpsReviewVehicle(vehicle);
-                                  setOpsRefZip(vehicle.zip || targetZipcode);
-                                  setShowOpsReview(true);
-                                }}
-                              >
-                                <Users className="h-3 w-3 mr-1" />
-                                Ops Review
-                              </Button>
-                            ) : (
-                              <span />
-                            )}
+                          <div className="flex items-center justify-end pt-2 border-t">
                             <div className="flex items-center gap-1">
                               <ViewInventoryButton 
                                 vehicleNumber={vehicle.vehicleNumber} 
@@ -2129,6 +2111,20 @@ export default function FleetManagement() {
                   </div>
                   <ViewInventoryButton vehicleNumber={selectedVehicle.vehicleNumber} className="w-full" size="sm" />
                   <TelematicsButton vehicleNumber={selectedVehicle.vehicleNumber} className="w-full" size="sm" />
+                  {!selectedVehicle.tpmsAssignedTechId?.trim() && !selectedVehicle.holmanTechAssigned?.trim() && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full text-purple-700 border-purple-300 hover:bg-purple-50 dark:text-purple-300 dark:border-purple-700 dark:hover:bg-purple-950"
+                      onClick={() => {
+                        setOpsReviewVehicle(selectedVehicle);
+                        setOpsRefZip(selectedVehicle.zip || targetZipcode);
+                        setShowOpsReview(true);
+                      }}
+                    >
+                      <Users className="h-4 w-4 mr-1.5" />Ops Review
+                    </Button>
+                  )}
                 </div>
 
                 <Separator />
