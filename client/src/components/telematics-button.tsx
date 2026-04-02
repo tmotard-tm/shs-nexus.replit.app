@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   Satellite, Loader2, AlertCircle, MapPin, Gauge, Wrench,
@@ -165,7 +164,7 @@ export function TelematicsButton({
             </DialogDescription>
           </DialogHeader>
 
-          <ScrollArea className="flex-1 min-h-0 pr-1">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-2">
             {isLoading && (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
                 <Loader2 className="h-8 w-8 animate-spin" />
@@ -395,7 +394,7 @@ export function TelematicsButton({
 
               </div>
             )}
-          </ScrollArea>
+          </div>
         </DialogContent>
       </Dialog>
     </>
