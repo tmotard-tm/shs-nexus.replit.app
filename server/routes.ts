@@ -10432,7 +10432,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { runTpmsFullRefresh } = await import('./run-tpms-full-refresh');
-      const summary = await runTpmsFullRefresh();
+      const skipStep3 = req.body?.skipStep3 !== false; // defaults to true (skip)
+      const summary = await runTpmsFullRefresh({ skipStep3 });
 
       res.json({
         success: true,

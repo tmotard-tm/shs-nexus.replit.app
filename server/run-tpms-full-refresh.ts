@@ -25,7 +25,8 @@ export interface MismatchRefreshSummary {
   errors: string[];
 }
 
-export async function runTpmsFullRefresh(): Promise<MismatchRefreshSummary> {
+export async function runTpmsFullRefresh(options: { skipStep3?: boolean } = {}): Promise<MismatchRefreshSummary> {
+  const skipStep3 = options.skipStep3 ?? true;
   const summary: MismatchRefreshSummary = {
     snowflakeResolved: 0,
     deltaResolved: 0,
@@ -191,7 +192,9 @@ export async function runTpmsFullRefresh(): Promise<MismatchRefreshSummary> {
   const needsApiLookup = afterStep2.filter(v => !v.tpmsId);
   log(`\n[Step 3] Per-enterprise-ID API fallback for ${needsApiLookup.length} trucks with empty TPMS cache...`);
 
-  if (needsApiLookup.length === 0) {
+  if (skipStep3) {
+    log('[Step 3] Skipped (skipStep3=true) — per-truck API fallback disabled.');
+  } else if (needsApiLookup.length === 0) {
     log('[Step 3] No trucks require per-ID API lookup.');
   } else if (!tpmsService.isConfigured()) {
     log('[Step 3] TPMS not configured — skipping per-ID lookup.');
