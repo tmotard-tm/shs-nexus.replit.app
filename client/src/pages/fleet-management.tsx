@@ -1732,7 +1732,7 @@ export default function FleetManagement() {
                               {poFlags?.hasOpenMaintenance && (
                                 <Badge className="bg-amber-500 text-white text-xs border-none">MAINT ({poFlags.openMaintenanceCount})</Badge>
                               )}
-                              {isInRentalOps && (
+                              {isInRentalOps && !poFlags?.hasOpenRental && (
                                 <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
                               )}
                               {hasDTC && (
@@ -1828,11 +1828,8 @@ export default function FleetManagement() {
                             </div>
                           ) : null}
 
-                          {/* Status Badge + Action */}
-                          <div className="flex items-center justify-between pt-2 border-t">
-                            <Badge className={assignStatus.color + ' border text-xs'}>
-                              {assignStatus.label}
-                            </Badge>
+                          {/* Action bar */}
+                          <div className="flex items-center justify-end pt-2 border-t">
                             <div className="flex items-center gap-1">
                               <ViewInventoryButton 
                                 vehicleNumber={vehicle.vehicleNumber} 
