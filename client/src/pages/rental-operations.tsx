@@ -262,7 +262,10 @@ export default function RentalOperations() {
       sourceFilter === "all" ? true :
       sourceFilter === "enterprise" ? r.source === "enterprise" :
       r.source === "holman_non_enterprise" || r.source === "holman_raw";
-    const matchesTerminated = !showTerminatedOnly || (r.enterpriseId && offboardingEidSet.has(r.enterpriseId.toUpperCase()));
+    const eid = r.enterpriseId?.toUpperCase();
+    const matchesTerminated = !showTerminatedOnly || (eid && (
+      offboardingEidSet.has(eid) || !!hrTechStatusMap?.[eid]
+    ));
     return matchesSearch && matchesSource && matchesTerminated;
   });
 
@@ -575,7 +578,7 @@ export default function RentalOperations() {
                   <button
                     onClick={() => setShowTerminatedOnly(v => !v)}
                     className={`text-xs px-2 py-1 rounded border transition-colors flex items-center gap-1 ${showTerminatedOnly ? "bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300" : "bg-muted text-muted-foreground border-muted-foreground/30"}`}
-                    title={showTerminatedOnly ? "Showing only terminated-tech rentals" : "Show only rentals with a terminated tech (T badge)"}
+                    title={showTerminatedOnly ? "Showing only at-risk tech rentals (T, L, P, or S badge)" : "Show only rentals with an at-risk tech (T = terminated, L = leave, P = paid leave, S = suspended)"}
                   >
                     <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 text-[9px] font-bold leading-none">T</span>
                     {showTerminatedOnly ? "Terminated Only" : "Terminated"}
