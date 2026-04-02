@@ -93,7 +93,7 @@ export function MultiSelectFilter({
       return "None";
     }
     if (selectedValues.length === 0 || selectedValues.length === options.length) {
-      return "All";
+      return placeholder ?? "All";
     }
     if (selectedValues.length === 1) {
       return selectedValues[0];
