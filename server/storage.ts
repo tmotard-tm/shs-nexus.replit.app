@@ -6149,6 +6149,8 @@ export class DatabaseStorage implements IStorage {
           repaired: data.repaired,
           comments: data.comments,
           phoneRecoveryInitiated: data.phoneRecoveryInitiated,
+          toolsPartsLocation: data.toolsPartsLocation,
+          partsRecoveryInitiated: data.partsRecoveryInitiated,
           updatedBy: data.updatedBy,
           updatedAt: new Date(),
           vehicleNumberDisplay: toDisplayNumber(data.vehicleNumber),
