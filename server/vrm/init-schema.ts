@@ -246,7 +246,26 @@ export async function initVrmSchema(): Promise<void> {
     );
   `);
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rental_checks (
+      id                      VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      tech_ldap               VARCHAR(50)  NOT NULL,
+      tech_name               VARCHAR(255),
+      daily_net_with_rental   DECIMAL(10,2),
+      daily_net_before_rental DECIMAL(10,2),
+      recommendation          VARCHAR(20)  NOT NULL,
+      scorecard_score         DECIMAL(6,3),
+      tenure_months           INTEGER,
+      completes               INTEGER,
+      lookback_days           INTEGER,
+      checked_at              TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+
   // Indexes
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_checks_ldap_idx ON vrm_rental_checks(tech_ldap);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_checks_at_idx ON vrm_rental_checks(checked_at);`);
+
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_techs_ldap_idx ON vrm_techs(ldap);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_techs_status_idx ON vrm_techs(current_status);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_techs_market_idx ON vrm_techs(market);`);

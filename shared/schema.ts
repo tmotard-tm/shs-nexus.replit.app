@@ -86,6 +86,7 @@ export interface RolePermissionSettings {
       communicationHub: boolean;
       techRoster: boolean;
       rentalOperations: boolean;
+      wmsEngine: boolean;
     };
     activities: {
       enabled: boolean;
