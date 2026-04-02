@@ -237,6 +237,9 @@ export default function FleetManagement() {
   const [divisionFilter, setDivisionFilter] = useState("all");
   const [districtFilter, setDistrictFilter] = useState("all");
   
+  // Stat card quick-filter (clicking a summary card filters the grid)
+  const [statCardFilter, setStatCardFilter] = useState<"all"|"assigned"|"unassigned"|"mismatch"|"rental">("all");
+
   // Tech Assignment filters
   const [holmanTechFilter, setHolmanTechFilter] = useState("all");
   const [tpmsTechFilter, setTpmsTechFilter] = useState("all");
@@ -1217,12 +1220,27 @@ export default function FleetManagement() {
         (dtcFilter === "yes" && hasDTCF) ||
         (dtcFilter === "no" && !hasDTCF);
 
+      // Stat card quick-filter
+      const tpmsId2 = vehicle.tpmsAssignedTechId?.trim() || '';
+      const holmanId2 = vehicle.holmanTechAssigned?.trim() || '';
+      const isMismatchSC = (holmanId2 && tpmsId2 && holmanId2.toLowerCase() !== tpmsId2.toLowerCase()) || (holmanId2 && !tpmsId2);
+      const isRentalSC = rentalOpsVehicleSet.has(vehicle.vehicleNumber)
+        || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
+        || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
+      const matchesStatCard =
+        statCardFilter === "all" ||
+        (statCardFilter === "assigned"   && !!tpmsId2) ||
+        (statCardFilter === "unassigned" && !tpmsId2) ||
+        (statCardFilter === "mismatch"   && isMismatchSC) ||
+        (statCardFilter === "rental"     && isRentalSC);
+
       return matchesSearch && matchesMake && matchesModel && matchesYear && matchesColor &&
              matchesProgram && matchesBranding && matchesInterior && matchesTuneStatus &&
              matchesAssignment &&
              matchesState && matchesCity && matchesLicenseState && matchesRegion && matchesDivision && matchesDistrict &&
              matchesHolmanTech && matchesTpmsTech && matchesMismatch &&
-             matchesRentalOps && matchesPoRental && matchesPoMaint && matchesDTC;
+             matchesRentalOps && matchesPoRental && matchesPoMaint && matchesDTC &&
+             matchesStatCard;
     });
   }, [activeVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
       vehicleProgramFilter, brandingFilter, interiorFilter, tuneStatusFilter,
@@ -1230,6 +1248,7 @@ export default function FleetManagement() {
       stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
       holmanTechFilter, tpmsTechFilter, mismatchFilter,
       rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter,
+      statCardFilter,
       rentalOpsVehicleSet, poFlagsMap, dtcTruckSet]);
 
   // Async zip-distance sort: fetch real coordinates and sort by haversine distance
@@ -1380,6 +1399,11 @@ export default function FleetManagement() {
     const t = v.tpmsAssignedTechId?.trim() || '';
     return (h && t && h.toLowerCase() !== t.toLowerCase()) || (h && !t);
   }).length;
+  const rentalCount = activeVehicles.filter(v =>
+    rentalOpsVehicleSet.has(v.vehicleNumber) ||
+    rentalOpsVehicleSet.has(toCanonical(v.vehicleNumber)) ||
+    rentalOpsVehicleSet.has(toDisplayNumber(v.vehicleNumber))
+  ).length;
 
   return (
     <MainContent>
@@ -1393,9 +1417,13 @@ export default function FleetManagement() {
           <BackButton href="/" />
 
           <div className="space-y-6">
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card>
+            {/* Stats Cards — clickable quick-filters */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {/* Total Vehicles — clears filter */}
+              <Card
+                onClick={() => setStatCardFilter("all")}
+                className={`cursor-pointer transition-all hover:shadow-md select-none ${statCardFilter === "all" ? "ring-2 ring-offset-1 ring-foreground/30" : ""}`}
+              >
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium">Total Vehicles</CardTitle>
                 </CardHeader>
@@ -1403,7 +1431,12 @@ export default function FleetManagement() {
                   <p className="text-2xl font-bold" data-testid="text-total-vehicles">{activeVehicles.length}</p>
                 </CardContent>
               </Card>
-              <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/10">
+
+              {/* Assigned */}
+              <Card
+                onClick={() => setStatCardFilter(statCardFilter === "assigned" ? "all" : "assigned")}
+                className={`cursor-pointer transition-all hover:shadow-md select-none border-blue-200 bg-blue-50/50 dark:bg-blue-950/10 ${statCardFilter === "assigned" ? "ring-2 ring-offset-1 ring-blue-500" : ""}`}
+              >
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-blue-600">Assigned</CardTitle>
                 </CardHeader>
@@ -1411,7 +1444,12 @@ export default function FleetManagement() {
                   <p className="text-2xl font-bold text-blue-600" data-testid="text-assigned-count">{assignedCount}</p>
                 </CardContent>
               </Card>
-              <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/10">
+
+              {/* Unassigned */}
+              <Card
+                onClick={() => setStatCardFilter(statCardFilter === "unassigned" ? "all" : "unassigned")}
+                className={`cursor-pointer transition-all hover:shadow-md select-none border-green-200 bg-green-50/50 dark:bg-green-950/10 ${statCardFilter === "unassigned" ? "ring-2 ring-offset-1 ring-green-500" : ""}`}
+              >
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-green-600">Unassigned</CardTitle>
                 </CardHeader>
@@ -1419,12 +1457,30 @@ export default function FleetManagement() {
                   <p className="text-2xl font-bold text-green-600" data-testid="text-unassigned-count">{unassignedCount}</p>
                 </CardContent>
               </Card>
-              <Card className="border-red-200 bg-red-50/50 dark:bg-red-950/10">
+
+              {/* Mismatches */}
+              <Card
+                onClick={() => setStatCardFilter(statCardFilter === "mismatch" ? "all" : "mismatch")}
+                className={`cursor-pointer transition-all hover:shadow-md select-none border-red-200 bg-red-50/50 dark:bg-red-950/10 ${statCardFilter === "mismatch" ? "ring-2 ring-offset-1 ring-red-500" : ""}`}
+              >
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-red-600">Mismatches</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-red-600" data-testid="text-mismatch-count">{mismatchCount}</p>
+                </CardContent>
+              </Card>
+
+              {/* Rentals */}
+              <Card
+                onClick={() => setStatCardFilter(statCardFilter === "rental" ? "all" : "rental")}
+                className={`cursor-pointer transition-all hover:shadow-md select-none border-orange-200 bg-orange-50/50 dark:bg-orange-950/10 ${statCardFilter === "rental" ? "ring-2 ring-offset-1 ring-orange-500" : ""}`}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-orange-600">Rentals</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-orange-600">{rentalCount}</p>
                 </CardContent>
               </Card>
             </div>
