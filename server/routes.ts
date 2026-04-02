@@ -15404,6 +15404,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const vehicles = vehicleRows.rows as any[];
       console.log(`[Fleet CSV] Queried ${vehicles.length} active vehicles from Holman cache`);
 
+      // ─── Enrich with generalStatus, subStatus, AMS status, location, Samsara ─
+      const enrichMap = new Map<string, any>();
+      let rentalVehicleSet = new Set<string>();
+      try {
+        const port = parseInt(process.env.PORT || "5000");
+        const cookie = req.headers.cookie || "";
+        const [avRes, rentalRes] = await Promise.all([
+          fetch(`http://localhost:${port}/api/fs/all-vehicles`, { headers: { cookie } }).catch(() => null),
+          fetch(`http://localhost:${port}/api/rental-ops/open-vehicle-numbers`, { headers: { cookie } }).catch(() => null),
+        ]);
+        if (avRes?.ok) {
+          const avData = await avRes.json();
+          for (const v of avData.vehicles || []) {
+            enrichMap.set(toCanonical(v.vehicleNumber), v);
+          }
+        }
+        if (rentalRes?.ok) {
+          const rentalData = await rentalRes.json();
+          for (const vn of rentalData.vehicleNumbers || []) {
+            rentalVehicleSet.add(toCanonical(vn));
+          }
+        }
+        console.log(`[Fleet CSV] Enrichment: ${enrichMap.size} vehicles enriched, ${rentalVehicleSet.size} on rental`);
+      } catch (enrichErr: any) {
+        console.warn("[Fleet CSV] Enrichment fetch failed (continuing without):", enrichErr?.message);
+      }
+
       // ─── Odometer candidate type ────────────────────────────────────────────
       interface OdoCandidate { miles: number; date: string; source: string; }
 
@@ -15556,9 +15583,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "Vehicle Number", "VIN", "Year", "Make", "Model", "Color",
         "Division", "District", "Region", "State", "City",
         "License Plate", "License State",
+        // Status & operational columns
+        "TPMS Status",
+        "Rental",
+        "AMS Status",
+        "General Status",
+        "Sub Status",
+        "Last Known Location",
+        "Location Source",
+        "Location Updated At",
+        "Last Samsara Signal",
+        "Samsara Status",
+        // Tech assignment
         "Holman Tech Enterprise ID", "Holman Tech Name",
         "TPMS Enterprise ID", "TPMS Tech ID", "TPMS First Name", "TPMS Last Name",
         "TPMS District", "TPMS Contact", "TPMS Email",
+        // Odometer
         "Odometer (Miles)", "Odometer Date", "Odometer Source", "Odometer Notes",
       ];
 
@@ -15583,13 +15623,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const best = selectBestOdometer(candidates);
           const notes = best?.excluded?.length ? `Excluded outliers: ${best.excluded.join(", ")}` : "";
 
+          // Enrichment data from all-vehicles cache
+          const enriched = enrichMap.get(truckKey);
+          const tpmsStatus = v.tpmsEnterpriseId ? "Assigned" : "Unassigned";
+          const isRental = rentalVehicleSet.has(truckKey) ? "Yes" : "No";
+
           return [
             v.vehicleNumber, v.vin, v.year, v.make, v.model, v.color,
             v.division, v.district, v.region, v.state, v.city,
             v.licensePlate, v.licenseState,
+            // Status & operational
+            tpmsStatus,
+            isRental,
+            enriched?.truckStatus ?? "",
+            enriched?.generalStatus ?? "",
+            enriched?.subStatus ?? "",
+            enriched?.lastKnownLocation ?? "",
+            enriched?.locationSource ?? "",
+            enriched?.locationUpdatedAt ? formatDate(enriched.locationUpdatedAt) : "",
+            enriched?.lastSamsaraSignal ? formatDate(enriched.lastSamsaraSignal) : "",
+            enriched?.samsaraStatus ?? "",
+            // Tech assignment
             v.holmanTechEnterpriseId, v.holmanTechName,
             v.tpmsEnterpriseId, v.tpmsTechId, v.tpmsFirstName, v.tpmsLastName,
             v.tpmsDistrict, v.tpmsContact, v.tpmsEmail,
+            // Odometer
             best?.miles != null ? Math.round(best.miles * 10) / 10 : "", formatDate(best?.date), best?.source ?? "", notes,
           ].map(escapeCell).join(",");
         }),
