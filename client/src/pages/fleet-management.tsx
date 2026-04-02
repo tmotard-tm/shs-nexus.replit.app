@@ -1726,13 +1726,13 @@ export default function FleetManagement() {
                               <Badge variant="outline" className="text-xs">
                                 {ownership.type}
                               </Badge>
-                              {poFlags?.hasOpenRental && (
+                              {poFlags?.hasOpenRental && !isInRentalOps && (
                                 <Badge className="bg-red-600 text-white text-xs border-none">RENTAL ({poFlags.openRentalCount})</Badge>
                               )}
                               {poFlags?.hasOpenMaintenance && (
                                 <Badge className="bg-amber-500 text-white text-xs border-none">MAINT ({poFlags.openMaintenanceCount})</Badge>
                               )}
-                              {isInRentalOps && !poFlags?.hasOpenRental && (
+                              {isInRentalOps && (
                                 <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
                               )}
                               {hasDTC && (
