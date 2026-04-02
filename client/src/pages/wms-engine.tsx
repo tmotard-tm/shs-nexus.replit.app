@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -124,12 +124,25 @@ function TruckLocationsTab() {
     },
   });
 
-  const { data: trucksData, isLoading, refetch } = useQuery<{ success: boolean; data: any[] }>({
+  const { data: trucksData, isLoading, isError: trucksIsError, error: trucksError, refetch } = useQuery<{ success: boolean; data: any[] }>({
     queryKey: ["/api/wms/trucks"],
     retry: false,
   });
 
   const trucks = trucksData?.success ? (trucksData.data || []) : [];
+
+  useEffect(() => {
+    if (trucksIsError) {
+      const errMsg = (trucksError instanceof Error ? trucksError.message : String(trucksError)) || "";
+      if (!errMsg.startsWith("503")) {
+        toast({
+          title: "Failed to load truck locations",
+          description: parseApiError(trucksError, "An error occurred loading trucks from the WMS Engine"),
+          variant: "destructive",
+        });
+      }
+    }
+  }, [trucksIsError]);
 
   const createMutation = useMutation({
     mutationFn: (data: CreateTruckForm) =>
@@ -320,6 +333,16 @@ function TruckLocationsTab() {
         <div className="flex items-center justify-center py-12 text-muted-foreground">
           <RefreshCw className="h-5 w-5 animate-spin mr-2" />
           Loading trucks...
+        </div>
+      ) : trucksIsError && !((trucksError instanceof Error ? trucksError.message : "") || "").startsWith("503") ? (
+        <div className="flex flex-col items-center justify-center py-12 text-destructive/70 border border-destructive/20 rounded-lg bg-destructive/5">
+          <AlertCircle className="h-8 w-8 mb-2 opacity-60" />
+          <p className="text-sm font-medium">Failed to load truck locations</p>
+          <p className="text-xs mt-1 text-muted-foreground">{parseApiError(trucksError, "Check your network or WMS Engine connectivity")}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-1" />
+            Retry
+          </Button>
         </div>
       ) : trucks.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border rounded-lg">
@@ -534,7 +557,7 @@ function TechAssignmentsTab() {
     defaultValues: { techId: "", truckId: "" },
   });
 
-  const { data: assignmentData, isLoading: lookupLoading, refetch: refetchAssignment } = useQuery<{
+  const { data: assignmentData, isLoading: lookupLoading, isError: lookupIsError, error: lookupError, refetch: refetchAssignment } = useQuery<{
     success: boolean;
     data?: any;
     message?: string;
@@ -545,6 +568,21 @@ function TechAssignmentsTab() {
   });
 
   const assignment = assignmentData?.success ? assignmentData.data : null;
+
+  useEffect(() => {
+    if (lookupIsError && lookedUpTech) {
+      const errMsg = (lookupError instanceof Error ? lookupError.message : String(lookupError)) || "";
+      const is404 = errMsg.startsWith("404");
+      const is503 = errMsg.startsWith("503");
+      if (!is404 && !is503) {
+        toast({
+          title: "Lookup failed",
+          description: parseApiError(lookupError, "Failed to look up tech assignment in WMS Engine"),
+          variant: "destructive",
+        });
+      }
+    }
+  }, [lookupIsError, lookedUpTech]);
 
   function handleLookup() {
     const id = lookupTechId.trim();
@@ -714,6 +752,32 @@ function TechAssignmentsTab() {
               <RefreshCw className="h-4 w-4 animate-spin" />
               Looking up assignment for <strong>{lookedUpTech}</strong>...
             </div>
+          ) : lookupIsError ? (
+            (() => {
+              const errMsg = (lookupError instanceof Error ? lookupError.message : String(lookupError)) || "";
+              if (errMsg.startsWith("404")) {
+                return (
+                  <div className="flex items-center gap-2 text-muted-foreground text-sm py-4 border rounded-lg px-4">
+                    <AlertCircle className="h-4 w-4" />
+                    No assignment found for tech <strong className="ml-1">{lookedUpTech}</strong>
+                  </div>
+                );
+              }
+              if (errMsg.startsWith("503")) return null;
+              return (
+                <div className="flex flex-col gap-2 text-sm py-4 border border-destructive/20 rounded-lg px-4 bg-destructive/5">
+                  <div className="flex items-center gap-2 text-destructive/80">
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="font-medium">Lookup failed for <strong>{lookedUpTech}</strong></span>
+                  </div>
+                  <p className="text-muted-foreground text-xs">{parseApiError(lookupError, "An unexpected error occurred")}</p>
+                  <Button variant="outline" size="sm" className="self-start mt-1" onClick={() => refetchAssignment()}>
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Retry
+                  </Button>
+                </div>
+              );
+            })()
           ) : assignment ? (
             <Card>
               <CardHeader className="pb-3">
