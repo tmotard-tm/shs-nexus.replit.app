@@ -46,7 +46,12 @@ function nodeRequest(
     const lib = parsed.protocol === "https:" ? https : http;
     const bodyBuf = options.body ? Buffer.from(options.body, "utf8") : null;
     const headers: Record<string, string | number> = { ...options.headers };
-    if (bodyBuf) headers["Content-Length"] = bodyBuf.length;
+    // Do NOT set Content-Length for GET/HEAD — gateways reject GET+Content-Length.
+    // For other methods, set it explicitly so the server knows the body size.
+    const method = options.method.toUpperCase();
+    if (bodyBuf && method !== "GET" && method !== "HEAD") {
+      headers["Content-Length"] = bodyBuf.length;
+    }
 
     const req = lib.request(
       {
