@@ -10459,8 +10459,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Helper: upsert a tech profile into the last-known truck→tech cache
   async function upsertLastKnownTruckTech(profile: any, truckNoKey: string) {
     try {
+      const normalizedKey = truckNoKey.trim().toUpperCase();
       await db.insert(tpmsLastKnownTruckTech).values({
-        truckNo: truckNoKey,
+        truckNo: normalizedKey,
         enterpriseId: profile.enterpriseId || null,
         techId: profile.techId || null,
         firstName: profile.firstName || null,
@@ -10540,16 +10541,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // ── Last-known cache logic (only when querying by a specific truckNo) ──
       if (truckNo) {
-        const truckKey = (truckNo as string).trim();
+        const truckKey = (truckNo as string).trim().toUpperCase();
         if (results.length > 0) {
           // Live results found — seed/refresh the last-known cache in the background
           for (const r of results) {
-            if (r.truckNo) {
-              upsertLastKnownTruckTech(r, r.truckNo).catch(() => {});
+            const rTruckNo = r.truckNo?.trim().toUpperCase();
+            if (rTruckNo) {
+              upsertLastKnownTruckTech(r, rTruckNo).catch(() => {});
             }
           }
         } else {
-          // No live results — fall back to last-known cache
+          // No live results — fall back to last-known cache (exact normalized key)
           const [cached] = await db
             .select()
             .from(tpmsLastKnownTruckTech)
@@ -11017,7 +11019,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         // Immediately seed the last-known cache for this truck assignment
-        upsertLastKnownTruckTech({ ...profile, truckNo }, truckNo).catch(() => {});
+        upsertLastKnownTruckTech({ ...profile, truckNo }, truckNo.trim().toUpperCase()).catch(() => {});
       }
       
       res.json({ success: true, result });
