@@ -21,8 +21,10 @@ import {
   Truck, Search, Filter, ChevronDown, ChevronUp, ChevronRight, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
-  UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench, Download
+  UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench, Download,
+  Users, PhoneCall, ClipboardList
 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BackButton } from "@/components/ui/back-button";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { TelematicsButton } from "@/components/telematics-button";
@@ -159,6 +161,21 @@ export default function FleetManagement() {
   const [dtcFilter, setDtcFilter] = useState("all");
 
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+
+  // Ops Review modal
+  const [showOpsReview, setShowOpsReview] = useState(false);
+  const [opsRefZip, setOpsRefZip] = useState("");
+  const [opsRentalSorted, setOpsRentalSorted] = useState<Array<{
+    techRacfid: string; techName: string; vehicleNumber: string;
+    homeCity: string; homeState: string; homePostal: string; distanceMiles: number;
+  }>>([]);
+  const [opsUnassignedSorted, setOpsUnassignedSorted] = useState<Array<{
+    techRacfid: string; techName: string; employeeId: string;
+    districtNo: string; planningAreaName: string;
+    homeCity: string; homeState: string; homePostal: string;
+    mainPhone: string; cellPhone: string; distanceMiles: number;
+  }>>([]);
+  const [opsSorting, setOpsSorting] = useState(false);
   const [showOos, setShowOos] = useState(false);
   
   // Quick lookup state
@@ -528,6 +545,113 @@ export default function FleetManagement() {
   }, [dtcVehiclesData]);
 
   const dtcTruckSet = useMemo(() => new Set(dtcScoreMap.keys()), [dtcScoreMap]);
+
+  // All techs roster — fetched lazily when Ops Review modal is opened
+  const { data: allTechsRoster } = useQuery<Array<{
+    techRacfid: string; techName: string; employeeId: string;
+    districtNo: string | null; planningAreaName: string | null;
+    employmentStatus: string | null;
+    homeCity: string | null; homeState: string | null; homePostal: string | null;
+    mainPhone: string | null; cellPhone: string | null;
+  }>>({
+    queryKey: ['/api/all-techs'],
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    enabled: showOpsReview,
+  });
+
+  type AllTechEntry = {
+    techRacfid: string; techName: string; employeeId: string;
+    districtNo: string | null; planningAreaName: string | null;
+    employmentStatus: string | null;
+    homeCity: string | null; homeState: string | null; homePostal: string | null;
+    mainPhone: string | null; cellPhone: string | null;
+  };
+  const allTechsRosterMap = useMemo(() => {
+    const m = new Map<string, AllTechEntry>();
+    for (const t of allTechsRoster ?? []) {
+      m.set(t.techRacfid.toLowerCase(), t);
+    }
+    return m;
+  }, [allTechsRoster]);
+
+  // Ops Review — raw list of techs whose assigned vehicle is in rental ops
+  const opsRawRentalTechs = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Array<{ techRacfid: string; techName: string; vehicleNumber: string; homeCity: string; homeState: string; homePostal: string; distanceMiles: number }> = [];
+    for (const v of allVehicles) {
+      const inRental = rentalOpsVehicleSet.has(v.vehicleNumber)
+        || rentalOpsVehicleSet.has(toCanonical(v.vehicleNumber))
+        || rentalOpsVehicleSet.has(toDisplayNumber(v.vehicleNumber));
+      const techId = (v.tpmsAssignedTechId?.trim() || v.holmanTechAssigned?.trim() || '');
+      if (!inRental || !techId || seen.has(techId.toLowerCase())) continue;
+      seen.add(techId.toLowerCase());
+      const rec = allTechsRosterMap.get(techId.toLowerCase());
+      result.push({
+        techRacfid: techId,
+        techName: v.tpmsAssignedTechName || v.holmanTechName || rec?.techName || techId,
+        vehicleNumber: v.vehicleNumber,
+        homeCity: rec?.homeCity || '',
+        homeState: rec?.homeState || '',
+        homePostal: rec?.homePostal || '',
+        distanceMiles: Infinity,
+      });
+    }
+    return result;
+  }, [allVehicles, rentalOpsVehicleSet, allTechsRosterMap]);
+
+  // Ops Review — raw list of active techs not assigned to any vehicle
+  const opsRawUnassigned = useMemo(() => {
+    const assignedIds = new Set<string>();
+    for (const v of allVehicles) {
+      if (v.tpmsAssignedTechId?.trim()) assignedIds.add(v.tpmsAssignedTechId.trim().toLowerCase());
+      if (v.holmanTechAssigned?.trim()) assignedIds.add(v.holmanTechAssigned.trim().toLowerCase());
+    }
+    return (allTechsRoster ?? [])
+      .filter(t => t.employmentStatus === 'A' && !assignedIds.has(t.techRacfid.toLowerCase()))
+      .map(t => ({
+        techRacfid: t.techRacfid,
+        techName: t.techName,
+        employeeId: t.employeeId,
+        districtNo: t.districtNo || '',
+        planningAreaName: t.planningAreaName || '',
+        homeCity: t.homeCity || '',
+        homeState: t.homeState || '',
+        homePostal: t.homePostal || '',
+        mainPhone: t.mainPhone || '',
+        cellPhone: t.cellPhone || '',
+        distanceMiles: Infinity,
+      }));
+  }, [allVehicles, allTechsRoster]);
+
+  // Sort both Ops Review lists by distance from opsRefZip whenever the modal is open or ref zip changes
+  useEffect(() => {
+    if (!showOpsReview) return;
+    let cancelled = false;
+    setOpsSorting(true);
+
+    const sortByZip = async <T extends { homePostal: string; distanceMiles: number }>(items: T[]): Promise<T[]> => {
+      if (!opsRefZip || items.length === 0) return items.map(i => ({ ...i, distanceMiles: Infinity }));
+      const refCoords = await fetchZipCoords(opsRefZip);
+      if (!refCoords) return items.map(i => ({ ...i, distanceMiles: Infinity }));
+      const withDist = await Promise.all(items.map(async item => {
+        if (!item.homePostal) return { ...item, distanceMiles: Infinity };
+        const coords = await fetchZipCoords(item.homePostal);
+        if (!coords) return { ...item, distanceMiles: Infinity };
+        return { ...item, distanceMiles: haversineDistance(refCoords.lat, refCoords.lng, coords.lat, coords.lng) };
+      }));
+      return withDist.sort((a, b) => a.distanceMiles - b.distanceMiles);
+    };
+
+    Promise.all([sortByZip(opsRawRentalTechs), sortByZip(opsRawUnassigned)]).then(([rental, unassigned]) => {
+      if (cancelled) return;
+      setOpsRentalSorted(rental);
+      setOpsUnassignedSorted(unassigned);
+      setOpsSorting(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [showOpsReview, opsRefZip, opsRawRentalTechs, opsRawUnassigned]);
 
   // Score thresholds: higher score → warmer colour → red = critical
   function dtcBadgeClass(score: number): string {
@@ -1255,6 +1379,17 @@ export default function FleetManagement() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button
+                      onClick={() => {
+                        setOpsRefZip(targetZipcode);
+                        setShowOpsReview(true);
+                      }}
+                      variant="outline"
+                      data-testid="button-ops-review"
+                    >
+                      <Users className="h-4 w-4 mr-2" />
+                      Ops Review
+                    </Button>
                     <Button
                       onClick={() => {
                         const a = document.createElement("a");
@@ -3445,6 +3580,177 @@ export default function FleetManagement() {
                 Add Comment
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Ops Review Modal ────────────────────────────────────────────────── */}
+      <Dialog open={showOpsReview} onOpenChange={setShowOpsReview}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-blue-600" />
+              Ops Review
+            </DialogTitle>
+            <DialogDescription>
+              Techs whose vehicle is currently in rental ops, and active techs without an assigned vehicle.
+            </DialogDescription>
+            {/* Reference zip for distance sorting */}
+            <div className="flex items-center gap-2 mt-3">
+              <MapPin className="h-4 w-4 text-muted-foreground shrink-0" />
+              <Input
+                placeholder="Reference zip for distance sort..."
+                value={opsRefZip}
+                onChange={e => setOpsRefZip(e.target.value)}
+                className="h-8 w-48 text-sm"
+              />
+              {opsSorting && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              {!opsSorting && opsRefZip && (
+                <span className="text-xs text-muted-foreground">Sorted by distance from {opsRefZip}</span>
+              )}
+              {!opsRefZip && (
+                <span className="text-xs text-muted-foreground">Enter a zip to sort closest → furthest</span>
+              )}
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-hidden px-6 pb-6 pt-4">
+            <Tabs defaultValue="rental" className="h-full flex flex-col">
+              <TabsList className="shrink-0 w-fit mb-4">
+                <TabsTrigger value="rental" className="gap-2">
+                  <Car className="h-4 w-4" />
+                  In Rentals
+                  <Badge variant="secondary" className="ml-1">{opsRentalSorted.length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="unassigned" className="gap-2">
+                  <UserX className="h-4 w-4" />
+                  Unassigned Active
+                  <Badge variant="secondary" className="ml-1">{opsUnassignedSorted.length}</Badge>
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ── Techs in Rentals ── */}
+              <TabsContent value="rental" className="flex-1 overflow-y-auto mt-0">
+                {!allTechsRoster && (
+                  <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading tech roster…
+                  </div>
+                )}
+                {allTechsRoster && opsRentalSorted.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm gap-2">
+                    <Car className="h-8 w-8 opacity-40" />
+                    No techs currently have a vehicle in rental ops.
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {opsRentalSorted.map((t, i) => {
+                    const hasDist = t.distanceMiles !== Infinity;
+                    const distLabel = hasDist ? getDistanceLabel(t.distanceMiles) : null;
+                    return (
+                      <div key={t.techRacfid} className="flex items-center gap-3 border rounded-md px-4 py-3 bg-card hover:bg-muted/40 transition-colors">
+                        <span className="text-xs font-mono text-muted-foreground w-6 shrink-0">{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-sm truncate">{t.techName}</span>
+                            <span className="text-xs font-mono text-muted-foreground">{t.techRacfid}</span>
+                          </div>
+                          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Truck className="h-3 w-3" /> Truck #{t.vehicleNumber}
+                            </span>
+                            {(t.homeCity || t.homeState) && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Home className="h-3 w-3" />
+                                {[t.homeCity, t.homeState].filter(Boolean).join(', ')}
+                                {t.homePostal && ` ${t.homePostal}`}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {hasDist ? (
+                            <div>
+                              <span className={`text-sm font-medium ${distLabel!.color}`}>
+                                {t.distanceMiles.toFixed(0)} mi
+                              </span>
+                              <div className={`text-xs ${distLabel!.color}`}>{distLabel!.label}</div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </TabsContent>
+
+              {/* ── Unassigned Active Techs ── */}
+              <TabsContent value="unassigned" className="flex-1 overflow-y-auto mt-0">
+                {!allTechsRoster && (
+                  <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading tech roster…
+                  </div>
+                )}
+                {allTechsRoster && opsUnassignedSorted.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm gap-2">
+                    <UserX className="h-8 w-8 opacity-40" />
+                    All active techs have a vehicle assigned.
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {opsUnassignedSorted.map((t, i) => {
+                    const hasDist = t.distanceMiles !== Infinity;
+                    const distLabel = hasDist ? getDistanceLabel(t.distanceMiles) : null;
+                    const phone = t.cellPhone || t.mainPhone || '';
+                    return (
+                      <div key={t.techRacfid} className="flex items-center gap-3 border rounded-md px-4 py-3 bg-card hover:bg-muted/40 transition-colors">
+                        <span className="text-xs font-mono text-muted-foreground w-6 shrink-0">{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-sm truncate">{t.techName}</span>
+                            <span className="text-xs font-mono text-muted-foreground">{t.techRacfid}</span>
+                            {t.districtNo && (
+                              <Badge variant="outline" className="text-xs h-5">District {t.districtNo}</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                            {(t.homeCity || t.homeState) && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Home className="h-3 w-3" />
+                                {[t.homeCity, t.homeState].filter(Boolean).join(', ')}
+                                {t.homePostal && ` ${t.homePostal}`}
+                              </span>
+                            )}
+                            {phone && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <PhoneCall className="h-3 w-3" />
+                                {phone}
+                              </span>
+                            )}
+                            {t.planningAreaName && (
+                              <span className="text-xs text-muted-foreground">{t.planningAreaName}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {hasDist ? (
+                            <div>
+                              <span className={`text-sm font-medium ${distLabel!.color}`}>
+                                {t.distanceMiles.toFixed(0)} mi
+                              </span>
+                              <div className={`text-xs ${distLabel!.color}`}>{distLabel!.label}</div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         </DialogContent>
       </Dialog>
