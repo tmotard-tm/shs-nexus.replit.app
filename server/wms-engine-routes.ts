@@ -154,5 +154,15 @@ export function registerWmsRoutes(requireAuth: any): Router {
     }
   });
 
+  // Debug: force a fresh token fetch and return diagnostic info
+  router.get("/debug/auth", async (req, res) => {
+    try {
+      const result = await wmsEngineService.debugAuth();
+      res.json({ success: true, data: result });
+    } catch (err: any) {
+      handleWmsError(res, err);
+    }
+  });
+
   return router;
 }

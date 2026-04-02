@@ -52,15 +52,35 @@ function assertConfigured(): void {
   }
 }
 
-/** Extract <ns2:token> value from XML response */
+/** Build the token URL — don't double-append /token if endpoint already ends with it */
+function buildTokenUrl(): string {
+  const base = WMS_ENGINE_AUTH_ENDPOINT!.replace(/\/$/, "");
+  return /\/token$/i.test(base) ? base : `${base}/token`;
+}
+
+/** Extract <ns2:token> (or any namespaced <token>) value from XML response.
+ *  Falls back to plain text if the response is not XML. */
 function extractTokenFromXml(xml: string): string | null {
-  const match = xml.match(/<(?:\w+:)?token[^>]*>([\s\S]*?)<\/(?:\w+:)?token>/i);
-  return match ? match[1].trim() : null;
+  // Try common XML patterns
+  const patterns = [
+    /<(?:\w+:)?token[^>]*>([\s\S]*?)<\/(?:\w+:)?token>/i,
+    /<(?:\w+:)?return[^>]*>([\s\S]*?)<\/(?:\w+:)?return>/i,
+    /<(?:\w+:)?accessToken[^>]*>([\s\S]*?)<\/(?:\w+:)?accessToken>/i,
+    /<(?:\w+:)?access_token[^>]*>([\s\S]*?)<\/(?:\w+:)?access_token>/i,
+  ];
+  for (const pattern of patterns) {
+    const match = xml.match(pattern);
+    if (match) return match[1].trim();
+  }
+  // If it looks like plain text (no tags), treat the whole body as the token
+  if (!xml.includes("<")) return xml.trim() || null;
+  return null;
 }
 
 /** Fetch a fresh bearer token from the auth endpoint */
-async function fetchToken(): Promise<string> {
-  const url = `${WMS_ENGINE_AUTH_ENDPOINT!.replace(/\/$/, "")}/token`;
+async function fetchToken(): Promise<{ token: string; url: string; status: number; rawExcerpt: string }> {
+  const url = buildTokenUrl();
+  console.log(`[WMS Engine] Fetching token from: ${url}`);
   const res = await fetch(url, {
     method: "GET",
     headers: {
@@ -68,16 +88,19 @@ async function fetchToken(): Promise<string> {
       Accept: "application/xml, text/xml, */*",
     },
   });
+  const rawText = await res.text().catch(() => "");
+  const rawExcerpt = rawText.slice(0, 400);
+  console.log(`[WMS Engine] Token response status: ${res.status}`);
+  console.log(`[WMS Engine] Token response excerpt: ${rawExcerpt}`);
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`WMS Engine auth failed (${res.status}): ${body}`);
+    throw new Error(`WMS Engine auth failed (${res.status}): ${rawExcerpt}`);
   }
-  const xml = await res.text();
-  const token = extractTokenFromXml(xml);
+  const token = extractTokenFromXml(rawText);
   if (!token) {
-    throw new Error(`WMS Engine auth: could not parse token from response: ${xml.slice(0, 200)}`);
+    throw new Error(`WMS Engine auth: could not parse token from response (${res.status}): ${rawExcerpt}`);
   }
-  return token;
+  console.log(`[WMS Engine] Token extracted, length=${token.length}, prefix=${token.slice(0, 12)}...`);
+  return { token, url, status: res.status, rawExcerpt };
 }
 
 /** Return cached token, refreshing if expired */
@@ -85,7 +108,7 @@ async function getToken(): Promise<string> {
   if (cachedToken && Date.now() < tokenExpiresAt) {
     return cachedToken;
   }
-  const token = await fetchToken();
+  const { token } = await fetchToken();
   cachedToken = token;
   tokenExpiresAt = Date.now() + TOKEN_TTL_MS;
   return token;
@@ -262,5 +285,68 @@ export const wmsEngineService = {
       `/wms-engine/v1/trucks/assignments/${encodeURIComponent(techId)}?useCaseId=${encodeURIComponent(WMS_ENGINE_USE_CASE_ID)}`,
       { method: "DELETE" }
     );
+  },
+
+  /** Debug: force a fresh token fetch and return diagnostic info (no secrets exposed) */
+  async debugAuth(): Promise<{
+    configured: boolean;
+    tokenUrl: string;
+    tokenStatus: number | null;
+    rawExcerpt: string;
+    tokenExtracted: boolean;
+    tokenLength: number | null;
+    tokenPrefix: string | null;
+    cachedUntil: string | null;
+    useCaseId: string;
+    baseUrl: string;
+  }> {
+    if (!isConfigured()) {
+      return {
+        configured: false,
+        tokenUrl: "(not configured)",
+        tokenStatus: null,
+        rawExcerpt: "",
+        tokenExtracted: false,
+        tokenLength: null,
+        tokenPrefix: null,
+        cachedUntil: null,
+        useCaseId: WMS_ENGINE_USE_CASE_ID,
+        baseUrl: WMS_ENGINE_BASE_URL || "(not set)",
+      };
+    }
+    // Invalidate cache so we always do a fresh fetch on debug
+    cachedToken = null;
+    tokenExpiresAt = 0;
+    const tokenUrl = buildTokenUrl();
+    try {
+      const { token, status, rawExcerpt } = await fetchToken();
+      cachedToken = token;
+      tokenExpiresAt = Date.now() + TOKEN_TTL_MS;
+      return {
+        configured: true,
+        tokenUrl,
+        tokenStatus: status,
+        rawExcerpt,
+        tokenExtracted: true,
+        tokenLength: token.length,
+        tokenPrefix: token.slice(0, 16) + "…",
+        cachedUntil: new Date(tokenExpiresAt).toISOString(),
+        useCaseId: WMS_ENGINE_USE_CASE_ID,
+        baseUrl: WMS_ENGINE_BASE_URL!,
+      };
+    } catch (err: any) {
+      return {
+        configured: true,
+        tokenUrl,
+        tokenStatus: null,
+        rawExcerpt: err.message || "",
+        tokenExtracted: false,
+        tokenLength: null,
+        tokenPrefix: null,
+        cachedUntil: null,
+        useCaseId: WMS_ENGINE_USE_CASE_ID,
+        baseUrl: WMS_ENGINE_BASE_URL!,
+      };
+    }
   },
 };

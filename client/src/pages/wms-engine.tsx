@@ -24,7 +24,7 @@ interface BodyField {
 
 interface Endpoint {
   id: string;
-  group: "Trucks" | "Assignments";
+  group: "Debug" | "Trucks" | "Assignments";
   method: HttpMethod;
   name: string;
   description: string;
@@ -34,6 +34,16 @@ interface Endpoint {
 }
 
 const ENDPOINTS: Endpoint[] = [
+  {
+    id: "debug-auth",
+    group: "Debug",
+    method: "GET",
+    name: "Test Auth & Token",
+    description: "Forces a fresh token fetch from the auth endpoint and returns diagnostic info: token URL, HTTP status, raw response excerpt, whether the token was extracted, its length, and when the cache expires. No secrets are exposed.",
+    path: "/api/wms/debug/auth",
+    pathParams: [],
+    bodyFields: [],
+  },
   {
     id: "list-trucks",
     group: "Trucks",
@@ -231,8 +241,8 @@ function ConfigBanner() {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function WmsEnginePage() {
-  const groups = ["Trucks", "Assignments"] as const;
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Trucks: true, Assignments: true });
+  const groups = ["Debug", "Trucks", "Assignments"] as const;
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Debug: true, Trucks: true, Assignments: true });
   const [selected, setSelected] = useState<Endpoint>(ENDPOINTS[0]);
 
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
