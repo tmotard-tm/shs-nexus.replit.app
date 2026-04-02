@@ -302,6 +302,13 @@ export function registerVrmRoutes(): Router {
       const netRows = await fetchAdjustedNet(ldaps);
       let updated = 0;
 
+      // #region agent log
+      if (netRows.length > 0) {
+        const sample = netRows[0];
+        fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'routes.ts:305',message:'sync/adjusted-net first row',data:{ldap:sample.tech_ldap,completes:sample.completes,total_revenue:sample.total_revenue,labor_direct:sample.labor_direct,labor_benefits:sample.labor_benefits,fuel_est:sample.fuel_est,rental_cost:sample.rental_cost,adj_net:sample.adj_net,days_in_rental:sample.days_in_rental},timestamp:Date.now(),runId:'run1',hypothesisId:'H-A'})}).catch(()=>{});
+      }
+      // #endregion
+
       for (const nr of netRows) {
         const ldap = (nr.tech_ldap || "").trim();
         if (!ldap) continue;
@@ -316,11 +323,27 @@ export function registerVrmRoutes(): Router {
 
         await upsertTech({
           ...tech,
+          gate1DaysInRental: nr.days_in_rental,
+          gate1Completes: nr.completes,
+          gate1TotalRevenue: String(nr.total_revenue),
+          gate1LaborDirect: String(nr.labor_direct),
+          gate1LaborBenefits: String(nr.labor_benefits),
+          gate1PartsCogs: String(nr.parts_cogs),
+          gate1PartsShipping: String(nr.parts_shipping),
+          gate1TruckExpense: String(nr.truck_expense),
+          gate1PptProfit: String(nr.ppt_profit),
+          gate1FuelEst: String(nr.fuel_est),
+          gate1RentalCost: String(nr.rental_cost),
           gate1AdjustedNet: String(nr.adj_net),
           gate1PayrollCost: String(Number(nr.labor_direct) + Number(nr.labor_benefits)),
           gate1Classification: classification as any,
           dcaReviewOutcome: classification && classification !== "profitable" ? "pending" : tech.dcaReviewOutcome,
         });
+        // #region agent log
+        if (updated === 0) {
+          fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'routes.ts:340',message:'first upsertTech completed',data:{ldap:nr.tech_ldap,completes_stored:nr.completes,revenue_stored:nr.total_revenue},timestamp:Date.now(),runId:'run1',hypothesisId:'H-D'})}).catch(()=>{});
+        }
+        // #endregion
         updated++;
       }
 

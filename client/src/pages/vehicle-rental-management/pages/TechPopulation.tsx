@@ -12,7 +12,20 @@ interface TechPopRow {
   ldap: string;
   name: string;
   market: string | null;
+  primaryZip: string | null;
   tenureMonths: number | null;
+  // Waterfall components
+  gate1DaysInRental: number | null;
+  gate1Completes: number | null;
+  gate1TotalRevenue: string | null;
+  gate1LaborDirect: string | null;
+  gate1LaborBenefits: string | null;
+  gate1PartsCogs: string | null;
+  gate1PartsShipping: string | null;
+  gate1TruckExpense: string | null;
+  gate1PptProfit: string | null;
+  gate1FuelEst: string | null;
+  gate1RentalCost: string | null;
   gate1AdjustedNet: string | null;
   gate1PayrollCost: string | null;
   gate1Classification: string | null;
@@ -407,10 +420,23 @@ export default function TechPopulation() {
 
   const exportCsv = () => {
     const headers = [
-      "LDAP", "Name", "Market", "Tenure (mo)", "Gate 1 Net", "Payroll Cost",
-      "vs. Home (Incremental)", "Gate 1 Class",
+      // Identity
+      "LDAP", "Name", "Market", "ZIP", "Tenure (mo)", "Rental Start",
+      // Volume
+      "Days in Rental", "Completes",
+      // Revenue waterfall
+      "Total Revenue",
+      // Cost waterfall
+      "Labor Direct", "Labor Benefits", "Payroll Total",
+      "Parts COGS", "Parts Shipping", "Truck Expense", "PPT Profit (source)", "Fuel Est ($10/complete)",
+      "Rental Cost ($78/day)",
+      // Profit metrics
+      "Adj Net (Method C)", "vs. Home (Incremental)", "Gate 1 Class",
+      // Scorecard
       "Gate 2 Score", "Gate 2 Exempt", "New Hire Exempt",
-      "DCA Review", "Status", "Rental Start", "Outreach Flagged", "Returned Rental", "Escalation Path",
+      // Admin
+      "DCA Review", "Status",
+      "Outreach Flagged", "Returned Rental", "Escalation Path",
     ];
     const escape = (v: string | number | null | undefined) => {
       if (v == null) return "";
@@ -423,12 +449,24 @@ export default function TechPopulation() {
       const payroll = t.gate1PayrollCost != null ? Number(t.gate1PayrollCost) : null;
       const incremental = adjNet != null && payroll != null ? (adjNet + payroll).toFixed(2) : "";
       return [
-        t.ldap, t.name, t.market ?? "", t.tenureMonths ?? "",
-        t.gate1AdjustedNet ?? "", payroll != null ? payroll.toFixed(2) : "",
-        incremental, t.gate1Classification ?? "",
+        // Identity
+        t.ldap, t.name, t.market ?? "", t.primaryZip ?? "", t.tenureMonths ?? "", t.rentalStartDate ?? "",
+        // Volume
+        t.gate1DaysInRental ?? "", t.gate1Completes ?? "",
+        // Revenue
+        t.gate1TotalRevenue ?? "",
+        // Costs
+        t.gate1LaborDirect ?? "", t.gate1LaborBenefits ?? "",
+        payroll != null ? payroll.toFixed(2) : "",
+        t.gate1PartsCogs ?? "", t.gate1PartsShipping ?? "", t.gate1TruckExpense ?? "", t.gate1PptProfit ?? "",
+        t.gate1FuelEst ?? "", t.gate1RentalCost ?? "",
+        // Profit
+        t.gate1AdjustedNet ?? "", incremental, t.gate1Classification ?? "",
+        // Scorecard
         t.gate2WeightedScore != null ? Number(t.gate2WeightedScore).toFixed(3) : "",
         t.gate2Exempt ? "Yes" : "No", t.newHireExempt ? "Yes" : "No",
-        t.dcaReviewOutcome ?? "", t.currentStatus, t.rentalStartDate ?? "",
+        // Admin
+        t.dcaReviewOutcome ?? "", t.currentStatus,
         t.outreachFlagged ? "Yes" : "No",
         t.returnedRental ? "Yes" : "No",
         t.escalationPath ?? "",
