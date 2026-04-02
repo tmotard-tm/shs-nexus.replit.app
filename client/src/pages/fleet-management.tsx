@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { toHolmanRef, toDisplayNumber, toCanonical } from "@shared/vehicle-number-utils";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
@@ -111,6 +111,87 @@ function formatDriveTime(miles: number): string {
   if (hours === 0) return `${mins}m`;
   if (mins === 0) return `${hours}h`;
   return `${hours}h ${mins}m`;
+}
+
+// Separate component so it can call useQuery per-VIN without violating hook rules.
+// React Query caches per ["/api/ams/vehicles", vin], so slide-out won't re-fetch.
+function MismatchAssignmentSection({ vehicle }: { vehicle: FleetVehicle }) {
+  const { data: amsData, isLoading: amsLoading } = useQuery<any>({
+    queryKey: ["/api/ams/vehicles", vehicle.vin],
+    queryFn: async () => {
+      const res = await fetch(`/api/ams/vehicles/${vehicle.vin}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    enabled: !!vehicle.vin,
+  });
+
+  const amsTech = amsData?.Tech?.trim() || "";
+  const amsTechName = amsData?.TechName?.trim() || "";
+
+  const SystemCol = ({
+    icon, label, labelColor, techId, techName, loading,
+  }: {
+    icon: ReactNode; label: string; labelColor: string;
+    techId: string; techName: string; loading?: boolean;
+  }) => (
+    <div className="space-y-0.5">
+      <div className="flex items-center gap-1">
+        {icon}
+        <span className={`text-xs font-medium ${labelColor}`}>{label}</span>
+      </div>
+      {loading ? (
+        <div className="flex items-center gap-1 py-0.5">
+          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Loading…</span>
+        </div>
+      ) : techId ? (
+        <>
+          <p className="text-xs font-medium leading-tight">{techName || techId}</p>
+          <p className="text-xs text-muted-foreground font-mono leading-tight">{techId}</p>
+        </>
+      ) : (
+        <p className="text-xs text-orange-500 flex items-center gap-0.5">
+          <XCircle className="h-3 w-3" />Unassigned
+        </p>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="pt-2 border-t space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
+        <span className="text-xs font-semibold text-red-600 dark:text-red-400">Assignment Mismatch</span>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        <SystemCol
+          icon={<Truck className="h-3 w-3 text-blue-500" />}
+          label="Holman"
+          labelColor="text-blue-600 dark:text-blue-400"
+          techId={vehicle.holmanTechAssigned?.trim() || ""}
+          techName={vehicle.holmanTechName?.trim() || ""}
+        />
+        <SystemCol
+          icon={<Link2 className="h-3 w-3 text-purple-500" />}
+          label="TPMS"
+          labelColor="text-purple-600 dark:text-purple-400"
+          techId={vehicle.tpmsAssignedTechId?.trim() || ""}
+          techName={vehicle.tpmsAssignedTechName?.trim() || ""}
+        />
+        <SystemCol
+          icon={<Database className="h-3 w-3 text-emerald-500" />}
+          label="AMS"
+          labelColor="text-emerald-600 dark:text-emerald-400"
+          techId={amsTech}
+          techName={amsTechName}
+          loading={amsLoading}
+        />
+      </div>
+    </div>
+  );
 }
 
 export default function FleetManagement() {
@@ -1835,45 +1916,7 @@ export default function FleetManagement() {
                           
                           {/* Tech Assignment Section */}
                           {hasMismatch ? (
-                            /* Mismatch: show each system side-by-side */
-                            <div className="pt-2 border-t space-y-1.5">
-                              <div className="flex items-center gap-1.5">
-                                <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
-                                <span className="text-xs font-semibold text-red-600 dark:text-red-400">Assignment Mismatch</span>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2">
-                                {/* Holman */}
-                                <div className="space-y-0.5">
-                                  <div className="flex items-center gap-1">
-                                    <Truck className="h-3 w-3 text-blue-500" />
-                                    <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Holman</span>
-                                  </div>
-                                  {vehicle.holmanTechAssigned ? (
-                                    <>
-                                      <p className="text-xs font-medium leading-tight">{vehicle.holmanTechName || vehicle.holmanTechAssigned}</p>
-                                      <p className="text-xs text-muted-foreground font-mono leading-tight">{vehicle.holmanTechAssigned}</p>
-                                    </>
-                                  ) : (
-                                    <p className="text-xs text-orange-500 flex items-center gap-0.5"><XCircle className="h-3 w-3" />Unassigned</p>
-                                  )}
-                                </div>
-                                {/* TPMS */}
-                                <div className="space-y-0.5">
-                                  <div className="flex items-center gap-1">
-                                    <Link2 className="h-3 w-3 text-purple-500" />
-                                    <span className="text-xs text-purple-600 dark:text-purple-400 font-medium">TPMS</span>
-                                  </div>
-                                  {vehicle.tpmsAssignedTechId ? (
-                                    <>
-                                      <p className="text-xs font-medium leading-tight">{vehicle.tpmsAssignedTechName || vehicle.tpmsAssignedTechId}</p>
-                                      <p className="text-xs text-muted-foreground font-mono leading-tight">{vehicle.tpmsAssignedTechId}</p>
-                                    </>
-                                  ) : (
-                                    <p className="text-xs text-orange-500 flex items-center gap-0.5"><XCircle className="h-3 w-3" />Unassigned</p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
+                            <MismatchAssignmentSection vehicle={vehicle} />
                           ) : (
                             /* Matched or unassigned: show single tech line */
                             <div className="flex items-center gap-2 pt-2 border-t">
