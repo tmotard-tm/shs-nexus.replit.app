@@ -1791,16 +1791,6 @@ export default function FleetManagement() {
                         data-testid={`card-vehicle-${vehicle.vehicleNumber}`}
                       >
                         <CardContent className="p-4 space-y-3">
-                          {/* Mismatch Warning Banner */}
-                          {hasMismatch && (
-                            <div className="p-2 bg-red-100 dark:bg-red-900 rounded-md flex items-center gap-2">
-                              <AlertTriangle className="h-4 w-4 text-red-600" />
-                              <span className="text-xs font-medium text-red-700 dark:text-red-300">
-                                Assignment Mismatch
-                              </span>
-                            </div>
-                          )}
-                          
                           {/* Header: Vehicle Info + Badges */}
                           <div className="flex items-start justify-between">
                             <div className="flex items-center gap-2">
@@ -1844,45 +1834,63 @@ export default function FleetManagement() {
                           </div>
                           
                           {/* Tech Assignment Section */}
-                          <div className="grid grid-cols-2 gap-2 pt-2 border-t">
-                            {/* Holman Tech */}
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1">
-                                <Truck className="h-3 w-3 text-blue-600" />
-                                <span className="text-xs font-medium text-blue-600">Holman Tech</span>
+                          {hasMismatch ? (
+                            /* Mismatch: show each system side-by-side */
+                            <div className="pt-2 border-t space-y-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
+                                <span className="text-xs font-semibold text-red-600 dark:text-red-400">Assignment Mismatch</span>
                               </div>
-                              {vehicle.holmanTechAssigned ? (
-                                <>
-                                  <p className="text-sm font-medium">{vehicle.holmanTechName || 'N/A'}</p>
-                                  <p className="text-xs text-muted-foreground font-mono">{vehicle.holmanTechAssigned}</p>
-                                </>
-                              ) : (
-                                <p className="text-xs text-orange-600 flex items-center gap-1">
-                                  <XCircle className="h-3 w-3" />
-                                  Unassigned
-                                </p>
-                              )}
+                              <div className="grid grid-cols-2 gap-2">
+                                {/* Holman */}
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-1">
+                                    <Truck className="h-3 w-3 text-blue-500" />
+                                    <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Holman</span>
+                                  </div>
+                                  {vehicle.holmanTechAssigned ? (
+                                    <>
+                                      <p className="text-xs font-medium leading-tight">{vehicle.holmanTechName || vehicle.holmanTechAssigned}</p>
+                                      <p className="text-xs text-muted-foreground font-mono leading-tight">{vehicle.holmanTechAssigned}</p>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs text-orange-500 flex items-center gap-0.5"><XCircle className="h-3 w-3" />Unassigned</p>
+                                  )}
+                                </div>
+                                {/* TPMS */}
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-1">
+                                    <Link2 className="h-3 w-3 text-purple-500" />
+                                    <span className="text-xs text-purple-600 dark:text-purple-400 font-medium">TPMS</span>
+                                  </div>
+                                  {vehicle.tpmsAssignedTechId ? (
+                                    <>
+                                      <p className="text-xs font-medium leading-tight">{vehicle.tpmsAssignedTechName || vehicle.tpmsAssignedTechId}</p>
+                                      <p className="text-xs text-muted-foreground font-mono leading-tight">{vehicle.tpmsAssignedTechId}</p>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs text-orange-500 flex items-center gap-0.5"><XCircle className="h-3 w-3" />Unassigned</p>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                            
-                            {/* TPMS Tech */}
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1">
-                                <Link2 className="h-3 w-3 text-purple-600" />
-                                <span className="text-xs font-medium text-purple-600">TPMS Tech</span>
-                              </div>
+                          ) : (
+                            /* Matched or unassigned: show single tech line */
+                            <div className="flex items-center gap-2 pt-2 border-t">
+                              <User className="h-4 w-4 text-muted-foreground shrink-0" />
                               {vehicle.tpmsAssignedTechId ? (
-                                <>
-                                  <p className="text-sm font-medium">{vehicle.tpmsAssignedTechName || 'N/A'}</p>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium truncate">{vehicle.tpmsAssignedTechName || vehicle.tpmsAssignedTechId}</p>
                                   <p className="text-xs text-muted-foreground font-mono">{vehicle.tpmsAssignedTechId}</p>
-                                </>
+                                </div>
                               ) : (
-                                <p className="text-xs text-orange-600 flex items-center gap-1">
-                                  <XCircle className="h-3 w-3" />
+                                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                  <XCircle className="h-3 w-3 text-orange-500" />
                                   Unassigned
                                 </p>
                               )}
                             </div>
-                          </div>
+                          )}
                           
                           {/* Location & License Plate */}
                           <div className="grid grid-cols-2 gap-2 pt-2 border-t text-xs">
