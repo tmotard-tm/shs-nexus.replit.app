@@ -33,7 +33,7 @@
 const WMS_ENGINE_BASE_URL      = process.env.WMS_ENGINE_BASE_URL;
 const WMS_ENGINE_AUTH_ENDPOINT = process.env.WMS_ENGINE_AUTH_ENDPOINT;
 const WMS_ENGINE_AUTH_HEADER   = process.env.WMS_ENGINE_AUTHORIZATION;
-const WMS_ENGINE_USE_CASE_ID   = process.env.WMS_ENGINE_USE_CASE_ID || "TECHHUB";
+const WMS_ENGINE_USE_CASE_ID   = process.env.WMS_ENGINE_USE_CASE_ID || "Nexus";
 const TOKEN_TTL_MS = Number(process.env.WMS_ENGINE_TOKEN_TTL_MS || 3300000); // 55 min default
 
 // In-memory token cache
