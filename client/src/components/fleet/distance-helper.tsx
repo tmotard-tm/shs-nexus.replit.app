@@ -27,8 +27,10 @@ const zipCoordsCache = new Map<string, { lat: number; lng: number } | null>();
  * Results are memoized in-process so repeated calls are instant.
  */
 export async function fetchZipCoords(zip: string): Promise<{ lat: number; lng: number } | null> {
-  const cleanZip = zip.replace(/\D/g, '').slice(0, 5);
-  if (cleanZip.length !== 5) return null;
+  // Strip non-digits, cap at 5, then left-pad to 5 so "7728" → "07728"
+  const digits = zip.replace(/\D/g, '').slice(0, 5);
+  if (digits.length === 0) return null;
+  const cleanZip = digits.padStart(5, '0');
 
   const cached = zipCoordsCache.get(cleanZip);
   if (cached) return cached;

@@ -460,10 +460,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Lightweight ZIP → lat/lng lookup using the Zippopotam API (same as fleet-scope-distance-calculator)
   app.get("/api/zip-coords/:zip", async (req, res) => {
-    const cleanZip = req.params.zip.replace(/\D/g, '').slice(0, 5);
-    if (cleanZip.length !== 5) {
-      return res.status(400).json({ error: "Invalid ZIP code" });
-    }
+    // Strip non-digits, cap at 5, then left-pad so "7728" → "07728"
+    const digits = req.params.zip.replace(/\D/g, '').slice(0, 5);
+    if (digits.length === 0) return res.status(400).json({ error: "Invalid ZIP code" });
+    const cleanZip = digits.padStart(5, '0');
 
     // Only serve from cache if it's a positive hit — don't permanently cache failures
     if (zipCoordsCache.has(cleanZip)) {
