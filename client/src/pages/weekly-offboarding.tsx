@@ -13,8 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin } from "lucide-react";
-import { BackButton } from "@/components/ui/back-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { TopBar } from "@/components/layout/top-bar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO, getWeek, getYear, differenceInDays } from "date-fns";
@@ -385,20 +385,16 @@ export default function WeeklyOffboarding() {
 
   return (
     <MainContent>
+      <TopBar title="Weekly Offboarding" breadcrumbs={["Home", "Weekly Offboarding"]} />
       <div className="container mx-auto py-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <BackButton />
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-                <UserMinus className="h-8 w-8 text-red-600" />
-                Weekly Offboarding
-              </h1>
-              <p className="text-muted-foreground">
-                Terminated employee roster from Snowflake
-              </p>
-            </div>
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <UserMinus className="h-8 w-8 text-red-600" />
+            Weekly Offboarding
+          </h1>
+          <p className="text-muted-foreground">
+            Terminated employee roster from Snowflake
+          </p>
         </div>
 
         <Card>

@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { MainContent } from "@/components/layout/main-content";
-import { BackButton } from "@/components/ui/back-button";
+import { TopBar } from "@/components/layout/top-bar";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import type { QueueItem, QueueModule, User } from "@shared/schema";
 import { 
@@ -72,8 +72,9 @@ export default function TaskWorkPage() {
   // Loading state
   if (isLoading) {
     return (
-      <MainContent className="p-6">
-        <div className="flex items-center justify-center min-h-[400px]">
+      <MainContent>
+        <TopBar title="Task" breadcrumbs={["Home", "Task Queue", "Task"]} />
+        <div className="p-6 flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
             <p className="text-muted-foreground" data-testid="loading-task">Loading task...</p>
@@ -86,9 +87,9 @@ export default function TaskWorkPage() {
   // Error state
   if (error || !taskData) {
     return (
-      <MainContent className="p-6">
-        <div className="max-w-2xl mx-auto">
-          <BackButton href="/dashboard" />
+      <MainContent>
+        <TopBar title="Task Not Found" breadcrumbs={["Home", "Task Queue", "Task"]} />
+        <div className="p-6 max-w-2xl mx-auto">
           <Card className="mt-6" data-testid="error-card">
             <CardHeader className="text-center">
               <div className="flex justify-center mb-4">
@@ -134,11 +135,10 @@ export default function TaskWorkPage() {
   const submitter = taskDetails.submitter || {};
 
   return (
-    <MainContent className="p-6">
-      <div className="max-w-4xl mx-auto">
-        <BackButton href="/dashboard" />
-        
-        <div className="mt-6 space-y-6">
+    <MainContent>
+      <TopBar title="Task" breadcrumbs={["Home", "Task Queue", "Task"]} />
+      <div className="p-6 max-w-4xl mx-auto">
+        <div className="space-y-6">
           {/* Task Header */}
           <Card data-testid="task-header-card">
             <CardHeader>

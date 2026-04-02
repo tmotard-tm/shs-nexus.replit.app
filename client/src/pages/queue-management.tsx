@@ -37,8 +37,8 @@ import {
   ChevronUp
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
+import { TopBar } from "@/components/layout/top-bar";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
@@ -776,19 +776,15 @@ export default function UnifiedQueueManagement() {
 
   return (
     <MainContent>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <BackButton />
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-foreground" data-testid="text-page-title">
-                Task Queue
-              </h1>
-              <p className="text-muted-foreground mt-2">
-                Manage tasks across all department queues from one unified interface
-              </p>
-            </div>
-          </div>
+      <TopBar title="Task Queue" breadcrumbs={["Home", "Task Queue"]} />
+      <div className="space-y-6 p-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground" data-testid="text-page-title">
+            Task Queue
+          </h1>
+          <p className="text-muted-foreground mt-2">
+            Manage tasks across all department queues from one unified interface
+          </p>
         </div>
 
         {/* Department Tabs - Quick department switching */}

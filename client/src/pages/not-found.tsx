@@ -1,23 +1,34 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { BackButton } from "@/components/ui/back-button";
-import { AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { AlertCircle, Home, ArrowLeft } from "lucide-react";
+import { useLocation } from "wouter";
 
 export default function NotFound() {
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <Card className="w-full max-w-md mx-4">
-        <CardContent className="pt-6">
-          <div className="flex mb-4 gap-2">
-            <AlertCircle className="h-8 w-8 text-red-500" />
-            <h1 className="text-2xl font-bold text-gray-900">404 Page Not Found</h1>
-          </div>
+  const [, setLocation] = useLocation();
 
-          <p className="mt-4 text-sm text-gray-600">
-            Did you forget to add the page to the router?
-          </p>
-          
-          <div className="mt-6">
-            <BackButton href="/" />
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center bg-background">
+      <Card className="w-full max-w-md mx-4">
+        <CardContent className="pt-8 pb-8">
+          <div className="flex flex-col items-center text-center gap-4">
+            <AlertCircle className="h-16 w-16 text-destructive" />
+            <div>
+              <h1 className="text-3xl font-bold text-foreground">404</h1>
+              <p className="text-xl font-semibold text-foreground mt-1">Page Not Found</p>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              The page you're looking for doesn't exist or has been moved.
+            </p>
+            <div className="flex flex-col gap-2 w-full mt-2">
+              <Button onClick={() => setLocation("/")} className="w-full">
+                <Home className="h-4 w-4 mr-2" />
+                Go to Nexus Home
+              </Button>
+              <Button variant="outline" onClick={() => window.history.back()} className="w-full">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Go Back
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
