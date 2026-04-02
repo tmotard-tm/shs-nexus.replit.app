@@ -1011,9 +1011,12 @@ export default function Dashboard() {
     // Multi-column sorting - both sorts can be active simultaneously
     // Primary sort is Date In Repair, secondary sort is Reg. Expiry (or vice versa if only one is active)
     return filtered.sort((a, b) => {
-      // Always float terminated-tech (offboardingFlagged) trucks to the top
-      if (a.offboardingFlagged !== b.offboardingFlagged) {
-        return a.offboardingFlagged ? -1 : 1;
+      // Always float terminated-tech trucks to the top — union of offboardingFlagged (DB field)
+      // and terminatedVehicleSet (rental-ops cross-reference, drives the T badge)
+      const aTerminated = a.offboardingFlagged || terminatedVehicleSet.has(a.truckNumber?.replace(/^0+/, '') || '0');
+      const bTerminated = b.offboardingFlagged || terminatedVehicleSet.has(b.truckNumber?.replace(/^0+/, '') || '0');
+      if (aTerminated !== bTerminated) {
+        return aTerminated ? -1 : 1;
       }
 
       // First apply Date In Repair sort if active
@@ -1067,7 +1070,7 @@ export default function Dashboard() {
       
       return 0;
     });
-  }, [trucks, debouncedSearch, mainStatusFilter, subStatusFilter, issueFilter, truckNumberFilter, columnStatusFilter, callStatusFilter, ownerFilter, regStickerFilter, completedFilter, amsFilter, regExpiryFilter, assignedFilter, upsStatusFilter, pickSlotFilter, gaveHolmanFilter, holmanStatusFilter, scraperStatusMap, spareVanFilter, regTestSlotFilter, stateFilter, regionFilter, byovFilter, byovEnrollmentMap, regExpirySortOrder, dateRepairSortOrder, billPaidSortOrder]);
+  }, [trucks, debouncedSearch, mainStatusFilter, subStatusFilter, issueFilter, truckNumberFilter, columnStatusFilter, callStatusFilter, ownerFilter, regStickerFilter, completedFilter, amsFilter, regExpiryFilter, assignedFilter, upsStatusFilter, pickSlotFilter, gaveHolmanFilter, holmanStatusFilter, scraperStatusMap, spareVanFilter, regTestSlotFilter, stateFilter, regionFilter, byovFilter, byovEnrollmentMap, regExpirySortOrder, dateRepairSortOrder, billPaidSortOrder, terminatedVehicleSet]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredTrucks.length / TRUCKS_PER_PAGE);

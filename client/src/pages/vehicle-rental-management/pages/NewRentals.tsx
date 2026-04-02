@@ -547,6 +547,44 @@ export default function NewRentals() {
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           <RecPill rec={row.recommendation} />
+                          {row.new_hire_exempt && (
+                            <div style={{ marginTop: 4 }}>
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  fontFamily: fonts.dmSans,
+                                  fontSize: 9,
+                                  fontWeight: 600,
+                                  color: "#1D4ED8",
+                                  backgroundColor: "#DBEAFE",
+                                  padding: "1px 6px",
+                                  borderRadius: 4,
+                                  letterSpacing: "0.03em",
+                                }}
+                              >
+                                NEW HIRE
+                              </span>
+                            </div>
+                          )}
+                          {row.scorecard_exempt && (
+                            <div style={{ marginTop: 4 }}>
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  fontFamily: fonts.dmSans,
+                                  fontSize: 9,
+                                  fontWeight: 600,
+                                  color: colors.amber,
+                                  backgroundColor: colors.amberLight,
+                                  padding: "1px 6px",
+                                  borderRadius: 4,
+                                  letterSpacing: "0.03em",
+                                }}
+                              >
+                                SC EXEMPT
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           {isNoData ? (
