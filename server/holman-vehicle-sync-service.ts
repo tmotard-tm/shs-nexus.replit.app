@@ -978,7 +978,7 @@ class HolmanVehicleSyncService {
       driverPhone: v.cellPhone || v.workPhone || v.homePhone || v.driverPhone || '',
       city: v.city || '',
       state: v.stateProvince || v.state || '',
-      zip: v.postalCode || '',
+      zip: String(v.zipPostalCode || '').replace(/\D/g, '').slice(0, 5) || '',
       region: v.clientData3 || v.region || '', // clientData3 from Holman (e.g., "890")
       division: v.division || '', // division from Holman (e.g., "01")
       district: v.prefix || v.district || '', // prefix from Holman (e.g., "7084")
@@ -1015,7 +1015,7 @@ class HolmanVehicleSyncService {
       driverPhone: v.driverPhone || '',
       city: v.city || '',
       state: v.state || '',
-      zip: (v.rawData as any)?.postalCode || '',
+      zip: String((v.rawData as any)?.zipPostalCode || '').replace(/\D/g, '').slice(0, 5) || '',
       region: v.region || '', // clientData3 from Holman
       division: v.division || '', // prefix/division from Holman
       district: v.district || '',
