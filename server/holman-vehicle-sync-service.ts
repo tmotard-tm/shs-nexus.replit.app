@@ -39,6 +39,7 @@ interface FleetVehicle {
   branding: string;
   interior: string;
   tuneStatus: string;
+  zip: string;
   holmanTechAssigned: string; // clientData2 from Holman - enterprise ID of assigned tech
   holmanTechName: string; // Tech name from Holman (firstName + lastName or driverName)
   dataSource: string;
@@ -977,6 +978,7 @@ class HolmanVehicleSyncService {
       driverPhone: v.cellPhone || v.workPhone || v.homePhone || v.driverPhone || '',
       city: v.city || '',
       state: v.stateProvince || v.state || '',
+      zip: v.postalCode || '',
       region: v.clientData3 || v.region || '', // clientData3 from Holman (e.g., "890")
       division: v.division || '', // division from Holman (e.g., "01")
       district: v.prefix || v.district || '', // prefix from Holman (e.g., "7084")
@@ -1013,6 +1015,7 @@ class HolmanVehicleSyncService {
       driverPhone: v.driverPhone || '',
       city: v.city || '',
       state: v.state || '',
+      zip: (v.rawData as any)?.postalCode || '',
       region: v.region || '', // clientData3 from Holman
       division: v.division || '', // prefix/division from Holman
       district: v.district || '',
