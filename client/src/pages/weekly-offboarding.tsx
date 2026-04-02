@@ -711,18 +711,20 @@ export default function WeeklyOffboarding() {
 
                               if (nexusInfo?.postOffboardedStatus) {
                                 return (
-                                  <div className="flex flex-col gap-0.5">
-                                    <div className="flex items-center gap-1 flex-wrap">
-                                      <Badge variant="outline" className="text-xs whitespace-nowrap">
+                                  <div className="flex items-start gap-1">
+                                    <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                                      <Badge variant="outline" className="text-xs whitespace-nowrap w-fit">
                                         {manualStatusLabels[nexusInfo.postOffboardedStatus] || nexusInfo.postOffboardedStatus}
                                       </Badge>
+                                      {nexusInfo.updatedBy && (
+                                        <span className="text-xs text-muted-foreground">by {nexusInfo.updatedBy}</span>
+                                      )}
                                     </div>
-                                    <div className="flex flex-col gap-0.5">
-                                      {ToolsIcon}
-                                      {PhoneIcon}
-                                    </div>
-                                    {nexusInfo.updatedBy && (
-                                      <span className="text-xs text-muted-foreground">by {nexusInfo.updatedBy}</span>
+                                    {hasIcons && (
+                                      <div className="flex flex-col gap-0.5 shrink-0">
+                                        {ToolsIcon}
+                                        {PhoneIcon}
+                                      </div>
                                     )}
                                   </div>
                                 );
