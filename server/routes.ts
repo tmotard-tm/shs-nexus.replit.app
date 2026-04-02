@@ -15167,20 +15167,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/fleet-vehicles/po-flags", requireAuth, async (req: any, res) => {
     type FlagMap = Record<string, { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number }>;
 
-    const buildFlags = (rawRows: Array<{ vehicle_number: string; derived_type: string; cnt: string | number }>) => {
+    const buildFlags = (rawRows: Record<string, any>[]) => {
       const flags: FlagMap = {};
       for (const row of rawRows) {
-        const vn = row.vehicle_number;
+        // Snowflake returns column names uppercase; normalize to handle both cases
+        const vn = String(row.VEHICLE_NUMBER || row.vehicle_number || "").trim();
         if (!vn) continue;
         if (!flags[vn]) flags[vn] = { hasOpenRental: false, openRentalCount: 0, hasOpenMaintenance: false, openMaintenanceCount: 0 };
-        const cnt = Number(row.cnt);
-        if (row.derived_type === 'rental') { flags[vn].hasOpenRental = true; flags[vn].openRentalCount = cnt; }
-        if (row.derived_type === 'maintenance') { flags[vn].hasOpenMaintenance = true; flags[vn].openMaintenanceCount = cnt; }
+        const cnt = Number(row.CNT ?? row.cnt ?? 0);
+        const dtype = String(row.DERIVED_TYPE || row.derived_type || "").toLowerCase();
+        if (dtype === 'rental') { flags[vn].hasOpenRental = true; flags[vn].openRentalCount = cnt; }
+        if (dtype === 'maintenance') { flags[vn].hasOpenMaintenance = true; flags[vn].openMaintenanceCount = cnt; }
       }
       return flags;
     };
 
     // Try Snowflake first (source of truth for open POs)
+    const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
     if (isSnowflakeConfigured()) {
       try {
         const sf = getSnowflakeService();
