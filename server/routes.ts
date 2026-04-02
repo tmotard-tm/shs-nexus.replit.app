@@ -15212,7 +15212,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // PO flags per vehicle — open rental and maintenance PO counts
   app.post("/api/fleet-vehicles/resync-assignments", requireAuth, async (req: any, res) => {
     try {
       const { vehicleNumber, enterpriseId } = req.body;
