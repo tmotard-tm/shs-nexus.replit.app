@@ -603,7 +603,7 @@ function TechAssignmentsTab() {
   function openUpdate() {
     if (!assignment) return;
     const techId = assignment.techEnterpriseId || lookedUpTech || "";
-    const truckId = assignment.name || assignment.id || "";
+    const truckId = assignment.id || assignment.truckId || "";
     setUpdateTechId(techId);
     updateForm.reset({ techId, truckId });
   }
