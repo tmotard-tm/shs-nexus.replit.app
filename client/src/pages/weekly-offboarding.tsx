@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin } from "lucide-react";
+import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -107,6 +107,7 @@ export default function WeeklyOffboarding() {
   const { data: allNexusData = [] } = useQuery<{
     vehicleNumber: string;
     postOffboardedStatus: string | null;
+    phoneRecoveryInitiated: string | null;
     updatedBy: string | null;
   }[]>({
     queryKey: ['/api/vehicle-nexus-data/batch', truckNumbers],
@@ -676,17 +677,29 @@ export default function WeeklyOffboarding() {
                           <TableCell className="text-sm">
                             {(() => {
                               const nexusInfo = rowTruck ? nexusDataMap.get(rowTruck) : null;
+                              const phoneRecovery = nexusInfo?.phoneRecoveryInitiated?.toLowerCase() || null;
+                              const PhoneIcon = phoneRecovery === 'no'
+                                ? <PhoneOff className="w-3 h-3 text-muted-foreground shrink-0" title="Phone recovery: No" />
+                                : phoneRecovery === 'yes'
+                                ? <Phone className="w-3 h-3 text-blue-500 shrink-0" title="Phone recovery: Yes" />
+                                : null;
                               if (nexusInfo?.postOffboardedStatus) {
                                 return (
-                                  <div className="flex flex-col">
-                                    <Badge variant="outline" className="text-xs mb-1 whitespace-nowrap">
-                                      {manualStatusLabels[nexusInfo.postOffboardedStatus] || nexusInfo.postOffboardedStatus}
-                                    </Badge>
+                                  <div className="flex flex-col gap-0.5">
+                                    <div className="flex items-center gap-1">
+                                      <Badge variant="outline" className="text-xs whitespace-nowrap">
+                                        {manualStatusLabels[nexusInfo.postOffboardedStatus] || nexusInfo.postOffboardedStatus}
+                                      </Badge>
+                                      {PhoneIcon}
+                                    </div>
                                     {nexusInfo.updatedBy && (
                                       <span className="text-xs text-muted-foreground">by {nexusInfo.updatedBy}</span>
                                     )}
                                   </div>
                                 );
+                              }
+                              if (PhoneIcon) {
+                                return <div className="flex items-center">{PhoneIcon}</div>;
                               }
                               return '-';
                             })()}
