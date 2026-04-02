@@ -31,6 +31,47 @@
  *   - deleteAssignment  — DELETE /wms-engine/v1/trucks/assignments/:techId
  */
 
+import https from "node:https";
+import http from "node:http";
+
+/** Low-level HTTP request that supports bodies on any method (including GET).
+ *  Node.js globalThis.fetch follows WHATWG spec and silently strips GET bodies,
+ *  so we use node:https directly. */
+function nodeRequest(
+  url: string,
+  options: { method: string; headers: Record<string, string>; body?: string }
+): Promise<{ status: number; text(): Promise<string> }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const lib = parsed.protocol === "https:" ? https : http;
+    const bodyBuf = options.body ? Buffer.from(options.body, "utf8") : null;
+    const headers: Record<string, string | number> = { ...options.headers };
+    if (bodyBuf) headers["Content-Length"] = bodyBuf.length;
+
+    const req = lib.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+        path: parsed.pathname + parsed.search,
+        method: options.method,
+        headers,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
+          resolve({ status: res.statusCode ?? 0, text: () => Promise.resolve(raw) });
+        });
+        res.on("error", reject);
+      }
+    );
+    req.on("error", reject);
+    if (bodyBuf) req.write(bodyBuf);
+    req.end();
+  });
+}
+
 const WMS_ENGINE_BASE_URL      = process.env.WMS_ENGINE_BASE_URL;
 const WMS_ENGINE_AUTH_ENDPOINT = process.env.WMS_ENGINE_AUTH_ENDPOINT;
 const WMS_ENGINE_AUTH_HEADER   = process.env.WMS_ENGINE_AUTHORIZATION;
@@ -85,18 +126,18 @@ function extractTokenFromXml(xml: string): string | null {
 async function fetchToken(): Promise<{ token: string; url: string; status: number; rawExcerpt: string }> {
   const url = buildTokenUrl();
   console.log(`[WMS Engine] Fetching token from: ${url}`);
-  const res = await fetch(url, {
+  const res = await nodeRequest(url, {
     method: "GET",
     headers: {
       Authorization: WMS_ENGINE_AUTH_HEADER!,
       Accept: "application/xml, text/xml, */*",
     },
   });
-  const rawText = await res.text().catch(() => "");
+  const rawText = await res.text();
   const rawExcerpt = rawText.slice(0, 400);
   console.log(`[WMS Engine] Token response status: ${res.status}`);
   console.log(`[WMS Engine] Token response excerpt: ${rawExcerpt}`);
-  if (!res.ok) {
+  if (res.status < 200 || res.status >= 300) {
     throw new Error(`WMS Engine auth failed (${res.status}): ${rawExcerpt}`);
   }
   const token = extractTokenFromXml(rawText);
@@ -118,7 +159,13 @@ async function getToken(): Promise<string> {
   return token;
 }
 
-async function apiFetch(path: string, opts: RequestInit = {}, retry = true): Promise<any> {
+interface ApiFetchOpts {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+async function apiFetch(path: string, opts: ApiFetchOpts = {}, retry = true): Promise<any> {
   assertConfigured();
   const token = await getToken();
   const url = `${WMS_ENGINE_BASE_URL!.replace(/\/$/, "")}${path}`;
@@ -126,9 +173,13 @@ async function apiFetch(path: string, opts: RequestInit = {}, retry = true): Pro
     "Content-Type": "application/json",
     Accept: "application/json",
     Authorization: `Bearer ${token}`,
-    ...(opts.headers as Record<string, string> || {}),
+    ...(opts.headers || {}),
   };
-  const res = await fetch(url, { ...opts, headers });
+  const res = await nodeRequest(url, {
+    method: opts.method || "GET",
+    headers,
+    body: opts.body,
+  });
 
   // On 401, invalidate cache and retry once
   if (res.status === 401 && retry) {
@@ -137,8 +188,8 @@ async function apiFetch(path: string, opts: RequestInit = {}, retry = true): Pro
     return apiFetch(path, opts, false);
   }
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
+  if (res.status < 200 || res.status >= 300) {
+    const body = await res.text();
     let message = body;
     try {
       const parsed = JSON.parse(body);
