@@ -30,9 +30,9 @@
  *   - deleteAssignment  — DELETE /wms-engine/v1/trucks/assignments/:techId
  */
 
-const WMS_ENGINE_BASE_URL     = process.env.WMS_ENGINE_BASE_URL;
+const WMS_ENGINE_BASE_URL      = process.env.WMS_ENGINE_BASE_URL;
 const WMS_ENGINE_AUTH_ENDPOINT = process.env.WMS_ENGINE_AUTH_ENDPOINT;
-const WMS_ENGINE_AUTH_HEADER   = process.env.WMS_ENGINE_AUTH_HEADER;
+const WMS_ENGINE_AUTH_HEADER   = process.env.WMS_ENGINE_AUTHORIZATION;
 const WMS_ENGINE_USE_CASE_ID   = process.env.WMS_ENGINE_USE_CASE_ID || "TECHHUB";
 const TOKEN_TTL_MS = Number(process.env.WMS_ENGINE_TOKEN_TTL_MS || 3300000); // 55 min default
 
@@ -47,7 +47,7 @@ function isConfigured(): boolean {
 function assertConfigured(): void {
   if (!isConfigured()) {
     throw new Error(
-      "WMS Engine is not configured. Set WMS_ENGINE_BASE_URL, WMS_ENGINE_AUTH_ENDPOINT, and WMS_ENGINE_AUTH_HEADER environment variables."
+      "WMS Engine is not configured. Set WMS_ENGINE_BASE_URL, WMS_ENGINE_AUTH_ENDPOINT, and WMS_ENGINE_AUTHORIZATION environment variables."
     );
   }
 }

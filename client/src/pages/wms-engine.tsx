@@ -87,8 +87,9 @@ function ConfigStatus() {
       <AlertCircle className="h-4 w-4 text-amber-600" />
       <AlertDescription className="text-amber-700 dark:text-amber-400">
         <strong>WMS Engine not configured.</strong> Set the{" "}
-        <code className="text-xs bg-amber-100 dark:bg-amber-900 px-1 rounded">WMS_ENGINE_BASE_URL</code> and{" "}
-        <code className="text-xs bg-amber-100 dark:bg-amber-900 px-1 rounded">WMS_ENGINE_TOKEN</code> environment
+        <code className="text-xs bg-amber-100 dark:bg-amber-900 px-1 rounded">WMS_ENGINE_BASE_URL</code>,{" "}
+        <code className="text-xs bg-amber-100 dark:bg-amber-900 px-1 rounded">WMS_ENGINE_AUTH_ENDPOINT</code>, and{" "}
+        <code className="text-xs bg-amber-100 dark:bg-amber-900 px-1 rounded">WMS_ENGINE_AUTHORIZATION</code> environment
         variables to enable this integration.
       </AlertDescription>
     </Alert>
