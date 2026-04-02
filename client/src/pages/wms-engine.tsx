@@ -64,6 +64,7 @@ const ENDPOINTS: Endpoint[] = [
     pathParams: [],
     bodyFields: [
       { key: "name", label: "Name", placeholder: "Truck 1234", required: true, type: "text" },
+      { key: "locationId", label: "Location ID", placeholder: "TRUCK-1234", required: true, type: "text" },
       { key: "description", label: "Description", placeholder: "Zone A delivery truck", type: "text" },
       { key: "subsidiary", label: "Subsidiary", placeholder: "1093", type: "text" },
       { key: "parentLocation", label: "Parent Location", placeholder: "Main Warehouse", type: "text" },
