@@ -465,28 +465,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ error: "Invalid ZIP code" });
     }
 
+    // Only serve from cache if it's a positive hit — don't permanently cache failures
     if (zipCoordsCache.has(cleanZip)) {
       const cached = zipCoordsCache.get(cleanZip);
       if (cached) return res.json(cached);
-      return res.status(404).json({ error: "ZIP code not found" });
+    }
+
+    // Helper: try zippopotam.us
+    async function tryZippopotam(): Promise<{ lat: number; lng: number } | null> {
+      try {
+        const r = await fetch(`https://api.zippopotam.us/us/${cleanZip}`, {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!r.ok) return null;
+        const d = await r.json();
+        if (d.places && d.places.length > 0) {
+          return { lat: parseFloat(d.places[0].latitude), lng: parseFloat(d.places[0].longitude) };
+        }
+        return null;
+      } catch { return null; }
+    }
+
+    // Helper: fall back to Nominatim (OpenStreetMap)
+    async function tryNominatim(): Promise<{ lat: number; lng: number } | null> {
+      try {
+        const r = await fetch(
+          `https://nominatim.openstreetmap.org/search?postalcode=${cleanZip}&countrycodes=us&format=json&limit=1`,
+          { headers: { Accept: "application/json", "User-Agent": "NexusFleetApp/1.0" },
+            signal: AbortSignal.timeout(6000) }
+        );
+        if (!r.ok) return null;
+        const d = await r.json();
+        if (Array.isArray(d) && d.length > 0) {
+          return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) };
+        }
+        return null;
+      } catch { return null; }
     }
 
     try {
-      const response = await fetch(`https://api.zippopotam.us/us/${cleanZip}`, {
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) {
-        zipCoordsCache.set(cleanZip, null);
-        return res.status(404).json({ error: "ZIP code not found" });
-      }
-      const data = await response.json();
-      if (data.places && data.places.length > 0) {
-        const place = data.places[0];
-        const coords = { lat: parseFloat(place.latitude), lng: parseFloat(place.longitude) };
+      const coords = (await tryZippopotam()) ?? (await tryNominatim());
+      if (coords) {
         zipCoordsCache.set(cleanZip, coords);
         return res.json(coords);
       }
-      zipCoordsCache.set(cleanZip, null);
       return res.status(404).json({ error: "ZIP code not found" });
     } catch (err) {
       console.error(`[zip-coords] Error fetching ZIP ${cleanZip}:`, err);

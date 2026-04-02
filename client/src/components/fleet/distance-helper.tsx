@@ -30,22 +30,20 @@ export async function fetchZipCoords(zip: string): Promise<{ lat: number; lng: n
   const cleanZip = zip.replace(/\D/g, '').slice(0, 5);
   if (cleanZip.length !== 5) return null;
 
-  if (zipCoordsCache.has(cleanZip)) {
-    return zipCoordsCache.get(cleanZip) ?? null;
-  }
+  const cached = zipCoordsCache.get(cleanZip);
+  if (cached) return cached;
 
   try {
     const res = await fetch(`/api/zip-coords/${cleanZip}`);
     if (!res.ok) {
-      zipCoordsCache.set(cleanZip, null);
+      // Don't permanently cache failures — allow retry on next call
       return null;
     }
     const data = await res.json();
     const coords = data.lat != null && data.lng != null ? { lat: data.lat, lng: data.lng } : null;
-    zipCoordsCache.set(cleanZip, coords);
+    if (coords) zipCoordsCache.set(cleanZip, coords);
     return coords;
   } catch {
-    zipCoordsCache.set(cleanZip, null);
     return null;
   }
 }
