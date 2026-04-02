@@ -56,6 +56,7 @@ export interface RolePermissionSettings {
     enabled: boolean;
     fleetScope: boolean;
     tpms: boolean;
+    vehicleRentalManagement: boolean;
     dashboards: {
       enabled: boolean;
       dashboard: boolean;

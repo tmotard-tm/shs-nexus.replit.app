@@ -19,6 +19,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
     enabled: true,
     fleetScope: true,
     tpms: true,
+    vehicleRentalManagement: true,
     dashboards: {
       enabled: true,
       dashboard: true,
@@ -150,6 +151,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
     enabled: true,
     fleetScope: true,
     tpms: true,
+    vehicleRentalManagement: true,
     dashboards: {
       enabled: true,
       dashboard: true,
@@ -280,6 +282,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
     enabled: true,
     fleetScope: false,
     tpms: true,
+    vehicleRentalManagement: false,
     dashboards: {
       enabled: false,
       dashboard: false,
@@ -475,7 +478,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/rental-dashboard': () => perms.sidebar.dashboards.rentalReductionDash,
     '/reporting': () => perms.sidebar.dashboards.reporting,
     '/rental-operations': () => perms.sidebar.management.rentalOperations,
-    '/vehicle-rental-management': () => perms.quickActions.vehicleRentalManagement,
+    '/vehicle-rental-management': () => !!perms.sidebar.vehicleRentalManagement,
     '/samsara-integration': () => perms.sidebar.management.integrations,
     '/parq-integration': () => perms.sidebar.management.integrations,
     '/ams-integration': () => perms.sidebar.management.integrations,
@@ -501,7 +504,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
 
   // Vehicle Rental Management module - all sub-routes share the same permission flag
   if (route === '/vehicle-rental-management' || route.startsWith('/vehicle-rental-management/')) {
-    return !!perms.quickActions.vehicleRentalManagement;
+    return !!perms.sidebar.vehicleRentalManagement;
   }
 
   // Handle wildcard patterns for forms - all authenticated users can access forms

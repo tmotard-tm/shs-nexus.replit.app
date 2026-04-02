@@ -20,6 +20,14 @@ import {
   Wrench,
   Package,
   ClipboardList,
+  TrendingUp,
+  MessageSquare,
+  AlertTriangle,
+  ClipboardCheck,
+  ShieldAlert,
+  GraduationCap,
+  FileBarChart,
+  LayoutDashboard,
   type LucideIcon
 } from "lucide-react";
 
@@ -32,7 +40,8 @@ export type PageCategory =
   | "account"
   | "helpAndTutorial"
   | "fleetScope"
-  | "tpms";
+  | "tpms"
+  | "vehicleRentalManagement";
 
 export type PermissionPath = string[];
 
@@ -125,6 +134,13 @@ export const CATEGORIES: CategoryDefinition[] = [
     description: "Technician Profile Management System - tech profiles, shipping addresses, and schedules",
     icon: Package,
     permissionKey: "tpms",
+  },
+  {
+    key: "vehicleRentalManagement",
+    label: "Vehicle Rental Management",
+    description: "Route-ready rental tracking, outreach, escalations, DCA review, and reporting",
+    icon: Truck,
+    permissionKey: "vehicleRentalManagement",
   },
 ];
 
@@ -559,6 +575,87 @@ export const PAGES: PageDefinition[] = [
     category: "tpms",
     permissionKey: "tpms",
   },
+  {
+    key: "vrmDashboard",
+    label: "VRM Dashboard",
+    description: "Route-ready rental overview and stats",
+    path: "/vehicle-rental-management",
+    icon: LayoutDashboard,
+    category: "vehicleRentalManagement",
+    permissionKey: "vehicleRentalManagement",
+  },
+  {
+    key: "vrmNewRentals",
+    label: "New Rentals",
+    description: "Incoming rental assignments for newly-enrolled technicians",
+    path: "/vehicle-rental-management/new-rentals",
+    icon: TrendingUp,
+    category: "vehicleRentalManagement",
+    permissionKey: "vehicleRentalManagement",
+  },
+  {
+    key: "vrmActiveRentals",
+    label: "Active Rentals",
+    description: "Technician population currently in rental vehicles",
+    path: "/vehicle-rental-management/tech-population",
+    icon: Users,
+    category: "vehicleRentalManagement",
+    permissionKey: "vehicleRentalManagement",
+  },
+  {
+    key: "vrmOutreach",
+    label: "Outreach",
+    description: "Technician outreach tracking and communication",
+    path: "/vehicle-rental-management/outreach",
+    icon: MessageSquare,
+    category: "vehicleRentalManagement",
+    permissionKey: "vehicleRentalManagement",
+  },
+  {
+    key: "vrmEscalations",
+    label: "Escalations",
+    description: "Escalated rental cases requiring manager attention",
+    path: "/vehicle-rental-management/escalations",
+    icon: AlertTriangle,
+    category: "vehicleRentalManagement",
+    permissionKey: "vehicleRentalManagement",
+  },
+  {
+    key: "vrmDcaReview",
+    label: "DCA Review",
+    description: "Driver-check authorization review queue",
+    path: "/vehicle-rental-management/dca-review",
+    icon: ClipboardCheck,
+    category: "vehicleRentalManagement",
+    permissionKey: "vehicleRentalManagement",
+  },
+  {
+    key: "vrmExceptionCases",
+    label: "Exception Cases",
+    description: "Rental exception case management",
+    path: "/vehicle-rental-management/exception-cases",
+    icon: ShieldAlert,
+    category: "vehicleRentalManagement",
+    permissionKey: "vehicleRentalManagement",
+  },
+  {
+    key: "vrmReports",
+    label: "Reports",
+    description: "Rental reporting and analytics exports",
+    path: "/vehicle-rental-management/reports",
+    icon: FileBarChart,
+    category: "vehicleRentalManagement",
+    permissionKey: "vehicleRentalManagement",
+  },
+  {
+    key: "vrmSkillBuilder",
+    label: "Skill Builder",
+    description: "Training and skill-building resources for rental agents",
+    path: "/vehicle-rental-management/skill-builder",
+    icon: GraduationCap,
+    category: "vehicleRentalManagement",
+    permissionKey: "vehicleRentalManagement",
+  },
 ];
 
 export const QUICK_ACTIONS: PageFeature[] = [
@@ -570,6 +667,7 @@ export const QUICK_ACTIONS: PageFeature[] = [
   { key: "weeklyOffboarding", label: "Weekly Offboarding", description: "Access to Weekly Offboarding quick action" },
   { key: "createVehicle", label: "Create New Vehicle", description: "Access to Create Vehicle quick action" },
   { key: "fleetScope", label: "Fleet Scope", description: "Access to Fleet Scope module" },
+  { key: "vehicleRentalManagement", label: "Vehicle Rental Management", description: "Access to Vehicle Rental Management module" },
 ];
 
 export function getPagesByCategory(category: PageCategory): PageDefinition[] {
@@ -642,15 +740,26 @@ export function generatePermissionTree(): PermissionNode[] {
   for (const category of CATEGORIES) {
     const pagesInCategory = getPagesByCategory(category.key);
     if (pagesInCategory.length > 0) {
+      // Deduplicate children by permissionKey (module-level categories share one flag)
+      const seenPermKeys = new Set<string>();
+      const uniqueChildren: PermissionNode[] = [];
+      for (const page of pagesInCategory) {
+        if (!seenPermKeys.has(page.permissionKey)) {
+          seenPermKeys.add(page.permissionKey);
+          uniqueChildren.push({
+            key: page.permissionKey,
+            label: page.label,
+            description: page.description,
+          });
+        }
+      }
+      // If all pages share the category's own permissionKey, render as a leaf (no children)
+      const isModuleLevel = uniqueChildren.length === 1 && uniqueChildren[0].key === category.permissionKey;
       sidebarChildren.push({
         key: category.permissionKey,
         label: category.label,
         description: category.description,
-        children: pagesInCategory.map(page => ({
-          key: page.permissionKey,
-          label: page.label,
-          description: page.description,
-        })),
+        ...(isModuleLevel ? {} : { children: uniqueChildren }),
       });
     }
   }
