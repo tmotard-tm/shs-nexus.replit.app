@@ -222,6 +222,12 @@ export default function RentalOperations() {
     return new Set<string>(woNameSet?.enterpriseIds ?? []);
   }, [woNameSet]);
 
+  // Fetch HR employment status map for L/P/S badge rendering (Leave, Paid Leave, Suspended)
+  const { data: hrTechStatusMap } = useQuery<Record<string, string>>({
+    queryKey: ["/api/hr/tech-status"],
+    staleTime: 30 * 60 * 1000,
+  });
+
   const qualifyMutation = useMutation({
     mutationFn: (source: string) => apiRequest("POST", "/api/rental-ops/qualify", { source }),
     onSuccess: () => {
@@ -621,6 +627,24 @@ export default function RentalOperations() {
                                   title="Tech is in the Weekly Offboarding roster"
                                 >
                                   T
+                                </span>
+                              )}
+                              {r.enterpriseId && hrTechStatusMap?.[r.enterpriseId.toUpperCase()] && (
+                                <span
+                                  className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold leading-none ${
+                                    hrTechStatusMap[r.enterpriseId.toUpperCase()] === 'L'
+                                      ? 'bg-amber-100 dark:bg-amber-900/40 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300'
+                                      : hrTechStatusMap[r.enterpriseId.toUpperCase()] === 'P'
+                                        ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                                        : 'bg-orange-100 dark:bg-orange-900/40 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300'
+                                  }`}
+                                  title={
+                                    hrTechStatusMap[r.enterpriseId.toUpperCase()] === 'L' ? 'Tech is on Leave' :
+                                    hrTechStatusMap[r.enterpriseId.toUpperCase()] === 'P' ? 'Tech is on Paid Leave' :
+                                    'Tech is Suspended'
+                                  }
+                                >
+                                  {hrTechStatusMap[r.enterpriseId.toUpperCase()]}
                                 </span>
                               )}
                             </span>

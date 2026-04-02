@@ -9256,6 +9256,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // HR Tech Status - returns map of Enterprise ID → EMPL_STATUS for L/P/S statuses only
+  // Used by Rental Ops Open Rentals to show Leave/Paid-Leave/Suspended badges next to tech names
+  app.get("/api/hr/tech-status", requireAuth, async (_req: any, res) => {
+    try {
+      const snowflakeService = getSnowflakeService();
+      const rows = await snowflakeService.executeQuery(
+        `SELECT ENTERPRISE_ID, EMPL_STATUS
+         FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_ACTIVE_ROSTER_DAILY_VW
+         WHERE EMPL_STATUS IN ('L', 'P', 'S')
+           AND ENTERPRISE_ID IS NOT NULL`
+      ) as Array<{ ENTERPRISE_ID: string; EMPL_STATUS: string }>;
+      const statusMap: Record<string, string> = {};
+      for (const row of rows) {
+        const eid = (row.ENTERPRISE_ID || '').trim().toUpperCase();
+        if (eid) statusMap[eid] = row.EMPL_STATUS;
+      }
+      res.json(statusMap);
+    } catch (error: any) {
+      console.error('[HR tech-status] Error fetching HR tech status:', error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Weekly Offboarding - Sync/Refresh (same as GET but for POST compatibility)
   app.post("/api/snowflake/sync/weekly-offboarding", requireAuth, async (req: any, res) => {
     try {
