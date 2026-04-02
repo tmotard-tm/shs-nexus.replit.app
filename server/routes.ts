@@ -10423,6 +10423,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Resolve TPMS assignment mismatches via 3-step sync (Snowflake → delta → per-ID API fallback)
+  // Restricted to developer/admin roles. Runs in-process and returns a structured JSON summary.
+  app.post("/api/tpms/refresh-mismatches", requireAuth, async (req: any, res) => {
+    try {
+      if (req.user.role !== 'developer' && req.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: 'Only developers or admins can trigger mismatch refresh' });
+      }
+
+      const { runTpmsFullRefresh } = await import('./run-tpms-full-refresh');
+      const summary = await runTpmsFullRefresh();
+
+      res.json({
+        success: true,
+        snowflakeResolved: summary.snowflakeResolved,
+        deltaResolved:     summary.deltaResolved,
+        apiResolved:       summary.apiResolved,
+        stillMismatched:   summary.stillMismatched,
+        errors:            summary.errors,
+      });
+    } catch (error: any) {
+      console.error("Error running TPMS mismatch refresh:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // ==================================================
   // TPMS Tech Profiles & Change Log Routes
   // ==================================================
