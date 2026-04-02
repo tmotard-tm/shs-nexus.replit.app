@@ -1928,11 +1928,15 @@ export default function FleetManagement() {
                     const card = (
                       <Card 
                         key={vehicle.vin} 
-                        className={`cursor-pointer hover:shadow-md transition-shadow ${assignStatus.cardBorder} ${assignStatus.cardBg} border-2`}
+                        className={`cursor-pointer hover:shadow-md transition-shadow ${assignStatus.cardBorder} ${assignStatus.cardBg} border-2 relative`}
                         onClick={() => setSelectedVehicle(vehicle)}
                         data-testid={`card-vehicle-${vehicle.vehicleNumber}`}
                       >
-                        <CardContent className="p-4 space-y-3">
+                        {/* Programs badge — top-left corner */}
+                        <Badge variant="outline" className="absolute top-3 left-3 text-xs z-10">
+                          {ownership.type}
+                        </Badge>
+                        <CardContent className="p-4 pt-9 space-y-3">
                           {/* Header: Vehicle Info */}
                           <div className="flex items-center gap-2">
                             <Car className="h-5 w-5 text-muted-foreground shrink-0" />
@@ -2013,9 +2017,6 @@ export default function FleetManagement() {
                             )}
                             <Badge className={assignStatus.color + ' border text-xs'}>
                               {assignStatus.label}
-                            </Badge>
-                            <Badge variant="outline" className="text-xs">
-                              {ownership.type}
                             </Badge>
                             {poFlags?.hasOpenRental && !isInRentalOps && (
                               <Badge className="bg-red-600 text-white text-xs border-none">RENTAL ({poFlags.openRentalCount})</Badge>
