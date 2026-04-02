@@ -716,6 +716,8 @@ export default function WeeklyOffboarding() {
                                       <Badge variant="outline" className="text-xs whitespace-nowrap">
                                         {manualStatusLabels[nexusInfo.postOffboardedStatus] || nexusInfo.postOffboardedStatus}
                                       </Badge>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
                                       {ToolsIcon}
                                       {PhoneIcon}
                                     </div>
@@ -727,7 +729,7 @@ export default function WeeklyOffboarding() {
                               }
                               if (hasIcons) {
                                 return (
-                                  <div className="flex items-center gap-1">
+                                  <div className="flex flex-col gap-0.5">
                                     {ToolsIcon}
                                     {PhoneIcon}
                                   </div>
