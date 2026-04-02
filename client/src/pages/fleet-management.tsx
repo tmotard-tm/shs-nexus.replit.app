@@ -2984,7 +2984,7 @@ export default function FleetManagement() {
                                           <td className="py-1 px-3 text-muted-foreground">{idx + 1}</td>
                                           <td className="py-1 px-3 max-w-[240px]">{line.description || "—"}</td>
                                           <td className="py-1 px-3 font-mono text-orange-600 dark:text-orange-400">
-                                            {line.ataGroupCode || <span className="text-muted-foreground">—</span>}
+                                            {line.ataCode || <span className="text-muted-foreground">—</span>}
                                           </td>
                                           <td className="py-1 px-3 text-muted-foreground">
                                             {line.ataGroupDesc || "—"}
