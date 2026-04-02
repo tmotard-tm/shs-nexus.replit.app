@@ -10454,7 +10454,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==================================================
   console.log("Registering TPMS Tech Profiles API routes...");
 
-  const { tpmsTechProfiles, tpmsChangeLog } = await import("@shared/schema");
+  const { tpmsTechProfiles, tpmsChangeLog, tpmsLastKnownTruckTech } = await import("@shared/schema");
+
+  // Helper: upsert a tech profile into the last-known truck→tech cache
+  async function upsertLastKnownTruckTech(profile: any, truckNoKey: string) {
+    try {
+      await db.insert(tpmsLastKnownTruckTech).values({
+        truckNo: truckNoKey,
+        enterpriseId: profile.enterpriseId || null,
+        techId: profile.techId || null,
+        firstName: profile.firstName || null,
+        lastName: profile.lastName || null,
+        districtNo: profile.districtNo || null,
+        mobilePhone: profile.mobilePhone || null,
+        email: profile.email || null,
+        shippingAddresses: profile.shippingAddresses || [],
+        lastSeenAt: new Date(),
+        updatedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: tpmsLastKnownTruckTech.truckNo,
+        set: {
+          enterpriseId: profile.enterpriseId || null,
+          techId: profile.techId || null,
+          firstName: profile.firstName || null,
+          lastName: profile.lastName || null,
+          districtNo: profile.districtNo || null,
+          mobilePhone: profile.mobilePhone || null,
+          email: profile.email || null,
+          shippingAddresses: profile.shippingAddresses || [],
+          lastSeenAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+    } catch (cacheErr: any) {
+      console.warn("[TPMS LastKnown] Cache upsert failed (non-fatal):", cacheErr?.message);
+    }
+  }
 
   app.get("/api/tpms/techs", requireAuth, async (req: any, res) => {
     try {
@@ -10501,6 +10536,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return true;
           });
         });
+      }
+
+      // ── Last-known cache logic (only when querying by a specific truckNo) ──
+      if (truckNo) {
+        const truckKey = (truckNo as string).trim();
+        if (results.length > 0) {
+          // Live results found — seed/refresh the last-known cache in the background
+          for (const r of results) {
+            if (r.truckNo) {
+              upsertLastKnownTruckTech(r, r.truckNo).catch(() => {});
+            }
+          }
+        } else {
+          // No live results — fall back to last-known cache
+          const [cached] = await db
+            .select()
+            .from(tpmsLastKnownTruckTech)
+            .where(eq(tpmsLastKnownTruckTech.truckNo, truckKey))
+            .limit(1);
+          if (cached) {
+            console.log(`[TPMS LastKnown] Falling back to cached tech for truck ${truckKey} (last seen: ${cached.lastSeenAt})`);
+            return res.json([{ ...cached, isLastKnown: true }]);
+          }
+        }
       }
       
       res.json(results);
@@ -10956,6 +11015,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           source: "nexus-vehicle-assign",
           confirmedByTpms: false,
         });
+
+        // Immediately seed the last-known cache for this truck assignment
+        upsertLastKnownTruckTech({ ...profile, truckNo }, truckNo).catch(() => {});
       }
       
       res.json({ success: true, result });

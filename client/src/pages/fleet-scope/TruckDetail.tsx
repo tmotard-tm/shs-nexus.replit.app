@@ -1876,6 +1876,11 @@ export default function TruckDetail() {
                             No Data
                           </Badge>
                         )}
+                        {!tpmsLoading && Array.isArray(tpmsTechProfile) && tpmsTechProfile[0]?.isLastKnown && (
+                          <Badge variant="outline" className="ml-1 text-xs bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-700">
+                            Last known tech
+                          </Badge>
+                        )}
                         {pendingCdcCount > 0 && (
                           <Badge className="ml-1 text-xs bg-amber-500/20 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700" variant="outline">
                             {pendingCdcCount} pending
@@ -1893,6 +1898,7 @@ export default function TruckDetail() {
                         const hasLiveData = tpmsVehicleData?.success;
                         const info = hasLiveData ? (tpmsVehicleData.data?.truckInfo || tpmsVehicleData.data) : null;
                         const techProfile = Array.isArray(tpmsTechProfile) && tpmsTechProfile.length > 0 ? tpmsTechProfile[0] : null;
+                        const isLastKnown = techProfile?.isLastKnown === true;
                         const hasAnyData = hasLiveData || techProfile;
                         const currentEnterprise = info?.ldapId || techProfile?.enterpriseId || techSpecialtyData?.enterpriseId;
                         
@@ -1923,6 +1929,16 @@ export default function TruckDetail() {
                         
                         return (
                           <div className="space-y-4">
+                            {isLastKnown && (
+                              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-700">
+                                <span className="text-xs text-amber-700 dark:text-amber-400">
+                                  Tech no longer active in TPMS — showing last known profile
+                                  {techProfile?.lastSeenAt && (
+                                    <> · last seen {new Date(techProfile.lastSeenAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</>
+                                  )}
+                                </span>
+                              </div>
+                            )}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div>
                                 <p className="text-xs font-medium text-muted-foreground mb-1">Assigned Technician</p>

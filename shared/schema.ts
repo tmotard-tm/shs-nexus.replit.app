@@ -1972,6 +1972,30 @@ export type TpmsTechProfile = typeof tpmsTechProfiles.$inferSelect;
 export type InsertTpmsTechProfile = z.infer<typeof insertTpmsTechProfileSchema>;
 
 // ===============================
+// TPMS Last-Known Tech per Truck
+// Persists the most recently seen tech profile for each truck number so the
+// TruckDetail sidebar can keep showing it even after the truck drops off
+// TPMS_EXTRACT (e.g., tech unassigned). Never deleted — only replaced when a
+// different value comes in from a live TPMS query.
+// ===============================
+
+export const tpmsLastKnownTruckTech = pgTable("tpms_last_known_truck_tech", {
+  truckNo: varchar("truck_no", { length: 20 }).primaryKey(),
+  enterpriseId: varchar("enterprise_id", { length: 20 }),
+  techId: varchar("tech_id", { length: 20 }),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  districtNo: varchar("district_no", { length: 10 }),
+  mobilePhone: varchar("mobile_phone", { length: 30 }),
+  email: text("email"),
+  shippingAddresses: jsonb("shipping_addresses").default([]),
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type TpmsLastKnownTruckTech = typeof tpmsLastKnownTruckTech.$inferSelect;
+
+// ===============================
 // TPMS Change Log (CDC record of Nexus-originated writes)
 // ===============================
 
