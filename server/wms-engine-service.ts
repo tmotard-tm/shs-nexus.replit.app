@@ -31,50 +31,25 @@
  *   - deleteAssignment  — DELETE /wms-engine/v1/trucks/assignments/:techId
  */
 
-import https from "node:https";
-import http from "node:http";
+import { request as undiciRequest } from "undici";
 
 /** Low-level HTTP request that supports bodies on any method (including GET).
- *  Node.js globalThis.fetch follows WHATWG spec and silently strips GET bodies,
- *  so we use node:https directly. */
-function nodeRequest(
+ *  Node.js globalThis.fetch follows WHATWG spec and silently strips GET bodies.
+ *  Node.js http.request throws ERR_HTTP_BODY_NOT_ALLOWED for GET+body in Node 18+.
+ *  undici has no such restriction and matches Postman's behaviour. */
+async function nodeRequest(
   url: string,
   options: { method: string; headers: Record<string, string>; body?: string }
 ): Promise<{ status: number; text(): Promise<string> }> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const lib = parsed.protocol === "https:" ? https : http;
-    const bodyBuf = options.body ? Buffer.from(options.body, "utf8") : null;
-    const headers: Record<string, string | number> = { ...options.headers };
-    // Do NOT set Content-Length for GET/HEAD — gateways reject GET+Content-Length.
-    // For other methods, set it explicitly so the server knows the body size.
-    const method = options.method.toUpperCase();
-    if (bodyBuf && method !== "GET" && method !== "HEAD") {
-      headers["Content-Length"] = bodyBuf.length;
-    }
-
-    const req = lib.request(
-      {
-        hostname: parsed.hostname,
-        port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
-        path: parsed.pathname + parsed.search,
-        method: options.method,
-        headers,
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (c: Buffer) => chunks.push(c));
-        res.on("end", () => {
-          const raw = Buffer.concat(chunks).toString("utf8");
-          resolve({ status: res.statusCode ?? 0, text: () => Promise.resolve(raw) });
-        });
-        res.on("error", reject);
-      }
-    );
-    req.on("error", reject);
-    if (bodyBuf) req.write(bodyBuf);
-    req.end();
+  const { statusCode, body } = await undiciRequest(url, {
+    method: options.method as any,
+    headers: options.body
+      ? { ...options.headers, "Content-Length": String(Buffer.byteLength(options.body, "utf8")) }
+      : options.headers,
+    body: options.body,
   });
+  const text = await body.text();
+  return { status: statusCode, text: () => Promise.resolve(text) };
 }
 
 const WMS_ENGINE_BASE_URL      = process.env.WMS_ENGINE_BASE_URL;
@@ -283,7 +258,10 @@ export const wmsEngineService = {
   async getAllTrucks(): Promise<any[]> {
     const result = await apiFetch(
       `/wms-engine/v1/trucks?useCaseId=${encodeURIComponent(WMS_ENGINE_USE_CASE_ID)}`,
-      { method: "GET" }
+      {
+        method: "GET",
+        body: JSON.stringify({ useCaseId: WMS_ENGINE_USE_CASE_ID }),
+      }
     );
     return Array.isArray(result) ? result : result ? [result] : [];
   },
