@@ -14893,9 +14893,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // =====================================================================
-  // Holman PO Tracking (T003) — reads from HOLMAN_PO_DETAILS_CDC
+  // Holman PO Tracking — reads from HOLMAN_ETL_PO_DETAILS
   // =====================================================================
-  const HOLMAN_PO_CDC_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_PO_DETAILS_CDC";
+  const HOLMAN_PO_ETL_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS";
 
   app.post("/api/holman/pos/sync", requireAuth, async (req: any, res) => {
     try {
@@ -14904,23 +14904,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sf = getSnowflakeService();
       await sf.connect();
 
-      // Pull raw line-item rows. The view has internal aggregates so GROUP BY / window functions
-      // cannot be applied on top of it. Deduplication to one record per PO is handled in JS below.
-      // Confirmed column names from HOLMAN_PO_DETAILS_CDC schema discovery 2026-03-05.
       const rows = await sf.executeQuery(
-        `SELECT PO_NUMBER, HOLMAN_VEHICLE_NUMBER, CLIENT_VEHICLE_NUMBER, SERIAL_NO,
+        `SELECT PO_NUMBER, HOLMAN_VEHICLE_NUMBER, SERIAL_NO,
                 PO_TYPE_DESCRIPTION, DIVISION, PO_STATUS, PO_DATE,
-                LINE_ITEM_COST, DESCRIPTION, VENDOR_NAME, ENTERPRISE_ID
-         FROM ${HOLMAN_PO_CDC_TABLE}
+                LINE_ITEM_COST, DESCRIPTION, VENDOR_NAME, ENTERPRISE_ID,
+                ATA_GROUP_CODE, ATA_GROUP_DESC, REPAIR_TYPE_DESCRIPTION
+         FROM ${HOLMAN_PO_ETL_TABLE}
          WHERE PO_NUMBER IS NOT NULL
-         LIMIT 10000`
+         LIMIT 50000`
       ) as any[];
-      console.log(`[PO Sync] Fetched ${rows.length} raw rows from CDC table`);
+      console.log(`[PO Sync] Fetched ${rows.length} raw rows from ETL table`);
 
       // Deduplicate in JS: keep last-seen row per (po_number, vehicle_number) pair.
       const seen = new Map<string, any>();
       for (const r of rows) {
-        const key = `${r.PO_NUMBER}|${r.HOLMAN_VEHICLE_NUMBER || r.CLIENT_VEHICLE_NUMBER}`;
+        const key = `${r.PO_NUMBER}|${r.HOLMAN_VEHICLE_NUMBER}`;
         seen.set(key, r);
       }
       const deduped = Array.from(seen.values());
@@ -14935,7 +14933,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         return {
           poNumber: String(r.PO_NUMBER || "").replace(/^'/, "").trim(),
-          vehicleNumber: String(r.HOLMAN_VEHICLE_NUMBER || r.CLIENT_VEHICLE_NUMBER || "").trim(),
+          vehicleNumber: String(r.HOLMAN_VEHICLE_NUMBER || "").trim(),
           vin: String(r.SERIAL_NO || "").trim() || null,
           poType,
           poStatus: String(r.PO_STATUS || "").trim() || null,
@@ -14943,21 +14941,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           amount: r.LINE_ITEM_COST ?? null,
           description: String(r.DESCRIPTION || r.PO_TYPE_DESCRIPTION || "").trim().slice(0, 500) || null,
           vendor: String(r.VENDOR_NAME || "").trim() || null,
-          rawData: { poTypeDescription: r.PO_TYPE_DESCRIPTION, division: r.DIVISION, enterpriseId: r.ENTERPRISE_ID },
+          rawData: { poTypeDescription: r.PO_TYPE_DESCRIPTION, division: r.DIVISION, enterpriseId: r.ENTERPRISE_ID, ataGroupCode: r.ATA_GROUP_CODE, ataGroupDesc: r.ATA_GROUP_DESC, repairType: r.REPAIR_TYPE_DESCRIPTION },
         };
       }).filter(r => r.poNumber);
 
       const synced = await storage.upsertHolmanPoCache(records);
       res.json({ synced, lastSyncedAt: new Date().toISOString() });
     } catch (err: any) {
-      // Only treat as "table missing" when the error specifically names the table as not existing.
-      // A SQL compilation error about a column name is NOT a missing table — return 500 with the real message.
       const msg = err.message || "";
       const isTableMissing = (msg.includes("does not exist") && msg.toLowerCase().includes("table"))
         || err.code === "002003";
       const status = isTableMissing ? 503 : 500;
       const message = isTableMissing
-        ? `Snowflake pipeline table not yet available: ${HOLMAN_PO_CDC_TABLE}. Sync will work once the table is provisioned.`
+        ? `Snowflake table not available: ${HOLMAN_PO_ETL_TABLE}.`
         : msg;
       console.error(`[PO Sync] Error (${status}):`, msg);
       res.status(status).json({ message });
