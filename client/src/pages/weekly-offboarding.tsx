@@ -693,16 +693,16 @@ export default function WeeklyOffboarding() {
 
                               const ToolsIcon = toolsLoc === 'in_the_truck'
                                 ? (
-                                  <span className="inline-flex items-center gap-0.5 shrink-0" title="Tools & parts: In the truck">
+                                  <span className="inline-flex items-center shrink-0" title="Tools & parts: In the truck">
                                     <Wrench className="w-3 h-3 text-amber-600" />
-                                    <Truck className="w-3 h-3 text-amber-600" />
+                                    <Truck className="w-3 h-3 text-amber-600 -ml-px" />
                                   </span>
                                 )
                                 : toolsLoc === 'techs_home'
                                 ? (
-                                  <span className="inline-flex items-center gap-0.5 shrink-0" title="Tools & parts: Tech's home">
+                                  <span className="inline-flex items-center shrink-0" title="Tools & parts: Tech's home">
                                     <Wrench className="w-3 h-3 text-violet-500" />
-                                    <Home className="w-3 h-3 text-violet-500" />
+                                    <Home className="w-3 h-3 text-violet-500 -ml-px" />
                                   </span>
                                 )
                                 : null;
