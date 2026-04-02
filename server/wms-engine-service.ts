@@ -1,18 +1,19 @@
 /**
  * WMS Engine API Service
  *
- * Authenticates via a token endpoint (WMS_ENGINE_AUTH_ENDPOINT + "/token")
- * using an Authorization header (WMS_ENGINE_AUTH_HEADER, e.g. "Basic <base64>").
+ * Authenticates via a GET request to WMS_ENGINE_AUTH_ENDPOINT (the full token URL,
+ * e.g. https://…/HSSOMAuthService/services/auth/token) using the Authorization
+ * header value from WMS_ENGINE_AUTHORIZATION (e.g. "Basic <base64>").
  * The response is XML; the bearer token is extracted from <ns2:token>.
  * The token is cached in memory and refreshed when it expires or on 401.
  *
  * Required env vars:
  *   WMS_ENGINE_BASE_URL      — base URL of the WMS Engine API gateway
- *   WMS_ENGINE_AUTH_ENDPOINT — base URL of the auth/token endpoint
- *   WMS_ENGINE_AUTH_HEADER   — value for the Authorization header sent to the token endpoint
+ *   WMS_ENGINE_AUTH_ENDPOINT — full URL of the token endpoint (ending in /token)
+ *   WMS_ENGINE_AUTHORIZATION — value for the Authorization header sent to the token endpoint
  *
  * Optional:
- *   WMS_ENGINE_USE_CASE_ID   — defaults to "TECHHUB"
+ *   WMS_ENGINE_USE_CASE_ID   — defaults to "Nexus"
  *   WMS_ENGINE_TOKEN_TTL_MS  — token cache TTL in ms, defaults to 3300000 (55 min)
  *
  * Methods:
