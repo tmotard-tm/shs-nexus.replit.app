@@ -1707,7 +1707,7 @@ export default function FleetManagement() {
                               {hasDTC && (
                                 <Badge className={`text-xs border-none flex items-center gap-1 ${dtcBadgeClass(dtcSeverity)}`}>
                                   <Wrench className="h-3 w-3" />
-                                  {dtcSeverity === 'STOP' ? 'STOP' : dtcSeverity === 'PROTECT' ? 'PROTECT' : dtcSeverity === 'WARNING' ? 'WARNING' : dtcSeverity === 'EMISSIONS' ? 'Emissions' : 'Check Engine'}
+                                  Check Engine
                                 </Badge>
                               )}
                             </div>
