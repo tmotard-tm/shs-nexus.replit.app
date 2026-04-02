@@ -54,29 +54,45 @@ const assignmentSchema = z.object({
 type CreateTruckForm = z.infer<typeof createTruckSchema>;
 type AssignmentForm = z.infer<typeof assignmentSchema>;
 
+function parseApiError(err: unknown, fallback: string): string {
+  const message = (err instanceof Error ? err.message : String(err)) || "";
+  const bodyPart = message.replace(/^\d+:\s*/, "");
+  try {
+    const parsed = JSON.parse(bodyPart);
+    return parsed?.message || parsed?.error || fallback;
+  } catch {
+    return bodyPart || fallback;
+  }
+}
+
 function ConfigStatus() {
-  const { data, isLoading } = useQuery<{ success: boolean; data?: any[]; message?: string }>({
+  const { isLoading, isError, error } = useQuery<{ success: boolean; data?: any[]; message?: string }>({
     queryKey: ["/api/wms/trucks"],
     retry: false,
   });
 
   if (isLoading) return null;
 
-  if (!data?.success && data?.message?.includes("not configured")) {
-    return (
-      <Alert className="mb-6 border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950">
-        <AlertCircle className="h-4 w-4 text-amber-600" />
-        <AlertDescription className="text-amber-700 dark:text-amber-400">
-          <strong>WMS Engine not configured.</strong> Set the{" "}
-          <code className="text-xs bg-amber-100 dark:bg-amber-900 px-1 rounded">WMS_ENGINE_BASE_URL</code> and{" "}
-          <code className="text-xs bg-amber-100 dark:bg-amber-900 px-1 rounded">WMS_ENGINE_TOKEN</code> environment
-          variables to enable this integration.
-        </AlertDescription>
-      </Alert>
-    );
-  }
+  const isNotConfigured =
+    isError &&
+    (() => {
+      const msg = (error instanceof Error ? error.message : String(error)) || "";
+      return msg.startsWith("503") || msg.toLowerCase().includes("not configured");
+    })();
 
-  return null;
+  if (!isNotConfigured) return null;
+
+  return (
+    <Alert className="mb-6 border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950">
+      <AlertCircle className="h-4 w-4 text-amber-600" />
+      <AlertDescription className="text-amber-700 dark:text-amber-400">
+        <strong>WMS Engine not configured.</strong> Set the{" "}
+        <code className="text-xs bg-amber-100 dark:bg-amber-900 px-1 rounded">WMS_ENGINE_BASE_URL</code> and{" "}
+        <code className="text-xs bg-amber-100 dark:bg-amber-900 px-1 rounded">WMS_ENGINE_TOKEN</code> environment
+        variables to enable this integration.
+      </AlertDescription>
+    </Alert>
+  );
 }
 
 function TruckLocationsTab() {
@@ -129,13 +145,8 @@ function TruckLocationsTab() {
         description: netsuiteId ? `NetSuite ID: ${netsuiteId}` : "Successfully created in NetSuite",
       });
     },
-    onError: async (err: any) => {
-      let message = "Failed to create truck location";
-      try {
-        const json = await err.response?.json();
-        message = json?.message || message;
-      } catch {}
-      toast({ title: "Error", description: message, variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: parseApiError(err, "Failed to create truck location"), variant: "destructive" });
     },
   });
 
@@ -147,13 +158,8 @@ function TruckLocationsTab() {
       setEditTruck(null);
       toast({ title: "Truck location updated" });
     },
-    onError: async (err: any) => {
-      let message = "Failed to update truck location";
-      try {
-        const json = await err.response?.json();
-        message = json?.message || message;
-      } catch {}
-      toast({ title: "Error", description: message, variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: parseApiError(err, "Failed to update truck location"), variant: "destructive" });
     },
   });
 
@@ -164,13 +170,8 @@ function TruckLocationsTab() {
       queryClient.invalidateQueries({ queryKey: ["/api/wms/trucks"] });
       toast({ title: "Truck disabled in NetSuite" });
     },
-    onError: async (err: any) => {
-      let message = "Failed to disable truck";
-      try {
-        const json = await err.response?.json();
-        message = json?.message || message;
-      } catch {}
-      toast({ title: "Error", description: message, variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: parseApiError(err, "Failed to disable truck"), variant: "destructive" });
     },
   });
 
@@ -567,13 +568,8 @@ function TechAssignmentsTab() {
         description: json?.data?.netsuiteId ? `NetSuite ID: ${json.data.netsuiteId}` : "Assignment processed successfully",
       });
     },
-    onError: async (err: any) => {
-      let message = "Failed to create assignment";
-      try {
-        const json = await err.response?.json();
-        message = json?.message || message;
-      } catch {}
-      toast({ title: "Error", description: message, variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: parseApiError(err, "Failed to create assignment"), variant: "destructive" });
     },
   });
 
@@ -585,13 +581,8 @@ function TechAssignmentsTab() {
       setUpdateTechId(null);
       toast({ title: "Assignment updated" });
     },
-    onError: async (err: any) => {
-      let message = "Failed to update assignment";
-      try {
-        const json = await err.response?.json();
-        message = json?.message || message;
-      } catch {}
-      toast({ title: "Error", description: message, variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: parseApiError(err, "Failed to update assignment"), variant: "destructive" });
     },
   });
 
@@ -604,13 +595,8 @@ function TechAssignmentsTab() {
       setLookupTechId("");
       toast({ title: "Tech unassigned from truck" });
     },
-    onError: async (err: any) => {
-      let message = "Failed to unassign tech";
-      try {
-        const json = await err.response?.json();
-        message = json?.message || message;
-      } catch {}
-      toast({ title: "Error", description: message, variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: parseApiError(err, "Failed to unassign tech"), variant: "destructive" });
     },
   });
 

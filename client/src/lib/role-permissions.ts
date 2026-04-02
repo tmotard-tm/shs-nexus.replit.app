@@ -49,6 +49,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       communicationHub: true,
       techRoster: true,
       rentalOperations: true,
+      wmsEngine: true,
     },
     activities: {
       enabled: true,
@@ -179,6 +180,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       communicationHub: true,
       techRoster: true,
       rentalOperations: true,
+      wmsEngine: false,
     },
     activities: {
       enabled: true,
@@ -308,6 +310,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       communicationHub: false,
       techRoster: false,
       rentalOperations: false,
+      wmsEngine: false,
     },
     activities: {
       enabled: false,
@@ -478,6 +481,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/ams-integration': () => perms.sidebar.management.integrations,
     '/segno-integration': () => perms.sidebar.management.integrations,
     '/tpms-integration': () => perms.sidebar.management.integrations,
+    '/wms-engine': () => perms.sidebar.management.wmsEngine,
   };
 
   // Check exact route match
