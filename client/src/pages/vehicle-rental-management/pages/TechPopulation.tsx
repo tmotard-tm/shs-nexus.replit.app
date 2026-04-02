@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, RefreshCw, CheckCircle, AlertCircle, Download, Flag, X, ChevronRight } from "lucide-react";
+import { Upload, RefreshCw, CheckCircle, AlertCircle, Download, Flag, X, ChevronRight, Plus, Clock } from "lucide-react";
 import { StatusPill } from "../components/status-pill";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
@@ -43,7 +43,19 @@ interface TechPopRow {
 
 interface TechDetail extends TechPopRow {
   smsSentAt: string | null;
-  smsResponse: string | null;
+  smsResponseStatus: string | null;
+  byovEnrolled: boolean;
+  rentalReturnDate: string | null;
+}
+
+interface OutreachEntry {
+  id: string;
+  techId: string;
+  actionType: string;
+  outcome: string | null;
+  notes: string | null;
+  performedByName: string | null;
+  createdAt: string;
 }
 
 // ─── Gate pill helpers ────────────────────────────────────────────────────────
@@ -118,10 +130,42 @@ function ImportSummary({ summary, onClose }: { summary: { upserted: number; tota
 
 // ─── Slide-in detail panel ────────────────────────────────────────────────────
 
-const ESCALATION_LABELS: Record<string, string> = {
-  helper: "Helper",
-  at_home_training: "At-Home Training",
+const ACTION_TYPE_LABELS: Record<string, string> = {
+  text_sent: "Text Sent",
+  call_completed: "Call Completed",
+  carl_escalated: "Escalated to Carl",
+  epv_issued: "EPV Issued",
+  byov_enrolled: "BYOV Enrolled",
+  exception_opened: "Exception Opened",
 };
+
+const SELECT_STYLE: React.CSSProperties = {
+  fontFamily: "var(--font-dm-sans, sans-serif)", fontWeight: 400, fontSize: 13,
+  color: "#1A1D27", backgroundColor: "#FAFAFA",
+  border: "1px solid #E4E7EF", borderRadius: 8,
+  padding: "6px 28px 6px 10px", height: 34, appearance: "none" as any,
+  cursor: "pointer", width: "100%",
+  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238891A4' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+  backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center",
+};
+
+function WipSection({ title }: { title: string }) {
+  return (
+    <div style={{ marginTop: 28 }}>
+      <h3 style={{ fontFamily: "var(--font-syne, sans-serif)", fontWeight: 700, fontSize: 13, color: "#8891A4", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 10px" }}>
+        {title}
+      </h3>
+      <div style={{
+        padding: "20px 16px", borderRadius: 10, border: "1px dashed #E4E7EF",
+        backgroundColor: "#FAFAFA", textAlign: "center",
+      }}>
+        <span style={{ fontFamily: "var(--font-dm-sans, sans-serif)", fontSize: 13, color: "#8891A4" }}>
+          🚧 Coming soon
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: () => void; onUpdated: () => void }) {
   const qc = useQueryClient();
@@ -130,14 +174,40 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
     enabled: !!techId,
   });
 
-  const [returnedRental, setReturnedRental] = useState<boolean | null>(null);
+  const { data: outreachData } = useQuery<OutreachEntry[]>({
+    queryKey: [`/api/vrm/techs/${techId}/outreach`],
+    enabled: !!techId,
+    queryFn: async () => {
+      const r = await fetch(`/api/vrm/techs/${techId}/outreach`);
+      if (!r.ok) throw new Error("Failed to load outreach log");
+      return r.json();
+    },
+  });
+  const outreachLog = outreachData ?? [];
+
+  // ── Structured tracking state ──
+  const [smsSentAt, setSmsSentAt] = useState<string>("");
+  const [smsResponseStatus, setSmsResponseStatus] = useState<string>("");
+  const [byovEnrolled, setByovEnrolled] = useState<boolean>(false);
+  const [returnedRental, setReturnedRental] = useState<boolean>(false);
+  const [rentalReturnDate, setRentalReturnDate] = useState<string>("");
   const [escalationPath, setEscalationPath] = useState<string>("");
   const [saved, setSaved] = useState(false);
+
+  // ── Action log form state ──
+  const [showAddAction, setShowAddAction] = useState(false);
+  const [actionType, setActionType] = useState<string>("text_sent");
+  const [actionNotes, setActionNotes] = useState<string>("");
+  const [actionPerformer, setActionPerformer] = useState<string>("");
 
   // Sync local state when detail loads
   const initialized = useRef(false);
   if (detail && !initialized.current) {
+    setSmsSentAt(detail.smsSentAt ? detail.smsSentAt.split("T")[0] : "");
+    setSmsResponseStatus(detail.smsResponseStatus ?? "");
+    setByovEnrolled(detail.byovEnrolled);
     setReturnedRental(detail.returnedRental);
+    setRentalReturnDate(detail.rentalReturnDate ?? "");
     setEscalationPath(detail.escalationPath ?? "");
     initialized.current = true;
   }
@@ -145,7 +215,11 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
   const trackingMutation = useMutation({
     mutationFn: async () => {
       const r = await apiRequest("PATCH", `/api/vrm/techs/${techId}/tracking`, {
-        returnedRental: returnedRental ?? false,
+        smsSentAt: smsSentAt || null,
+        smsResponseStatus: smsResponseStatus || null,
+        byovEnrolled,
+        returnedRental,
+        rentalReturnDate: rentalReturnDate || null,
         escalationPath: escalationPath || null,
       });
       return r.json();
@@ -158,54 +232,68 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
     },
   });
 
+  const addActionMutation = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", `/api/vrm/techs/${techId}/outreach`, {
+        actionType,
+        notes: actionNotes || null,
+        performedByName: actionPerformer,
+      });
+      return r.json();
+    },
+    onSuccess: () => {
+      setShowAddAction(false);
+      setActionType("text_sent");
+      setActionNotes("");
+      setActionPerformer("");
+      qc.invalidateQueries({ queryKey: [`/api/vrm/techs/${techId}/outreach`] });
+    },
+  });
+
   const labelStyle: React.CSSProperties = {
     fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
     color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em",
-    marginBottom: 4,
+    marginBottom: 6,
   };
-  const valueStyle: React.CSSProperties = {
-    fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 14, color: colors.ink,
+  const rowStyle: React.CSSProperties = { padding: "14px 0", borderBottom: `1px solid ${colors.rule}` };
+  const inputStyle: React.CSSProperties = {
+    fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink,
+    backgroundColor: colors.background, border: `1px solid ${colors.rule}`,
+    borderRadius: 8, padding: "6px 10px", width: "100%", outline: "none",
   };
-  const rowStyle: React.CSSProperties = {
-    padding: "14px 0",
-    borderBottom: `1px solid ${colors.rule}`,
-  };
+  const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
+    fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 13,
+    padding: "5px 16px", borderRadius: 6, cursor: "pointer",
+    border: `1px solid ${active ? colors.accent : colors.rule}`,
+    backgroundColor: active ? colors.accent : "transparent",
+    color: active ? "#FFFFFF" : colors.inkSoft,
+    transition: "all 120ms",
+  });
 
   return (
     <>
       {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{ position: "fixed", inset: 0, backgroundColor: "rgba(15,17,23,0.18)", zIndex: 40 }}
-      />
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(15,17,23,0.18)", zIndex: 40 }} />
       {/* Panel */}
-      <div
-        style={{
-          position: "fixed", top: 0, right: 0, bottom: 0, width: 480,
-          backgroundColor: "#FFFFFF", borderLeft: `1px solid ${colors.rule}`,
-          zIndex: 50, display: "flex", flexDirection: "column",
-          boxShadow: "-4px 0 24px rgba(0,0,0,0.07)",
-        }}
-      >
-        {/* Panel header */}
-        <div style={{ padding: "20px 24px", borderBottom: `1px solid ${colors.rule}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+      <div style={{
+        position: "fixed", top: 0, right: 0, bottom: 0, width: 520,
+        backgroundColor: "#FFFFFF", borderLeft: `1px solid ${colors.rule}`,
+        zIndex: 50, display: "flex", flexDirection: "column",
+        boxShadow: "-4px 0 24px rgba(0,0,0,0.07)",
+      }}>
+        {/* Header */}
+        <div style={{ padding: "20px 24px", borderBottom: `1px solid ${colors.rule}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexShrink: 0 }}>
           <div>
             {isLoading
               ? <div style={{ height: 22, width: 180, backgroundColor: colors.surface, borderRadius: 4 }} />
-              : (
-                <>
-                  <h2 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 20, color: colors.ink, margin: 0 }}>
-                    {detail?.name}
-                  </h2>
+              : <>
+                  <h2 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 20, color: colors.ink, margin: 0 }}>{detail?.name}</h2>
                   <div className="flex items-center gap-2 mt-1">
                     <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{detail?.ldap}</span>
-                    {detail?.market && (
-                      <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>· {detail.market}</span>
-                    )}
+                    {detail?.market && <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>· {detail.market}</span>}
                     {detail && <StatusPill status={detail.currentStatus} />}
                   </div>
                 </>
-              )
             }
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 4, marginTop: -2 }}>
@@ -214,9 +302,9 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
         </div>
 
         {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 32px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 40px" }}>
 
-          {/* ── Outreach Tracking ─────────────────────────────── */}
+          {/* ── Outreach Tracking ──────────────────────────────── */}
           <div style={{ marginTop: 20, marginBottom: 4 }}>
             <h3 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 13, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
               Outreach Tracking
@@ -226,77 +314,55 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
           {/* SMS Sent */}
           <div style={rowStyle}>
             <div style={labelStyle}>SMS Sent</div>
-            {isLoading
-              ? <div style={{ height: 16, width: 120, backgroundColor: colors.surface, borderRadius: 4 }} />
-              : detail?.smsSentAt
-                ? <span style={{ ...valueStyle, color: colors.green }}>
-                    Yes — {new Date(detail.smsSentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                  </span>
-                : <span style={{ ...valueStyle, color: colors.inkMuted }}>No</span>
-            }
+            <input type="date" value={smsSentAt} onChange={(e) => setSmsSentAt(e.target.value)} style={inputStyle} />
           </div>
 
           {/* Response */}
           <div style={rowStyle}>
             <div style={labelStyle}>Response</div>
-            {isLoading
-              ? <div style={{ height: 16, width: 100, backgroundColor: colors.surface, borderRadius: 4 }} />
-              : detail?.smsResponse
-                ? <StatusPill status={detail.smsResponse} />
-                : <span style={{ ...valueStyle, color: colors.inkMuted }}>No response yet</span>
-            }
+            <input
+              type="text"
+              value={smsResponseStatus}
+              onChange={(e) => setSmsResponseStatus(e.target.value)}
+              placeholder="Enter response…"
+              style={inputStyle}
+            />
           </div>
 
-          {/* Returned Rental */}
+          {/* Enrolled in BYOV */}
           <div style={rowStyle}>
-            <div style={labelStyle}>Returned Rental</div>
+            <div style={labelStyle}>Enrolled in BYOV</div>
             <div className="flex gap-2 mt-1">
-              {[true, false].map((val) => (
-                <button
-                  key={String(val)}
-                  onClick={() => setReturnedRental(val)}
-                  style={{
-                    fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 13,
-                    padding: "5px 16px", borderRadius: 6, cursor: "pointer",
-                    border: `1px solid ${returnedRental === val ? colors.accent : colors.rule}`,
-                    backgroundColor: returnedRental === val ? colors.accent : "transparent",
-                    color: returnedRental === val ? "#FFFFFF" : colors.inkSoft,
-                    transition: "all 120ms",
-                  }}
-                >
+              {([true, false] as boolean[]).map((val) => (
+                <button key={String(val)} onClick={() => setByovEnrolled(val)} style={toggleBtnStyle(byovEnrolled === val)}>
                   {val ? "Yes" : "No"}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Enrolled in BYOV */}
+          {/* Returned Rental */}
           <div style={rowStyle}>
-            <div style={labelStyle}>Enrolled in BYOV</div>
-            {isLoading
-              ? <div style={{ height: 16, width: 80, backgroundColor: colors.surface, borderRadius: 4 }} />
-              : detail?.currentStatus === "byov_enrolled"
-                ? <StatusPill status="byov_enrolled" />
-                : <span style={{ ...valueStyle, color: colors.inkMuted }}>No</span>
-            }
+            <div style={labelStyle}>Returned Rental</div>
+            <div className="flex gap-2 mt-1">
+              {([true, false] as boolean[]).map((val) => (
+                <button key={String(val)} onClick={() => setReturnedRental(val)} style={toggleBtnStyle(returnedRental === val)}>
+                  {val ? "Yes" : "No"}
+                </button>
+              ))}
+            </div>
+            {returnedRental && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ ...labelStyle, marginBottom: 4 }}>Return Date</div>
+                <input type="date" value={rentalReturnDate} onChange={(e) => setRentalReturnDate(e.target.value)} style={inputStyle} />
+              </div>
+            )}
           </div>
 
           {/* Escalation Path */}
           <div style={rowStyle}>
             <div style={labelStyle}>Escalation Path</div>
-            <select
-              value={escalationPath}
-              onChange={(e) => setEscalationPath(e.target.value)}
-              style={{
-                fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 13,
-                color: colors.ink, backgroundColor: colors.background,
-                border: `1px solid ${colors.rule}`, borderRadius: 8,
-                padding: "6px 28px 6px 10px", height: 34, appearance: "none" as any,
-                cursor: "pointer", marginTop: 4,
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238891A4' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
-                backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center",
-              }}
-            >
+            <select value={escalationPath} onChange={(e) => setEscalationPath(e.target.value)} style={SELECT_STYLE}>
               <option value="">None</option>
               <option value="helper">Helper</option>
               <option value="at_home_training">At-Home Training</option>
@@ -304,7 +370,7 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
           </div>
 
           {/* Save button */}
-          <div style={{ marginTop: 20 }}>
+          <div style={{ marginTop: 18 }}>
             <button
               onClick={() => trackingMutation.mutate()}
               disabled={trackingMutation.isPending}
@@ -317,12 +383,128 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
                 transition: "background-color 200ms",
               }}
             >
-              {saved ? "Saved" : trackingMutation.isPending ? "Saving…" : "Save Changes"}
+              {saved ? "Saved ✓" : trackingMutation.isPending ? "Saving…" : "Save Changes"}
             </button>
           </div>
 
+          {/* ── Action Log ────────────────────────────────────── */}
+          <div style={{ marginTop: 32 }}>
+            <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+              <h3 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 13, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
+                Action Log
+              </h3>
+              <button
+                onClick={() => setShowAddAction((v) => !v)}
+                style={{
+                  fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+                  color: colors.accent, backgroundColor: "#EFF4FF",
+                  border: "1px solid #C7D7F9", borderRadius: 6, padding: "4px 10px",
+                  cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
+                }}
+              >
+                <Plus className="h-3 w-3" /> Add Action
+              </button>
+            </div>
+
+            {/* Add action form */}
+            {showAddAction && (
+              <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 14 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div>
+                    <div style={labelStyle}>Action Type</div>
+                    <select value={actionType} onChange={(e) => setActionType(e.target.value)} style={SELECT_STYLE}>
+                      {Object.entries(ACTION_TYPE_LABELS).map(([v, l]) => (
+                        <option key={v} value={v}>{l}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={labelStyle}>Notes</div>
+                    <textarea
+                      value={actionNotes}
+                      onChange={(e) => setActionNotes(e.target.value)}
+                      placeholder="Optional notes…"
+                      rows={2}
+                      style={{ ...inputStyle, resize: "vertical", height: "auto" }}
+                    />
+                  </div>
+                  <div>
+                    <div style={labelStyle}>Performed By</div>
+                    <input
+                      type="text"
+                      value={actionPerformer}
+                      onChange={(e) => setActionPerformer(e.target.value)}
+                      placeholder="Your name"
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => addActionMutation.mutate()}
+                      disabled={!actionPerformer.trim() || addActionMutation.isPending}
+                      style={{
+                        fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+                        color: "#fff", backgroundColor: colors.accent,
+                        border: "none", borderRadius: 6, padding: "6px 14px",
+                        cursor: !actionPerformer.trim() || addActionMutation.isPending ? "not-allowed" : "pointer",
+                        opacity: !actionPerformer.trim() || addActionMutation.isPending ? 0.55 : 1,
+                      }}
+                    >
+                      {addActionMutation.isPending ? "Saving…" : "Log Action"}
+                    </button>
+                    <button
+                      onClick={() => setShowAddAction(false)}
+                      style={{
+                        fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+                        color: colors.inkSoft, backgroundColor: "transparent",
+                        border: `1px solid ${colors.rule}`, borderRadius: 6, padding: "6px 12px", cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Log entries */}
+            {outreachLog.length === 0 ? (
+              <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>
+                No actions logged yet.
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {outreachLog.map((entry) => (
+                  <div key={entry.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface }}>
+                    <div className="flex items-center justify-between" style={{ marginBottom: entry.notes ? 6 : 0 }}>
+                      <span style={{
+                        fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12,
+                        color: colors.accent, backgroundColor: "#EFF4FF",
+                        padding: "2px 8px", borderRadius: 5,
+                      }}>
+                        {ACTION_TYPE_LABELS[entry.actionType] ?? entry.actionType}
+                      </span>
+                      <div className="flex items-center gap-1" style={{ color: colors.inkMuted }}>
+                        <Clock className="h-3 w-3" />
+                        <span style={{ fontFamily: fonts.dmSans, fontSize: 11 }}>
+                          {new Date(entry.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                        </span>
+                      </div>
+                    </div>
+                    {entry.notes && (
+                      <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, margin: "4px 0 0" }}>{entry.notes}</p>
+                    )}
+                    {entry.performedByName && (
+                      <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "4px 0 0" }}>— {entry.performedByName}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* ── Gate Summary ──────────────────────────────────── */}
-          <div style={{ marginTop: 28, marginBottom: 4 }}>
+          <div style={{ marginTop: 32, marginBottom: 4 }}>
             <h3 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 13, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
               Gate Summary
             </h3>
@@ -330,31 +512,27 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
 
           <div style={rowStyle}>
             <div style={labelStyle}>Gate 1 — Adjusted Net</div>
-            {isLoading
-              ? <div style={{ height: 16, width: 100, backgroundColor: colors.surface, borderRadius: 4 }} />
-              : <Gate1Pill classification={detail?.gate1Classification ?? null} net={detail?.gate1AdjustedNet ?? null} />
-            }
+            {isLoading ? <div style={{ height: 16, width: 100, backgroundColor: colors.surface, borderRadius: 4 }} />
+              : <Gate1Pill classification={detail?.gate1Classification ?? null} net={detail?.gate1AdjustedNet ?? null} />}
           </div>
 
           <div style={rowStyle}>
             <div style={labelStyle}>Gate 2 — Scorecard</div>
-            {isLoading
-              ? <div style={{ height: 16, width: 100, backgroundColor: colors.surface, borderRadius: 4 }} />
-              : <Gate2Pill exempt={detail?.gate2Exempt ?? false} newHire={detail?.newHireExempt ?? false} score={detail?.gate2WeightedScore ?? null} />
-            }
+            {isLoading ? <div style={{ height: 16, width: 100, backgroundColor: colors.surface, borderRadius: 4 }} />
+              : <Gate2Pill exempt={detail?.gate2Exempt ?? false} newHire={detail?.newHireExempt ?? false} score={detail?.gate2WeightedScore ?? null} />}
           </div>
 
           <div style={rowStyle}>
             <div style={labelStyle}>Tenure</div>
-            <span style={valueStyle}>{detail?.tenureMonths != null ? `${detail.tenureMonths} months` : "—"}</span>
+            <span style={{ fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 14, color: colors.ink }}>
+              {detail?.tenureMonths != null ? `${detail.tenureMonths} months` : "—"}
+            </span>
           </div>
 
           <div style={rowStyle}>
             <div style={labelStyle}>Rental Start</div>
-            <span style={{ ...valueStyle, fontFamily: fonts.jetbrains, fontSize: 13 }}>
-              {detail?.rentalStartDate
-                ? new Date(detail.rentalStartDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                : "—"}
+            <span style={{ fontFamily: fonts.jetbrains, fontSize: 13, color: colors.ink }}>
+              {detail?.rentalStartDate ? new Date(detail.rentalStartDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
             </span>
           </div>
 
@@ -362,6 +540,12 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
             <div style={labelStyle}>DCA Review</div>
             {detail && <StatusPill status={detail.dcaReviewOutcome ?? "pending"} />}
           </div>
+
+          {/* ── WIP Sections ──────────────────────────────────── */}
+          <WipSection title="Escalations" />
+          <WipSection title="DCA Review" />
+          <WipSection title="Exception Cases" />
+
         </div>
       </div>
     </>

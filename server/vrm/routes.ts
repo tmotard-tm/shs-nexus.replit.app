@@ -561,6 +561,64 @@ export function registerVrmRoutes(): Router {
     }
   });
 
+  /**
+   * PATCH /api/vrm/profitability/log/:id
+   * Updates structured tracking fields on a rental decision.
+   */
+  router.patch("/profitability/log/:id", async (req, res) => {
+    try {
+      const existing = await getRentalDecision(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Decision not found" });
+      const data: Record<string, any> = {};
+      if ("smsSentAt" in req.body) data.smsSentAt = req.body.smsSentAt ? new Date(req.body.smsSentAt) : null;
+      if ("smsResponseStatus" in req.body) data.smsResponseStatus = req.body.smsResponseStatus ?? null;
+      if (req.body.byovEnrolled !== undefined) data.byovEnrolled = Boolean(req.body.byovEnrolled);
+      if (req.body.returnedRental !== undefined) data.returnedRental = Boolean(req.body.returnedRental);
+      if ("rentalReturnDate" in req.body) data.rentalReturnDate = req.body.rentalReturnDate ?? null;
+      const updated = await updateRentalDecision(req.params.id, data);
+      res.json(updated);
+    } catch (e: any) {
+      console.error("[VRM] profitability/log PATCH error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * GET /api/vrm/profitability/log/:id/actions
+   * Returns action log entries for a rental decision.
+   */
+  router.get("/profitability/log/:id/actions", async (req, res) => {
+    try {
+      const rows = await listRentalDecisionActions(req.params.id);
+      res.json({ rows });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/vrm/profitability/log/:id/actions
+   * Adds an action log entry to a rental decision.
+   */
+  router.post("/profitability/log/:id/actions", async (req, res) => {
+    try {
+      const { actionType, notes, performedByName } = req.body;
+      if (!actionType || !performedByName) {
+        return res.status(400).json({ error: "actionType and performedByName required" });
+      }
+      const row = await addRentalDecisionAction({
+        decisionId: req.params.id,
+        actionType,
+        notes: notes ?? null,
+        performedByName,
+      });
+      res.json(row);
+    } catch (e: any) {
+      console.error("[VRM] profitability/log/:id/actions POST error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ─── Exception Cases ─────────────────────────────────────────────────────────
 
   router.get("/exception-cases", async (_req, res) => {
