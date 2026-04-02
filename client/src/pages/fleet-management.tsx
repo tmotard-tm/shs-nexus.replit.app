@@ -151,7 +151,13 @@ export default function FleetManagement() {
   const [holmanTechFilter, setHolmanTechFilter] = useState("all");
   const [tpmsTechFilter, setTpmsTechFilter] = useState("all");
   const [mismatchFilter, setMismatchFilter] = useState("all");
-  
+
+  // Badge filters
+  const [rentalOpsFilter, setRentalOpsFilter] = useState("all");
+  const [poRentalFilter, setPoRentalFilter] = useState("all");
+  const [poMaintFilter, setPoMaintFilter] = useState("all");
+  const [dtcFilter, setDtcFilter] = useState("all");
+
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [showOos, setShowOos] = useState(false);
   
@@ -889,7 +895,8 @@ export default function FleetManagement() {
     vehicleProgramFilter, brandingFilter, interiorFilter, tuneStatusFilter,
     assignmentStatusFilter,
     stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
-    holmanTechFilter, tpmsTechFilter, mismatchFilter
+    holmanTechFilter, tpmsTechFilter, mismatchFilter,
+    rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter,
   ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0);
 
   // OOS pre-filter — exclude out-of-service vehicles unless toggle is on
@@ -964,18 +971,42 @@ export default function FleetManagement() {
       const matchesMismatch = mismatchFilter === "all" || 
         (mismatchFilter === "mismatch" && hasMismatch) ||
         (mismatchFilter === "match" && !hasMismatch);
-      
+
+      // Badge filters
+      const isInRentalOpsF = rentalOpsVehicleSet.has(vehicle.vehicleNumber)
+        || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
+        || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
+      const matchesRentalOps = rentalOpsFilter === "all" ||
+        (rentalOpsFilter === "yes" && isInRentalOpsF) ||
+        (rentalOpsFilter === "no" && !isInRentalOpsF);
+
+      const pfF = poFlagsMap.get(vehicle.vehicleNumber);
+      const matchesPoRental = poRentalFilter === "all" ||
+        (poRentalFilter === "yes" && pfF?.hasOpenRental) ||
+        (poRentalFilter === "no" && !pfF?.hasOpenRental);
+      const matchesPoMaint = poMaintFilter === "all" ||
+        (poMaintFilter === "yes" && pfF?.hasOpenMaintenance) ||
+        (poMaintFilter === "no" && !pfF?.hasOpenMaintenance);
+
+      const hasDTCF = dtcTruckSet.has(vehicle.vehicleNumber) || dtcTruckSet.has(toCanonical(vehicle.vehicleNumber));
+      const matchesDTC = dtcFilter === "all" ||
+        (dtcFilter === "yes" && hasDTCF) ||
+        (dtcFilter === "no" && !hasDTCF);
+
       return matchesSearch && matchesMake && matchesModel && matchesYear && matchesColor &&
              matchesProgram && matchesBranding && matchesInterior && matchesTuneStatus &&
              matchesAssignment &&
              matchesState && matchesCity && matchesLicenseState && matchesRegion && matchesDivision && matchesDistrict &&
-             matchesHolmanTech && matchesTpmsTech && matchesMismatch;
+             matchesHolmanTech && matchesTpmsTech && matchesMismatch &&
+             matchesRentalOps && matchesPoRental && matchesPoMaint && matchesDTC;
     });
   }, [activeVehicles, searchQuery, makeFilter, modelFilter, yearFilter, colorFilter,
       vehicleProgramFilter, brandingFilter, interiorFilter, tuneStatusFilter,
       assignmentStatusFilter,
       stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
-      holmanTechFilter, tpmsTechFilter, mismatchFilter]);
+      holmanTechFilter, tpmsTechFilter, mismatchFilter,
+      rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter,
+      rentalOpsVehicleSet, poFlagsMap, dtcTruckSet]);
 
   // Async zip-distance sort: fetch real coordinates and sort by haversine distance
   useEffect(() => {
@@ -1091,6 +1122,10 @@ export default function FleetManagement() {
     setHolmanTechFilter("all");
     setTpmsTechFilter("all");
     setMismatchFilter("all");
+    setRentalOpsFilter("all");
+    setPoRentalFilter("all");
+    setPoMaintFilter("all");
+    setDtcFilter("all");
   };
 
   const getAssignmentStatus = (vehicle: FleetVehicle) => {
@@ -1304,321 +1339,240 @@ export default function FleetManagement() {
 
                 {/* Expanded Filters Panel */}
                 <Collapsible open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
-                  <CollapsibleContent className="space-y-4 mt-4">
-                    {/* Vehicle Details Filters */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Vehicle Details</h4>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Make</Label>
-                          <Select value={makeFilter} onValueChange={setMakeFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-make-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All makes</SelectItem>
-                              {filterOptions.makes.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">Model</Label>
-                          <Select value={modelFilter} onValueChange={setModelFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-model-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All models</SelectItem>
-                              {filterOptions.models.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">Year</Label>
-                          <Select value={yearFilter} onValueChange={setYearFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-year-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All years</SelectItem>
-                              {filterOptions.years.map(option => (
-                                <SelectItem key={option.toString()} value={option.toString()}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">Color</Label>
-                          <Select value={colorFilter} onValueChange={setColorFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-color-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All colors</SelectItem>
-                              {filterOptions.colors.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                  <CollapsibleContent className="mt-3">
+                    <div className="border rounded-md p-3 bg-muted/30 space-y-2">
+                      {/* Row 1 — Status / Badge filters */}
+                      <div className="flex flex-wrap gap-2">
+                        <Select value={assignmentStatusFilter} onValueChange={setAssignmentStatusFilter}>
+                          <SelectTrigger className="h-7 text-xs w-36" data-testid="select-assignment-status-filter">
+                            <SelectValue placeholder="Assignment" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All assignments</SelectItem>
+                            <SelectItem value="assigned">Assigned</SelectItem>
+                            <SelectItem value="unassigned">Unassigned</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={vehicleProgramFilter} onValueChange={setVehicleProgramFilter}>
+                          <SelectTrigger className="h-7 text-xs w-32" data-testid="select-vehicle-program-filter">
+                            <SelectValue placeholder="Program" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All programs</SelectItem>
+                            <SelectItem value="fleet">Fleet</SelectItem>
+                            <SelectItem value="byov">BYOV</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={mismatchFilter} onValueChange={setMismatchFilter}>
+                          <SelectTrigger className="h-7 text-xs w-36" data-testid="select-mismatch-filter">
+                            <SelectValue placeholder="Tech match" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All (match)</SelectItem>
+                            <SelectItem value="mismatch">Mismatch only</SelectItem>
+                            <SelectItem value="match">Matched only</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={rentalOpsFilter} onValueChange={setRentalOpsFilter}>
+                          <SelectTrigger className="h-7 text-xs w-32" data-testid="select-rental-ops-filter">
+                            <SelectValue placeholder="Rental Ops" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All (rental ops)</SelectItem>
+                            <SelectItem value="yes">In Rental Ops</SelectItem>
+                            <SelectItem value="no">Not in Rental Ops</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={poRentalFilter} onValueChange={setPoRentalFilter}>
+                          <SelectTrigger className="h-7 text-xs w-32" data-testid="select-po-rental-filter">
+                            <SelectValue placeholder="PO Rental" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All (PO rental)</SelectItem>
+                            <SelectItem value="yes">Has open rental PO</SelectItem>
+                            <SelectItem value="no">No open rental PO</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={poMaintFilter} onValueChange={setPoMaintFilter}>
+                          <SelectTrigger className="h-7 text-xs w-32" data-testid="select-po-maint-filter">
+                            <SelectValue placeholder="PO Maint" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All (PO maint)</SelectItem>
+                            <SelectItem value="yes">Has open maint PO</SelectItem>
+                            <SelectItem value="no">No open maint PO</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={dtcFilter} onValueChange={setDtcFilter}>
+                          <SelectTrigger className="h-7 text-xs w-28" data-testid="select-dtc-filter">
+                            <SelectValue placeholder="DTC" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All (DTC)</SelectItem>
+                            <SelectItem value="yes">Has DTC</SelectItem>
+                            <SelectItem value="no">No DTC</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
-                    </div>
-                    
-                    {/* Configuration Filters */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Configuration</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Vehicle Program</Label>
-                          <Select value={vehicleProgramFilter} onValueChange={setVehicleProgramFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-vehicle-program-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All programs</SelectItem>
-                              <SelectItem value="fleet">Fleet</SelectItem>
-                              <SelectItem value="byov">BYOV</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">Branding</Label>
-                          <Select value={brandingFilter} onValueChange={setBrandingFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-branding-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All branding</SelectItem>
-                              {filterOptions.brandings.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">Interior</Label>
-                          <Select value={interiorFilter} onValueChange={setInteriorFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-interior-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All interiors</SelectItem>
-                              {filterOptions.interiors.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">Tune Status</Label>
-                          <Select value={tuneStatusFilter} onValueChange={setTuneStatusFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-tune-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All tune statuses</SelectItem>
-                              {filterOptions.tuneStatuses.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
+
+                      {/* Row 2 — Vehicle details */}
+                      <div className="flex flex-wrap gap-2">
+                        <Select value={makeFilter} onValueChange={setMakeFilter}>
+                          <SelectTrigger className="h-7 text-xs w-32" data-testid="select-make-filter">
+                            <SelectValue placeholder="Make" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All makes</SelectItem>
+                            {filterOptions.makes.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={modelFilter} onValueChange={setModelFilter}>
+                          <SelectTrigger className="h-7 text-xs w-36" data-testid="select-model-filter">
+                            <SelectValue placeholder="Model" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All models</SelectItem>
+                            {filterOptions.models.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={yearFilter} onValueChange={setYearFilter}>
+                          <SelectTrigger className="h-7 text-xs w-24" data-testid="select-year-filter">
+                            <SelectValue placeholder="Year" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All years</SelectItem>
+                            {filterOptions.years.map(o => <SelectItem key={o.toString()} value={o.toString()}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={colorFilter} onValueChange={setColorFilter}>
+                          <SelectTrigger className="h-7 text-xs w-28" data-testid="select-color-filter">
+                            <SelectValue placeholder="Color" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All colors</SelectItem>
+                            {filterOptions.colors.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={brandingFilter} onValueChange={setBrandingFilter}>
+                          <SelectTrigger className="h-7 text-xs w-32" data-testid="select-branding-filter">
+                            <SelectValue placeholder="Branding" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All branding</SelectItem>
+                            {filterOptions.brandings.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={interiorFilter} onValueChange={setInteriorFilter}>
+                          <SelectTrigger className="h-7 text-xs w-28" data-testid="select-interior-filter">
+                            <SelectValue placeholder="Interior" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All interiors</SelectItem>
+                            {filterOptions.interiors.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={tuneStatusFilter} onValueChange={setTuneStatusFilter}>
+                          <SelectTrigger className="h-7 text-xs w-32" data-testid="select-tune-filter">
+                            <SelectValue placeholder="Tune status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All tune statuses</SelectItem>
+                            {filterOptions.tuneStatuses.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
                       </div>
-                    </div>
-                    
-                    {/* Assignment Status Filter */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Assignment Status</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Status</Label>
-                          <Select value={assignmentStatusFilter} onValueChange={setAssignmentStatusFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-assignment-status-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All vehicles</SelectItem>
-                              <SelectItem value="assigned">Assigned</SelectItem>
-                              <SelectItem value="unassigned">Unassigned</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+
+                      {/* Row 3 — Location */}
+                      <div className="flex flex-wrap gap-2">
+                        <Select value={stateFilter} onValueChange={setStateFilter}>
+                          <SelectTrigger className="h-7 text-xs w-24" data-testid="select-state-filter">
+                            <SelectValue placeholder="State" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All states</SelectItem>
+                            {filterOptions.states.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={cityFilter} onValueChange={setCityFilter}>
+                          <SelectTrigger className="h-7 text-xs w-36" data-testid="select-city-filter">
+                            <SelectValue placeholder="City" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All cities</SelectItem>
+                            {filterOptions.cities.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={licenseStateFilter} onValueChange={setLicenseStateFilter}>
+                          <SelectTrigger className="h-7 text-xs w-32" data-testid="select-license-state-filter">
+                            <SelectValue placeholder="License state" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All license states</SelectItem>
+                            {filterOptions.licenseStates.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={regionFilter} onValueChange={setRegionFilter}>
+                          <SelectTrigger className="h-7 text-xs w-28" data-testid="select-region-filter">
+                            <SelectValue placeholder="Region" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All regions</SelectItem>
+                            {filterOptions.regions.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={divisionFilter} onValueChange={setDivisionFilter}>
+                          <SelectTrigger className="h-7 text-xs w-28" data-testid="select-division-filter">
+                            <SelectValue placeholder="Division" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All divisions</SelectItem>
+                            {filterOptions.divisions.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={districtFilter} onValueChange={setDistrictFilter}>
+                          <SelectTrigger className="h-7 text-xs w-28" data-testid="select-district-filter">
+                            <SelectValue placeholder="District" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All districts</SelectItem>
+                            {filterOptions.districts.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
                       </div>
-                    </div>
-                    
-                    {/* Location Filters */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Location</h4>
-                      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">State</Label>
-                          <Select value={stateFilter} onValueChange={setStateFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-state-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All states</SelectItem>
-                              {filterOptions.states.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">City</Label>
-                          <Select value={cityFilter} onValueChange={setCityFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-city-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All cities</SelectItem>
-                              {filterOptions.cities.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">License State</Label>
-                          <Select value={licenseStateFilter} onValueChange={setLicenseStateFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-license-state-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All license states</SelectItem>
-                              {filterOptions.licenseStates.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">Region</Label>
-                          <Select value={regionFilter} onValueChange={setRegionFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-region-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All regions</SelectItem>
-                              {filterOptions.regions.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">Division</Label>
-                          <Select value={divisionFilter} onValueChange={setDivisionFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-division-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All divisions</SelectItem>
-                              {filterOptions.divisions.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">District</Label>
-                          <Select value={districtFilter} onValueChange={setDistrictFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-district-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All districts</SelectItem>
-                              {filterOptions.districts.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Tech Assignment Filters */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Tech Assignment</h4>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Holman Tech ID</Label>
-                          <Select value={holmanTechFilter} onValueChange={setHolmanTechFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-holman-tech-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All techs</SelectItem>
-                              <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {filterOptions.holmanTechs.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">TPMS Tech ID</Label>
-                          <Select value={tpmsTechFilter} onValueChange={setTpmsTechFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-tpms-tech-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All techs</SelectItem>
-                              <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {filterOptions.tpmsTechs.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <Label className="text-xs">Assignment Match</Label>
-                          <Select value={mismatchFilter} onValueChange={setMismatchFilter}>
-                            <SelectTrigger className="h-8" data-testid="select-mismatch-filter">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All vehicles</SelectItem>
-                              <SelectItem value="mismatch">Mismatch Only</SelectItem>
-                              <SelectItem value="match">Matched Only</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Filter Actions */}
-                    <div className="flex justify-between items-center pt-2 border-t">
-                      <span className="text-sm text-muted-foreground">
-                        {activeFiltersCount > 0 ? `${activeFiltersCount} filter(s) active` : 'No filters applied'}
-                      </span>
-                      <div className="flex gap-2">
+
+                      {/* Row 4 — Tech assignment */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Select value={holmanTechFilter} onValueChange={setHolmanTechFilter}>
+                          <SelectTrigger className="h-7 text-xs w-36" data-testid="select-holman-tech-filter">
+                            <SelectValue placeholder="Holman Tech ID" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Holman techs</SelectItem>
+                            <SelectItem value="unassigned">Unassigned</SelectItem>
+                            {filterOptions.holmanTechs.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select value={tpmsTechFilter} onValueChange={setTpmsTechFilter}>
+                          <SelectTrigger className="h-7 text-xs w-36" data-testid="select-tpms-tech-filter">
+                            <SelectValue placeholder="TPMS Tech ID" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All TPMS techs</SelectItem>
+                            <SelectItem value="unassigned">Unassigned</SelectItem>
+                            {filterOptions.tpmsTechs.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <div className="flex-1" />
                         {activeFiltersCount > 0 && (
                           <Button
-                            variant="outline"
+                            variant="ghost"
                             size="sm"
+                            className="h-7 text-xs px-2 text-muted-foreground hover:text-foreground"
                             onClick={clearAllFilters}
                             data-testid="button-clear-filters"
                           >
-                            <X className="h-4 w-4 mr-1" />
-                            Clear Filters
+                            <X className="h-3 w-3 mr-1" />
+                            Clear all
                           </Button>
                         )}
                       </div>
