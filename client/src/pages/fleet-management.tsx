@@ -24,6 +24,7 @@ import {
   UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench, Download,
   Users, PhoneCall, ClipboardList
 } from "lucide-react";
+import { MultiSelectFilter } from "@/components/fleet-scope/MultiSelectFilter";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { TelematicsButton } from "@/components/telematics-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -251,10 +252,10 @@ export default function FleetManagement() {
   const [dtcFilter, setDtcFilter] = useState("all");
 
   // Status field filters
-  const [holmanStatusFilter, setHolmanStatusFilter] = useState("all");
-  const [amsTruckStatusFilter, setAmsTruckStatusFilter] = useState("all");
-  const [amsRepairShopFilter, setAmsRepairShopFilter] = useState("all");
-  const [offboardingFilter, setOffboardingFilter] = useState("all");
+  const [holmanStatusFilter, setHolmanStatusFilter] = useState<string[]>([]);
+  const [amsTruckStatusFilter, setAmsTruckStatusFilter] = useState<string[]>([]);
+  const [amsRepairShopFilter, setAmsRepairShopFilter] = useState<string[]>([]);
+  const [offboardingFilter, setOffboardingFilter] = useState<string[]>([]);
 
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
@@ -1209,8 +1210,9 @@ export default function FleetManagement() {
     stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
     holmanTechFilter, tpmsTechFilter, mismatchFilter,
     rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter,
-    holmanStatusFilter, amsTruckStatusFilter, amsRepairShopFilter, offboardingFilter,
-  ].filter(f => f !== "all").length + (targetZipcode ? 1 : 0);
+  ].filter(f => f !== "all").length +
+  [holmanStatusFilter, amsTruckStatusFilter, amsRepairShopFilter, offboardingFilter].filter(f => f.length > 0).length +
+  (targetZipcode ? 1 : 0);
 
   // OOS pre-filter — exclude out-of-service vehicles unless toggle is on
   const activeVehicles = useMemo(() =>
@@ -1307,27 +1309,28 @@ export default function FleetManagement() {
         (dtcFilter === "no" && !hasDTCF);
 
       // Status field filters
-      const matchesHolmanStatus = holmanStatusFilter === "all" ||
-        String(vehicle.statusCode ?? 1) === holmanStatusFilter;
+      const holmanStatusCodeMap: Record<string, number> = { "Active": 1, "New": 0, "Inactive / Out of Service": 2, "Sold": 3 };
+      const matchesHolmanStatus = holmanStatusFilter.length === 0 ||
+        holmanStatusFilter.some(label => holmanStatusCodeMap[label] === (vehicle.statusCode ?? 1));
 
       const vehicleVinUpper = (vehicle.vin || '').toUpperCase();
       const amsTruckLabel = amsTruckStatusData?.[vehicleVinUpper] ?? null;
-      const matchesAmsTruckStatus = amsTruckStatusFilter === "all" ||
-        (amsTruckLabel != null && amsTruckLabel.toLowerCase() === amsTruckStatusFilter.toLowerCase());
+      const matchesAmsTruckStatus = amsTruckStatusFilter.length === 0 ||
+        (amsTruckLabel != null && amsTruckStatusFilter.some(f => amsTruckLabel.toLowerCase() === f.toLowerCase()));
 
       const isInRepairShop = repairShopFlagsMap.get(vehicle.vehicleNumber)
         ?? repairShopFlagsMap.get(toCanonical(vehicle.vehicleNumber))
         ?? false;
-      const matchesAmsRepairShop = amsRepairShopFilter === "all" ||
-        (amsRepairShopFilter === "yes" && isInRepairShop) ||
-        (amsRepairShopFilter === "no" && !isInRepairShop);
+      const matchesAmsRepairShop = amsRepairShopFilter.length === 0 ||
+        (amsRepairShopFilter.includes("In Repair Shop") && isInRepairShop) ||
+        (amsRepairShopFilter.includes("Not in Repair Shop") && !isInRepairShop);
 
       const isOffboardingFlagged = offboardingFlagsMap.get(vehicle.vehicleNumber)
         ?? offboardingFlagsMap.get(toCanonical(vehicle.vehicleNumber))
         ?? false;
-      const matchesOffboarding = offboardingFilter === "all" ||
-        (offboardingFilter === "yes" && isOffboardingFlagged) ||
-        (offboardingFilter === "no" && !isOffboardingFlagged);
+      const matchesOffboarding = offboardingFilter.length === 0 ||
+        (offboardingFilter.includes("Offboarding Flagged") && isOffboardingFlagged) ||
+        (offboardingFilter.includes("Not Flagged") && !isOffboardingFlagged);
 
       // Stat card quick-filter
       const tpmsId2 = vehicle.tpmsAssignedTechId?.trim() || '';
@@ -1483,10 +1486,10 @@ export default function FleetManagement() {
     setPoRentalFilter("all");
     setPoMaintFilter("all");
     setDtcFilter("all");
-    setHolmanStatusFilter("all");
-    setAmsTruckStatusFilter("all");
-    setAmsRepairShopFilter("all");
-    setOffboardingFilter("all");
+    setHolmanStatusFilter([]);
+    setAmsTruckStatusFilter([]);
+    setAmsRepairShopFilter([]);
+    setOffboardingFilter([]);
   };
 
   const getAssignmentStatus = (vehicle: FleetVehicle) => {
@@ -1997,49 +2000,40 @@ export default function FleetManagement() {
 
                       {/* Row 5 — Status fields */}
                       <div className="flex flex-wrap items-center gap-2">
-                        <Select value={holmanStatusFilter} onValueChange={setHolmanStatusFilter}>
-                          <SelectTrigger className="h-7 text-xs w-40" data-testid="select-holman-status-filter">
-                            <SelectValue placeholder="Holman Status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Holman statuses</SelectItem>
-                            <SelectItem value="1">Active</SelectItem>
-                            <SelectItem value="0">New</SelectItem>
-                            <SelectItem value="2">Inactive / Out of Service</SelectItem>
-                            <SelectItem value="3">Sold</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Select value={amsTruckStatusFilter} onValueChange={setAmsTruckStatusFilter}>
-                          <SelectTrigger className="h-7 text-xs w-44" data-testid="select-ams-truck-status-filter">
-                            <SelectValue placeholder="AMS Truck Status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All AMS truck statuses</SelectItem>
-                            {amsTruckStatusOptions.map(o => (
-                              <SelectItem key={o} value={o.toLowerCase()}>{o}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Select value={amsRepairShopFilter} onValueChange={setAmsRepairShopFilter}>
-                          <SelectTrigger className="h-7 text-xs w-40" data-testid="select-ams-repair-shop-filter">
-                            <SelectValue placeholder="AMS Repair Status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All (repair shop)</SelectItem>
-                            <SelectItem value="yes">In Repair Shop</SelectItem>
-                            <SelectItem value="no">Not in Repair Shop</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Select value={offboardingFilter} onValueChange={setOffboardingFilter}>
-                          <SelectTrigger className="h-7 text-xs w-40" data-testid="select-offboarding-filter">
-                            <SelectValue placeholder="Offboarding Status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All (offboarding)</SelectItem>
-                            <SelectItem value="yes">Offboarding Flagged</SelectItem>
-                            <SelectItem value="no">Not Flagged</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <MultiSelectFilter
+                          options={["Active", "New", "Inactive / Out of Service", "Sold"]}
+                          selectedValues={holmanStatusFilter}
+                          onSelectionChange={vals => setHolmanStatusFilter(vals.filter(v => v !== "__NONE_SELECTED__"))}
+                          placeholder="Holman Status"
+                          label="Holman Status"
+                          className="w-40"
+                        />
+                        <MultiSelectFilter
+                          options={amsTruckStatusOptions}
+                          selectedValues={amsTruckStatusFilter}
+                          onSelectionChange={vals => setAmsTruckStatusFilter(vals.filter(v => v !== "__NONE_SELECTED__"))}
+                          placeholder="AMS Truck Status"
+                          label="AMS Truck Status"
+                          className="w-44"
+                        />
+                        <MultiSelectFilter
+                          options={["In Repair Shop", "Not in Repair Shop"]}
+                          selectedValues={amsRepairShopFilter}
+                          onSelectionChange={vals => setAmsRepairShopFilter(vals.filter(v => v !== "__NONE_SELECTED__"))}
+                          placeholder="Repair Shop"
+                          label="Repair Shop"
+                          showSearch={false}
+                          className="w-40"
+                        />
+                        <MultiSelectFilter
+                          options={["Offboarding Flagged", "Not Flagged"]}
+                          selectedValues={offboardingFilter}
+                          onSelectionChange={vals => setOffboardingFilter(vals.filter(v => v !== "__NONE_SELECTED__"))}
+                          placeholder="Offboarding"
+                          label="Offboarding"
+                          showSearch={false}
+                          className="w-40"
+                        />
                         <div className="flex-1" />
                         {activeFiltersCount > 0 && (
                           <Button
