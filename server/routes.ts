@@ -14908,7 +14908,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `SELECT PO_NUMBER, HOLMAN_VEHICLE_NUMBER, SERIAL_NO,
                 PO_TYPE_DESCRIPTION, DIVISION, PO_STATUS, PO_DATE,
                 LINE_ITEM_COST, DESCRIPTION, VENDOR_NAME, ENTERPRISE_ID,
-                ATA_GROUP_CODE, ATA_GROUP_DESC, REPAIR_TYPE_DESCRIPTION
+                ATA_CODE, ATA_GROUP_DESC, REPAIR_TYPE_DESCRIPTION
          FROM ${HOLMAN_PO_ETL_TABLE}
          WHERE PO_NUMBER IS NOT NULL
          LIMIT 50000`
@@ -14941,7 +14941,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           amount: r.LINE_ITEM_COST ?? null,
           description: String(r.DESCRIPTION || r.PO_TYPE_DESCRIPTION || "").trim().slice(0, 500) || null,
           vendor: String(r.VENDOR_NAME || "").trim() || null,
-          rawData: { poTypeDescription: r.PO_TYPE_DESCRIPTION, division: r.DIVISION, enterpriseId: r.ENTERPRISE_ID, ataGroupCode: r.ATA_GROUP_CODE, ataGroupDesc: r.ATA_GROUP_DESC, repairType: r.REPAIR_TYPE_DESCRIPTION },
+          rawData: { poTypeDescription: r.PO_TYPE_DESCRIPTION, division: r.DIVISION, enterpriseId: r.ENTERPRISE_ID, ataCode: r.ATA_CODE, ataGroupDesc: r.ATA_GROUP_DESC, repairType: r.REPAIR_TYPE_DESCRIPTION },
         };
       }).filter(r => r.poNumber);
 
@@ -15009,7 +15009,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                VENDOR_NAME,
                ENTERPRISE_ID,
                SERIAL_NO,
-               ATA_GROUP_CODE,
+               ATA_CODE,
                ATA_GROUP_DESC,
                REPAIR_TYPE_DESCRIPTION
              FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS
@@ -15033,7 +15033,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               description: String(r.DESCRIPTION || r.PO_TYPE_DESCRIPTION || "").trim().slice(0, 500) || null,
               vendor: String(r.VENDOR_NAME || "").trim() || null,
               vin: String(r.SERIAL_NO || "").trim() || null,
-              ataGroupCode: String(r.ATA_GROUP_CODE || "").trim() || null,
+              ataCode: String(r.ATA_CODE || "").trim() || null,
               ataGroupDesc: String(r.ATA_GROUP_DESC || "").trim() || null,
               repairType: String(r.REPAIR_TYPE_DESCRIPTION || "").trim() || null,
             };
