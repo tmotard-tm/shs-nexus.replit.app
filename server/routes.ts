@@ -8702,6 +8702,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rows = await sf.executeQuery(
         `SELECT TRUCK_NUMBER, SEVERITY_SCORE, SEVERITY_LABEL, DTC_COUNT_DISTINCT
          FROM PARTS_SUPPLYCHAIN.FLEET.SAMSARA_CRITICALITY_SCORE
+         WHERE DTC_COUNT_DISTINCT > 0
+           AND (SEVERITY_LABEL IS NULL OR SEVERITY_LABEL != 'CLEAR')
          ORDER BY SEVERITY_SCORE DESC`
       );
       const vehicles = (rows as any[]).map((r: any) => ({
