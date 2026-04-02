@@ -60,14 +60,17 @@ function buildTokenUrl(): string {
 }
 
 /** Extract <ns2:token> (or any namespaced <token>) value from XML response.
+ *  Uses a word-boundary check after "token" so that <ns2:TokenResponse> is NOT
+ *  matched — only tags whose name IS exactly "token" (e.g. <ns2:token>, <token>).
  *  Falls back to plain text if the response is not XML. */
 function extractTokenFromXml(xml: string): string | null {
-  // Try common XML patterns
+  // (?:\s[^>]*)? — after the tag name "token", optionally allow a space + attributes.
+  // This prevents matching <ns2:TokenResponse ...> where "Response" follows "Token".
   const patterns = [
-    /<(?:\w+:)?token[^>]*>([\s\S]*?)<\/(?:\w+:)?token>/i,
-    /<(?:\w+:)?return[^>]*>([\s\S]*?)<\/(?:\w+:)?return>/i,
-    /<(?:\w+:)?accessToken[^>]*>([\s\S]*?)<\/(?:\w+:)?accessToken>/i,
-    /<(?:\w+:)?access_token[^>]*>([\s\S]*?)<\/(?:\w+:)?access_token>/i,
+    /<(?:\w+:)?token(?:\s[^>]*)?>([\s\S]*?)<\/(?:\w+:)?token>/i,
+    /<(?:\w+:)?return(?:\s[^>]*)?>([\s\S]*?)<\/(?:\w+:)?return>/i,
+    /<(?:\w+:)?accessToken(?:\s[^>]*)?>([\s\S]*?)<\/(?:\w+:)?accessToken>/i,
+    /<(?:\w+:)?access_token(?:\s[^>]*)?>([\s\S]*?)<\/(?:\w+:)?access_token>/i,
   ];
   for (const pattern of patterns) {
     const match = xml.match(pattern);
