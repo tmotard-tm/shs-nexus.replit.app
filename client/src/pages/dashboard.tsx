@@ -72,10 +72,9 @@ export default function Dashboard() {
 
   return (
     <MainContent>
-      <TopBar title="Administrator Dashboard" breadcrumbs={["Home", "Dashboard"]} />
+      <TopBar title="Administrator Dashboard" breadcrumbs={["Home", "Dashboard"]} isHome={true} />
       
       <main className="p-6">
-        <BackButton href="/" />
         {/* Workflow Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
           {/* Onboarding */}

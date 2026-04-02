@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { TpmsSidebar } from "@/components/tpms/app-sidebar";
 import { Separator } from "@/components/ui/separator";
-import { Home } from "lucide-react";
+import { Home, ChevronLeft } from "lucide-react";
 
 import TechProfiles from "./TechProfiles";
 import ShippingAddresses from "./ShippingAddresses";
@@ -18,6 +18,14 @@ export default function TpmsLayout() {
         <SidebarInset>
           <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-4">
             <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="h-4" />
+            <button
+              onClick={() => { if (window.history.length > 1) { window.history.back(); } else { window.location.href = '/'; } }}
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Back
+            </button>
             <Separator orientation="vertical" className="h-4" />
             <Link href="/" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
               <Home className="h-3.5 w-3.5" />
