@@ -633,15 +633,27 @@ export default function AllVehicles() {
                 Vehicle assignment status from REPLIT_ALL_VEHICLES
               </p>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              data-testid="button-refresh"
-            >
-              {isFetching ? "Refreshing..." : "Refresh"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <a href="/api/fleet-vehicles/export.csv" download>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="button-export-csv"
+                >
+                  <Download className="w-4 h-4 mr-1" />
+                  Export CSV
+                </Button>
+              </a>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                data-testid="button-refresh"
+              >
+                {isFetching ? "Refreshing..." : "Refresh"}
+              </Button>
+            </div>
           </div>
 
           {error && (
