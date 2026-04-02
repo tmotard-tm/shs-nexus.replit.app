@@ -498,6 +498,8 @@ export default function Dashboard() {
   const [editingCell, setEditingCell] = useState<{truckId: string; field: string} | null>(null);
   const [selectedTruckId, setSelectedTruckId] = useState<number | null>(null);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
+  const [amsVehiclePanelOpen, setAmsVehiclePanelOpen] = useState(false);
+  const [selectedTruckForAms, setSelectedTruckForAms] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>("");
   
   // Owner editing state
@@ -694,6 +696,22 @@ export default function Dashboard() {
     },
     staleTime: 10 * 60 * 1000,
   });
+
+  // Fetch AMS fleet vehicles for "Update AMS" 2nd panel (only when that panel is open)
+  const { data: amsFleetData, isLoading: amsFleetLoading } = useQuery<{ vehicles: any[]; success: boolean }>({
+    queryKey: ["/api/holman/fleet-vehicles"],
+    staleTime: 5 * 60 * 1000,
+    enabled: amsVehiclePanelOpen && !!selectedTruckForAms,
+  });
+
+  const amsVehicle = useMemo(() => {
+    if (!amsFleetData?.vehicles || !selectedTruckForAms) return null;
+    const normalized = selectedTruckForAms.replace(/^0+/, "").toLowerCase().trim();
+    return amsFleetData.vehicles.find((v: any) => {
+      const vn = (v.vehicleNumber || "").replace(/^0+/, "").toLowerCase().trim();
+      return vn === normalized;
+    }) ?? null;
+  }, [amsFleetData, selectedTruckForAms]);
 
   // Build set of normalized vehicle numbers whose tech is on the offboarding roster
   const terminatedVehicleSet = useMemo(() => {
@@ -3643,8 +3661,161 @@ export default function Dashboard() {
       <TruckDetailPanel
         truckId={selectedTruckId}
         open={detailPanelOpen}
-        onOpenChange={setDetailPanelOpen}
+        onOpenChange={(open) => {
+          setDetailPanelOpen(open);
+          if (!open) setAmsVehiclePanelOpen(false);
+        }}
+        onUpdateAms={(truckNumber) => {
+          setSelectedTruckForAms(truckNumber);
+          setAmsVehiclePanelOpen(true);
+        }}
       />
+
+      {/* AMS Vehicle 2nd Panel — slides in to the left of the TruckDetailPanel */}
+      {amsVehiclePanelOpen && selectedTruckForAms && (
+        <div
+          className="fixed top-0 right-[700px] h-full w-[540px] bg-background border-l shadow-2xl z-[51] flex flex-col"
+          style={{ animation: "slideInFromRight 0.2s ease-out" }}
+        >
+          <style>{`@keyframes slideInFromRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b shrink-0 bg-blue-50 dark:bg-blue-950/20">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span className="font-semibold text-sm">AMS — Truck {selectedTruckForAms}</span>
+            </div>
+            <button
+              onClick={() => setAmsVehiclePanelOpen(false)}
+              className="rounded-sm opacity-70 hover:opacity-100 transition-opacity p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-5">
+            {amsFleetLoading ? (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                <span className="text-sm">Loading AMS vehicle data…</span>
+              </div>
+            ) : amsVehicle ? (
+              <>
+                {/* Vehicle header */}
+                <div className="rounded-lg border bg-card p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-mono font-semibold text-lg leading-none">
+                        {amsVehicle.vehicleNumber}
+                      </p>
+                      <p className="text-muted-foreground text-sm mt-1">
+                        {[amsVehicle.modelYear, amsVehicle.makeName, amsVehicle.modelName].filter(Boolean).join(" ") || "Unknown vehicle"}
+                      </p>
+                    </div>
+                    {amsVehicle.vehicleStatusDescription && (
+                      <span className="shrink-0 text-xs px-2 py-0.5 rounded-full border font-medium bg-muted">
+                        {amsVehicle.vehicleStatusDescription}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm pt-1 border-t">
+                    <div>
+                      <p className="text-xs text-muted-foreground">VIN</p>
+                      <p className="font-mono text-xs">{amsVehicle.vin || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">License Plate</p>
+                      <p>{amsVehicle.licensePlate ? `${amsVehicle.licensePlate} (${amsVehicle.licenseState || ""})` : "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Location</p>
+                      <p>{[amsVehicle.city, amsVehicle.state].filter(Boolean).join(", ") || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Odometer</p>
+                      <p>{amsVehicle.odometer ? `${amsVehicle.odometer.toLocaleString()} mi` : "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Region / District</p>
+                      <p>{[amsVehicle.region, amsVehicle.district].filter(Boolean).join(" / ") || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Color</p>
+                      <p>{amsVehicle.color || "—"}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Assignment info */}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Current Assignment</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border p-3 space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">TPMS</p>
+                      {amsVehicle.tpmsAssignedTechId ? (
+                        <>
+                          <p className="font-mono text-sm">{amsVehicle.tpmsAssignedTechId}</p>
+                          {amsVehicle.tpmsAssignedTechName && (
+                            <p className="text-xs text-muted-foreground">{amsVehicle.tpmsAssignedTechName}</p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground text-sm">Unassigned</p>
+                      )}
+                    </div>
+                    <div className="rounded-lg border p-3 space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">Holman</p>
+                      {amsVehicle.holmanTechAssigned ? (
+                        <>
+                          <p className="font-mono text-sm">{amsVehicle.holmanTechAssigned}</p>
+                          {amsVehicle.holmanTechName && (
+                            <p className="text-xs text-muted-foreground">{amsVehicle.holmanTechName}</p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground text-sm">Unassigned</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Open in Fleet Management CTA */}
+                <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 p-4 space-y-2">
+                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300">Make Updates in Fleet Management</p>
+                  <p className="text-xs text-blue-700 dark:text-blue-400">
+                    Assign or unassign techs, post repair updates, add comments, and more.
+                  </p>
+                  <Button
+                    className="w-full mt-1"
+                    size="sm"
+                    onClick={() => window.open(`/fleet-management?openTruck=${selectedTruckForAms}`, "_blank", "noopener,noreferrer")}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                    Open in Fleet Management
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+                <Building2 className="w-10 h-10 opacity-30" />
+                <div className="text-center">
+                  <p className="text-sm font-medium">Vehicle not found in AMS</p>
+                  <p className="text-xs mt-1">Truck {selectedTruckForAms} may not be in the Holman fleet system.</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(`/fleet-management?openTruck=${selectedTruckForAms}`, "_blank", "noopener,noreferrer")}
+                >
+                  <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                  Search in Fleet Management
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -45,6 +45,7 @@ import {
   PhoneForwarded,
   Loader2,
   Navigation,
+  Building2,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -146,6 +147,7 @@ interface TruckDetailPanelProps {
   truckId: number | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onUpdateAms?: (truckNumber: string) => void;
 }
 
 type OwnerName = "Oscar S" | "Rob A" | "Bob B" | "John C" | "Mandy R" | "Final Actioned";
@@ -425,7 +427,7 @@ function EditableBoolRow({
   );
 }
 
-export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPanelProps) {
+export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms }: TruckDetailPanelProps) {
   const { toast } = useToast();
   const [commentValue, setCommentValue] = useState("");
   const [isEditingComment, setIsEditingComment] = useState(false);
@@ -552,6 +554,18 @@ export function TruckDetailPanel({ truckId, open, onOpenChange }: TruckDetailPan
                     >
                       <FileText className="w-3.5 h-3.5 mr-1.5" />
                       Raw POs
+                    </Button>
+                  )}
+                  {onUpdateAms && truck.truckNumber && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      data-testid="button-update-ams"
+                      className="border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                      onClick={() => onUpdateAms(truck.truckNumber!.toString())}
+                    >
+                      <Building2 className="w-3.5 h-3.5 mr-1.5" />
+                      Update AMS
                     </Button>
                   )}
                 </div>
