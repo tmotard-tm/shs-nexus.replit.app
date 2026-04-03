@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { type Truck } from "@shared/fleet-scope-schema";
@@ -52,8 +53,18 @@ import {
   PhoneCall,
   PhoneForwarded,
   Loader2,
+  Pencil,
+  Wrench,
+  CheckCircle,
+  Send,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scope-schema";
 import Papa from "papaparse";
@@ -366,6 +377,16 @@ function saveFiltersToStorage(filters: StoredFilters): void {
   }
 }
 
+function getAmsLookupLabel(item: any): string {
+  if (!item) return "Unknown";
+  const skip = new Set(["UniqueID", "uniqueID", "Id", "id"]);
+  for (const [key, val] of Object.entries(item)) {
+    if (skip.has(key)) continue;
+    if (typeof val === "string" && val.trim()) return val.trim();
+  }
+  return String(item.UniqueID);
+}
+
 export default function Dashboard() {
   const { currentUser } = useUser();
   
@@ -504,6 +525,36 @@ export default function Dashboard() {
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [amsVehiclePanelOpen, setAmsVehiclePanelOpen] = useState(false);
   const [selectedTruckForAms, setSelectedTruckForAms] = useState<string | null>(null);
+  const [selectedVinForAms, setSelectedVinForAms] = useState<string | null>(null);
+  const [amsActiveModal, setAmsActiveModal] = useState<"amsEdit" | "amsRepair" | null>(null);
+  const [amsEditColor, setAmsEditColor] = useState("");
+  const [amsEditBranding, setAmsEditBranding] = useState("");
+  const [amsEditInterior, setAmsEditInterior] = useState("");
+  const [amsEditAddress, setAmsEditAddress] = useState("");
+  const [amsEditAddressZip, setAmsEditAddressZip] = useState("");
+  const [amsEditTruckStatus, setAmsEditTruckStatus] = useState("");
+  const [amsEditTheftVerified, setAmsEditTheftVerified] = useState("");
+  const [amsEditKeyAddress, setAmsEditKeyAddress] = useState("");
+  const [amsEditKeyZip, setAmsEditKeyZip] = useState("");
+  const [amsEditStorageCost, setAmsEditStorageCost] = useState("");
+  const [amsEditVehicleRuns, setAmsEditVehicleRuns] = useState("");
+  const [amsEditVehicleLooks, setAmsEditVehicleLooks] = useState("");
+  const [amsRepairInRepair, setAmsRepairInRepair] = useState(false);
+  const [amsRepairDate, setAmsRepairDate] = useState("");
+  const [amsRepairReason, setAmsRepairReason] = useState("");
+  const [amsRepairVendor, setAmsRepairVendor] = useState("");
+  const [amsRepairETA, setAmsRepairETA] = useState("");
+  const [amsRepairStatus, setAmsRepairStatus] = useState("");
+  const [amsRepairEstimate, setAmsRepairEstimate] = useState("");
+  const [amsRepairRentalCar, setAmsRepairRentalCar] = useState("");
+  const [amsRepairRentalStart, setAmsRepairRentalStart] = useState("");
+  const [amsRepairRentalEnd, setAmsRepairRentalEnd] = useState("");
+  const [amsRepairFinalDisposition, setAmsRepairFinalDisposition] = useState("");
+  const [amsRepairDispositionReason, setAmsRepairDispositionReason] = useState("");
+  const [amsRepairFinalDate, setAmsRepairFinalDate] = useState("");
+  const [amsNewComment, setAmsNewComment] = useState("");
+  const [amsCommentDialogOpen, setAmsCommentDialogOpen] = useState(false);
+  const [amsCommentsCollapsed, setAmsCommentsCollapsed] = useState(false);
   const [editValue, setEditValue] = useState<string>("");
   
   // Owner editing state
@@ -701,21 +752,138 @@ export default function Dashboard() {
     staleTime: 10 * 60 * 1000,
   });
 
-  // Fetch AMS fleet vehicles for "Update AMS" 2nd panel (only when that panel is open)
-  const { data: amsFleetData, isLoading: amsFleetLoading } = useQuery<{ vehicles: any[]; success: boolean }>({
-    queryKey: ["/api/holman/fleet-vehicles"],
+  // Fetch AMS vehicle data by VIN for "Update AMS" 2nd panel
+  const { data: amsVehicle, isLoading: amsFleetLoading } = useQuery<any>({
+    queryKey: ["/api/ams/vehicles", selectedVinForAms],
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
     staleTime: 5 * 60 * 1000,
-    enabled: amsVehiclePanelOpen && !!selectedTruckForAms,
+    retry: false,
+    queryFn: async () => {
+      const res = await fetch(`/api/ams/vehicles/${selectedVinForAms}`, { credentials: "include" });
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json || null;
+    },
   });
 
-  const amsVehicle = useMemo(() => {
-    if (!amsFleetData?.vehicles || !selectedTruckForAms) return null;
-    const normalized = selectedTruckForAms.replace(/^0+/, "").toLowerCase().trim();
-    return amsFleetData.vehicles.find((v: any) => {
-      const vn = (v.vehicleNumber || "").replace(/^0+/, "").toLowerCase().trim();
-      return vn === normalized;
-    }) ?? null;
-  }, [amsFleetData, selectedTruckForAms]);
+  // AMS lookup tables (enabled when panel open + VIN known)
+  const { data: amsLookupTruckStatus } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "truck-status"],
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupVehicleRuns } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "vehicle-runs"],
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupVehicleLooks } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "vehicle-looks"],
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupColors } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "colors"],
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupBranding } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "branding"],
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupInterior } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "interior"],
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupRepairReason } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "service-reasons"],
+    enabled: amsActiveModal === "amsRepair",
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupRepairStatus } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "repair-status"],
+    enabled: amsActiveModal === "amsRepair",
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupDisposition } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "repair-disposition"],
+    enabled: amsActiveModal === "amsRepair",
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupDispositionReason } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "disposition-reasons"],
+    enabled: amsActiveModal === "amsRepair",
+    staleTime: 10 * 60 * 1000,
+  });
+  const { data: amsLookupRentalCar } = useQuery<any[]>({
+    queryKey: ["/api/ams/lookups", "rental-car"],
+    enabled: amsActiveModal === "amsRepair",
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const amsUserUpdateMutation = useMutation({
+    mutationFn: async (payload: Record<string, any>) => {
+      const res = await apiRequest("POST", `/api/ams/vehicles/${selectedVinForAms}/user-updates`, payload);
+      return res.json();
+    },
+    onSuccess: () => {
+      setAmsActiveModal(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/ams/vehicles", selectedVinForAms] });
+      toast({ title: "AMS vehicle fields updated" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to update AMS fields", description: error.message || "An error occurred", variant: "destructive" });
+    },
+  });
+
+  const amsRepairMutation = useMutation({
+    mutationFn: async (payload: Record<string, any>) => {
+      const isFinalizing = payload.finalDisposition !== undefined;
+      const endpoint = isFinalizing
+        ? `/api/ams/vehicles/${selectedVinForAms}/repair-disposition`
+        : `/api/ams/vehicles/${selectedVinForAms}/repair-updates`;
+      const res = await apiRequest("POST", endpoint, payload);
+      return res.json();
+    },
+    onSuccess: () => {
+      setAmsActiveModal(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/ams/vehicles", selectedVinForAms] });
+      toast({ title: "Repair status updated" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to update repair status", description: error.message || "An error occurred", variant: "destructive" });
+    },
+  });
+
+  const { data: amsComments, isLoading: amsCommentsLoading } = useQuery<any[]>({
+    queryKey: ["/api/ams/vehicles/comments", selectedVinForAms],
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
+    queryFn: async () => {
+      const res = await fetch(`/api/ams/vehicles/${selectedVinForAms}/comments`, { credentials: "include" });
+      if (!res.ok) return [];
+      const json = await res.json();
+      const arr = json.data || json.comments || json.rows || json.items || json.records || json.CommentList || json.Comments || json.Notes || json.notes;
+      return Array.isArray(arr) ? arr : Array.isArray(json) ? json : [];
+    },
+  });
+
+  const addCommentMutation = useMutation({
+    mutationFn: async (comment: string) => {
+      const res = await apiRequest("POST", `/api/ams/vehicles/${selectedVinForAms}/comments`, { comment });
+      return res.json();
+    },
+    onSuccess: () => {
+      setAmsNewComment("");
+      setAmsCommentDialogOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/ams/vehicles/comments", selectedVinForAms] });
+      toast({ title: "Comment added successfully" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to add comment", description: error.message || "An error occurred", variant: "destructive" });
+    },
+  });
 
   // Build set of normalized vehicle numbers whose tech is on the offboarding roster
   const terminatedVehicleSet = useMemo(() => {
@@ -3819,32 +3987,50 @@ export default function Dashboard() {
           setDetailPanelOpen(open);
           if (!open) setAmsVehiclePanelOpen(false);
         }}
-        onUpdateAms={(truckNumber) => {
+        onUpdateAms={(truckNumber, vin) => {
           setSelectedTruckForAms(truckNumber);
+          setSelectedVinForAms(vin || null);
           setAmsVehiclePanelOpen(true);
         }}
+        amsOpen={amsVehiclePanelOpen}
       />
 
-      {/* AMS Vehicle 2nd Panel — slides in to the left of the TruckDetailPanel */}
-      {amsVehiclePanelOpen && selectedTruckForAms && (
-        <div
-          className="fixed top-0 right-[700px] h-full w-[540px] bg-background border-l shadow-2xl z-[51] flex flex-col"
-          style={{ animation: "slideInFromRight 0.2s ease-out" }}
-        >
+      {/* AMS Vehicle 2nd Panel — renders in a portal so it sits above the Sheet overlay */}
+      {amsVehiclePanelOpen && selectedTruckForAms && createPortal(
+        <>
+          {/* Backdrop — click anywhere outside the panel to close it */}
+          <div
+            className="fixed inset-0 z-[9998]"
+            style={{ pointerEvents: "auto" }}
+            onClick={() => setAmsVehiclePanelOpen(false)}
+          />
+          <div
+            className="fixed top-0 right-[700px] h-full w-[560px] bg-background border-l shadow-2xl z-[9999] flex flex-col"
+            style={{ animation: "slideInFromRight 0.2s ease-out", pointerEvents: "auto" }}
+          >
           <style>{`@keyframes slideInFromRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
 
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b shrink-0 bg-blue-50 dark:bg-blue-950/20">
+          <div className="flex items-center justify-between px-5 py-3 border-b shrink-0 bg-blue-50 dark:bg-blue-950/20">
             <div className="flex items-center gap-2">
               <Building2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span className="font-semibold text-sm">AMS — Truck {selectedTruckForAms}</span>
             </div>
-            <button
-              onClick={() => setAmsVehiclePanelOpen(false)}
-              className="rounded-sm opacity-70 hover:opacity-100 transition-opacity p-1"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 opacity-75 hover:opacity-100"
+                onClick={() => window.open(`/fleet-management?openTruck=${selectedTruckForAms}`, "_blank", "noopener,noreferrer")}
+              >
+                <ExternalLink className="w-3 h-3" />
+                Fleet Mgmt
+              </button>
+              <button
+                onClick={() => setAmsVehiclePanelOpen(false)}
+                className="rounded-sm opacity-70 hover:opacity-100 transition-opacity p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Body */}
@@ -3854,6 +4040,21 @@ export default function Dashboard() {
                 <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
                 <span className="text-sm">Loading AMS vehicle data…</span>
               </div>
+            ) : !selectedVinForAms ? (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+                <Building2 className="w-10 h-10 opacity-30" />
+                <div className="text-center">
+                  <p className="text-sm font-medium">VIN not available</p>
+                  <p className="text-xs mt-1">Cannot load AMS data without a VIN. Open in Fleet Management to view details.</p>
+                </div>
+                <button
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                  onClick={() => window.open(`/fleet-management?openTruck=${selectedTruckForAms}`, "_blank", "noopener,noreferrer")}
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Open in Fleet Management
+                </button>
+              </div>
             ) : amsVehicle ? (
               <>
                 {/* Vehicle header */}
@@ -3861,115 +4062,735 @@ export default function Dashboard() {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="font-mono font-semibold text-lg leading-none">
-                        {amsVehicle.vehicleNumber}
+                        {selectedTruckForAms}
                       </p>
                       <p className="text-muted-foreground text-sm mt-1">
-                        {[amsVehicle.modelYear, amsVehicle.makeName, amsVehicle.modelName].filter(Boolean).join(" ") || "Unknown vehicle"}
+                        {[amsVehicle.Year, amsVehicle.Make, amsVehicle.Model].filter(Boolean).join(" ") || "Unknown vehicle"}
                       </p>
                     </div>
-                    {amsVehicle.vehicleStatusDescription && (
-                      <span className="shrink-0 text-xs px-2 py-0.5 rounded-full border font-medium bg-muted">
-                        {amsVehicle.vehicleStatusDescription}
-                      </span>
-                    )}
+                    <div className="flex flex-col items-end gap-1">
+                      {amsVehicle.TruckStatus != null && (() => {
+                        const match = Array.isArray(amsLookupTruckStatus) ? amsLookupTruckStatus.find((item: any) => String(item.UniqueID) === String(amsVehicle.TruckStatus)) : undefined;
+                        return (
+                          <span className="shrink-0 text-xs px-2 py-0.5 rounded-full border font-medium bg-muted">
+                            {match ? getAmsLookupLabel(match) : String(amsVehicle.TruckStatus)}
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm pt-1 border-t">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm pt-2 border-t">
                     <div>
                       <p className="text-xs text-muted-foreground">VIN</p>
-                      <p className="font-mono text-xs">{amsVehicle.vin || "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">License Plate</p>
-                      <p>{amsVehicle.licensePlate ? `${amsVehicle.licensePlate} (${amsVehicle.licenseState || ""})` : "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Location</p>
-                      <p>{[amsVehicle.city, amsVehicle.state].filter(Boolean).join(", ") || "—"}</p>
+                      <p className="font-mono text-xs">{selectedVinForAms}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Odometer</p>
-                      <p>{amsVehicle.odometer ? `${amsVehicle.odometer.toLocaleString()} mi` : "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Region / District</p>
-                      <p>{[amsVehicle.region, amsVehicle.district].filter(Boolean).join(" / ") || "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Color</p>
-                      <p>{amsVehicle.color || "—"}</p>
+                      <p>{amsVehicle.CurOdometer != null ? `${Number(amsVehicle.CurOdometer).toLocaleString()} mi` : "—"}</p>
                     </div>
                   </div>
                 </div>
 
-                {/* Assignment info */}
+                {/* Ownership */}
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Current Assignment</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-lg border p-3 space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">TPMS</p>
-                      {amsVehicle.tpmsAssignedTechId ? (
-                        <>
-                          <p className="font-mono text-sm">{amsVehicle.tpmsAssignedTechId}</p>
-                          {amsVehicle.tpmsAssignedTechName && (
-                            <p className="text-xs text-muted-foreground">{amsVehicle.tpmsAssignedTechName}</p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-muted-foreground text-sm">Unassigned</p>
-                      )}
-                    </div>
-                    <div className="rounded-lg border p-3 space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">Holman</p>
-                      {amsVehicle.holmanTechAssigned ? (
-                        <>
-                          <p className="font-mono text-sm">{amsVehicle.holmanTechAssigned}</p>
-                          {amsVehicle.holmanTechName && (
-                            <p className="text-xs text-muted-foreground">{amsVehicle.holmanTechName}</p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-muted-foreground text-sm">Unassigned</p>
-                      )}
-                    </div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Ownership</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    {amsVehicle.Tech && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">AMS Tech</Label>
+                        <p className="font-mono text-xs">{amsVehicle.Tech}</p>
+                        {amsVehicle.TechName && <p className="text-xs text-muted-foreground">{amsVehicle.TechName}</p>}
+                      </div>
+                    )}
+                    {(amsVehicle.TFD || amsVehicle.TFDName) && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">TFD</Label>
+                        <p className="text-xs font-mono">{amsVehicle.TFD || "—"}</p>
+                        {amsVehicle.TFDName && <p className="text-xs text-muted-foreground">{amsVehicle.TFDName}</p>}
+                      </div>
+                    )}
+                    {(amsVehicle.DSM || amsVehicle.DSMName) && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">DSM</Label>
+                        <p className="text-xs font-mono">{amsVehicle.DSM || "—"}</p>
+                        {amsVehicle.DSMName && <p className="text-xs text-muted-foreground">{amsVehicle.DSMName}</p>}
+                      </div>
+                    )}
+                    {(amsVehicle.TM || amsVehicle.TMName) && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">TM</Label>
+                        <p className="text-xs font-mono">{amsVehicle.TM || "—"}</p>
+                        {amsVehicle.TMName && <p className="text-xs text-muted-foreground">{amsVehicle.TMName}</p>}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Open in Fleet Management CTA */}
-                <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 p-4 space-y-2">
-                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300">Make Updates in Fleet Management</p>
-                  <p className="text-xs text-blue-700 dark:text-blue-400">
-                    Assign or unassign techs, post repair updates, add comments, and more.
-                  </p>
-                  <Button
-                    className="w-full mt-1"
-                    size="sm"
-                    onClick={() => window.open(`/fleet-management?openTruck=${selectedTruckForAms}`, "_blank", "noopener,noreferrer")}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-                    Open in Fleet Management
-                  </Button>
+                <Separator />
+
+                {/* Description */}
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Description</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    {amsVehicle.ColorName && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Color</Label>
+                        <p>{amsVehicle.ColorName}</p>
+                      </div>
+                    )}
+                    {amsVehicle.BrandingName && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Branding</Label>
+                        <p>{amsVehicle.BrandingName}</p>
+                      </div>
+                    )}
+                    {amsVehicle.InteriorName && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Interior</Label>
+                        <p>{amsVehicle.InteriorName}</p>
+                      </div>
+                    )}
+                    {amsVehicle.CurOdometer != null && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">AMS Odometer</Label>
+                        <p>{Number(amsVehicle.CurOdometer).toLocaleString()} mi</p>
+                        {amsVehicle.CurOdometerDate && <p className="text-xs text-muted-foreground">{amsVehicle.CurOdometerDate.slice(0, 10)}</p>}
+                      </div>
+                    )}
+                    {amsVehicle.RemBookValue != null && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Book Value</Label>
+                        <p>${Number(amsVehicle.RemBookValue).toLocaleString()}</p>
+                      </div>
+                    )}
+                    {amsVehicle.LeaseEndDate && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Lease End</Label>
+                        <p>{amsVehicle.LeaseEndDate}</p>
+                      </div>
+                    )}
+                    {amsVehicle.OutofSvcDate && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Out of Service</Label>
+                        <p>{amsVehicle.OutofSvcDate}</p>
+                      </div>
+                    )}
+                    {amsVehicle.SaleDate && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Sale Date</Label>
+                        <p>{amsVehicle.SaleDate}</p>
+                      </div>
+                    )}
+                    {amsVehicle.RegRenewalDate && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Reg Renewal</Label>
+                        <p>{amsVehicle.RegRenewalDate}</p>
+                      </div>
+                    )}
+                    {amsVehicle.StorageCost != null && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Storage Cost</Label>
+                        <p>${Number(amsVehicle.StorageCost).toLocaleString()}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
+
+                <Separator />
+
+                {/* Condition */}
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Condition</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Road Ready</Label>
+                      <div className="mt-0.5">
+                        {amsVehicle.RoadReady === "Y" || amsVehicle.RoadReady === "Yes" ? (
+                          <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border-none text-xs">Ready</Badge>
+                        ) : amsVehicle.RoadReady ? (
+                          <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 border-none text-xs">{amsVehicle.RoadReady}</Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">N/A</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Grade</Label>
+                      <p>{amsVehicle.Grade || "N/A"}</p>
+                      {amsVehicle.GradeDescription && <p className="text-xs text-muted-foreground">{amsVehicle.GradeDescription}</p>}
+                    </div>
+                    {amsVehicle.TruckStatus != null && (() => {
+                      const match = Array.isArray(amsLookupTruckStatus) ? amsLookupTruckStatus.find((item: any) => String(item.UniqueID) === String(amsVehicle.TruckStatus)) : undefined;
+                      return (
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Truck Status</Label>
+                          <p>{match ? getAmsLookupLabel(match) : String(amsVehicle.TruckStatus)}</p>
+                        </div>
+                      );
+                    })()}
+                    {amsVehicle.InRepair != null && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">In Repair</Label>
+                        <p>{amsVehicle.InRepair === true || amsVehicle.InRepair === "Y" ? "Yes" : "No"}</p>
+                      </div>
+                    )}
+                    {amsVehicle.DaysInRepair != null && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Days In Repair</Label>
+                        <p>{amsVehicle.DaysInRepair}</p>
+                      </div>
+                    )}
+                    {amsVehicle.TheftVerified != null && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Theft Verified</Label>
+                        <p>{amsVehicle.TheftVerified === "Y" || amsVehicle.TheftVerified === true ? "Yes" : "No"}</p>
+                      </div>
+                    )}
+                    {amsVehicle.VehicleRuns != null && (() => {
+                      const match = Array.isArray(amsLookupVehicleRuns) ? amsLookupVehicleRuns.find((item: any) => String(item.UniqueID) === String(amsVehicle.VehicleRuns)) : undefined;
+                      return (
+                        <div className="col-span-2">
+                          <Label className="text-xs text-muted-foreground">How Vehicle Runs</Label>
+                          <p className="text-xs">{match ? getAmsLookupLabel(match) : String(amsVehicle.VehicleRuns)}</p>
+                        </div>
+                      );
+                    })()}
+                    {amsVehicle.VehicleLooks != null && (() => {
+                      const match = Array.isArray(amsLookupVehicleLooks) ? amsLookupVehicleLooks.find((item: any) => String(item.UniqueID) === String(amsVehicle.VehicleLooks)) : undefined;
+                      return (
+                        <div className="col-span-2">
+                          <Label className="text-xs text-muted-foreground">How Vehicle Looks</Label>
+                          <p className="text-xs">{match ? getAmsLookupLabel(match) : String(amsVehicle.VehicleLooks)}</p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Location */}
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Location</p>
+                  <div className="space-y-1.5 text-sm">
+                    {(amsVehicle.CurLocAddress || amsVehicle.CurLocCity) && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Current Location</Label>
+                        <p className="text-xs">
+                          {[amsVehicle.CurLocAddress, amsVehicle.CurLocCity, amsVehicle.CurLocState].filter(Boolean).join(", ")}
+                          {amsVehicle.CurLocZip ? ` ${amsVehicle.CurLocZip}` : ""}
+                        </p>
+                        {amsVehicle.UpdateDate && <p className="text-xs text-muted-foreground">Updated: {amsVehicle.UpdateDate}</p>}
+                      </div>
+                    )}
+                    {(amsVehicle.DeliveryDate || amsVehicle.Address) && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Delivery Location</Label>
+                        <p className="text-xs">
+                          {[amsVehicle.Address, amsVehicle.City, amsVehicle.State].filter(Boolean).join(", ")}
+                          {amsVehicle.Zip ? ` ${amsVehicle.Zip}` : ""}
+                        </p>
+                        {amsVehicle.DeliveryDate && <p className="text-xs text-muted-foreground">Delivered: {amsVehicle.DeliveryDate}</p>}
+                      </div>
+                    )}
+                    {((amsVehicle.KeyAddress || amsVehicle.keyAddress) || (amsVehicle.KeyZip || amsVehicle.keyZip)) && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Key Location</Label>
+                        <p className="text-xs">
+                          {[(amsVehicle.KeyAddress || amsVehicle.keyAddress)].filter(Boolean).join(", ")}
+                          {(amsVehicle.KeyZip || amsVehicle.keyZip) ? ` ${amsVehicle.KeyZip || amsVehicle.keyZip}` : ""}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {(amsVehicle.LastUpdate || amsVehicle.LastUpdateUser) && (
+                  <p className="text-xs text-muted-foreground">
+                    AMS last updated: {amsVehicle.LastUpdate || "N/A"}{amsVehicle.LastUpdateUser ? ` by ${amsVehicle.LastUpdateUser}` : ""}
+                  </p>
+                )}
+
+                <Separator />
+
+                {/* AMS Comments */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <button
+                      className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={() => setAmsCommentsCollapsed(v => !v)}
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      AMS Comments
+                      {amsCommentsLoading ? (
+                        <Loader2 className="h-3 w-3 animate-spin ml-0.5" />
+                      ) : amsComments && amsComments.length > 0 ? (
+                        <span className="text-xs text-muted-foreground">({amsComments.length})</span>
+                      ) : null}
+                      {amsCommentsCollapsed ? <ChevronDown className="h-3.5 w-3.5 ml-0.5" /> : <ChevronUp className="h-3.5 w-3.5 ml-0.5" />}
+                    </button>
+                    <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setAmsCommentDialogOpen(true)}>
+                      + Add Comment
+                    </Button>
+                  </div>
+                  {!amsCommentsCollapsed && (
+                    amsCommentsLoading ? (
+                      <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading comments...</div>
+                    ) : !amsComments || amsComments.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No AMS comments for this vehicle.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {[...amsComments]
+                          .sort((a, b) => {
+                            const da = new Date(a.Date || a.CommentDate || a.CreatedAt || a.UpdateDate || a.commentDate || a.createdAt || a.date || 0).getTime();
+                            const db = new Date(b.Date || b.CommentDate || b.CreatedAt || b.UpdateDate || b.commentDate || b.createdAt || b.date || 0).getTime();
+                            return db - da;
+                          })
+                          .map((comment: any, i: number) => (
+                            <div key={i} className="rounded-md border bg-muted/30 px-3 py-2 space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium">{comment.User || comment.Author || comment.author || comment.CreatedBy || comment.UpdatedBy || comment.user || "Unknown"}</span>
+                                <span className="text-xs text-muted-foreground">{comment.Date || comment.CommentDate || comment.CreatedAt || comment.UpdateDate || comment.commentDate || comment.createdAt || comment.date || ""}</span>
+                              </div>
+                              <p className="text-xs leading-relaxed">{comment.Comment || comment.CommentText || comment.Note || comment.Text || comment.comment || comment.note || comment.text || "—"}</p>
+                            </div>
+                          ))
+                        }
+                      </div>
+                    )
+                  )}
+                </div>
+
               </>
             ) : (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
                 <Building2 className="w-10 h-10 opacity-30" />
                 <div className="text-center">
                   <p className="text-sm font-medium">Vehicle not found in AMS</p>
-                  <p className="text-xs mt-1">Truck {selectedTruckForAms} may not be in the Holman fleet system.</p>
+                  <p className="text-xs mt-1">Truck {selectedTruckForAms} may not be in the AMS system.</p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
+                <button
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
                   onClick={() => window.open(`/fleet-management?openTruck=${selectedTruckForAms}`, "_blank", "noopener,noreferrer")}
                 >
-                  <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                  <ExternalLink className="w-3.5 h-3.5" />
                   Search in Fleet Management
-                </Button>
+                </button>
               </div>
             )}
           </div>
+
+          {/* Sticky action buttons — always visible at bottom of panel */}
+          {!amsFleetLoading && !!amsVehicle && (
+            <div className="shrink-0 border-t px-5 py-3 flex gap-2 bg-background">
+              <Button size="sm" variant="outline" className="flex-1" onClick={() => {
+                const matchLookup = (lookup: any[] | undefined, raw: any): string => {
+                  if (raw == null || !lookup?.length) return "";
+                  const s = String(raw);
+                  const byId = lookup.find(item => String(item.UniqueID) === s);
+                  if (byId) return s;
+                  const byLabel = lookup.find(item => getAmsLookupLabel(item).toLowerCase() === s.toLowerCase());
+                  return byLabel ? String(byLabel.UniqueID) : "";
+                };
+                setAmsEditColor(matchLookup(amsLookupColors, amsVehicle?.Color));
+                setAmsEditBranding(matchLookup(amsLookupBranding, amsVehicle?.Branding));
+                setAmsEditInterior(matchLookup(amsLookupInterior, amsVehicle?.Interior));
+                setAmsEditAddress(amsVehicle?.CurLocAddress || "");
+                setAmsEditAddressZip(amsVehicle?.CurLocZip || "");
+                setAmsEditTruckStatus(matchLookup(amsLookupTruckStatus, amsVehicle?.TruckStatus));
+                const tv = amsVehicle?.TheftVerified;
+                setAmsEditTheftVerified(tv === true || tv === "Y" ? "Y" : tv === false || tv === "N" ? "N" : "");
+                setAmsEditKeyAddress(amsVehicle?.KeyLocAddress || amsVehicle?.KeyAddress || amsVehicle?.keyAddress || "");
+                setAmsEditKeyZip(amsVehicle?.KeyLocZip || amsVehicle?.KeyZip || amsVehicle?.keyZip || "");
+                setAmsEditStorageCost(amsVehicle?.StorageCost != null ? String(amsVehicle.StorageCost) : "");
+                setAmsEditVehicleRuns(matchLookup(amsLookupVehicleRuns, amsVehicle?.VehicleRuns));
+                setAmsEditVehicleLooks(matchLookup(amsLookupVehicleLooks, amsVehicle?.VehicleLooks));
+                setAmsActiveModal("amsEdit");
+              }}>
+                <Pencil className="h-4 w-4 mr-1.5" />Edit Fields
+              </Button>
+              <Button size="sm" variant="outline" className="flex-1" onClick={() => {
+                setAmsRepairInRepair(!!amsVehicle?.InRepair);
+                setAmsRepairDate("");
+                setAmsRepairReason("");
+                setAmsRepairVendor("");
+                setAmsRepairETA("");
+                setAmsRepairStatus("");
+                setAmsRepairEstimate("");
+                setAmsRepairRentalCar("");
+                setAmsRepairRentalStart("");
+                setAmsRepairRentalEnd("");
+                setAmsRepairFinalDisposition("");
+                setAmsRepairDispositionReason("");
+                setAmsRepairFinalDate("");
+                setAmsActiveModal("amsRepair");
+              }}>
+                <Wrench className="h-4 w-4 mr-1.5" />Repair
+              </Button>
+            </div>
+          )}
+
+          {/* Add Comment Dialog — inside the portal panel */}
+          <Dialog open={amsCommentDialogOpen} onOpenChange={(o) => { setAmsCommentDialogOpen(o); if (!o) setAmsNewComment(""); }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  Add AMS Comment
+                </DialogTitle>
+                <DialogDescription>
+                  Add a comment to vehicle {selectedVinForAms} in AMS.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                <Textarea
+                  placeholder="Add an AMS comment..."
+                  value={amsNewComment}
+                  onChange={(e) => setAmsNewComment(e.target.value)}
+                  rows={5}
+                  className="resize-none"
+                  disabled={addCommentMutation.isPending}
+                  autoFocus
+                />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setAmsCommentDialogOpen(false); setAmsNewComment(""); }} disabled={addCommentMutation.isPending}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => amsNewComment.trim() && addCommentMutation.mutate(amsNewComment.trim())}
+                  disabled={!amsNewComment.trim() || addCommentMutation.isPending}
+                >
+                  {addCommentMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+                  Add Comment
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
+        </>,
+        document.body
       )}
+
+      {/* AMS Edit Fields Dialog */}
+      <Dialog open={amsActiveModal === "amsEdit"} onOpenChange={(o) => { if (!o) setAmsActiveModal(null); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Pencil className="h-4 w-4" />Edit AMS Fields — {selectedVinForAms}</DialogTitle>
+            <DialogDescription>Update user-editable fields in the AMS system.</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Description</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Color</Label>
+                <Select value={amsEditColor} onValueChange={setAmsEditColor}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select color..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— No change —</SelectItem>
+                    {(Array.isArray(amsLookupColors) ? amsLookupColors : []).map((item: any) => (
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Branding</Label>
+                <Select value={amsEditBranding} onValueChange={setAmsEditBranding}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select branding..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— No change —</SelectItem>
+                    {(Array.isArray(amsLookupBranding) ? amsLookupBranding : []).map((item: any) => (
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Interior</Label>
+              <Select value={amsEditInterior} onValueChange={setAmsEditInterior}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Select interior..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— No change —</SelectItem>
+                  {(Array.isArray(amsLookupInterior) ? amsLookupInterior : []).map((item: any) => (
+                    <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-1">Current Location</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <Label className="text-xs">Address</Label>
+                <Input className="mt-1" value={amsEditAddress} onChange={e => setAmsEditAddress(e.target.value)} placeholder="Street address" />
+              </div>
+              <div>
+                <Label className="text-xs">ZIP</Label>
+                <Input className="mt-1" value={amsEditAddressZip} onChange={e => setAmsEditAddressZip(e.target.value)} placeholder="ZIP" />
+              </div>
+            </div>
+
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-1">Status</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Truck Status</Label>
+                <Select value={amsEditTruckStatus} onValueChange={setAmsEditTruckStatus}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select status..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— No change —</SelectItem>
+                    {(Array.isArray(amsLookupTruckStatus) ? amsLookupTruckStatus : []).map((item: any) => (
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Theft Verified</Label>
+                <Select value={amsEditTheftVerified} onValueChange={setAmsEditTheftVerified}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— No change —</SelectItem>
+                    <SelectItem value="Y">Yes</SelectItem>
+                    <SelectItem value="N">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-1">Key Location</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <Label className="text-xs">Key Address</Label>
+                <Input className="mt-1" value={amsEditKeyAddress} onChange={e => setAmsEditKeyAddress(e.target.value)} placeholder="Key pickup address" />
+              </div>
+              <div>
+                <Label className="text-xs">Key ZIP</Label>
+                <Input className="mt-1" value={amsEditKeyZip} onChange={e => setAmsEditKeyZip(e.target.value)} placeholder="ZIP" />
+              </div>
+            </div>
+
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-1">Condition &amp; Financial</p>
+            <div>
+              <Label className="text-xs">Storage Cost ($)</Label>
+              <Input className="mt-1" type="number" value={amsEditStorageCost} onChange={e => setAmsEditStorageCost(e.target.value)} placeholder="0.00" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">How Vehicle Runs</Label>
+                <Select value={amsEditVehicleRuns} onValueChange={setAmsEditVehicleRuns}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— No change —</SelectItem>
+                    {(Array.isArray(amsLookupVehicleRuns) ? amsLookupVehicleRuns : []).map((item: any) => (
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">How Vehicle Looks</Label>
+                <Select value={amsEditVehicleLooks} onValueChange={setAmsEditVehicleLooks}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— No change —</SelectItem>
+                    {(Array.isArray(amsLookupVehicleLooks) ? amsLookupVehicleLooks : []).map((item: any) => (
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="pt-3 border-t">
+            <Button variant="outline" onClick={() => setAmsActiveModal(null)}>Cancel</Button>
+            <Button
+              disabled={amsUserUpdateMutation.isPending}
+              onClick={() => {
+                const payload: Record<string, any> = { updateUser: currentUser || "nexus" };
+                if (amsEditColor && amsEditColor !== "__none__") payload.color = amsEditColor;
+                if (amsEditBranding && amsEditBranding !== "__none__") payload.branding = amsEditBranding;
+                if (amsEditInterior && amsEditInterior !== "__none__") payload.interior = amsEditInterior;
+                if (amsEditAddress) payload.address = amsEditAddress;
+                if (amsEditAddressZip) payload.zip = amsEditAddressZip;
+                if (amsEditTruckStatus && amsEditTruckStatus !== "__none__") payload.truckStatus = amsEditTruckStatus;
+                if (amsEditTheftVerified && amsEditTheftVerified !== "__none__") payload.theftVerified = amsEditTheftVerified;
+                if (amsEditKeyAddress) payload.keyAddress = amsEditKeyAddress;
+                if (amsEditKeyZip) payload.keyZip = amsEditKeyZip;
+                if (amsEditStorageCost !== "") payload.storageCost = parseFloat(amsEditStorageCost);
+                if (amsEditVehicleRuns && amsEditVehicleRuns !== "__none__") payload.vehicleRuns = amsEditVehicleRuns;
+                if (amsEditVehicleLooks && amsEditVehicleLooks !== "__none__") payload.vehicleLooks = amsEditVehicleLooks;
+                amsUserUpdateMutation.mutate(payload);
+              }}
+            >
+              {amsUserUpdateMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* AMS Repair Updates Dialog */}
+      <Dialog open={amsActiveModal === "amsRepair"} onOpenChange={(o) => { if (!o) setAmsActiveModal(null); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Wrench className="h-4 w-4" />Repair Updates — Truck {selectedTruckForAms}</DialogTitle>
+            <DialogDescription>Log or update repair status in AMS for this vehicle.</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+            <div className="flex items-center gap-3">
+              <Label className="text-xs">In Repair</Label>
+              <Switch checked={amsRepairInRepair} onCheckedChange={setAmsRepairInRepair} />
+              <span className="text-xs text-muted-foreground">{amsRepairInRepair ? "Yes — vehicle is in repair" : "No — vehicle is not in repair"}</span>
+            </div>
+
+            {amsRepairInRepair && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Repair Date</Label>
+                    <Input className="mt-1" type="date" value={amsRepairDate} onChange={e => setAmsRepairDate(e.target.value)} />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Repair ETA</Label>
+                    <Input className="mt-1" type="date" value={amsRepairETA} onChange={e => setAmsRepairETA(e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Svc. Reason</Label>
+                  <Select value={amsRepairReason} onValueChange={setAmsRepairReason}>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="Select reason..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Select —</SelectItem>
+                      {(Array.isArray(amsLookupRepairReason) ? amsLookupRepairReason : []).map((item: any) => (
+                        <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Repair Status</Label>
+                  <Select value={amsRepairStatus} onValueChange={setAmsRepairStatus}>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="Select status..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Select —</SelectItem>
+                      {(Array.isArray(amsLookupRepairStatus) ? amsLookupRepairStatus : []).map((item: any) => (
+                        <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Repair Vendor</Label>
+                  <Input className="mt-1" value={amsRepairVendor} onChange={e => setAmsRepairVendor(e.target.value)} placeholder="Vendor name / address" />
+                </div>
+                <div>
+                  <Label className="text-xs">Estimate Cost ($)</Label>
+                  <Input className="mt-1" type="number" value={amsRepairEstimate} onChange={e => setAmsRepairEstimate(e.target.value)} placeholder="0.00" />
+                </div>
+                <div>
+                  <Label className="text-xs">Rental Car</Label>
+                  <Select value={amsRepairRentalCar} onValueChange={setAmsRepairRentalCar}>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Select —</SelectItem>
+                      {(Array.isArray(amsLookupRentalCar) && amsLookupRentalCar.length > 0) ? amsLookupRentalCar.map((item: any) => (
+                        <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                      )) : (
+                        <>
+                          <SelectItem value="1">Yes — Rental</SelectItem>
+                          <SelectItem value="0">No Rental</SelectItem>
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {amsRepairRentalCar === "1" && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs">Rental Start</Label>
+                      <Input className="mt-1" type="date" value={amsRepairRentalStart} onChange={e => setAmsRepairRentalStart(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Rental End</Label>
+                      <Input className="mt-1" type="date" value={amsRepairRentalEnd} onChange={e => setAmsRepairRentalEnd(e.target.value)} />
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            <div className="border-t pt-3 space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Final Disposition (close repair)</p>
+              <div>
+                <Label className="text-xs">Disposition</Label>
+                <Select value={amsRepairFinalDisposition} onValueChange={setAmsRepairFinalDisposition}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select disposition..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— Not closing —</SelectItem>
+                    {(Array.isArray(amsLookupDisposition) ? amsLookupDisposition : []).map((item: any) => (
+                      <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {amsRepairFinalDisposition && amsRepairFinalDisposition !== "__none__" && (
+                <>
+                  <div>
+                    <Label className="text-xs">Disposition Reason</Label>
+                    <Select value={amsRepairDispositionReason} onValueChange={setAmsRepairDispositionReason}>
+                      <SelectTrigger className="mt-1"><SelectValue placeholder="Select reason..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">— Select —</SelectItem>
+                        {(Array.isArray(amsLookupDispositionReason) ? amsLookupDispositionReason : []).map((item: any) => (
+                          <SelectItem key={item.UniqueID} value={String(item.UniqueID)}>{getAmsLookupLabel(item)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Final Date</Label>
+                    <Input className="mt-1" type="date" value={amsRepairFinalDate} onChange={e => setAmsRepairFinalDate(e.target.value)} />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          <DialogFooter className="pt-3 border-t">
+            <Button variant="outline" onClick={() => setAmsActiveModal(null)}>Cancel</Button>
+            <Button
+              disabled={amsRepairMutation.isPending}
+              onClick={() => {
+                const updateUser = currentUser || "nexus";
+                const isFinalizing = amsRepairFinalDisposition && amsRepairFinalDisposition !== "__none__";
+                const payload: Record<string, any> = {
+                  inRepair: amsRepairInRepair,
+                  updateUser,
+                };
+                if (amsRepairDate) payload.repairDateStart = amsRepairDate;
+                if (amsRepairReason && amsRepairReason !== "__none__") payload.repairReason = parseInt(amsRepairReason);
+                if (amsRepairStatus && amsRepairStatus !== "__none__") payload.repairStatus = parseInt(amsRepairStatus);
+                if (amsRepairVendor) payload.vendor = amsRepairVendor;
+                if (amsRepairETA) payload.etaDate = amsRepairETA;
+                if (amsRepairEstimate) payload.estimateCost = parseFloat(amsRepairEstimate);
+                if (amsRepairRentalCar && amsRepairRentalCar !== "__none__") payload.rentalCar = parseInt(amsRepairRentalCar);
+                if (amsRepairRentalStart) payload.rentalStartDate = amsRepairRentalStart;
+                if (amsRepairRentalEnd) payload.rentalEndDate = amsRepairRentalEnd;
+                if (isFinalizing) {
+                  payload.finalDisposition = parseInt(amsRepairFinalDisposition);
+                  if (amsRepairDispositionReason && amsRepairDispositionReason !== "__none__") payload.finalDispositionReason = parseInt(amsRepairDispositionReason);
+                  if (amsRepairFinalDate) payload.finalDispositionDate = amsRepairFinalDate;
+                }
+                amsRepairMutation.mutate(payload);
+              }}
+            >
+              {amsRepairMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
+              {amsRepairFinalDisposition && amsRepairFinalDisposition !== "__none__" ? "Close Repair" : "Save Repair Status"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

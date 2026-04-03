@@ -147,7 +147,8 @@ interface TruckDetailPanelProps {
   truckId: number | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onUpdateAms?: (truckNumber: string) => void;
+  onUpdateAms?: (truckNumber: string, vin?: string) => void;
+  amsOpen?: boolean;
 }
 
 type OwnerName = "Oscar S" | "Rob A" | "Bob B" | "John C" | "Mandy R" | "Final Actioned";
@@ -427,7 +428,7 @@ function EditableBoolRow({
   );
 }
 
-export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms }: TruckDetailPanelProps) {
+export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, amsOpen }: TruckDetailPanelProps) {
   const { toast } = useToast();
   const [commentValue, setCommentValue] = useState("");
   const [isEditingComment, setIsEditingComment] = useState(false);
@@ -522,7 +523,14 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms }: T
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="p-0 flex flex-col w-[700px] sm:max-w-[700px]" data-testid="panel-truck-detail">
+      <SheetContent
+        side="right"
+        className="p-0 flex flex-col w-[700px] sm:max-w-[700px]"
+        data-testid="panel-truck-detail"
+        overlayClassName={amsOpen ? "pointer-events-none" : undefined}
+        onInteractOutside={(e) => { if (amsOpen) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (amsOpen) e.preventDefault(); }}
+      >
         {truckLoading ? (
           <div className="p-6 space-y-4">
             <Skeleton className="h-8 w-48" />
@@ -562,7 +570,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms }: T
                       size="sm"
                       data-testid="button-update-ams"
                       className="border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
-                      onClick={() => onUpdateAms(truck.truckNumber!.toString())}
+                      onClick={() => onUpdateAms(truck.truckNumber!.toString(), vehicleInfo?.vin)}
                     >
                       <Building2 className="w-3.5 h-3.5 mr-1.5" />
                       Update AMS
