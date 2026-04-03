@@ -3805,30 +3805,33 @@ export default function Dashboard() {
                                       const isGood = callStatus.toLowerCase().includes("ready") || callStatus.toLowerCase().includes("will pick");
                                       const isBad = callStatus.toLowerCase().includes("no answer") || callStatus.toLowerCase().includes("failed");
                                       const isCallingNow = callStatus === "Calling";
-                                      const colorClass = !hasCalled
-                                        ? "text-muted-foreground/40"
+                                      // Badge color classes matching existing badge pattern in the table
+                                      const badgeClass = !hasCalled
+                                        ? "bg-muted/40 text-muted-foreground/50 border-border/40"
                                         : isCallingNow
-                                          ? "text-blue-600 dark:text-blue-400"
+                                          ? "bg-muted text-muted-foreground border-border"
                                           : isGood
-                                            ? "text-green-600 dark:text-green-400"
+                                            ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border-green-200 dark:border-green-800"
                                             : isBad
-                                              ? "text-red-600 dark:text-red-400"
-                                              : "text-amber-600 dark:text-amber-400";
-                                      const labelText = !hasCalled ? "Not called" : (callStatus || (callDate ?? "—"));
+                                              ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-red-200 dark:border-red-800"
+                                              : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800";
+                                      // In-cell display: show date when available, otherwise "Not called"
+                                      const cellDate = !hasCalled ? "Not called" : (callDate ?? "—");
+                                      const statusBadgeText = callStatus && callStatus !== "Calling" ? callStatus : null;
                                       return (
                                         <Tooltip>
                                           <TooltipTrigger asChild>
                                             <button
                                               type="button"
-                                              className={`text-[9px] leading-none font-medium cursor-pointer ${colorClass} flex items-center gap-0.5 hover:opacity-80 transition-opacity`}
+                                              className={`text-[9px] leading-none font-medium cursor-pointer px-1 py-0.5 rounded border whitespace-nowrap flex items-center gap-0.5 hover:opacity-80 transition-opacity ${badgeClass}`}
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 setSelectedTruckId(truck.id);
                                                 setDetailPanelOpen(true);
                                               }}
                                             >
-                                              <PhoneCall className="w-2.5 h-2.5 shrink-0" />
-                                              <span className="truncate max-w-[80px]">{label}: {labelText}</span>
+                                              <PhoneCall className="w-2 h-2 shrink-0" />
+                                              <span className="truncate max-w-[100px]">{label}: {statusBadgeText || cellDate}</span>
                                             </button>
                                           </TooltipTrigger>
                                           <TooltipContent side="bottom" className="max-w-[260px]">
