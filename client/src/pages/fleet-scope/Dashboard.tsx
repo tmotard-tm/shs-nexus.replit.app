@@ -3797,50 +3797,63 @@ export default function Dashboard() {
                                     </SelectContent>
                                   </Select>
                                   {(() => {
-                                    const hasCalled = !!(truck.lastCallDate || truck.lastCallStatus);
-                                    const callDate = truck.lastCallDate
+                                    const lucaCallBadge = (
+                                      hasCalled: boolean, callDate: string | null,
+                                      callStatus: string, summary: string | null | undefined,
+                                      label: string, tooltipTitle: string
+                                    ) => {
+                                      const isGood = callStatus.toLowerCase().includes("ready") || callStatus.toLowerCase().includes("will pick");
+                                      const isBad = callStatus.toLowerCase().includes("no answer") || callStatus.toLowerCase().includes("failed");
+                                      const isCallingNow = callStatus === "Calling";
+                                      const colorClass = !hasCalled
+                                        ? "text-muted-foreground/40"
+                                        : isCallingNow
+                                          ? "text-blue-600 dark:text-blue-400"
+                                          : isGood
+                                            ? "text-green-600 dark:text-green-400"
+                                            : isBad
+                                              ? "text-red-600 dark:text-red-400"
+                                              : "text-amber-600 dark:text-amber-400";
+                                      const labelText = !hasCalled ? "Not called" : (callStatus || (callDate ?? "—"));
+                                      return (
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <button
+                                              type="button"
+                                              className={`text-[9px] leading-none font-medium cursor-pointer ${colorClass} flex items-center gap-0.5 hover:opacity-80 transition-opacity`}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedTruckId(truck.id);
+                                                setDetailPanelOpen(true);
+                                              }}
+                                            >
+                                              <PhoneCall className="w-2.5 h-2.5 shrink-0" />
+                                              <span className="truncate max-w-[80px]">{label}: {labelText}</span>
+                                            </button>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="bottom" className="max-w-[260px]">
+                                            <p className="text-xs font-medium mb-0.5">{tooltipTitle} — click to view details</p>
+                                            {callDate ? (
+                                              <p className="text-xs text-muted-foreground">{callDate}</p>
+                                            ) : (
+                                              <p className="text-xs text-muted-foreground">No call recorded</p>
+                                            )}
+                                            {summary && <p className="text-xs mt-0.5">{summary}</p>}
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      );
+                                    };
+                                    const shopCallDate = truck.lastCallDate
                                       ? new Date(truck.lastCallDate).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
                                       : null;
-                                    const callStatus = truck.lastCallStatus || "";
-                                    const isGood = callStatus.toLowerCase().includes("ready") || callStatus.toLowerCase().includes("will pick");
-                                    const isBad = callStatus.toLowerCase().includes("no answer") || callStatus.toLowerCase().includes("failed");
-                                    const isCallingNow = callStatus === "Calling";
-                                    const colorClass = !hasCalled
-                                      ? "text-muted-foreground/50"
-                                      : isCallingNow
-                                        ? "text-blue-600 dark:text-blue-400"
-                                        : isGood
-                                          ? "text-green-600 dark:text-green-400"
-                                          : isBad
-                                            ? "text-red-600 dark:text-red-400"
-                                            : "text-amber-600 dark:text-amber-400";
-                                    const labelText = !hasCalled ? "Not called" : (callStatus || (callDate ?? "—"));
+                                    const techCallDate = truck.lastTechCallDate
+                                      ? new Date(truck.lastTechCallDate).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                                      : null;
                                     return (
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <button
-                                            type="button"
-                                            className={`text-[9px] leading-none font-medium cursor-pointer ${colorClass} flex items-center gap-0.5 hover:opacity-80 transition-opacity`}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setSelectedTruckId(truck.id);
-                                              setDetailPanelOpen(true);
-                                            }}
-                                          >
-                                            <PhoneCall className="w-2.5 h-2.5 shrink-0" />
-                                            <span>{labelText}</span>
-                                          </button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="bottom" className="max-w-[260px]">
-                                          <p className="text-xs font-medium mb-0.5">LucaAI Shop Call — click to view details</p>
-                                          {callDate ? (
-                                            <p className="text-xs text-muted-foreground">{callDate}</p>
-                                          ) : (
-                                            <p className="text-xs text-muted-foreground">No call recorded</p>
-                                          )}
-                                          {truck.lastCallSummary && <p className="text-xs mt-0.5">{truck.lastCallSummary}</p>}
-                                        </TooltipContent>
-                                      </Tooltip>
+                                      <div className="flex flex-col gap-0.5 mt-0.5">
+                                        {lucaCallBadge(!!(truck.lastCallDate || truck.lastCallStatus), shopCallDate, truck.lastCallStatus || "", truck.lastCallSummary, "Shop", "LucaAI Shop Call")}
+                                        {lucaCallBadge(!!(truck.lastTechCallDate || truck.lastTechCallStatus), techCallDate, truck.lastTechCallStatus || "", truck.lastTechCallSummary, "Tech", "LucaAI Tech Call")}
+                                      </div>
                                     );
                                   })()}
                                 </div>
