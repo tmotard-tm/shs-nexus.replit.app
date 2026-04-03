@@ -4200,6 +4200,134 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     res.json({ message: "Batch cancelled" });
   });
 
+  // ===== BACKFILL ALL ENGINE =====
+  const backfillAllJobs = new Map<string, {
+    id: string;
+    total: number;
+    completed: number;
+    failed: number;
+    skipped: number;
+    done: boolean;
+    results: Array<{ truckNumber: string; callType: string; status: string; conversationId?: string; error?: string }>;
+    startedAt: Date;
+  }>();
+
+  app.post("/elevenlabs/backfill-all/start", async (req, res) => {
+    try {
+      const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
+      if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
+
+      const allTrucks = await fleetScopeStorage.getAllTrucks();
+
+      // Collect eligible { truck, callType, conversationId } pairs
+      const candidates: Array<{ truck: any; callType: "repair" | "tech"; conversationId: string }> = [];
+      let skippedCount = 0;
+
+      for (const truck of allTrucks) {
+        let hasAny = false;
+
+        if (truck.lastCallConversationId) {
+          candidates.push({ truck, callType: "repair", conversationId: truck.lastCallConversationId });
+          hasAny = true;
+        }
+        if (truck.lastTechCallConversationId) {
+          candidates.push({ truck, callType: "tech", conversationId: truck.lastTechCallConversationId });
+          hasAny = true;
+        }
+
+        // Also check call logs for trucks with no stored conv IDs
+        if (!hasAny) {
+          try {
+            const logs = await fleetScopeStorage.getCallLogsByTruckId(truck.id);
+            for (const ct of ["repair", "tech"] as const) {
+              const log = (logs as any[]).find((l: any) => l.callType === ct && l.elevenLabsConversationId);
+              if (log?.elevenLabsConversationId) {
+                candidates.push({ truck, callType: ct, conversationId: log.elevenLabsConversationId });
+                hasAny = true;
+              }
+            }
+          } catch (_e) {}
+        }
+
+        if (!hasAny) skippedCount++;
+      }
+
+      const jobId = `backfill_all_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const job = {
+        id: jobId,
+        total: candidates.length,
+        completed: 0,
+        failed: 0,
+        skipped: skippedCount,
+        done: false,
+        results: [] as Array<{ truckNumber: string; callType: string; status: string; conversationId?: string; error?: string }>,
+        startedAt: new Date(),
+      };
+      backfillAllJobs.set(jobId, job);
+
+      if (candidates.length === 0) {
+        job.done = true;
+        return res.json({ jobId, total: 0, eligible: 0 });
+      }
+
+      // Process in background — serial with 500ms delay between trucks
+      (async () => {
+        for (const { truck, callType, conversationId } of candidates) {
+          const truckNum = truck.truckNumber?.toString() || "?";
+          try {
+            const convData = await fetchElevenLabsConversation(conversationId, apiKey);
+            if (!convData) {
+              job.results.push({ truckNumber: truckNum, callType, status: "failed", conversationId, error: "Conversation not found" });
+              job.failed++;
+            } else {
+              const transcript = convData.transcript || convData.data?.transcript;
+              if (!transcript) {
+                job.results.push({ truckNumber: truckNum, callType, status: "failed", conversationId, error: "No transcript yet" });
+                job.failed++;
+              } else {
+                const transcriptText = buildTranscriptText(transcript);
+                const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber);
+                const convCallDate = convData.start_time_unix_secs ? new Date(convData.start_time_unix_secs * 1000) : undefined;
+                await applyCallResultToTruck(truck, callType, conversationId, status, summary, estimatedReadyDate, blockers, transcriptText, convCallDate);
+                job.results.push({ truckNumber: truckNum, callType, status: "updated", conversationId });
+                job.completed++;
+                console.log(`[BackfillAll] ${truckNum} (${callType}): ${status}`);
+              }
+            }
+          } catch (err: any) {
+            job.results.push({ truckNumber: truckNum, callType, status: "failed", conversationId, error: err.message });
+            job.failed++;
+            console.error(`[BackfillAll] ${truckNum} (${callType}) error:`, err.message);
+          }
+
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        job.done = true;
+        console.log(`[BackfillAll] ${jobId} complete: ${job.completed} updated, ${job.failed} failed, ${job.skipped} skipped`);
+      })();
+
+      res.json({ jobId, total: candidates.length, eligible: candidates.length });
+    } catch (error: any) {
+      console.error("[BackfillAll] Error:", error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/elevenlabs/backfill-all/status/:jobId", async (req, res) => {
+    const job = backfillAllJobs.get(req.params.jobId);
+    if (!job) return res.status(404).json({ message: "Job not found" });
+    res.json({
+      jobId: job.id,
+      total: job.total,
+      completed: job.completed,
+      failed: job.failed,
+      skipped: job.skipped,
+      done: job.done,
+      results: job.results,
+    });
+  });
+
   app.get("/call-logs", async (_req, res) => {
     try {
       const logs = await fleetScopeStorage.getRecentCallLogs(200);

@@ -571,6 +571,18 @@ export default function Dashboard() {
     errors?: string[];
   } | null>(null);
   const [isUpsDialogOpen, setIsUpsDialogOpen] = useState(false);
+
+  // LucaAI Refresh All state
+  const [isLucaDialogOpen, setIsLucaDialogOpen] = useState(false);
+  const [lucaJobId, setLucaJobId] = useState<string | null>(null);
+  const [lucaProgress, setLucaProgress] = useState<{
+    total: number;
+    completed: number;
+    failed: number;
+    skipped: number;
+    done: boolean;
+    results: Array<{ truckNumber: string; callType: string; status: string; conversationId?: string; error?: string }>;
+  } | null>(null);
   
   // Truck consolidation dialog state
   const [isConsolidateDialogOpen, setIsConsolidateDialogOpen] = useState(false);
@@ -1948,6 +1960,51 @@ export default function Dashboard() {
     setIsUpsDialogOpen(false);
   };
 
+  // LucaAI Refresh All — start mutation
+  const startLucaRefreshMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/fs/elevenlabs/backfill-all/start", {});
+      return response.json();
+    },
+    onSuccess: (data: { jobId: string; total: number; eligible: number }) => {
+      setLucaJobId(data.jobId);
+      if (data.total === 0) {
+        setLucaProgress({ total: 0, completed: 0, failed: 0, skipped: 0, done: true, results: [] });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "LucaAI refresh failed",
+        description: error.message || "Failed to start refresh job",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Poll LucaAI job status every 2s while running
+  useEffect(() => {
+    if (!lucaJobId || lucaProgress?.done) return;
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/fs/elevenlabs/backfill-all/status/${lucaJobId}`, { credentials: "include" });
+        if (!response.ok) return;
+        const data = await response.json();
+        setLucaProgress(data);
+        if (data.done) {
+          clearInterval(interval);
+          queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
+        }
+      } catch (_e) {}
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [lucaJobId, lucaProgress?.done]);
+
+  const resetLucaDialog = () => {
+    setIsLucaDialogOpen(false);
+    setLucaJobId(null);
+    setLucaProgress(null);
+  };
+
   const handleImportCSV = () => {
     if (!importFile) return;
 
@@ -2735,6 +2792,121 @@ export default function Dashboard() {
             </DialogContent>
           </Dialog>
           
+          <Dialog open={isLucaDialogOpen} onOpenChange={(open) => { if (!open) resetLucaDialog(); else setIsLucaDialogOpen(true); }}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" data-testid="button-refresh-luca">
+                <PhoneCall className="w-3 h-3 mr-1" />
+                Refresh LucaAI
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Refresh All LucaAI Call Data</DialogTitle>
+                <DialogDescription>
+                  Fetch the latest call status for all trucks with recorded ElevenLabs conversations.
+                </DialogDescription>
+              </DialogHeader>
+
+              {lucaProgress?.done ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-green-600">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span className="font-medium">Refresh Complete</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div className="bg-muted rounded p-2">
+                      <div className="text-2xl font-bold text-green-600">{lucaProgress.completed}</div>
+                      <div className="text-xs text-muted-foreground">Updated</div>
+                    </div>
+                    <div className="bg-muted rounded p-2">
+                      <div className="text-2xl font-bold text-amber-600">{lucaProgress.failed}</div>
+                      <div className="text-xs text-muted-foreground">Failed</div>
+                    </div>
+                    <div className="bg-muted rounded p-2">
+                      <div className="text-2xl font-bold text-muted-foreground">{lucaProgress.skipped}</div>
+                      <div className="text-xs text-muted-foreground">Skipped</div>
+                    </div>
+                  </div>
+                  {lucaProgress.results.filter(r => r.status === "failed").length > 0 && (
+                    <div>
+                      <p className="text-sm font-medium text-destructive mb-1">Failed trucks:</p>
+                      <div className="max-h-32 overflow-y-auto text-xs text-muted-foreground space-y-1 bg-muted p-2 rounded">
+                        {lucaProgress.results.filter(r => r.status === "failed").map((r, i) => (
+                          <div key={i}>
+                            <strong>{r.truckNumber}</strong> ({r.callType}): {r.error}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <Button onClick={resetLucaDialog} className="w-full" data-testid="button-close-luca">
+                    Close
+                  </Button>
+                </div>
+              ) : lucaJobId ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-blue-600">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="font-medium">Refreshing...</span>
+                  </div>
+                  {lucaProgress && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Progress</span>
+                        <span className="font-medium">{lucaProgress.completed + lucaProgress.failed} / {lucaProgress.total}</span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2">
+                        <div
+                          className="bg-blue-500 h-2 rounded-full transition-all"
+                          style={{ width: lucaProgress.total > 0 ? `${Math.round(((lucaProgress.completed + lucaProgress.failed) / lucaProgress.total) * 100)}%` : "0%" }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {lucaProgress.completed} updated, {lucaProgress.failed} failed so far
+                      </p>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    This may take a moment depending on how many trucks have calls. You can close this dialog — the job will continue in the background.
+                  </p>
+                  <Button variant="outline" onClick={resetLucaDialog} className="w-full">
+                    Close (job continues)
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="text-sm text-muted-foreground">
+                    <p className="mb-2">This will:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Find all trucks with a stored ElevenLabs conversation ID</li>
+                      <li>Fetch the full transcript and current status from ElevenLabs</li>
+                      <li>Re-run the AI analysis and update each truck's call status</li>
+                      <li>Trucks with no recorded calls are skipped automatically</li>
+                    </ul>
+                  </div>
+                  <Button
+                    onClick={() => startLucaRefreshMutation.mutate()}
+                    disabled={startLucaRefreshMutation.isPending}
+                    className="w-full"
+                    data-testid="button-start-luca-refresh"
+                  >
+                    {startLucaRefreshMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      <>
+                        <PhoneCall className="w-4 h-4 mr-2" />
+                        Start Refresh
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
           <Dialog open={isConsolidateDialogOpen} onOpenChange={setIsConsolidateDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" data-testid="button-consolidate">
