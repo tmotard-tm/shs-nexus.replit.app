@@ -1668,7 +1668,7 @@ function extractPhoneFromConversation(conv: any): string {
 }
 
 function extractVinFromConversation(conv: any): string {
-  // The VIN is sent as dynamic_variables.vin_number during call initiation
+  // The VIN is sent as dynamic_variables.vin_number (full) and last_8_vin (last 8 chars)
   const meta = conv.metadata || {};
   const sources = [
     meta.dynamic_variables,
@@ -1680,8 +1680,11 @@ function extractVinFromConversation(conv: any): string {
   ];
   for (const src of sources) {
     if (!src) continue;
-    const v = (src.vin_number || src.vin || "").trim().toUpperCase();
-    if (v && v.length >= 8) return v;
+    // Prefer full VIN, fall back to last_8_vin
+    const full = (src.vin_number || src.vin || "").trim().toUpperCase();
+    if (full && full.length >= 8) return full;
+    const last8 = (src.last_8_vin || "").trim().toUpperCase();
+    if (last8 && last8.length >= 8) return last8;
   }
   return "";
 }
@@ -1728,21 +1731,22 @@ async function searchElevenLabsConversationByPhone(
 
         const phoneInConv = extractPhoneFromConversation(c);
         if (phoneInConv) {
-          // Phone field present — require it to match
+          // Phone field present — require it to match for phone candidates
           if (phoneInConv === toDigits) phoneCandidates.push(c);
-        } else if (vinUpper) {
-          // No phone field — try VIN match as fallback
+        } else {
+          console.log(`[ElevenLabs] Conv ${c.conversation_id}: no phone field in metadata`);
+        }
+
+        // VIN matching is independent of phone — collect VIN candidates regardless.
+        // They serve as a fallback if no phone candidates are found across all pages.
+        if (vinUpper) {
           const vinInConv = extractVinFromConversation(c);
           if (vinInConv) {
             if (vinInConv === vinUpper || vinInConv.slice(-8) === last8Vin) {
-              console.log(`[ElevenLabs] VIN match: conv ${c.conversation_id} vinInConv=${vinInConv}`);
+              console.log(`[ElevenLabs] VIN match candidate: conv ${c.conversation_id} vinInConv=${vinInConv}`);
               vinCandidates.push(c);
             }
-          } else {
-            console.log(`[ElevenLabs] Skipping conv ${c.conversation_id}: no phone or VIN in metadata`);
           }
-        } else {
-          console.log(`[ElevenLabs] Skipping conv ${c.conversation_id}: no phone field and no VIN to match`);
         }
       }
 
