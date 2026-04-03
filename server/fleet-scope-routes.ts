@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { fleetScopeStorage } from "./fleet-scope-storage";
 import { storage } from "./storage";
 import { fsDb } from "./fleet-scope-db";
@@ -1464,9 +1464,13 @@ async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
 // route in routes.ts (outside the /api/fs prefix and auth middleware).
 export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void> {
   try {
-    // Verify ElevenLabs HMAC-SHA256 signature when the secret is configured.
+    // express.raw({ type: "application/json" }) delivers req.body as a Buffer so that
+    // the exact bytes ElevenLabs sent are available for HMAC-SHA256 verification.
     // Header format: "ElevenLabs-Signature: t=<timestamp>,v0=<hex_hash>"
-    // Hash = HMAC-SHA256(secret, "<timestamp>.<rawBody>")
+    // Hash = HMAC-SHA256(secret, "<timestamp>.<rawBodyString>")
+    const rawBodyBuf: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
+    const rawBodyStr = rawBodyBuf.toString("utf8");
+
     const secret = process.env.FS_ELEVENLABS_WEBHOOK_SECRET;
     if (secret) {
       const sigHeader = req.headers["elevenlabs-signature"] as string | undefined;
@@ -1485,12 +1489,9 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
         res.status(401).json({ message: "Malformed ElevenLabs-Signature header" });
         return;
       }
-      // rawBody is stored by the verify callback in express.json() (server/index.ts)
-      const rawBody: Buffer | undefined = req.rawBody;
-      const bodyStr = rawBody ? rawBody.toString("utf8") : JSON.stringify(req.body);
       const expectedSig = require("crypto")
         .createHmac("sha256", secret)
-        .update(`${timestamp}.${bodyStr}`)
+        .update(`${timestamp}.${rawBodyStr}`)
         .digest("hex");
       if (expectedSig !== receivedSig) {
         console.warn("[ElevenLabs Webhook] Invalid signature");
@@ -1499,7 +1500,13 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
       }
     }
 
-    const body = req.body;
+    let body: any;
+    try {
+      body = JSON.parse(rawBodyStr);
+    } catch {
+      res.status(400).json({ message: "Invalid JSON body" });
+      return;
+    }
     const conversationId = body?.conversation_id || body?.data?.conversation_id;
     if (!conversationId) {
       res.status(400).json({ message: "Missing conversation_id" });
@@ -3866,58 +3873,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   // ===== ELEVENLABS WEBHOOK (FS-prefix alias) =====
   // The canonical route lives at /api/elevenlabs/webhook (registered in routes.ts).
-  // This alias at /api/fs/elevenlabs/webhook is kept for any tooling that already
-  // uses the /api/fs prefix. Auth is exempt via the middleware above.
-  app.post("/elevenlabs/webhook", elevenLabsWebhookHandler);
-
-  // TOMBSTONE: old inline handler body removed — logic lives in elevenLabsWebhookHandler above.
-  // The commented-out auto-trigger tech call block that was here:
-  /*
-          if (mappedOutcome === "VEHICLE_READY" && callLog.callType === "shop") {
-            const truckForAutoCall = await fleetScopeStorage.getTruck(callLog.truckId);
-            if (truckForAutoCall?.techPhone && truckForAutoCall.techPhone.trim()) {
-              console.log(`[ElevenLabs Webhook] Auto-triggering tech call for truck ${truckForAutoCall.truckNumber}`);
-              const techDigits = truckForAutoCall.techPhone.replace(/\D/g, "");
-              const techToNumber = techDigits.startsWith("1") && techDigits.length === 11 ? `+${techDigits}` : `+1${techDigits}`;
-              const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
-              try {
-                const techResponse = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
-                  method: "POST",
-                  headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    agent_id: "agent_9401kk2njc6veajaecs89wtbh840",
-                    agent_phone_number_id: "phnum_0401khxk7pknfafb4nb08kzfdkr0",
-                    to_number: techToNumber,
-                    conversation_initiation_client_data: {
-                      dynamic_variables: {
-                        TECH_NAME: truckForAutoCall.techName || "",
-                        VEHICLE_NUMBER: truckForAutoCall.truckNumber || "",
-                        SHOP_NAME: (truckForAutoCall.repairAddress || "").split(",")[0].split(" - ").pop()?.trim() || "",
-                        SHOP_ADDRESS: truckForAutoCall.repairAddress || "",
-                        SHOP_PHONE: truckForAutoCall.repairPhone || "",
-                        SCHEDULED_PICKUP_TIME: truckForAutoCall.timeBlockedToPickUpVan || "",
-                      },
-                    },
-                  }),
-                });
-                if (techResponse.ok) {
-                  const techResult = await techResponse.json();
-                  const techConvId = techResult?.conversation_id || techResult?.conversationId || null;
-                  await fleetScopeStorage.createCallLog({
-                    truckId: callLog.truckId, truckNumber: callLog.truckNumber, batchId: callLog.batchId,
-                    callType: "tech", phoneNumber: techToNumber, elevenLabsConversationId: techConvId, status: "in_progress",
-                  });
-                  await fleetScopeStorage.updateTruck(truckForAutoCall.id, {
-                    lastTechCallDate: new Date(), lastTechCallConversationId: techConvId, lastTechCallSummary: null,
-                  });
-                  console.log(`[ElevenLabs Webhook] Auto-triggered tech call: ${techConvId}`);
-                }
-              } catch (autoErr: any) {
-                console.error(`[ElevenLabs Webhook] Auto-trigger tech call failed:`, autoErr.message);
-              }
-            }
-          }
-          */
+  // This alias at /api/fs/elevenlabs/webhook is kept for backwards compatibility with
+  // any tooling that already points to the /api/fs prefix. Auth is exempt above.
+  app.post("/elevenlabs/webhook", express.raw({ type: "application/json" }), elevenLabsWebhookHandler);
 
   // GET actions for a specific truck
   app.get("/trucks/:id/actions", async (req, res) => {
