@@ -1549,8 +1549,11 @@ async function applyCallResultToTruck(
       lastTechCallStatus: status,
       lastTechCallConversationId: conversationId,
     };
-    // Backfill call date from conversation timestamp if missing
-    if (!truck.lastTechCallDate && callDate) updateFields.lastTechCallDate = callDate;
+    // Update call date from conversation timestamp when available, or backfill if missing
+    if (callDate) {
+      const existing = truck.lastTechCallDate ? new Date(truck.lastTechCallDate).getTime() : 0;
+      if (!truck.lastTechCallDate || callDate.getTime() > existing) updateFields.lastTechCallDate = callDate;
+    }
     await fleetScopeStorage.updateTruck(truck.id, updateFields);
   } else {
     const updateFields: Record<string, any> = {
@@ -1558,8 +1561,11 @@ async function applyCallResultToTruck(
       lastCallStatus: status,
       lastCallConversationId: conversationId,
     };
-    // Backfill call date from conversation timestamp if missing
-    if (!truck.lastCallDate && callDate) updateFields.lastCallDate = callDate;
+    // Update call date from conversation timestamp when available, or backfill if missing
+    if (callDate) {
+      const existing = truck.lastCallDate ? new Date(truck.lastCallDate).getTime() : 0;
+      if (!truck.lastCallDate || callDate.getTime() > existing) updateFields.lastCallDate = callDate;
+    }
     await fleetScopeStorage.updateTruck(truck.id, updateFields);
   }
   try {
