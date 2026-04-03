@@ -1491,11 +1491,17 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
         res.status(401).json({ message: "Malformed ElevenLabs-Signature header" });
         return;
       }
-      const expectedSig = require("crypto")
+      const crypto = require("crypto");
+      const expectedSig = crypto
         .createHmac("sha256", secret)
         .update(`${timestamp}.${rawBodyStr}`)
         .digest("hex");
-      if (expectedSig !== receivedSig) {
+      // Use timing-safe comparison to prevent timing-based signature oracle attacks
+      const expectedBuf = Buffer.from(expectedSig, "utf8");
+      const receivedBuf = Buffer.from(receivedSig, "utf8");
+      const sigValid = expectedBuf.length === receivedBuf.length &&
+        crypto.timingSafeEqual(expectedBuf, receivedBuf);
+      if (!sigValid) {
         console.warn("[ElevenLabs Webhook] Invalid signature");
         res.status(401).json({ message: "Invalid signature" });
         return;
