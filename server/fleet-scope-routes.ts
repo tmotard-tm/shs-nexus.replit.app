@@ -3692,7 +3692,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // Supports two strategies:
   //   strategy: "clear"  — sets summary to "Analysis unavailable" so UI stops spinning
   //   strategy: "replay" — re-fetches conversation summary from ElevenLabs by stored conv ID
-  app.post("/api/fs/call-analysis/recover", async (req, res) => {
+  app.post("/call-analysis/recover", async (req, res) => {
     try {
       const { truckId, callType = "repair", strategy = "clear" } = req.body;
       if (!truckId) return res.status(400).json({ message: "truckId is required" });
@@ -3763,7 +3763,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // status/summary using same logic as recover endpoint, applies recency guard
   // (never overwrite with older data), and upserts the call log.
   // Response: { checked, matched, updated, skipped, errors[] }
-  app.post("/api/fs/call-analysis/backfill", async (req, res) => {
+  app.post("/call-analysis/backfill", async (req, res) => {
     try {
       const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
       if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
