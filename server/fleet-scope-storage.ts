@@ -1,6 +1,6 @@
 import { trucks, actions, trackingRecords, pmfImports, pmfRows, pmfStatusEvents, pmfActivityLogs, pmfActivitySyncMeta, metricsSnapshots, spareVehicleDetails, purchaseOrders, poImportMeta, archivedTrucks, rentalImports, truckConsolidations, byovWeeklySnapshots, fleetWeeklySnapshots, pmfStatusWeeklySnapshots, repairWeeklySnapshots, fleetCostRecords, fleetCostImportMeta, approvedCostRecords, approvedCostImportMeta, decommissioningVehicles, callLogs, type Truck, type InsertTruck, type Action, type InsertAction, type TrackingRecord, type InsertTrackingRecord, type PmfImport, type PmfRow, type PmfStatusEvent, type PmfActivityLog, type InsertPmfActivityLog, type PmfActivitySyncMeta, type MetricsSnapshot, type InsertMetricsSnapshot, type SpareVehicleDetails, type InsertSpareVehicleDetails, type UpdateSpareVehicleDetails, type PurchaseOrder, type PoImportMeta, type ArchivedTruck, type InsertArchivedTruck, type RentalImport, type InsertRentalImport, type TruckConsolidation, type InsertTruckConsolidation, type ByovWeeklySnapshot, type InsertByovWeeklySnapshot, type FleetWeeklySnapshot, type InsertFleetWeeklySnapshot, type PmfStatusWeeklySnapshot, type InsertPmfStatusWeeklySnapshot, type RepairWeeklySnapshot, type InsertRepairWeeklySnapshot, type FleetCostRecord, type FleetCostImportMeta, type ApprovedCostRecord, type ApprovedCostImportMeta, type DecommissioningVehicle, type InsertDecommissioningVehicle, type CallLog, type InsertCallLog, getCombinedStatus } from "@shared/fleet-scope-schema";
 import { fsDb } from "./fleet-scope-db";
-import { eq, desc, gte, lte, and, or, inArray, sql } from "drizzle-orm";
+import { eq, desc, gte, lte, and, inArray, sql } from "drizzle-orm";
 
 function getDb() {
   return fsDb;
@@ -1658,19 +1658,9 @@ export class DatabaseStorage implements IStorage {
     return await getDb().select().from(callLogs).where(eq(callLogs.truckId, truckId)).orderBy(desc(callLogs.callTimestamp));
   }
 
-  async getCallLogByConversationId(conversationId: string, fallbackCallSid?: string): Promise<CallLog | undefined> {
-    const [byConvId] = await getDb().select().from(callLogs).where(eq(callLogs.elevenLabsConversationId, conversationId));
-    if (byConvId) return byConvId;
-    if (fallbackCallSid) {
-      const [bySid] = await getDb().select().from(callLogs).where(
-        or(
-          eq(callLogs.twilioCallSid, fallbackCallSid),
-          eq(callLogs.elevenLabsConversationId, fallbackCallSid),
-        )
-      );
-      return bySid;
-    }
-    return undefined;
+  async getCallLogByConversationId(conversationId: string): Promise<CallLog | undefined> {
+    const [log] = await getDb().select().from(callLogs).where(eq(callLogs.elevenLabsConversationId, conversationId));
+    return log;
   }
 
   async updateCallLog(id: number, data: Partial<CallLog>): Promise<CallLog> {

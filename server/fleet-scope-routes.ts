@@ -3294,32 +3294,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const result = await response.json();
       console.log(`[CallRepairShop] Call initiated successfully. Full response:`, JSON.stringify(result));
 
-      // ElevenLabs Twilio outbound-call returns only a Twilio call_sid (e.g. CA...).
-      // The ElevenLabs conversation_id (conv_...) is assigned later and arrives only in
-      // the webhook. We store the Twilio SID in lastCallSid so the webhook can match on
-      // it as a fallback; lastCallConversationId stays null until the webhook fills it in.
-      const callSid = result?.call_sid || result?.callSid || null;
-      const elevenLabsConvId = result?.conversation_id || result?.conversationId || null;
-      console.log(`[CallRepairShop] call_sid: ${callSid}, conversation_id: ${elevenLabsConvId} (keys: ${Object.keys(result || {}).join(', ')})`);
+      // Save conversation ID and call date to truck record
+      // ElevenLabs may return conversation_id or callSid — log all keys to identify the correct field
+      const conversationId = result?.conversation_id || result?.conversationId || result?.call_sid || result?.callSid || null;
+      console.log(`[CallRepairShop] Extracted conversationId: ${conversationId} (keys: ${Object.keys(result || {}).join(', ')})`);
 
-      // Step 1: Write lastCallDate + Calling status (non-optional — must always succeed)
-      await fleetScopeStorage.updateTruck(truck.id, {
-        lastCallDate: new Date(),
-        lastCallStatus: "Calling",
-        lastCallSummary: null,
-      });
-
-      // Step 2: Write SID/ConvId (optional — warn but don't fail if new columns missing)
       try {
         await fleetScopeStorage.updateTruck(truck.id, {
-          lastCallSid: callSid,
-          lastCallConversationId: elevenLabsConvId,
+          lastCallDate: new Date(),
+          lastCallConversationId: conversationId,
+          lastCallSummary: null,
         });
       } catch (saveErr: any) {
-        console.warn("[CallRepairShop] Could not save call SID/ConvId (columns may be missing):", saveErr.message);
+        console.warn("[CallRepairShop] Could not save call metadata:", saveErr.message);
       }
 
-      res.json({ success: true, toNumber, callSid, conversationId: elevenLabsConvId, result });
+      res.json({ success: true, toNumber, conversationId, result });
     } catch (error: any) {
       console.error("[CallRepairShop] Error:", error.message);
       res.status(500).json({ message: error.message });
@@ -3396,28 +3386,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const result = await response.json();
       console.log(`[CallTechnician] Call initiated successfully. Full response:`, JSON.stringify(result));
 
-      const callSid = result?.call_sid || result?.callSid || null;
-      const elevenLabsConvId = result?.conversation_id || result?.conversationId || null;
-      console.log(`[CallTechnician] call_sid: ${callSid}, conversation_id: ${elevenLabsConvId}`);
+      const conversationId = result?.conversation_id || result?.conversationId || result?.call_sid || result?.callSid || null;
+      console.log(`[CallTechnician] Extracted conversationId: ${conversationId}`);
 
-      // Step 1: Write lastTechCallDate + Calling status (non-optional — must always succeed)
-      await fleetScopeStorage.updateTruck(truck.id, {
-        lastTechCallDate: new Date(),
-        lastTechCallStatus: "Calling",
-        lastTechCallSummary: null,
-      });
-
-      // Step 2: Write SID/ConvId (optional — warn but don't fail if new columns missing)
       try {
         await fleetScopeStorage.updateTruck(truck.id, {
-          lastTechCallSid: callSid,
-          lastTechCallConversationId: elevenLabsConvId,
+          lastTechCallDate: new Date(),
+          lastTechCallConversationId: conversationId,
+          lastTechCallSummary: null,
         });
       } catch (saveErr: any) {
-        console.warn("[CallTechnician] Could not save call SID/ConvId (columns may be missing):", saveErr.message);
+        console.warn("[CallTechnician] Could not save call metadata:", saveErr.message);
       }
 
-      res.json({ success: true, toNumber, callSid, conversationId: elevenLabsConvId, result });
+      res.json({ success: true, toNumber, conversationId, result });
     } catch (error: any) {
       console.error("[CallTechnician] Error:", error.message);
       res.status(500).json({ message: error.message });
@@ -3587,34 +3569,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               }
 
               const result = await response.json();
-              const batchCallSid = result?.call_sid || result?.callSid || null;
-              const batchConvId = result?.conversation_id || result?.conversationId || null;
+              const conversationId = result?.conversation_id || result?.conversationId || result?.call_sid || null;
 
               await fleetScopeStorage.createCallLog({
                 truckId, truckNumber: vehicleNum, batchId, callType,
-                phoneNumber: toNumber,
-                elevenLabsConversationId: batchConvId,
-                twilioCallSid: batchCallSid,
-                status: "in_progress",
+                phoneNumber: toNumber, elevenLabsConversationId: conversationId, status: "in_progress",
               });
 
               if (callType === "tech") {
-                await fleetScopeStorage.updateTruck(truck.id, {
-                  lastTechCallDate: new Date(),
-                  lastTechCallSid: batchCallSid,
-                  lastTechCallConversationId: batchConvId,
-                  lastTechCallSummary: null,
-                });
+                await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date(), lastTechCallConversationId: conversationId, lastTechCallSummary: null });
               } else {
-                await fleetScopeStorage.updateTruck(truck.id, {
-                  lastCallDate: new Date(),
-                  lastCallSid: batchCallSid,
-                  lastCallConversationId: batchConvId,
-                  lastCallSummary: null,
-                });
+                await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallConversationId: conversationId, lastCallSummary: null });
               }
 
-              job.results.push({ truckId, truckNumber: vehicleNum, status: "in_progress", conversationId: batchConvId || batchCallSid || undefined });
+              job.results.push({ truckId, truckNumber: vehicleNum, status: "in_progress", conversationId });
               job.completed++;
             } catch (err: any) {
               job.results.push({ truckId, truckNumber: "?", status: "failed", error: err.message });
@@ -3686,422 +3654,28 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  // ===== STUCK CALL RECOVERY =====
-  // POST /api/fs/call-analysis/recover
-  // Admin endpoint: clears "Analyzing call..." stuck state for a truck.
-  // Supports two strategies:
-  //   strategy: "clear"  — sets summary to "Analysis unavailable" so UI stops spinning
-  //   strategy: "replay" — re-fetches conversation summary from ElevenLabs by stored conv ID
-  app.post("/call-analysis/recover", async (req, res) => {
-    try {
-      const { truckId, callType = "repair", strategy = "clear" } = req.body;
-      if (!truckId) return res.status(400).json({ message: "truckId is required" });
-
-      const truck = await fleetScopeStorage.getTruck(truckId);
-      if (!truck) return res.status(404).json({ message: "Truck not found" });
-
-      if (strategy === "clear") {
-        if (callType === "tech") {
-          await fleetScopeStorage.updateTruck(truckId, {
-            lastTechCallSummary: "Analysis unavailable (manually cleared)",
-            lastTechCallStatus: truck.lastTechCallStatus ?? "Unknown",
-          });
-        } else {
-          await fleetScopeStorage.updateTruck(truckId, {
-            lastCallSummary: "Analysis unavailable (manually cleared)",
-            lastCallStatus: truck.lastCallStatus ?? "Unknown",
-          });
-        }
-        return res.json({ recovered: true, strategy: "clear", truckId });
-      }
-
-      if (strategy === "replay") {
-        const convId = callType === "tech" ? truck.lastTechCallConversationId : truck.lastCallConversationId;
-        if (!convId) {
-          return res.status(400).json({ message: "No conversation ID on record — cannot replay. Use strategy=clear to unblock." });
-        }
-        const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
-        if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
-
-        const elRes = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${convId}`, {
-          headers: { "xi-api-key": apiKey },
-        });
-        if (!elRes.ok) {
-          return res.status(502).json({ message: `ElevenLabs returned ${elRes.status}` });
-        }
-        const elData: any = await elRes.json();
-        const transcript = elData?.transcript || null;
-        const rawStatus = elData?.analysis?.call_successful ?? "unknown";
-        const summary = typeof elData?.analysis?.transcript_summary === "string"
-          ? elData.analysis.transcript_summary
-          : transcript
-            ? (Array.isArray(transcript)
-                ? transcript.map((t: any) => `${t.role}: ${t.message}`).join("\n")
-                : String(transcript))
-            : "No summary available";
-        const status = rawStatus === "success" ? "Ready" : rawStatus === "failure" ? "Not Ready" : "Analysis unavailable";
-
-        if (callType === "tech") {
-          await fleetScopeStorage.updateTruck(truckId, { lastTechCallSummary: summary, lastTechCallStatus: status });
-        } else {
-          await fleetScopeStorage.updateTruck(truckId, { lastCallSummary: summary, lastCallStatus: status });
-        }
-        return res.json({ recovered: true, strategy: "replay", truckId, status, summary });
-      }
-
-      return res.status(400).json({ message: "Invalid strategy. Use 'clear' or 'replay'." });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  // ===== ELEVENLABS CALL BACKFILL =====
-  // POST /api/fs/call-analysis/backfill
-  // Iterates ElevenLabs conversations as source-of-truth. For each conversation,
-  // resolves the matching truck by conv ID (stored on truck) then Twilio SID fallback.
-  // Keeps only the latest conversation per truck. Then fetches detail, extracts
-  // status/summary using same logic as recover endpoint, applies recency guard
-  // (never overwrite with older data), and upserts the call log.
-  // Response: { checked, matched, updated, skipped, errors[] }
-  app.post("/call-analysis/backfill", async (req, res) => {
-    try {
-      const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
-      if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
-
-      const { force = false, truckIds = null } = req.body || {};
-
-      // Load all trucks and build reverse lookup maps: convId → truck, twilioSid → truck
-      const allTrucks = await fleetScopeStorage.getAllTrucks();
-      const scopedTrucks: any[] = truckIds
-        ? allTrucks.filter((t: any) => truckIds.includes(t.id))
-        : allTrucks;
-
-      // Normalize phone to digits only (strips +1 country code prefix if present)
-      function normalizePhone(raw: string): string {
-        const digits = (raw || "").replace(/\D/g, "");
-        // Strip leading 1 if 11 digits (US country code)
-        return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
-      }
-
-      // Maps: convId/sid → truck (for shop and tech calls)
-      const truckByShopConvId = new Map<string, any>();
-      const truckByShopSid = new Map<string, any>();
-      const truckByTechConvId = new Map<string, any>();
-      const truckByTechSid = new Map<string, any>();
-
-      // Build unique-phone maps: only include phones that belong to exactly ONE truck.
-      // This prevents false matches when multiple trucks share a repair shop / tech phone.
-      // Pass 1: count occurrences
-      const shopPhoneCount = new Map<string, number>();
-      const techPhoneCount = new Map<string, number>();
-      for (const truck of allTrucks) {
-        const sp = normalizePhone(truck.repairPhone || "");
-        if (sp) shopPhoneCount.set(sp, (shopPhoneCount.get(sp) || 0) + 1);
-        const tp = normalizePhone(truck.techPhone || "");
-        if (tp) techPhoneCount.set(tp, (techPhoneCount.get(tp) || 0) + 1);
-      }
-      // Pass 2: only keep phones that are unique
-      const truckByUniqueShopPhone = new Map<string, any>();
-      const truckByUniqueTechPhone = new Map<string, any>();
-      for (const truck of scopedTrucks) {
-        const sp = normalizePhone(truck.repairPhone || "");
-        if (sp && shopPhoneCount.get(sp) === 1) truckByUniqueShopPhone.set(sp, truck);
-        const tp = normalizePhone(truck.techPhone || "");
-        if (tp && techPhoneCount.get(tp) === 1) truckByUniqueTechPhone.set(tp, truck);
-      }
-      console.log(`[Backfill] Unique shop phones: ${truckByUniqueShopPhone.size}, unique tech phones: ${truckByUniqueTechPhone.size}`);
-
-      for (const truck of scopedTrucks) {
-        if (truck.lastCallConversationId) truckByShopConvId.set(truck.lastCallConversationId, truck);
-        if (truck.lastCallSid) truckByShopSid.set(truck.lastCallSid, truck);
-        if (truck.lastTechCallConversationId) truckByTechConvId.set(truck.lastTechCallConversationId, truck);
-        if (truck.lastTechCallSid) truckByTechSid.set(truck.lastTechCallSid, truck);
-      }
-
-      const SHOP_AGENT_ID = "agent_7901kgj8m0w8ep6ar78fzthzr9jv";
-      const TECH_AGENT_ID = "agent_9401kk2njc6veajaecs89wtbh840";
-
-      // Fetch all conversations from one agent (paginated, newest first)
-      async function fetchAllConversations(agentId: string): Promise<any[]> {
-        const conversations: any[] = [];
-        let cursor: string | null = null;
-        let page = 0;
-        const MAX_PAGES = 100; // up to 10,000 conversations per agent
-        do {
-          const url = new URL("https://api.elevenlabs.io/v1/convai/conversations");
-          url.searchParams.set("agent_id", agentId);
-          url.searchParams.set("page_size", "100");
-          if (cursor) url.searchParams.set("cursor", cursor);
-          const resp = await fetch(url.toString(), { headers: { "xi-api-key": apiKey } });
-          if (!resp.ok) { console.warn(`[Backfill] List page ${page} failed for ${agentId}: ${resp.status}`); break; }
-          const data: any = await resp.json();
-          const items = data?.conversations || data?.items || [];
-          conversations.push(...items);
-          cursor = data?.next_cursor || data?.cursor || null;
-          page++;
-        } while (cursor && page < MAX_PAGES);
-        return conversations;
-      }
-
-      // Get a conversation's timestamp (prefer start_time_unix_secs, fall back to created_at)
-      function convTimestamp(conv: any): number {
-        if (conv.start_time_unix_secs) return conv.start_time_unix_secs * 1000;
-        if (conv.created_at) return new Date(conv.created_at).getTime();
-        return 0;
-      }
-
-      // Fetch full conversation detail (same as recover endpoint)
-      async function fetchConversationDetail(convId: string): Promise<any | null> {
-        try {
-          const resp = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${convId}`, {
-            headers: { "xi-api-key": apiKey },
-          });
-          if (!resp.ok) return null;
-          return await resp.json();
-        } catch { return null; }
-      }
-
-      // Extract status + summary (same logic as recover endpoint — no separate GPT)
-      function extractFromDetail(elData: any): { status: string; summary: string; transcriptText: string } {
-        const rawStatus = elData?.analysis?.call_successful ?? "unknown";
-        const transcript = elData?.transcript || null;
-        const transcriptText = transcript
-          ? (Array.isArray(transcript)
-              ? transcript.map((t: any) => `${t.role}: ${t.message}`).join("\n")
-              : String(transcript))
-          : "";
-        const summary = typeof elData?.analysis?.transcript_summary === "string"
-          ? elData.analysis.transcript_summary
-          : transcriptText || "No summary available";
-        const status = rawStatus === "success" ? "Ready"
-          : rawStatus === "failure" ? "Not Ready"
-          : "Analysis unavailable";
-        return { status, summary, transcriptText };
-      }
-
-      // Upsert call log: update existing by conv ID, insert if absent
-      async function upsertCallLog(
-        convId: string, truckId: string, truckNumber: string,
-        callType: "shop" | "tech", phoneNumber: string, status: string, summary: string, transcriptText: string
-      ): Promise<void> {
-        const outcome = (status === "Ready" || status === "Will Pick Up") ? "VEHICLE_READY"
-          : (status.includes("No Answer") || status.includes("Failed") || status === "Not Ready") ? "CALL_FAILED"
-          : "VEHICLE_NOT_READY";
-        const existing = await fleetScopeStorage.getCallLogByConversationId(convId);
-        if (existing) {
-          await fleetScopeStorage.updateCallLog(existing.id, {
-            status: "completed", outcome, shopNotes: summary,
-            transcript: transcriptText || existing.transcript,
-          });
-        } else {
-          await fleetScopeStorage.createCallLog({
-            truckId, truckNumber, callType, phoneNumber,
-            elevenLabsConversationId: convId, status: "completed",
-            outcome, shopNotes: summary, transcript: transcriptText || undefined,
-          });
-        }
-      }
-
-      // Fetch all conversations from both agents in parallel
-      const [shopConversations, techConversations] = await Promise.all([
-        fetchAllConversations(SHOP_AGENT_ID),
-        fetchAllConversations(TECH_AGENT_ID),
-      ]);
-      console.log(`[Backfill] Fetched ${shopConversations.length} shop convs, ${techConversations.length} tech convs`);
-
-      // Extract the called (to) phone number from a conversation's metadata.
-      // ElevenLabs stores the Twilio metadata; the called number may be under several keys.
-      function convCalledPhone(conv: any): string {
-        const raw = conv?.metadata?.to
-          || conv?.metadata?.To
-          || conv?.metadata?.to_number
-          || conv?.metadata?.phone_number
-          || conv?.called_number
-          || conv?.to_number
-          || conv?.phone_number
-          || "";
-        return normalizePhone(raw);
-      }
-
-      // For each conv, resolve truck via convId → SID → unique phone fallback.
-      // Keep only newest conv per truck.
-      // latestShop/Tech: truckId → { conv, ts }
-      const latestShop = new Map<string, { conv: any; ts: number }>();
-      const latestTech = new Map<string, { conv: any; ts: number }>();
-
-      function resolveAndKeepLatest(
-        conv: any,
-        byConvId: Map<string, any>,
-        bySid: Map<string, any>,
-        byUniquePhone: Map<string, any>,
-        latestMap: Map<string, { conv: any; ts: number }>
-      ): void {
-        const convId = conv?.conversation_id || conv?.id;
-        const sid = conv?.metadata?.call_sid || conv?.call_sid || conv?.twilio_call_sid;
-        const calledPhone = convCalledPhone(conv);
-
-        // Priority: convId → Twilio SID → unique phone fallback
-        let truck = (convId && byConvId.get(convId)) || (sid && bySid.get(sid));
-        if (!truck && calledPhone) {
-          truck = byUniquePhone.get(calledPhone);
-          if (truck) {
-            console.log(`[Backfill] Phone-fallback match: conv ${convId} → truck ${truck.truckNumber} via ${calledPhone}`);
-          }
-        }
-
-        if (!truck) return;
-        const ts = convTimestamp(conv);
-        const existing = latestMap.get(truck.id);
-        if (!existing || ts > existing.ts) {
-          latestMap.set(truck.id, { conv, ts });
-        }
-      }
-
-      for (const conv of shopConversations) resolveAndKeepLatest(conv, truckByShopConvId, truckByShopSid, truckByUniqueShopPhone, latestShop);
-      for (const conv of techConversations) resolveAndKeepLatest(conv, truckByTechConvId, truckByTechSid, truckByUniqueTechPhone, latestTech);
-
-      let checked = 0;
-      let matched = 0;
-      let updated = 0;
-      let skipped = 0;
-      const errors: string[] = [];
-
-      // Process shop call matches
-      for (const [truckId, { conv, ts: convTs }] of latestShop) {
-        const truck = allTrucks.find((t: any) => t.id === truckId);
-        if (!truck) continue;
-        if (truckIds && !truckIds.includes(truckId)) continue;
-        checked++;
-
-        // Recency guard: skip if stored date is strictly newer than this conversation
-        const storedTs = truck.lastCallDate ? new Date(truck.lastCallDate).getTime() : 0;
-        if (!force && storedTs > convTs) {
-          skipped++;
-          console.log(`[Backfill] Shop skip ${truck.truckNumber}: stored (${new Date(storedTs).toISOString()}) > conv (${new Date(convTs).toISOString()})`);
-          continue;
-        }
-
-        matched++;
-        try {
-          const convId = conv.conversation_id || conv.id;
-          const detail = convId ? await fetchConversationDetail(convId) : null;
-          const { status, summary, transcriptText } = detail ? extractFromDetail(detail) : { status: truck.lastCallStatus || "Unknown", summary: truck.lastCallSummary || "No summary available", transcriptText: "" };
-          const callDate = convTs ? new Date(convTs) : new Date(storedTs || Date.now());
-          const repairPhone = (truck.repairPhone || "").replace(/\D/g, "");
-
-          await fleetScopeStorage.updateTruck(truck.id, {
-            lastCallDate: callDate, lastCallStatus: status, lastCallSummary: summary,
-            lastCallConversationId: convId || truck.lastCallConversationId,
-          });
-          if (convId) await upsertCallLog(convId, truck.id, truck.truckNumber, "shop", repairPhone, status, summary, transcriptText);
-
-          updated++;
-          console.log(`[Backfill] Shop updated ${truck.truckNumber}: ${status} (${new Date(convTs).toISOString()})`);
-        } catch (err: any) {
-          const msg = `${truck.truckNumber} shop: ${err.message}`;
-          errors.push(msg);
-          console.warn(`[Backfill] Error: ${msg}`);
-          skipped++;
-        }
-      }
-
-      // Process tech call matches
-      for (const [truckId, { conv, ts: convTs }] of latestTech) {
-        const truck = allTrucks.find((t: any) => t.id === truckId);
-        if (!truck) continue;
-        if (truckIds && !truckIds.includes(truckId)) continue;
-        checked++;
-
-        const storedTs = truck.lastTechCallDate ? new Date(truck.lastTechCallDate).getTime() : 0;
-        if (!force && storedTs > convTs) {
-          skipped++;
-          console.log(`[Backfill] Tech skip ${truck.truckNumber}: stored newer than conv`);
-          continue;
-        }
-
-        matched++;
-        try {
-          const convId = conv.conversation_id || conv.id;
-          const detail = convId ? await fetchConversationDetail(convId) : null;
-          const { status, summary, transcriptText } = detail ? extractFromDetail(detail) : { status: truck.lastTechCallStatus || "Unknown", summary: truck.lastTechCallSummary || "No summary available", transcriptText: "" };
-          const callDate = convTs ? new Date(convTs) : new Date(storedTs || Date.now());
-          const techPhone = (truck.techPhone || "").replace(/\D/g, "");
-
-          await fleetScopeStorage.updateTruck(truck.id, {
-            lastTechCallDate: callDate, lastTechCallStatus: status, lastTechCallSummary: summary,
-            lastTechCallConversationId: convId || truck.lastTechCallConversationId,
-          });
-          if (convId) await upsertCallLog(convId, truck.id, truck.truckNumber, "tech", techPhone, status, summary, transcriptText);
-
-          updated++;
-          console.log(`[Backfill] Tech updated ${truck.truckNumber}: ${status}`);
-        } catch (err: any) {
-          const msg = `${truck.truckNumber} tech: ${err.message}`;
-          errors.push(msg);
-          console.warn(`[Backfill] Error: ${msg}`);
-          skipped++;
-        }
-      }
-
-      console.log(`[Backfill] Done. checked=${checked}, matched=${matched}, updated=${updated}, skipped=${skipped}, errors=${errors.length}`);
-      res.json({ checked, matched, updated, skipped, errors });
-    } catch (error: any) {
-      console.error("[Backfill] Error:", error.message);
-      res.status(500).json({ message: error.message });
-    }
-  });
-
   // ===== ELEVENLABS WEBHOOK =====
   app.post("/elevenlabs/webhook", async (req, res) => {
     try {
       const body = req.body;
-      // ElevenLabs sends the ElevenLabs conversation_id (conv_...) in this field.
-      // It also includes the Twilio call_sid (CA...) which is what we stored at
-      // initiation time before we knew the ElevenLabs conv ID.
       const conversationId = body?.conversation_id || body?.data?.conversation_id;
-      const callSidFromWebhook = body?.call_sid || body?.data?.call_sid || null;
       if (!conversationId) {
         return res.status(400).json({ message: "Missing conversation_id" });
       }
 
-      console.log(`[ElevenLabs Webhook] Received event for conversation: ${conversationId}, call_sid: ${callSidFromWebhook}`, JSON.stringify(body).slice(0, 500));
+      console.log(`[ElevenLabs Webhook] Received event for conversation: ${conversationId}`, JSON.stringify(body).slice(0, 500));
 
-      // Find the truck — try ElevenLabs conv ID first, then fall back to Twilio call_sid.
-      // The Twilio SID is stored in lastCallSid / lastTechCallSid; the conv ID is stored in
-      // lastCallConversationId / lastTechCallConversationId (null until this webhook fires).
+      // Find the truck with this conversation ID — check both repair shop and tech call fields
       const allTrucks = await fleetScopeStorage.getAllTrucks();
       let truck = allTrucks.find((t: any) => t.lastCallConversationId === conversationId);
       let callType: "repair" | "tech" = "repair";
-      if (!truck && callSidFromWebhook) {
-        truck = allTrucks.find((t: any) => t.lastCallSid === callSidFromWebhook);
-        if (truck) callType = "repair";
-      }
       if (!truck) {
         truck = allTrucks.find((t: any) => t.lastTechCallConversationId === conversationId);
         if (truck) callType = "tech";
       }
-      if (!truck && callSidFromWebhook) {
-        truck = allTrucks.find((t: any) => t.lastTechCallSid === callSidFromWebhook);
-        if (truck) callType = "tech";
-      }
       if (!truck) {
-        console.warn(`[ElevenLabs Webhook] No truck found for conversation ${conversationId} / call_sid ${callSidFromWebhook}`);
+        console.warn(`[ElevenLabs Webhook] No truck found for conversation ${conversationId}`);
         return res.status(200).json({ received: true, matched: false });
-      }
-
-      // If we matched on Twilio SID, back-fill the real ElevenLabs conv ID so future lookups
-      // (and the UI's conversation link) use the canonical ElevenLabs identifier.
-      if (callType === "repair" && truck.lastCallConversationId !== conversationId) {
-        try {
-          await fleetScopeStorage.updateTruck(truck.id, { lastCallConversationId: conversationId });
-          truck = { ...truck, lastCallConversationId: conversationId };
-        } catch (e) {}
-      }
-      if (callType === "tech" && truck.lastTechCallConversationId !== conversationId) {
-        try {
-          await fleetScopeStorage.updateTruck(truck.id, { lastTechCallConversationId: conversationId });
-          truck = { ...truck, lastTechCallConversationId: conversationId };
-        } catch (e) {}
       }
 
       console.log(`[ElevenLabs Webhook] Matched truck ${truck.truckNumber} (${callType} call)`);
@@ -4199,10 +3773,9 @@ Respond ONLY with valid JSON, no other text.`;
         await fleetScopeStorage.updateTruck(truck.id, { lastCallSummary: summary, lastCallStatus: status });
       }
 
-      // Update call_log if one exists for this conversation.
-      // Pass the Twilio call_sid as fallback since that was stored at initiation time.
+      // Update call_log if one exists for this conversation
       try {
-        const callLog = await fleetScopeStorage.getCallLogByConversationId(conversationId, callSidFromWebhook ?? undefined);
+        const callLog = await fleetScopeStorage.getCallLogByConversationId(conversationId);
         if (callLog) {
           const mappedOutcome = status === "Ready" || status === "Will Pick Up" ? "VEHICLE_READY"
             : (status === "No Answer" || status === "Call Failed" || status === "Failed") ? "CALL_FAILED"
