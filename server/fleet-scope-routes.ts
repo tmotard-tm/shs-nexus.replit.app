@@ -3797,7 +3797,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const conversations: any[] = [];
         let cursor: string | null = null;
         let page = 0;
-        const MAX_PAGES = 20;
+        const MAX_PAGES = 100; // up to 10,000 conversations per agent
         do {
           const url = new URL("https://api.elevenlabs.io/v1/convai/conversations");
           url.searchParams.set("agent_id", agentId);
