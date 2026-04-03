@@ -543,12 +543,14 @@ export const trucks = pgTable("fs_trucks", {
   lastCallSummary: text("last_call_summary"),
   lastCallStatus: text("last_call_status"),
   lastCallConversationId: text("last_call_conversation_id"),
+  lastCallSid: text("last_call_sid"),
 
   // Call tracking (ElevenLabs outbound calls - technician pickup)
   lastTechCallDate: timestamp("last_tech_call_date"),
   lastTechCallSummary: text("last_tech_call_summary"),
   lastTechCallStatus: text("last_tech_call_status"),
   lastTechCallConversationId: text("last_tech_call_conversation_id"),
+  lastTechCallSid: text("last_tech_call_sid"),
 
   // Shop List sync fields (from Rental Extension Review)
   enterpriseId: text("enterprise_id"), // Enterprise ID from Shop List column D
@@ -1341,6 +1343,7 @@ export const callLogs = pgTable("fs_call_logs", {
   callType: text("call_type").notNull(),
   phoneNumber: text("phone_number"),
   elevenLabsConversationId: text("elevenlabs_conversation_id"),
+  twilioCallSid: text("twilio_call_sid"),
   status: text("status").default("in_progress"),
   outcome: text("outcome"),
   estimatedReadyDate: text("estimated_ready_date"),

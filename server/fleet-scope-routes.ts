@@ -3294,22 +3294,26 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const result = await response.json();
       console.log(`[CallRepairShop] Call initiated successfully. Full response:`, JSON.stringify(result));
 
-      // Save conversation ID and call date to truck record
-      // ElevenLabs may return conversation_id or callSid — log all keys to identify the correct field
-      const conversationId = result?.conversation_id || result?.conversationId || result?.call_sid || result?.callSid || null;
-      console.log(`[CallRepairShop] Extracted conversationId: ${conversationId} (keys: ${Object.keys(result || {}).join(', ')})`);
+      // ElevenLabs Twilio outbound-call returns only a Twilio call_sid (e.g. CA...).
+      // The ElevenLabs conversation_id (conv_...) is assigned later and arrives only in
+      // the webhook. We store the Twilio SID in lastCallSid so the webhook can match on
+      // it as a fallback; lastCallConversationId stays null until the webhook fills it in.
+      const callSid = result?.call_sid || result?.callSid || null;
+      const elevenLabsConvId = result?.conversation_id || result?.conversationId || null;
+      console.log(`[CallRepairShop] call_sid: ${callSid}, conversation_id: ${elevenLabsConvId} (keys: ${Object.keys(result || {}).join(', ')})`);
 
       try {
         await fleetScopeStorage.updateTruck(truck.id, {
           lastCallDate: new Date(),
-          lastCallConversationId: conversationId,
+          lastCallSid: callSid,
+          lastCallConversationId: elevenLabsConvId,
           lastCallSummary: null,
         });
       } catch (saveErr: any) {
         console.warn("[CallRepairShop] Could not save call metadata:", saveErr.message);
       }
 
-      res.json({ success: true, toNumber, conversationId, result });
+      res.json({ success: true, toNumber, callSid, conversationId: elevenLabsConvId, result });
     } catch (error: any) {
       console.error("[CallRepairShop] Error:", error.message);
       res.status(500).json({ message: error.message });
@@ -3386,20 +3390,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const result = await response.json();
       console.log(`[CallTechnician] Call initiated successfully. Full response:`, JSON.stringify(result));
 
-      const conversationId = result?.conversation_id || result?.conversationId || result?.call_sid || result?.callSid || null;
-      console.log(`[CallTechnician] Extracted conversationId: ${conversationId}`);
+      const callSid = result?.call_sid || result?.callSid || null;
+      const elevenLabsConvId = result?.conversation_id || result?.conversationId || null;
+      console.log(`[CallTechnician] call_sid: ${callSid}, conversation_id: ${elevenLabsConvId}`);
 
       try {
         await fleetScopeStorage.updateTruck(truck.id, {
           lastTechCallDate: new Date(),
-          lastTechCallConversationId: conversationId,
+          lastTechCallSid: callSid,
+          lastTechCallConversationId: elevenLabsConvId,
           lastTechCallSummary: null,
         });
       } catch (saveErr: any) {
         console.warn("[CallTechnician] Could not save call metadata:", saveErr.message);
       }
 
-      res.json({ success: true, toNumber, conversationId, result });
+      res.json({ success: true, toNumber, callSid, conversationId: elevenLabsConvId, result });
     } catch (error: any) {
       console.error("[CallTechnician] Error:", error.message);
       res.status(500).json({ message: error.message });
@@ -3569,20 +3575,34 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               }
 
               const result = await response.json();
-              const conversationId = result?.conversation_id || result?.conversationId || result?.call_sid || null;
+              const batchCallSid = result?.call_sid || result?.callSid || null;
+              const batchConvId = result?.conversation_id || result?.conversationId || null;
 
               await fleetScopeStorage.createCallLog({
                 truckId, truckNumber: vehicleNum, batchId, callType,
-                phoneNumber: toNumber, elevenLabsConversationId: conversationId, status: "in_progress",
+                phoneNumber: toNumber,
+                elevenLabsConversationId: batchConvId,
+                twilioCallSid: batchCallSid,
+                status: "in_progress",
               });
 
               if (callType === "tech") {
-                await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date(), lastTechCallConversationId: conversationId, lastTechCallSummary: null });
+                await fleetScopeStorage.updateTruck(truck.id, {
+                  lastTechCallDate: new Date(),
+                  lastTechCallSid: batchCallSid,
+                  lastTechCallConversationId: batchConvId,
+                  lastTechCallSummary: null,
+                });
               } else {
-                await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallConversationId: conversationId, lastCallSummary: null });
+                await fleetScopeStorage.updateTruck(truck.id, {
+                  lastCallDate: new Date(),
+                  lastCallSid: batchCallSid,
+                  lastCallConversationId: batchConvId,
+                  lastCallSummary: null,
+                });
               }
 
-              job.results.push({ truckId, truckNumber: vehicleNum, status: "in_progress", conversationId });
+              job.results.push({ truckId, truckNumber: vehicleNum, status: "in_progress", conversationId: batchConvId || batchCallSid || undefined });
               job.completed++;
             } catch (err: any) {
               job.results.push({ truckId, truckNumber: "?", status: "failed", error: err.message });
@@ -3658,24 +3678,53 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.post("/elevenlabs/webhook", async (req, res) => {
     try {
       const body = req.body;
+      // ElevenLabs sends the ElevenLabs conversation_id (conv_...) in this field.
+      // It also includes the Twilio call_sid (CA...) which is what we stored at
+      // initiation time before we knew the ElevenLabs conv ID.
       const conversationId = body?.conversation_id || body?.data?.conversation_id;
+      const callSidFromWebhook = body?.call_sid || body?.data?.call_sid || null;
       if (!conversationId) {
         return res.status(400).json({ message: "Missing conversation_id" });
       }
 
-      console.log(`[ElevenLabs Webhook] Received event for conversation: ${conversationId}`, JSON.stringify(body).slice(0, 500));
+      console.log(`[ElevenLabs Webhook] Received event for conversation: ${conversationId}, call_sid: ${callSidFromWebhook}`, JSON.stringify(body).slice(0, 500));
 
-      // Find the truck with this conversation ID — check both repair shop and tech call fields
+      // Find the truck — try ElevenLabs conv ID first, then fall back to Twilio call_sid.
+      // The Twilio SID is stored in lastCallSid / lastTechCallSid; the conv ID is stored in
+      // lastCallConversationId / lastTechCallConversationId (null until this webhook fires).
       const allTrucks = await fleetScopeStorage.getAllTrucks();
       let truck = allTrucks.find((t: any) => t.lastCallConversationId === conversationId);
       let callType: "repair" | "tech" = "repair";
+      if (!truck && callSidFromWebhook) {
+        truck = allTrucks.find((t: any) => t.lastCallSid === callSidFromWebhook);
+        if (truck) callType = "repair";
+      }
       if (!truck) {
         truck = allTrucks.find((t: any) => t.lastTechCallConversationId === conversationId);
         if (truck) callType = "tech";
       }
+      if (!truck && callSidFromWebhook) {
+        truck = allTrucks.find((t: any) => t.lastTechCallSid === callSidFromWebhook);
+        if (truck) callType = "tech";
+      }
       if (!truck) {
-        console.warn(`[ElevenLabs Webhook] No truck found for conversation ${conversationId}`);
+        console.warn(`[ElevenLabs Webhook] No truck found for conversation ${conversationId} / call_sid ${callSidFromWebhook}`);
         return res.status(200).json({ received: true, matched: false });
+      }
+
+      // If we matched on Twilio SID, back-fill the real ElevenLabs conv ID so future lookups
+      // (and the UI's conversation link) use the canonical ElevenLabs identifier.
+      if (callType === "repair" && truck.lastCallConversationId !== conversationId) {
+        try {
+          await fleetScopeStorage.updateTruck(truck.id, { lastCallConversationId: conversationId });
+          truck = { ...truck, lastCallConversationId: conversationId };
+        } catch (e) {}
+      }
+      if (callType === "tech" && truck.lastTechCallConversationId !== conversationId) {
+        try {
+          await fleetScopeStorage.updateTruck(truck.id, { lastTechCallConversationId: conversationId });
+          truck = { ...truck, lastTechCallConversationId: conversationId };
+        } catch (e) {}
       }
 
       console.log(`[ElevenLabs Webhook] Matched truck ${truck.truckNumber} (${callType} call)`);
@@ -3773,9 +3822,10 @@ Respond ONLY with valid JSON, no other text.`;
         await fleetScopeStorage.updateTruck(truck.id, { lastCallSummary: summary, lastCallStatus: status });
       }
 
-      // Update call_log if one exists for this conversation
+      // Update call_log if one exists for this conversation.
+      // Pass the Twilio call_sid as fallback since that was stored at initiation time.
       try {
-        const callLog = await fleetScopeStorage.getCallLogByConversationId(conversationId);
+        const callLog = await fleetScopeStorage.getCallLogByConversationId(conversationId, callSidFromWebhook ?? undefined);
         if (callLog) {
           const mappedOutcome = status === "Ready" || status === "Will Pick Up" ? "VEHICLE_READY"
             : (status === "No Answer" || status === "Call Failed" || status === "Failed") ? "CALL_FAILED"
