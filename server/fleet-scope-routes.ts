@@ -1540,20 +1540,27 @@ async function applyCallResultToTruck(
   summary: string,
   estimatedReadyDate: string | null,
   blockers: string | null,
-  transcriptText: string
+  transcriptText: string,
+  callDate?: Date
 ): Promise<void> {
   if (callType === "tech") {
-    await fleetScopeStorage.updateTruck(truck.id, {
+    const updateFields: Record<string, any> = {
       lastTechCallSummary: summary,
       lastTechCallStatus: status,
       lastTechCallConversationId: conversationId,
-    });
+    };
+    // Backfill call date from conversation timestamp if missing
+    if (!truck.lastTechCallDate && callDate) updateFields.lastTechCallDate = callDate;
+    await fleetScopeStorage.updateTruck(truck.id, updateFields);
   } else {
-    await fleetScopeStorage.updateTruck(truck.id, {
+    const updateFields: Record<string, any> = {
       lastCallSummary: summary,
       lastCallStatus: status,
       lastCallConversationId: conversationId,
-    });
+    };
+    // Backfill call date from conversation timestamp if missing
+    if (!truck.lastCallDate && callDate) updateFields.lastCallDate = callDate;
+    await fleetScopeStorage.updateTruck(truck.id, updateFields);
   }
   try {
     const existingLog = await fleetScopeStorage.getCallLogByConversationId(conversationId);
@@ -1740,7 +1747,8 @@ async function pollForCallCompletion(
       if (!transcript) { console.log(`[CallPoller] No transcript yet for ${match.conversation_id}`); continue; }
       const transcriptText = buildTranscriptText(transcript);
       const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber);
-      await applyCallResultToTruck(truck, callType, match.conversation_id, status, summary, estimatedReadyDate, blockers, transcriptText);
+      const convCallDate = match.start_time_unix_secs ? new Date(match.start_time_unix_secs * 1000) : undefined;
+      await applyCallResultToTruck(truck, callType, match.conversation_id, status, summary, estimatedReadyDate, blockers, transcriptText, convCallDate);
       console.log(`[CallPoller] Truck ${truck.truckNumber}: complete — status="${status}" after ${attempt} poll(s)`);
       return;
     } catch (err: any) {
@@ -3812,10 +3820,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
       if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
 
-      const { truckNumber, conversationId, callType } = req.body as {
+      const { truckNumber, conversationId, callType, force } = req.body as {
         truckNumber?: string | number;
         conversationId?: string;
         callType?: "repair" | "tech";
+        force?: boolean;
       };
       if (!truckNumber) return res.status(400).json({ message: "truckNumber is required" });
 
@@ -3828,9 +3837,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       let convData: any = null;
       let resolvedConvId = conversationId;
 
+      const truckPhone = (resolvedCallType === "tech" ? truck.techPhone : truck.repairPhone || "").replace(/\D/g, "").slice(-10);
+
       if (resolvedConvId) {
         convData = await fetchElevenLabsConversation(resolvedConvId, apiKey);
         if (!convData) return res.status(404).json({ message: `Conversation ${resolvedConvId} not found or not accessible` });
+        // Guard: if conversation has phone metadata, verify it matches this truck
+        const phoneInConv = extractPhoneFromConversation(convData);
+        if (phoneInConv && truckPhone && phoneInConv !== truckPhone && !force) {
+          console.warn(`[Backfill] Phone mismatch for truck ${truckNumber}: conv ${resolvedConvId} has ${phoneInConv}, truck has ${truckPhone}`);
+          return res.status(409).json({ message: `Conversation phone (${phoneInConv}) does not match truck phone (${truckPhone}). Pass force=true to override.` });
+        }
       } else {
         // Search by phone number for the most recent completed conversation
         const toNumber = resolvedCallType === "tech" ? truck.techPhone : truck.repairPhone;
@@ -3849,7 +3866,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       const transcriptText = buildTranscriptText(transcript);
       const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, resolvedCallType, truck.truckNumber);
-      await applyCallResultToTruck(truck, resolvedCallType, resolvedConvId!, status, summary, estimatedReadyDate, blockers, transcriptText);
+      const convCallDate = convData.start_time_unix_secs ? new Date(convData.start_time_unix_secs * 1000)
+        : convData.data?.start_time_unix_secs ? new Date(convData.data.start_time_unix_secs * 1000)
+        : undefined;
+      await applyCallResultToTruck(truck, resolvedCallType, resolvedConvId!, status, summary, estimatedReadyDate, blockers, transcriptText, convCallDate);
 
       console.log(`[Backfill] Truck ${truckNumber} (${resolvedCallType}): status="${status}" conv=${resolvedConvId}`);
       res.json({ success: true, truckNumber, conversationId: resolvedConvId, callType: resolvedCallType, status, summary });
