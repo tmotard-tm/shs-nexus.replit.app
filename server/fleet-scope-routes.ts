@@ -1626,37 +1626,91 @@ async function fetchElevenLabsConversation(conversationId: string, apiKey: strin
   }
 }
 
+// Possible phone number field names from ElevenLabs conversation metadata
+const ELEVENLABS_PHONE_FIELDS = [
+  "to", "to_number", "to_phone", "called",
+  "destination", "destination_number", "phone", "phone_number",
+  "callee", "callee_number",
+];
+
+function extractPhoneFromConversation(conv: any): string {
+  // Check metadata object
+  const meta = conv.metadata || {};
+  for (const field of ELEVENLABS_PHONE_FIELDS) {
+    const raw = (meta[field] || "").replace(/\D/g, "").slice(-10);
+    if (raw) return raw;
+  }
+  // Check top-level conversation object (some API versions put it there)
+  for (const field of ELEVENLABS_PHONE_FIELDS) {
+    const raw = (conv[field] || "").replace(/\D/g, "").slice(-10);
+    if (raw) return raw;
+  }
+  // Check nested initiation_metadata or dynamic_variables
+  const init = meta.initiation_metadata || meta.dynamic_variables || conv.initiation_metadata || {};
+  for (const field of ELEVENLABS_PHONE_FIELDS) {
+    const raw = (init[field] || "").replace(/\D/g, "").slice(-10);
+    if (raw) return raw;
+  }
+  return "";
+}
+
 async function searchElevenLabsConversationByPhone(
   agentId: string,
   toNumber: string,
   afterUnixSecs: number,
   apiKey: string
 ): Promise<any | null> {
-  try {
-    const url = `https://api.elevenlabs.io/v1/convai/conversations?agent_id=${encodeURIComponent(agentId)}&page_size=20`;
-    const res = await fetch(url, { headers: { "xi-api-key": apiKey } });
-    if (!res.ok) {
-      console.error(`[ElevenLabs] Failed to search conversations: ${res.status}`);
-      return null;
+  const toDigits = toNumber.replace(/\D/g, "").slice(-10);
+  const maxPages = 5;
+  let cursor: string | undefined;
+
+  for (let page = 0; page < maxPages; page++) {
+    try {
+      const baseUrl = `https://api.elevenlabs.io/v1/convai/conversations?agent_id=${encodeURIComponent(agentId)}&page_size=50`;
+      const url = cursor ? `${baseUrl}&cursor=${encodeURIComponent(cursor)}` : baseUrl;
+      const res = await fetch(url, { headers: { "xi-api-key": apiKey } });
+      if (!res.ok) {
+        console.error(`[ElevenLabs] Failed to search conversations (page ${page + 1}): ${res.status}`);
+        break;
+      }
+      const data = await res.json();
+      const convs: any[] = data.conversations || [];
+
+      let oldestTs = Infinity;
+      const candidates: any[] = [];
+
+      for (const c of convs) {
+        const startTs = c.start_time_unix_secs || 0;
+        if (startTs < oldestTs) oldestTs = startTs;
+        if (c.status !== "done") continue;
+        if (startTs < afterUnixSecs) continue;
+
+        const phoneInConv = extractPhoneFromConversation(c);
+        if (!phoneInConv) {
+          // No phone identifier present — skip; cannot safely verify truck match
+          console.log(`[ElevenLabs] Skipping conv ${c.conversation_id}: no phone field found in metadata`);
+          continue;
+        }
+        if (phoneInConv !== toDigits) continue;
+        candidates.push(c);
+      }
+
+      if (candidates.length > 0) {
+        candidates.sort((a: any, b: any) => (b.start_time_unix_secs || 0) - (a.start_time_unix_secs || 0));
+        console.log(`[ElevenLabs] Matched conversation ${candidates[0].conversation_id} for ${toNumber} (page ${page + 1})`);
+        return candidates[0];
+      }
+
+      // Stop scanning if oldest item on this page is before our time window or no more pages
+      const nextCursor = data.next_cursor || data.cursor;
+      if (oldestTs < afterUnixSecs || !nextCursor) break;
+      cursor = nextCursor;
+    } catch (err: any) {
+      console.error(`[ElevenLabs] Error searching conversations (page ${page + 1}):`, err.message);
+      break;
     }
-    const data = await res.json();
-    const convs: any[] = data.conversations || [];
-    const toDigits = toNumber.replace(/\D/g, "").slice(-10);
-    const candidates = convs.filter((c: any) => {
-      if (c.status !== "done") return false;
-      if ((c.start_time_unix_secs || 0) < afterUnixSecs) return false;
-      const meta = c.metadata || {};
-      const to = (meta.to || meta.to_number || meta.called || "").replace(/\D/g, "").slice(-10);
-      if (to && to !== toDigits) return false;
-      return true;
-    });
-    if (candidates.length === 0) return null;
-    candidates.sort((a: any, b: any) => (b.start_time_unix_secs || 0) - (a.start_time_unix_secs || 0));
-    return candidates[0];
-  } catch (err: any) {
-    console.error(`[ElevenLabs] Error searching conversations:`, err.message);
-    return null;
   }
+  return null;
 }
 
 async function pollForCallCompletion(
