@@ -1600,7 +1600,7 @@ async function applyCallResultToTruck(
         truckNumber: truck.truckNumber?.toString() || "",
         callType: callType === "tech" ? "tech" : "shop",
         elevenLabsConversationId: conversationId,
-        callTimestamp: new Date(),
+        callTimestamp: callDate || new Date(),
         status: "completed",
         outcome: mappedOutcome,
         shopNotes: summary,
@@ -1683,13 +1683,15 @@ async function searchElevenLabsConversationByPhone(
       const data = await res.json();
       const convs: any[] = data.conversations || [];
 
+      // Accept "done" and other known terminal statuses (ElevenLabs may use "completed" or "ended" in some environments)
+      const TERMINAL_STATUSES = new Set(["done", "completed", "ended", "finished"]);
       let oldestTs = Infinity;
       const candidates: any[] = [];
 
       for (const c of convs) {
         const startTs = c.start_time_unix_secs || 0;
         if (startTs < oldestTs) oldestTs = startTs;
-        if (c.status !== "done") continue;
+        if (!TERMINAL_STATUSES.has((c.status || "").toLowerCase())) continue;
         if (startTs < afterUnixSecs) continue;
 
         const phoneInConv = extractPhoneFromConversation(c);
