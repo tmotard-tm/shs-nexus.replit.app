@@ -1459,6 +1459,243 @@ async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
   }
 }
 
+// ===== ELEVENLABS SHARED HELPERS =====
+// These helpers are used by both the webhook handler and the polling/backfill system.
+
+const ELEVENLABS_SHOP_AGENT_ID = "agent_7901kgj8m0w8ep6ar78fzthzr9jv";
+const ELEVENLABS_TECH_AGENT_ID = "agent_9401kk2njc6veajaecs89wtbh840";
+
+function buildTranscriptText(transcript: any): string {
+  if (Array.isArray(transcript)) {
+    return transcript
+      .map((turn: any) => `${turn.role || turn.speaker || "Unknown"}: ${turn.message || turn.text || ""}`)
+      .join("\n");
+  }
+  if (typeof transcript === "string") return transcript;
+  return JSON.stringify(transcript);
+}
+
+async function summarizeCallTranscript(
+  transcriptText: string,
+  callType: "repair" | "tech",
+  truckNumber: string
+): Promise<{ status: string; summary: string; estimatedReadyDate: string | null; blockers: string | null }> {
+  if (!process.env.FS_OPENAI_API_KEY) {
+    console.warn("[ElevenLabs] No FS_OPENAI_API_KEY, skipping summarization");
+    return { status: "Unknown", summary: "OpenAI key not configured", estimatedReadyDate: null, blockers: null };
+  }
+  const systemPrompt = callType === "tech"
+    ? `You are a fleet coordinator assistant. Analyze technician pickup call transcripts. Respond in JSON with these fields:
+"status": one of these exact values: "Will Pick Up", "No Answer", "Call Failed", "Other Issues"
+"summary": 2-3 sentence factual summary of the call
+"estimated_ready_date": if a pickup date was mentioned, return it as YYYY-MM-DD, otherwise null
+"blockers": any issues preventing pickup, or null
+Respond ONLY with valid JSON, no other text.`
+    : `You are a fleet coordinator assistant. Analyze repair shop call transcripts. Respond in JSON with these fields:
+"status": one of these exact values: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Call Failed", "Failed"
+"summary": 2-3 sentence factual summary of the call
+"estimated_ready_date": if a completion/ready date was mentioned, return it as YYYY-MM-DD, otherwise null
+"blockers": any issues blocking repair completion (e.g. parts on order, awaiting authorization), or null
+Respond ONLY with valid JSON, no other text.`;
+  const userPrompt = callType === "tech"
+    ? `Analyze this technician pickup call transcript:\n\n${transcriptText}`
+    : `Analyze this repair shop call transcript:\n\n${transcriptText}`;
+  try {
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.FS_OPENAI_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
+        max_tokens: 200,
+        temperature: 0.3,
+      }),
+    });
+    if (!openaiRes.ok) {
+      const errText = await openaiRes.text();
+      console.error(`[ElevenLabs] OpenAI error for truck ${truckNumber}:`, errText);
+      return { status: "Error", summary: "Summary unavailable — analysis failed.", estimatedReadyDate: null, blockers: null };
+    }
+    const openaiData = await openaiRes.json();
+    const raw = openaiData.choices?.[0]?.message?.content?.trim() || "";
+    console.log(`[ElevenLabs] GPT response (${callType}) for truck ${truckNumber}: ${raw}`);
+    const parsed = JSON.parse(raw);
+    return {
+      status: parsed.status || "Unknown",
+      summary: parsed.summary || "",
+      estimatedReadyDate: parsed.estimated_ready_date || null,
+      blockers: parsed.blockers || null,
+    };
+  } catch (err: any) {
+    console.error(`[ElevenLabs] Summarization error for truck ${truckNumber}:`, err.message);
+    return { status: "Unknown", summary: "Summarization failed", estimatedReadyDate: null, blockers: null };
+  }
+}
+
+async function applyCallResultToTruck(
+  truck: any,
+  callType: "repair" | "tech",
+  conversationId: string,
+  status: string,
+  summary: string,
+  estimatedReadyDate: string | null,
+  blockers: string | null,
+  transcriptText: string
+): Promise<void> {
+  if (callType === "tech") {
+    await fleetScopeStorage.updateTruck(truck.id, {
+      lastTechCallSummary: summary,
+      lastTechCallStatus: status,
+      lastTechCallConversationId: conversationId,
+    });
+  } else {
+    await fleetScopeStorage.updateTruck(truck.id, {
+      lastCallSummary: summary,
+      lastCallStatus: status,
+      lastCallConversationId: conversationId,
+    });
+  }
+  try {
+    const existingLog = await fleetScopeStorage.getCallLogByConversationId(conversationId);
+    const mappedOutcome = (status === "Ready" || status === "Will Pick Up") ? "VEHICLE_READY"
+      : (status === "No Answer" || status === "Call Failed" || status === "Failed") ? "CALL_FAILED"
+      : "VEHICLE_NOT_READY";
+    const today = new Date();
+    let nextFollowUp: string | undefined;
+    if (mappedOutcome === "VEHICLE_NOT_READY" && estimatedReadyDate) {
+      const eta = new Date(estimatedReadyDate);
+      eta.setDate(eta.getDate() - 1);
+      nextFollowUp = eta.toISOString().split("T")[0];
+    } else if (mappedOutcome === "VEHICLE_NOT_READY") {
+      const d = new Date(today);
+      d.setDate(d.getDate() + 3);
+      nextFollowUp = d.toISOString().split("T")[0];
+    } else if (mappedOutcome === "CALL_FAILED") {
+      const d = new Date(today);
+      d.setDate(d.getDate() + 1);
+      nextFollowUp = d.toISOString().split("T")[0];
+    }
+    if (existingLog) {
+      const currentAttempt = existingLog.attemptNumber || 1;
+      await fleetScopeStorage.updateCallLog(existingLog.id, {
+        status: "completed",
+        outcome: mappedOutcome,
+        shopNotes: summary,
+        transcript: transcriptText,
+        estimatedReadyDate: estimatedReadyDate || existingLog.estimatedReadyDate,
+        blockers: blockers || existingLog.blockers,
+        attemptNumber: mappedOutcome === "CALL_FAILED" ? currentAttempt + 1 : currentAttempt,
+        nextFollowUpDate: nextFollowUp || existingLog.nextFollowUpDate,
+      });
+    } else {
+      await fleetScopeStorage.createCallLog({
+        truckId: truck.id,
+        truckNumber: truck.truckNumber?.toString() || "",
+        callType: callType === "tech" ? "tech" : "shop",
+        elevenLabsConversationId: conversationId,
+        callTimestamp: new Date(),
+        status: "completed",
+        outcome: mappedOutcome,
+        shopNotes: summary,
+        transcript: transcriptText,
+        estimatedReadyDate,
+        blockers,
+        nextFollowUpDate: nextFollowUp || null,
+        attemptNumber: 1,
+      });
+    }
+  } catch (logErr: any) {
+    console.warn(`[ElevenLabs] Could not update call_log for truck ${truck.truckNumber}:`, logErr.message);
+  }
+}
+
+async function fetchElevenLabsConversation(conversationId: string, apiKey: string): Promise<any | null> {
+  try {
+    const res = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`, {
+      headers: { "xi-api-key": apiKey },
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      console.error(`[ElevenLabs] Failed to fetch conversation ${conversationId}: ${res.status} ${txt}`);
+      return null;
+    }
+    return await res.json();
+  } catch (err: any) {
+    console.error(`[ElevenLabs] Error fetching conversation ${conversationId}:`, err.message);
+    return null;
+  }
+}
+
+async function searchElevenLabsConversationByPhone(
+  agentId: string,
+  toNumber: string,
+  afterUnixSecs: number,
+  apiKey: string
+): Promise<any | null> {
+  try {
+    const url = `https://api.elevenlabs.io/v1/convai/conversations?agent_id=${encodeURIComponent(agentId)}&page_size=20`;
+    const res = await fetch(url, { headers: { "xi-api-key": apiKey } });
+    if (!res.ok) {
+      console.error(`[ElevenLabs] Failed to search conversations: ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    const convs: any[] = data.conversations || [];
+    const toDigits = toNumber.replace(/\D/g, "").slice(-10);
+    const candidates = convs.filter((c: any) => {
+      if (c.status !== "done") return false;
+      if ((c.start_time_unix_secs || 0) < afterUnixSecs) return false;
+      const meta = c.metadata || {};
+      const to = (meta.to || meta.to_number || meta.called || "").replace(/\D/g, "").slice(-10);
+      if (to && to !== toDigits) return false;
+      return true;
+    });
+    if (candidates.length === 0) return null;
+    candidates.sort((a: any, b: any) => (b.start_time_unix_secs || 0) - (a.start_time_unix_secs || 0));
+    return candidates[0];
+  } catch (err: any) {
+    console.error(`[ElevenLabs] Error searching conversations:`, err.message);
+    return null;
+  }
+}
+
+async function pollForCallCompletion(
+  truck: any,
+  callType: "repair" | "tech",
+  toNumber: string,
+  agentId: string
+): Promise<void> {
+  const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
+  if (!apiKey) return;
+  const afterUnixSecs = Math.floor(Date.now() / 1000) - 120;
+  const maxAttempts = 40;
+  const intervalMs = 30_000;
+  console.log(`[CallPoller] Starting poll for truck ${truck.truckNumber} (${callType}) → ${toNumber}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise<void>(resolve => setTimeout(resolve, intervalMs));
+    try {
+      const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey);
+      if (!match) {
+        if (attempt % 5 === 0) console.log(`[CallPoller] Truck ${truck.truckNumber} attempt ${attempt}/${maxAttempts}: no match yet`);
+        continue;
+      }
+      console.log(`[CallPoller] Truck ${truck.truckNumber}: found ${match.conversation_id}, fetching transcript`);
+      const conv = await fetchElevenLabsConversation(match.conversation_id, apiKey);
+      if (!conv) continue;
+      const transcript = conv.transcript || conv.data?.transcript;
+      if (!transcript) { console.log(`[CallPoller] No transcript yet for ${match.conversation_id}`); continue; }
+      const transcriptText = buildTranscriptText(transcript);
+      const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber);
+      await applyCallResultToTruck(truck, callType, match.conversation_id, status, summary, estimatedReadyDate, blockers, transcriptText);
+      console.log(`[CallPoller] Truck ${truck.truckNumber}: complete — status="${status}" after ${attempt} poll(s)`);
+      return;
+    } catch (err: any) {
+      console.error(`[CallPoller] Truck ${truck.truckNumber} attempt ${attempt} error:`, err.message);
+    }
+  }
+  console.warn(`[CallPoller] Truck ${truck.truckNumber}: gave up after ${maxAttempts} attempts (20 min)`);
+}
+
 // ===== ELEVENLABS WEBHOOK HANDLER =====
 // Exported so it can be registered at the top-level /api/elevenlabs/webhook
 // route in routes.ts (outside the /api/fs prefix and auth middleware).
@@ -1547,135 +1784,10 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
       return;
     }
 
-    // Build transcript string
-    let transcriptText = "";
-    if (Array.isArray(transcript)) {
-      transcriptText = transcript
-        .map((turn: any) => `${turn.role || turn.speaker || "Unknown"}: ${turn.message || turn.text || ""}`)
-        .join("\n");
-    } else if (typeof transcript === "string") {
-      transcriptText = transcript;
-    } else {
-      transcriptText = JSON.stringify(transcript);
-    }
-
-    // Generate summary with OpenAI
-    if (!process.env.FS_OPENAI_API_KEY) {
-      console.warn("[ElevenLabs Webhook] No OPENAI_API_KEY, skipping summary");
-      res.status(200).json({ received: true, matched: true, summarized: false });
-      return;
-    }
-
-    const systemPrompt = callType === "tech"
-      ? `You are a fleet coordinator assistant. Analyze technician pickup call transcripts. Respond in JSON with these fields:
-"status": one of these exact values: "Will Pick Up", "No Answer", "Call Failed", "Other Issues"
-"summary": 2-3 sentence factual summary of the call
-"estimated_ready_date": if a pickup date was mentioned, return it as YYYY-MM-DD, otherwise null
-"blockers": any issues preventing pickup, or null
-Respond ONLY with valid JSON, no other text.`
-      : `You are a fleet coordinator assistant. Analyze repair shop call transcripts. Respond in JSON with these fields:
-"status": one of these exact values: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Call Failed", "Failed"
-"summary": 2-3 sentence factual summary of the call
-"estimated_ready_date": if a completion/ready date was mentioned, return it as YYYY-MM-DD, otherwise null
-"blockers": any issues blocking repair completion (e.g. parts on order, awaiting authorization), or null
-Respond ONLY with valid JSON, no other text.`;
-
-    const userPrompt = callType === "tech"
-      ? `Analyze this technician pickup call transcript:\n\n${transcriptText}`
-      : `Analyze this repair shop call transcript:\n\n${transcriptText}`;
-
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.FS_OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: 200,
-        temperature: 0.3,
-      }),
-    });
-
-    let summary = "";
-    let status = "";
-    let estimatedReadyDate: string | null = null;
-    let blockers: string | null = null;
-    if (openaiRes.ok) {
-      const openaiData = await openaiRes.json();
-      const raw = openaiData.choices?.[0]?.message?.content?.trim() || "";
-      console.log(`[ElevenLabs Webhook] GPT response (${callType}) for truck ${truck.truckNumber}: ${raw}`);
-      try {
-        const parsed = JSON.parse(raw);
-        status = parsed.status || "";
-        summary = parsed.summary || "";
-        estimatedReadyDate = parsed.estimated_ready_date || null;
-        blockers = parsed.blockers || null;
-      } catch {
-        summary = raw;
-        status = "Unknown";
-      }
-    } else {
-      const errText = await openaiRes.text();
-      console.error(`[ElevenLabs Webhook] OpenAI error:`, errText);
-      summary = "Summary unavailable — analysis failed.";
-      status = "Error";
-    }
-
+    const transcriptText = buildTranscriptText(transcript);
+    const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber);
     console.log(`[ElevenLabs Webhook] Status: "${status}", Summary: "${summary}"`);
-
-    if (callType === "tech") {
-      await fleetScopeStorage.updateTruck(truck.id, { lastTechCallSummary: summary, lastTechCallStatus: status });
-    } else {
-      await fleetScopeStorage.updateTruck(truck.id, { lastCallSummary: summary, lastCallStatus: status });
-    }
-
-    // Update call_log if one exists for this conversation
-    try {
-      const callLog = await fleetScopeStorage.getCallLogByConversationId(conversationId);
-      if (callLog) {
-        const mappedOutcome = status === "Ready" || status === "Will Pick Up" ? "VEHICLE_READY"
-          : (status === "No Answer" || status === "Call Failed" || status === "Failed") ? "CALL_FAILED"
-          : "VEHICLE_NOT_READY";
-
-        const currentAttempt = callLog.attemptNumber || 1;
-        let nextFollowUp: string | undefined;
-
-        if (mappedOutcome === "VEHICLE_NOT_READY" && estimatedReadyDate) {
-          const eta = new Date(estimatedReadyDate);
-          eta.setDate(eta.getDate() - 1);
-          nextFollowUp = eta.toISOString().split("T")[0];
-        } else if (mappedOutcome === "VEHICLE_NOT_READY") {
-          const d = new Date();
-          d.setDate(d.getDate() + 3);
-          nextFollowUp = d.toISOString().split("T")[0];
-        }
-
-        if (mappedOutcome === "CALL_FAILED" && currentAttempt < 3) {
-          const d = new Date();
-          d.setDate(d.getDate() + 1);
-          nextFollowUp = d.toISOString().split("T")[0];
-        }
-
-        await fleetScopeStorage.updateCallLog(callLog.id, {
-          status: "completed",
-          outcome: mappedOutcome,
-          shopNotes: summary,
-          transcript: transcriptText,
-          estimatedReadyDate: estimatedReadyDate || callLog.estimatedReadyDate,
-          blockers: blockers || callLog.blockers,
-          attemptNumber: mappedOutcome === "CALL_FAILED" ? currentAttempt + 1 : currentAttempt,
-          nextFollowUpDate: nextFollowUp || callLog.nextFollowUpDate,
-        });
-        console.log(`[ElevenLabs Webhook] Updated call_log ${callLog.id} with outcome ${mappedOutcome}`);
-      }
-    } catch (logErr: any) {
-      console.warn(`[ElevenLabs Webhook] Could not update call_log:`, logErr.message);
-    }
+    await applyCallResultToTruck(truck, callType, conversationId, status, summary, estimatedReadyDate, blockers, transcriptText);
 
     res.status(200).json({ received: true, matched: true, summarized: true });
   } catch (error: any) {
@@ -3535,6 +3647,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       res.json({ success: true, toNumber, conversationId, result });
+      // Fire-and-forget: poll ElevenLabs for the completed conversation transcript
+      pollForCallCompletion(truck, "repair", toNumber, ELEVENLABS_SHOP_AGENT_ID).catch((err: any) =>
+        console.error("[CallRepairShop] Polling error:", err.message)
+      );
     } catch (error: any) {
       console.error("[CallRepairShop] Error:", error.message);
       res.status(500).json({ message: error.message });
@@ -3625,13 +3741,70 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       res.json({ success: true, toNumber, conversationId, result });
+      // Fire-and-forget: poll ElevenLabs for the completed conversation transcript
+      pollForCallCompletion(truck, "tech", toNumber, ELEVENLABS_TECH_AGENT_ID).catch((err: any) =>
+        console.error("[CallTechnician] Polling error:", err.message)
+      );
     } catch (error: any) {
       console.error("[CallTechnician] Error:", error.message);
       res.status(500).json({ message: error.message });
     }
   });
 
-  // POST ElevenLabs webhook — receives call transcript and generates GPT summary
+  // POST /elevenlabs/backfill — manually fetch & process a conversation by conversationId or by searching phone
+  // Can also be called without args to refresh the most-recent call for a truck by polling phone search
+  app.post("/elevenlabs/backfill", async (req, res) => {
+    try {
+      const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
+      if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
+
+      const { truckNumber, conversationId, callType } = req.body as {
+        truckNumber?: string | number;
+        conversationId?: string;
+        callType?: "repair" | "tech";
+      };
+      if (!truckNumber) return res.status(400).json({ message: "truckNumber is required" });
+
+      const allTrucks = await fleetScopeStorage.getAllTrucks();
+      const truck = allTrucks.find((t: any) => String(t.truckNumber) === String(truckNumber));
+      if (!truck) return res.status(404).json({ message: `Truck ${truckNumber} not found` });
+
+      const resolvedCallType: "repair" | "tech" = callType || "repair";
+
+      let convData: any = null;
+      let resolvedConvId = conversationId;
+
+      if (resolvedConvId) {
+        convData = await fetchElevenLabsConversation(resolvedConvId, apiKey);
+        if (!convData) return res.status(404).json({ message: `Conversation ${resolvedConvId} not found or not accessible` });
+      } else {
+        // Search by phone number for the most recent completed conversation
+        const toNumber = resolvedCallType === "tech" ? truck.techPhone : truck.repairPhone;
+        if (!toNumber) return res.status(400).json({ message: `No ${resolvedCallType === "tech" ? "tech" : "repair"} phone number on truck ${truckNumber}` });
+        const agentId = resolvedCallType === "tech" ? ELEVENLABS_TECH_AGENT_ID : ELEVENLABS_SHOP_AGENT_ID;
+        const afterUnixSecs = Math.floor(Date.now() / 1000) - 7 * 24 * 3600; // last 7 days
+        const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey);
+        if (!match) return res.status(404).json({ message: `No recent completed conversation found for truck ${truckNumber}` });
+        resolvedConvId = match.conversation_id;
+        convData = await fetchElevenLabsConversation(resolvedConvId!, apiKey);
+        if (!convData) return res.status(404).json({ message: `Conversation ${resolvedConvId} could not be fetched` });
+      }
+
+      const transcript = convData.transcript || convData.data?.transcript;
+      if (!transcript) return res.status(422).json({ message: "Conversation found but transcript not yet available" });
+
+      const transcriptText = buildTranscriptText(transcript);
+      const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, resolvedCallType, truck.truckNumber);
+      await applyCallResultToTruck(truck, resolvedCallType, resolvedConvId!, status, summary, estimatedReadyDate, blockers, transcriptText);
+
+      console.log(`[Backfill] Truck ${truckNumber} (${resolvedCallType}): status="${status}" conv=${resolvedConvId}`);
+      res.json({ success: true, truckNumber, conversationId: resolvedConvId, callType: resolvedCallType, status, summary });
+    } catch (error: any) {
+      console.error("[Backfill] Error:", error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ===== BATCH CALLING ENGINE =====
   const batchJobs = new Map<string, {
     id: string;

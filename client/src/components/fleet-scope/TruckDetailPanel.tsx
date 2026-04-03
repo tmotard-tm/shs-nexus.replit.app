@@ -46,6 +46,7 @@ import {
   Loader2,
   Navigation,
   Building2,
+  RefreshCw,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -432,6 +433,8 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
   const { toast } = useToast();
   const [commentValue, setCommentValue] = useState("");
   const [isEditingComment, setIsEditingComment] = useState(false);
+  const [refreshingShopCall, setRefreshingShopCall] = useState(false);
+  const [refreshingTechCall, setRefreshingTechCall] = useState(false);
 
   const { data: truck, isLoading: truckLoading } = useQuery<Truck & { techAddress?: string }>({
     queryKey: ["/api/fs/trucks", truckId],
@@ -520,6 +523,46 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
   });
 
   const owner = truck ? determineOwner(truck) : "Oscar S";
+
+  const handleRefreshShopCall = async () => {
+    if (!truck) return;
+    setRefreshingShopCall(true);
+    try {
+      const res = await apiRequest("POST", "/api/fs/elevenlabs/backfill", {
+        truckNumber: truck.truckNumber,
+        callType: "repair",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Refresh failed");
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks", truckId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
+      toast({ title: "Shop call refreshed", description: `Status: ${data.status}` });
+    } catch (err: any) {
+      toast({ title: "Could not refresh shop call", description: err.message, variant: "destructive" });
+    } finally {
+      setRefreshingShopCall(false);
+    }
+  };
+
+  const handleRefreshTechCall = async () => {
+    if (!truck) return;
+    setRefreshingTechCall(true);
+    try {
+      const res = await apiRequest("POST", "/api/fs/elevenlabs/backfill", {
+        truckNumber: truck.truckNumber,
+        callType: "tech",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Refresh failed");
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks", truckId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
+      toast({ title: "Tech call refreshed", description: `Status: ${data.status}` });
+    } catch (err: any) {
+      toast({ title: "Could not refresh tech call", description: err.message, variant: "destructive" });
+    } finally {
+      setRefreshingTechCall(false);
+    }
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -661,6 +704,14 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
                   <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
                     <PhoneCall className="w-4 h-4 text-muted-foreground" />
                     Latest Shop Call
+                    <button
+                      onClick={handleRefreshShopCall}
+                      disabled={refreshingShopCall}
+                      className="ml-auto text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
+                      title="Refresh shop call status"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${refreshingShopCall ? "animate-spin" : ""}`} />
+                    </button>
                   </h3>
                   <div className="rounded-md border p-3 space-y-1.5">
                     {truck.lastCallDate ? (
@@ -694,6 +745,14 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
                   <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
                     <PhoneForwarded className="w-4 h-4 text-muted-foreground" />
                     Latest Tech Call
+                    <button
+                      onClick={handleRefreshTechCall}
+                      disabled={refreshingTechCall}
+                      className="ml-auto text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
+                      title="Refresh tech call status"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${refreshingTechCall ? "animate-spin" : ""}`} />
+                    </button>
                   </h3>
                   <div className="rounded-md border p-3 space-y-1.5">
                     {truck.lastTechCallDate ? (
