@@ -531,6 +531,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
       const res = await apiRequest("POST", "/api/fs/elevenlabs/backfill", {
         truckNumber: truck.truckNumber,
         callType: "repair",
+        ...(truck.lastCallConversationId ? { conversationId: truck.lastCallConversationId } : {}),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Refresh failed");
@@ -551,6 +552,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
       const res = await apiRequest("POST", "/api/fs/elevenlabs/backfill", {
         truckNumber: truck.truckNumber,
         callType: "tech",
+        ...(truck.lastTechCallConversationId ? { conversationId: truck.lastTechCallConversationId } : {}),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Refresh failed");

@@ -1667,15 +1667,43 @@ function extractPhoneFromConversation(conv: any): string {
   return "";
 }
 
+function extractVinFromConversation(conv: any): string {
+  // The VIN is sent as dynamic_variables.vin_number during call initiation
+  const meta = conv.metadata || {};
+  const sources = [
+    meta.dynamic_variables,
+    meta.initiation_metadata,
+    conv.dynamic_variables,
+    conv.initiation_metadata,
+    meta,
+    conv,
+  ];
+  for (const src of sources) {
+    if (!src) continue;
+    const v = (src.vin_number || src.vin || "").trim().toUpperCase();
+    if (v && v.length >= 8) return v;
+  }
+  return "";
+}
+
+// Accept "done" and other known terminal statuses across ElevenLabs environments
+const TERMINAL_STATUSES = new Set(["done", "completed", "ended", "finished"]);
+
 async function searchElevenLabsConversationByPhone(
   agentId: string,
   toNumber: string,
   afterUnixSecs: number,
-  apiKey: string
+  apiKey: string,
+  vin?: string
 ): Promise<any | null> {
   const toDigits = toNumber.replace(/\D/g, "").slice(-10);
+  const vinUpper = (vin || "").trim().toUpperCase();
+  const last8Vin = vinUpper.slice(-8);
   const maxPages = 5;
   let cursor: string | undefined;
+
+  // Collect VIN candidates separately — used as fallback when no phone match found
+  const vinCandidates: any[] = [];
 
   for (let page = 0; page < maxPages; page++) {
     try {
@@ -1689,10 +1717,8 @@ async function searchElevenLabsConversationByPhone(
       const data = await res.json();
       const convs: any[] = data.conversations || [];
 
-      // Accept "done" and other known terminal statuses (ElevenLabs may use "completed" or "ended" in some environments)
-      const TERMINAL_STATUSES = new Set(["done", "completed", "ended", "finished"]);
       let oldestTs = Infinity;
-      const candidates: any[] = [];
+      const phoneCandidates: any[] = [];
 
       for (const c of convs) {
         const startTs = c.start_time_unix_secs || 0;
@@ -1701,19 +1727,29 @@ async function searchElevenLabsConversationByPhone(
         if (startTs < afterUnixSecs) continue;
 
         const phoneInConv = extractPhoneFromConversation(c);
-        if (!phoneInConv) {
-          // No phone identifier present — skip; cannot safely verify truck match
-          console.log(`[ElevenLabs] Skipping conv ${c.conversation_id}: no phone field found in metadata`);
-          continue;
+        if (phoneInConv) {
+          // Phone field present — require it to match
+          if (phoneInConv === toDigits) phoneCandidates.push(c);
+        } else if (vinUpper) {
+          // No phone field — try VIN match as fallback
+          const vinInConv = extractVinFromConversation(c);
+          if (vinInConv) {
+            if (vinInConv === vinUpper || vinInConv.slice(-8) === last8Vin) {
+              console.log(`[ElevenLabs] VIN match: conv ${c.conversation_id} vinInConv=${vinInConv}`);
+              vinCandidates.push(c);
+            }
+          } else {
+            console.log(`[ElevenLabs] Skipping conv ${c.conversation_id}: no phone or VIN in metadata`);
+          }
+        } else {
+          console.log(`[ElevenLabs] Skipping conv ${c.conversation_id}: no phone field and no VIN to match`);
         }
-        if (phoneInConv !== toDigits) continue;
-        candidates.push(c);
       }
 
-      if (candidates.length > 0) {
-        candidates.sort((a: any, b: any) => (b.start_time_unix_secs || 0) - (a.start_time_unix_secs || 0));
-        console.log(`[ElevenLabs] Matched conversation ${candidates[0].conversation_id} for ${toNumber} (page ${page + 1})`);
-        return candidates[0];
+      if (phoneCandidates.length > 0) {
+        phoneCandidates.sort((a: any, b: any) => (b.start_time_unix_secs || 0) - (a.start_time_unix_secs || 0));
+        console.log(`[ElevenLabs] Phone-matched conv ${phoneCandidates[0].conversation_id} for ${toNumber} (page ${page + 1})`);
+        return phoneCandidates[0];
       }
 
       // Stop scanning if oldest item on this page is before our time window or no more pages
@@ -1725,6 +1761,14 @@ async function searchElevenLabsConversationByPhone(
       break;
     }
   }
+
+  // Fall back to best VIN match if no phone match was found
+  if (vinCandidates.length > 0) {
+    vinCandidates.sort((a: any, b: any) => (b.start_time_unix_secs || 0) - (a.start_time_unix_secs || 0));
+    console.log(`[ElevenLabs] VIN-fallback matched conv ${vinCandidates[0].conversation_id} for VIN ${vinUpper}`);
+    return vinCandidates[0];
+  }
+
   return null;
 }
 
@@ -1743,7 +1787,7 @@ async function pollForCallCompletion(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await new Promise<void>(resolve => setTimeout(resolve, intervalMs));
     try {
-      const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey);
+      const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey, truck.vin ?? undefined);
       if (!match) {
         if (attempt % 5 === 0) console.log(`[CallPoller] Truck ${truck.truckNumber} attempt ${attempt}/${maxAttempts}: no match yet`);
         continue;
@@ -3862,7 +3906,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         if (!toNumber) return res.status(400).json({ message: `No ${resolvedCallType === "tech" ? "tech" : "repair"} phone number on truck ${truckNumber}` });
         const agentId = resolvedCallType === "tech" ? ELEVENLABS_TECH_AGENT_ID : ELEVENLABS_SHOP_AGENT_ID;
         const afterUnixSecs = Math.floor(Date.now() / 1000) - 7 * 24 * 3600; // last 7 days
-        const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey);
+        const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey, truck.vin ?? undefined);
         if (!match) return res.status(404).json({ message: `No recent completed conversation found for truck ${truckNumber}` });
         resolvedConvId = match.conversation_id;
         convData = await fetchElevenLabsConversation(resolvedConvId!, apiKey);
