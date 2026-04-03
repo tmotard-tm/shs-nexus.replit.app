@@ -3776,11 +3776,40 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         ? allTrucks.filter((t: any) => truckIds.includes(t.id))
         : allTrucks;
 
-      // Maps: convId/sid → truck (for shop calls)
+      // Normalize phone to digits only (strips +1 country code prefix if present)
+      function normalizePhone(raw: string): string {
+        const digits = (raw || "").replace(/\D/g, "");
+        // Strip leading 1 if 11 digits (US country code)
+        return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+      }
+
+      // Maps: convId/sid → truck (for shop and tech calls)
       const truckByShopConvId = new Map<string, any>();
       const truckByShopSid = new Map<string, any>();
       const truckByTechConvId = new Map<string, any>();
       const truckByTechSid = new Map<string, any>();
+
+      // Build unique-phone maps: only include phones that belong to exactly ONE truck.
+      // This prevents false matches when multiple trucks share a repair shop / tech phone.
+      // Pass 1: count occurrences
+      const shopPhoneCount = new Map<string, number>();
+      const techPhoneCount = new Map<string, number>();
+      for (const truck of allTrucks) {
+        const sp = normalizePhone(truck.repairPhone || "");
+        if (sp) shopPhoneCount.set(sp, (shopPhoneCount.get(sp) || 0) + 1);
+        const tp = normalizePhone(truck.techPhone || "");
+        if (tp) techPhoneCount.set(tp, (techPhoneCount.get(tp) || 0) + 1);
+      }
+      // Pass 2: only keep phones that are unique
+      const truckByUniqueShopPhone = new Map<string, any>();
+      const truckByUniqueTechPhone = new Map<string, any>();
+      for (const truck of scopedTrucks) {
+        const sp = normalizePhone(truck.repairPhone || "");
+        if (sp && shopPhoneCount.get(sp) === 1) truckByUniqueShopPhone.set(sp, truck);
+        const tp = normalizePhone(truck.techPhone || "");
+        if (tp && techPhoneCount.get(tp) === 1) truckByUniqueTechPhone.set(tp, truck);
+      }
+      console.log(`[Backfill] Unique shop phones: ${truckByUniqueShopPhone.size}, unique tech phones: ${truckByUniqueTechPhone.size}`);
 
       for (const truck of scopedTrucks) {
         if (truck.lastCallConversationId) truckByShopConvId.set(truck.lastCallConversationId, truck);
@@ -3880,7 +3909,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       ]);
       console.log(`[Backfill] Fetched ${shopConversations.length} shop convs, ${techConversations.length} tech convs`);
 
-      // For each conv, resolve truck via convId then SID. Keep only newest conv per truck.
+      // Extract the called (to) phone number from a conversation's metadata.
+      // ElevenLabs stores the Twilio metadata; the called number may be under several keys.
+      function convCalledPhone(conv: any): string {
+        const raw = conv?.metadata?.to
+          || conv?.metadata?.To
+          || conv?.metadata?.to_number
+          || conv?.metadata?.phone_number
+          || conv?.called_number
+          || conv?.to_number
+          || conv?.phone_number
+          || "";
+        return normalizePhone(raw);
+      }
+
+      // For each conv, resolve truck via convId → SID → unique phone fallback.
+      // Keep only newest conv per truck.
       // latestShop/Tech: truckId → { conv, ts }
       const latestShop = new Map<string, { conv: any; ts: number }>();
       const latestTech = new Map<string, { conv: any; ts: number }>();
@@ -3889,11 +3933,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         conv: any,
         byConvId: Map<string, any>,
         bySid: Map<string, any>,
+        byUniquePhone: Map<string, any>,
         latestMap: Map<string, { conv: any; ts: number }>
       ): void {
         const convId = conv?.conversation_id || conv?.id;
         const sid = conv?.metadata?.call_sid || conv?.call_sid || conv?.twilio_call_sid;
-        const truck = (convId && byConvId.get(convId)) || (sid && bySid.get(sid));
+        const calledPhone = convCalledPhone(conv);
+
+        // Priority: convId → Twilio SID → unique phone fallback
+        let truck = (convId && byConvId.get(convId)) || (sid && bySid.get(sid));
+        if (!truck && calledPhone) {
+          truck = byUniquePhone.get(calledPhone);
+          if (truck) {
+            console.log(`[Backfill] Phone-fallback match: conv ${convId} → truck ${truck.truckNumber} via ${calledPhone}`);
+          }
+        }
+
         if (!truck) return;
         const ts = convTimestamp(conv);
         const existing = latestMap.get(truck.id);
@@ -3902,8 +3957,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         }
       }
 
-      for (const conv of shopConversations) resolveAndKeepLatest(conv, truckByShopConvId, truckByShopSid, latestShop);
-      for (const conv of techConversations) resolveAndKeepLatest(conv, truckByTechConvId, truckByTechSid, latestTech);
+      for (const conv of shopConversations) resolveAndKeepLatest(conv, truckByShopConvId, truckByShopSid, truckByUniqueShopPhone, latestShop);
+      for (const conv of techConversations) resolveAndKeepLatest(conv, truckByTechConvId, truckByTechSid, truckByUniqueTechPhone, latestTech);
 
       let checked = 0;
       let matched = 0;
