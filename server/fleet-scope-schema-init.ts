@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS "fs_trucks" (
   "last_tech_call_summary" text,
   "last_tech_call_status" text,
   "last_tech_call_conversation_id" text,
+  "enterprise_id" text,
   "last_updated_at" timestamp DEFAULT now(),
   "last_updated_by" text DEFAULT 'System',
   "created_at" timestamp DEFAULT now()
@@ -533,6 +534,15 @@ DO $$ BEGIN
     WHERE table_name = 'fs_trucks' AND column_name = 'offboarding_flagged'
   ) THEN
     ALTER TABLE "fs_trucks" ADD COLUMN "offboarding_flagged" boolean DEFAULT false;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'enterprise_id'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "enterprise_id" text;
   END IF;
 END $$;
 `;

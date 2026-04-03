@@ -385,6 +385,10 @@ export default function Dashboard() {
   const [callImportFile, setCallImportFile] = useState<File | null>(null);
   const [callImportResults, setCallImportResults] = useState<{updated: number; notFound: number; errors: string[]} | null>(null);
   const callImportFileRef = useRef<HTMLInputElement>(null);
+  const [isShopListDialogOpen, setIsShopListDialogOpen] = useState(false);
+  const [shopListFile, setShopListFile] = useState<File | null>(null);
+  const [shopListResults, setShopListResults] = useState<{processedAt: string; rowsProcessed: number; trucksUpdated: number; rowsSkipped: number; notFound: string[]; error: string | null} | null>(null);
+  const shopListFileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   // Column header filters (multi-select arrays - empty array means "all selected")
@@ -1195,6 +1199,57 @@ export default function Dashboard() {
       });
     },
   });
+
+  // Shop List auto-sync status
+  type ShopListStatus = { processedAt: string | null; rowsProcessed: number; trucksUpdated: number; rowsSkipped: number; notFound: string[]; error: string | null };
+  const { data: shopListStatus } = useQuery<ShopListStatus>({
+    queryKey: ["/api/fs/shop-list-status"],
+    refetchInterval: 60000,
+  });
+
+  // Shop List manual upload mutation
+  const shopListImportMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/fs/shop-list-import", { method: "POST", body: formData });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Upload failed" }));
+        throw new Error(err.message || "Upload failed");
+      }
+      return await res.json() as ShopListStatus & { processedAt: string };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/shop-list-status"] });
+      setShopListResults(data);
+      setShopListFile(null);
+      toast({
+        title: "Shop List import complete",
+        description: `Updated ${data.trucksUpdated} trucks from ${data.rowsProcessed} rows`,
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: "Shop List import failed", description: error.message || "Failed to import", variant: "destructive" });
+    },
+  });
+
+  const resetShopListDialog = () => {
+    setShopListFile(null);
+    setShopListResults(null);
+    setIsShopListDialogOpen(false);
+    if (shopListFileRef.current) shopListFileRef.current.value = "";
+  };
+
+  const handleShopListFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setShopListFile(file);
+  };
+
+  const handleShopListImport = () => {
+    if (!shopListFile) return;
+    shopListImportMutation.mutate(shopListFile);
+  };
 
   // Bulk sync mutation
   const bulkSyncMutation = useMutation({
@@ -2271,6 +2326,89 @@ export default function Dashboard() {
             </DialogContent>
           </Dialog>
           
+          <Dialog open={isShopListDialogOpen} onOpenChange={setIsShopListDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" data-testid="button-shop-list">
+                <FileSpreadsheet className="w-3 h-3 mr-1" />
+                Shop List
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Shop List Import</DialogTitle>
+                <DialogDescription>
+                  Upload a Rental Extension Review file (.xlsx, .xls, or .csv) to update Repair Location and Enterprise ID. Only rows within the last 7 days are processed.
+                </DialogDescription>
+              </DialogHeader>
+
+              {shopListResults ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-green-600">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span className="font-medium">Import Complete</span>
+                  </div>
+                  <div className="space-y-1 text-sm">
+                    <p><strong>{shopListResults.rowsProcessed}</strong> rows processed</p>
+                    <p><strong>{shopListResults.trucksUpdated}</strong> trucks updated</p>
+                    <p><strong>{shopListResults.rowsSkipped}</strong> rows skipped</p>
+                    {shopListResults.notFound.length > 0 && (
+                      <div>
+                        <p className="text-destructive font-medium mt-2">{shopListResults.notFound.length} truck(s) not found:</p>
+                        <div className="max-h-24 overflow-y-auto text-xs text-muted-foreground bg-muted p-2 rounded mt-1">
+                          {shopListResults.notFound.join(", ")}
+                        </div>
+                      </div>
+                    )}
+                    {shopListResults.error && (
+                      <p className="text-destructive text-xs mt-1">{shopListResults.error}</p>
+                    )}
+                  </div>
+                  <Button onClick={resetShopListDialog} className="w-full">Close</Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed rounded-lg p-6 text-center">
+                    <input
+                      ref={shopListFileRef}
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleShopListFileSelect}
+                      className="hidden"
+                      id="shop-list-upload"
+                      data-testid="input-shop-list-file"
+                    />
+                    <label htmlFor="shop-list-upload" className="cursor-pointer">
+                      <FileSpreadsheet className="w-12 h-12 mx-auto mb-2 text-muted-foreground" />
+                      <p className="text-sm font-medium mb-1">
+                        {shopListFile ? shopListFile.name : "Click to upload XLSX, XLS, or CSV"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">.xlsx, .xls, or .csv</p>
+                    </label>
+                  </div>
+                  <Button
+                    onClick={handleShopListImport}
+                    disabled={!shopListFile || shopListImportMutation.isPending}
+                    className="w-full"
+                    data-testid="button-start-shop-list-import"
+                  >
+                    {shopListImportMutation.isPending ? "Importing..." : "Import Shop List"}
+                  </Button>
+                  {shopListStatus?.processedAt && (
+                    <div className="text-xs text-muted-foreground border-t pt-3">
+                      <p className="font-medium mb-1">Last auto-sync:</p>
+                      <p>{format(new Date(shopListStatus.processedAt), "MMM d, yyyy h:mm a")}</p>
+                      {shopListStatus.error ? (
+                        <p className="text-destructive mt-1">Error: {shopListStatus.error}</p>
+                      ) : (
+                        <p className="mt-1">{shopListStatus.trucksUpdated} updated · {shopListStatus.rowsProcessed} rows · {shopListStatus.notFound.length} not found</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
           <Dialog open={isSyncDialogOpen} onOpenChange={setIsSyncDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" data-testid="button-sync-snowflake">
@@ -2646,6 +2784,22 @@ export default function Dashboard() {
             </Button>
           </Link>
         </div>
+
+        {shopListStatus?.processedAt && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+            <FileSpreadsheet className="w-3 h-3" />
+            <span>
+              Shop List auto-sync:&nbsp;
+              {shopListStatus.error ? (
+                <span className="text-destructive font-medium">Failed — {shopListStatus.error}</span>
+              ) : (
+                <span>
+                  {shopListStatus.trucksUpdated} updated · {shopListStatus.rowsProcessed} rows · last run {formatDistanceToNow(new Date(shopListStatus.processedAt), { addSuffix: true })}
+                </span>
+              )}
+            </span>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4" data-testid="rental-summary-cards">
           <Card className="p-3 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20" data-testid="card-total-rentals">

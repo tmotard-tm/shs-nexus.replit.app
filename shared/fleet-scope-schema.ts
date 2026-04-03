@@ -550,6 +550,9 @@ export const trucks = pgTable("fs_trucks", {
   lastTechCallStatus: text("last_tech_call_status"),
   lastTechCallConversationId: text("last_tech_call_conversation_id"),
 
+  // Shop List sync fields (from Rental Extension Review)
+  enterpriseId: text("enterprise_id"), // Enterprise ID from Shop List column D
+
   // Timestamps
   lastUpdatedAt: timestamp("last_updated_at").default(sql`now()`),
   lastUpdatedBy: text("last_updated_by").default("System"),

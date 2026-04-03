@@ -16,6 +16,232 @@ import { fetchSamsaraLocations, testSamsaraConnection, type SamsaraLocationData 
 import { reverseGeocode, batchReverseGeocode, getGeocodeStats } from "./fleet-scope-reverse-geocode";
 import sgMail from "@sendgrid/mail";
 import multer from "multer";
+import cron from "node-cron";
+import * as XLSX from "xlsx";
+
+// ---------------------------------------------------------------------------
+// Shop List Auto-Sync State (in-memory)
+// ---------------------------------------------------------------------------
+const SHAREPOINT_SHOP_LIST_URL =
+  "https://searshc-my.sharepoint.com/:x:/g/personal/sean_chen_transformco_com/IQAOvPvVRs5oQ7Umr4-YOMKCAV8esNjoqf-tktl5NNLmDXk?e=82fLjH&download=1";
+
+interface ShopListRunStatus {
+  processedAt: string | null;
+  rowsProcessed: number;
+  trucksUpdated: number;
+  rowsSkipped: number;
+  notFound: string[];
+  error: string | null;
+}
+
+let shopListLastRun: ShopListRunStatus = {
+  processedAt: null,
+  rowsProcessed: 0,
+  trucksUpdated: 0,
+  rowsSkipped: 0,
+  notFound: [],
+  error: null,
+};
+
+// ---------------------------------------------------------------------------
+// Shop List: parse an Excel buffer (columns A=date, B=truck#, D=enterpriseId, I=repairLocation)
+// Only rows where col A is within the last 7 calendar days are returned.
+// ---------------------------------------------------------------------------
+interface ShopListRow {
+  date: Date;
+  truckNumber: string;
+  enterpriseId: string;
+  repairLocation: string;
+}
+
+function parseExcelDate(value: any): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === "number") {
+    // Excel serial date: days since 1900-01-00 (with leap year bug)
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    return new Date(excelEpoch.getTime() + value * 86400000);
+  }
+  const str = String(value).trim();
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) return d;
+  return null;
+}
+
+function getSevenDayCutoff(): Date {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 7);
+  cutoff.setHours(0, 0, 0, 0);
+  return cutoff;
+}
+
+interface ParseShopListResult {
+  rows: ShopListRow[];
+  dateFilteredCount: number;
+}
+
+async function parseShopListBuffer(buffer: Buffer, mimeOrExt?: string): Promise<ParseShopListResult> {
+  const cutoff = getSevenDayCutoff();
+
+  // Determine format from extension/MIME hint
+  const extHint = (mimeOrExt || "").toLowerCase().replace(/^\./, "");
+  const isCsv = extHint === "csv" || extHint === "text/csv" || extHint === "text/plain";
+
+  if (isCsv) {
+    // Parse CSV: columns 0=date, 1=truck, 3=enterpriseId, 8=repairLocation (0-indexed)
+    const text = buffer.toString("utf-8");
+    const lines = text.split(/\r?\n/);
+    const rows: ShopListRow[] = [];
+    let dateFilteredCount = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const cols = parseCsvLine(line);
+      const dateStr = cols[0] || "";
+      const truckNumber = (cols[1] || "").trim();
+      const enterpriseId = (cols[3] || "").trim();
+      const repairLocation = (cols[8] || "").trim();
+      if (!truckNumber) continue;
+      const date = parseExcelDate(dateStr);
+      if (!date || date < cutoff) { dateFilteredCount++; continue; }
+      rows.push({ date, truckNumber, enterpriseId, repairLocation });
+    }
+    return { rows, dateFilteredCount };
+  }
+
+  // .xlsx or .xls: use SheetJS (xlsx package) which supports both formats
+  let wb: XLSX.WorkBook;
+  try {
+    wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  } catch (e: any) {
+    throw new Error(`Failed to parse Excel file (${extHint || "unknown format"}): ${e.message}`);
+  }
+  const sheetName = wb.SheetNames[0];
+  if (!sheetName) throw new Error("Excel file has no worksheets");
+  const ws = wb.Sheets[sheetName];
+  // Convert to array of arrays (raw values)
+  const rawData: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+  const rows: ShopListRow[] = [];
+  let dateFilteredCount = 0;
+  for (let i = 1; i < rawData.length; i++) {
+    const cols = rawData[i];
+    const colA = cols[0];
+    const colB = cols[1];
+    const colD = cols[3];
+    const colI = cols[8];
+    const truckNumber = colB ? String(colB).trim() : "";
+    if (!truckNumber) continue;
+    const date = parseExcelDate(colA);
+    if (!date || date < cutoff) { dateFilteredCount++; continue; }
+    const enterpriseId = colD ? String(colD).trim() : "";
+    const repairLocation = colI ? String(colI).trim() : "";
+    rows.push({ date, truckNumber, enterpriseId, repairLocation });
+  }
+  return { rows, dateFilteredCount };
+}
+
+function parseCsvLine(line: string): string[] {
+  const cols: string[] = [];
+  let inQuotes = false;
+  let current = "";
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      cols.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cols.push(current);
+  return cols;
+}
+
+// ---------------------------------------------------------------------------
+// Shop List: apply parsed rows to the database and return a summary
+// ---------------------------------------------------------------------------
+async function applyShopListRows(rows: ShopListRow[], dateFilteredCount = 0): Promise<ShopListRunStatus> {
+  let trucksUpdated = 0;
+  let rowsSkipped = dateFilteredCount;
+  const notFound: string[] = [];
+
+  for (const row of rows) {
+    const raw = row.truckNumber;
+    const stripped = raw.replace(/^0+/, "") || raw;
+
+    const existing =
+      (await fleetScopeStorage.getTruckByNumber(raw)) ||
+      (await fleetScopeStorage.getTruckByNumber(stripped));
+
+    if (!existing) {
+      notFound.push(raw);
+      rowsSkipped++;
+      continue;
+    }
+
+    const updates: Record<string, any> = {};
+    if (row.repairLocation) updates.repairAddress = row.repairLocation;
+    if (row.enterpriseId) updates.enterpriseId = row.enterpriseId;
+
+    if (Object.keys(updates).length > 0) {
+      await fleetScopeStorage.updateTruck(existing.id, updates);
+
+      trucksUpdated++;
+    } else {
+      rowsSkipped++;
+    }
+  }
+
+  return {
+    processedAt: new Date().toISOString(),
+    rowsProcessed: rows.length + dateFilteredCount,
+    trucksUpdated,
+    rowsSkipped,
+    notFound: [...new Set(notFound)],
+    error: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shop List: fetch from SharePoint and run import (used by scheduled job)
+// ---------------------------------------------------------------------------
+async function runShopListAutoSync(): Promise<ShopListRunStatus> {
+  try {
+    console.log("[ShopListSync] Fetching from SharePoint...");
+    const resp = await fetch(SHAREPOINT_SHOP_LIST_URL, {
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    }
+    const arrayBuf = await resp.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+    const { rows, dateFilteredCount } = await parseShopListBuffer(buffer);
+    console.log(`[ShopListSync] Parsed ${rows.length} qualifying rows (${dateFilteredCount} filtered by date)`);
+    const result = await applyShopListRows(rows, dateFilteredCount);
+    console.log(`[ShopListSync] Done: updated=${result.trucksUpdated} skipped=${result.rowsSkipped} notFound=${result.notFound.length}`);
+    return result;
+  } catch (err: any) {
+    console.error("[ShopListSync] Auto-sync failed:", err.message);
+    return {
+      processedAt: new Date().toISOString(),
+      rowsProcessed: 0,
+      trucksUpdated: 0,
+      rowsSkipped: 0,
+      notFound: [],
+      error: err.message || "Unknown error",
+    };
+  }
+}
+
+// Cron is registered inside registerFleetScopeRoutes() to ensure FS DB is available
 
 function getDb() {
   return fsDb;
@@ -1235,6 +1461,12 @@ async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
 
 export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next: any) => Promise<any>): Router {
   const app = Router();
+
+  // Schedule Shop List daily sync at 6:00 AM server time (inside registration to ensure FS DB is available)
+  cron.schedule("0 6 * * *", async () => {
+    console.log("[ShopListSync] Starting scheduled daily sync...");
+    shopListLastRun = await runShopListAutoSync();
+  });
 
   // Apply authentication to all fleet-scope routes except the /public/* paths,
   // which are protected by their own API key check instead.
@@ -12224,6 +12456,43 @@ Respond ONLY with valid JSON, no other text.`;
     } catch (error: any) {
       console.error("[OilChangeCSV] Error generating CSV:", error.message);
       res.status(500).json({ message: "Failed to generate oil change CSV" });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Shop List endpoints
+  // ---------------------------------------------------------------------------
+
+  // GET /shop-list-status — return last auto-sync run status
+  app.get("/shop-list-status", async (_req, res) => {
+    res.json(shopListLastRun);
+  });
+
+  // POST /shop-list-sync — trigger auto-fetch from SharePoint manually
+  app.post("/shop-list-sync", async (_req, res) => {
+    try {
+      const result = await runShopListAutoSync();
+      shopListLastRun = result;
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message || "Shop list sync failed" });
+    }
+  });
+
+  // POST /shop-list-import — manual file upload (multipart/form-data with field "file")
+  const shopListUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+  app.post("/shop-list-import", shopListUpload.single("file"), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+      const ext = (req.file.originalname || "").split(".").pop()?.toLowerCase() || req.file.mimetype || "";
+      const { rows, dateFilteredCount } = await parseShopListBuffer(req.file.buffer, ext);
+      const result = await applyShopListRows(rows, dateFilteredCount);
+      res.json(result);
+    } catch (err: any) {
+      console.error("[ShopListImport] Error:", err.message);
+      res.status(500).json({ message: err.message || "Shop list import failed" });
     }
   });
 
