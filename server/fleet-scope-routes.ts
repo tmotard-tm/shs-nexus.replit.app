@@ -4219,37 +4219,41 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       const allTrucks = await fleetScopeStorage.getAllTrucks();
 
-      // Collect eligible { truck, callType, conversationId } pairs
+      // Collect eligible { truck, callType, conversationId } pairs.
+      // For each call type, prefer the stored conv ID on the truck; fall back to the
+      // most recent call log entry. This ensures we refresh ALL available call types
+      // (repair + tech) even if only one has a stored ID.
       const candidates: Array<{ truck: any; callType: "repair" | "tech"; conversationId: string }> = [];
       let skippedCount = 0;
 
       for (const truck of allTrucks) {
-        let hasAny = false;
+        const coveredTypes = new Set<string>();
 
         if (truck.lastCallConversationId) {
           candidates.push({ truck, callType: "repair", conversationId: truck.lastCallConversationId });
-          hasAny = true;
+          coveredTypes.add("repair");
         }
         if (truck.lastTechCallConversationId) {
           candidates.push({ truck, callType: "tech", conversationId: truck.lastTechCallConversationId });
-          hasAny = true;
+          coveredTypes.add("tech");
         }
 
-        // Also check call logs for trucks with no stored conv IDs
-        if (!hasAny) {
+        // For any call type not yet covered by a stored ID, check call logs
+        const missingTypes = (["repair", "tech"] as const).filter(ct => !coveredTypes.has(ct));
+        if (missingTypes.length > 0) {
           try {
             const logs = await fleetScopeStorage.getCallLogsByTruckId(truck.id);
-            for (const ct of ["repair", "tech"] as const) {
+            for (const ct of missingTypes) {
               const log = (logs as any[]).find((l: any) => l.callType === ct && l.elevenLabsConversationId);
               if (log?.elevenLabsConversationId) {
                 candidates.push({ truck, callType: ct, conversationId: log.elevenLabsConversationId });
-                hasAny = true;
+                coveredTypes.add(ct);
               }
             }
           } catch (_e) {}
         }
 
-        if (!hasAny) skippedCount++;
+        if (coveredTypes.size === 0) skippedCount++;
       }
 
       const jobId = `backfill_all_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -4267,7 +4271,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       if (candidates.length === 0) {
         job.done = true;
-        return res.json({ jobId, total: 0, eligible: 0 });
+        return res.json({ jobId, total: 0, eligible: 0, skipped: skippedCount });
       }
 
       // Process in background — serial with 500ms delay between trucks
@@ -4307,7 +4311,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.log(`[BackfillAll] ${jobId} complete: ${job.completed} updated, ${job.failed} failed, ${job.skipped} skipped`);
       })();
 
-      res.json({ jobId, total: candidates.length, eligible: candidates.length });
+      res.json({ jobId, total: candidates.length, eligible: candidates.length, skipped: skippedCount });
     } catch (error: any) {
       console.error("[BackfillAll] Error:", error.message);
       res.status(500).json({ message: error.message });

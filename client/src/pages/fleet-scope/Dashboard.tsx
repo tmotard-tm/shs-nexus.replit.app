@@ -1966,11 +1966,17 @@ export default function Dashboard() {
       const response = await apiRequest("POST", "/api/fs/elevenlabs/backfill-all/start", {});
       return response.json();
     },
-    onSuccess: (data: { jobId: string; total: number; eligible: number }) => {
+    onSuccess: (data: { jobId: string; total: number; eligible: number; skipped?: number }) => {
       setLucaJobId(data.jobId);
-      if (data.total === 0) {
-        setLucaProgress({ total: 0, completed: 0, failed: 0, skipped: 0, done: true, results: [] });
-      }
+      // Seed initial progress immediately so the UI shows 0/total before first poll
+      setLucaProgress({
+        total: data.total,
+        completed: 0,
+        failed: 0,
+        skipped: data.skipped ?? 0,
+        done: data.total === 0,
+        results: [],
+      });
     },
     onError: (error: any) => {
       toast({
