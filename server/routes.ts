@@ -28,7 +28,7 @@ import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
 import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
-import { registerFleetScopeRoutes } from "./fleet-scope-routes";
+import { registerFleetScopeRoutes, elevenLabsWebhookHandler } from "./fleet-scope-routes";
 import { registerWmsRoutes } from "./wms-engine-routes";
 import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
 import { fsDb } from "./fleet-scope-db";
@@ -516,6 +516,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ error: "Failed to fetch coordinates" });
     }
   });
+
+  // ElevenLabs post-call webhook — must be registered here (top-level, no /api/fs prefix)
+  // so ElevenLabs can reach it without a session cookie and without the FS auth middleware.
+  // The FS_ELEVENLABS_WEBHOOK_SECRET env var enables HMAC-SHA256 signature verification.
+  app.post("/api/elevenlabs/webhook", elevenLabsWebhookHandler);
+  console.log("[ElevenLabs] Webhook registered at POST /api/elevenlabs/webhook");
 
   // Mount Fleet-Scope module routes at /api/fs/*
   if (fsDb) {

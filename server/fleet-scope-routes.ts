@@ -1459,6 +1459,216 @@ async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
   }
 }
 
+// ===== ELEVENLABS WEBHOOK HANDLER =====
+// Exported so it can be registered at the top-level /api/elevenlabs/webhook
+// route in routes.ts (outside the /api/fs prefix and auth middleware).
+export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void> {
+  try {
+    // Verify ElevenLabs HMAC-SHA256 signature when the secret is configured.
+    // Header format: "ElevenLabs-Signature: t=<timestamp>,v0=<hex_hash>"
+    // Hash = HMAC-SHA256(secret, "<timestamp>.<rawBody>")
+    const secret = process.env.FS_ELEVENLABS_WEBHOOK_SECRET;
+    if (secret) {
+      const sigHeader = req.headers["elevenlabs-signature"] as string | undefined;
+      if (!sigHeader) {
+        res.status(401).json({ message: "Missing ElevenLabs-Signature header" });
+        return;
+      }
+      const parts: Record<string, string> = {};
+      for (const part of sigHeader.split(",")) {
+        const [k, v] = part.split("=");
+        if (k && v !== undefined) parts[k.trim()] = v.trim();
+      }
+      const timestamp = parts["t"];
+      const receivedSig = parts["v0"];
+      if (!timestamp || !receivedSig) {
+        res.status(401).json({ message: "Malformed ElevenLabs-Signature header" });
+        return;
+      }
+      // rawBody is stored by the verify callback in express.json() (server/index.ts)
+      const rawBody: Buffer | undefined = req.rawBody;
+      const bodyStr = rawBody ? rawBody.toString("utf8") : JSON.stringify(req.body);
+      const expectedSig = require("crypto")
+        .createHmac("sha256", secret)
+        .update(`${timestamp}.${bodyStr}`)
+        .digest("hex");
+      if (expectedSig !== receivedSig) {
+        console.warn("[ElevenLabs Webhook] Invalid signature");
+        res.status(401).json({ message: "Invalid signature" });
+        return;
+      }
+    }
+
+    const body = req.body;
+    const conversationId = body?.conversation_id || body?.data?.conversation_id;
+    if (!conversationId) {
+      res.status(400).json({ message: "Missing conversation_id" });
+      return;
+    }
+
+    console.log(`[ElevenLabs Webhook] Received event for conversation: ${conversationId}`, JSON.stringify(body).slice(0, 500));
+
+    // Find the truck with this conversation ID — check both repair shop and tech call fields
+    const allTrucks = await fleetScopeStorage.getAllTrucks();
+    let truck = allTrucks.find((t: any) => t.lastCallConversationId === conversationId);
+    let callType: "repair" | "tech" = "repair";
+    if (!truck) {
+      truck = allTrucks.find((t: any) => t.lastTechCallConversationId === conversationId);
+      if (truck) callType = "tech";
+    }
+    if (!truck) {
+      console.warn(`[ElevenLabs Webhook] No truck found for conversation ${conversationId}`);
+      res.status(200).json({ received: true, matched: false });
+      return;
+    }
+
+    console.log(`[ElevenLabs Webhook] Matched truck ${truck.truckNumber} (${callType} call)`);
+
+    // Extract transcript from the webhook payload
+    const transcript = body?.transcript || body?.data?.transcript || body?.conversation?.transcript;
+    if (!transcript) {
+      console.log(`[ElevenLabs Webhook] No transcript yet for ${conversationId}`);
+      res.status(200).json({ received: true, matched: true, transcriptReady: false });
+      return;
+    }
+
+    // Build transcript string
+    let transcriptText = "";
+    if (Array.isArray(transcript)) {
+      transcriptText = transcript
+        .map((turn: any) => `${turn.role || turn.speaker || "Unknown"}: ${turn.message || turn.text || ""}`)
+        .join("\n");
+    } else if (typeof transcript === "string") {
+      transcriptText = transcript;
+    } else {
+      transcriptText = JSON.stringify(transcript);
+    }
+
+    // Generate summary with OpenAI
+    if (!process.env.FS_OPENAI_API_KEY) {
+      console.warn("[ElevenLabs Webhook] No OPENAI_API_KEY, skipping summary");
+      res.status(200).json({ received: true, matched: true, summarized: false });
+      return;
+    }
+
+    const systemPrompt = callType === "tech"
+      ? `You are a fleet coordinator assistant. Analyze technician pickup call transcripts. Respond in JSON with these fields:
+"status": one of these exact values: "Will Pick Up", "No Answer", "Call Failed", "Other Issues"
+"summary": 2-3 sentence factual summary of the call
+"estimated_ready_date": if a pickup date was mentioned, return it as YYYY-MM-DD, otherwise null
+"blockers": any issues preventing pickup, or null
+Respond ONLY with valid JSON, no other text.`
+      : `You are a fleet coordinator assistant. Analyze repair shop call transcripts. Respond in JSON with these fields:
+"status": one of these exact values: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Call Failed", "Failed"
+"summary": 2-3 sentence factual summary of the call
+"estimated_ready_date": if a completion/ready date was mentioned, return it as YYYY-MM-DD, otherwise null
+"blockers": any issues blocking repair completion (e.g. parts on order, awaiting authorization), or null
+Respond ONLY with valid JSON, no other text.`;
+
+    const userPrompt = callType === "tech"
+      ? `Analyze this technician pickup call transcript:\n\n${transcriptText}`
+      : `Analyze this repair shop call transcript:\n\n${transcriptText}`;
+
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.FS_OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 200,
+        temperature: 0.3,
+      }),
+    });
+
+    let summary = "";
+    let status = "";
+    let estimatedReadyDate: string | null = null;
+    let blockers: string | null = null;
+    if (openaiRes.ok) {
+      const openaiData = await openaiRes.json();
+      const raw = openaiData.choices?.[0]?.message?.content?.trim() || "";
+      console.log(`[ElevenLabs Webhook] GPT response (${callType}) for truck ${truck.truckNumber}: ${raw}`);
+      try {
+        const parsed = JSON.parse(raw);
+        status = parsed.status || "";
+        summary = parsed.summary || "";
+        estimatedReadyDate = parsed.estimated_ready_date || null;
+        blockers = parsed.blockers || null;
+      } catch {
+        summary = raw;
+        status = "Unknown";
+      }
+    } else {
+      const errText = await openaiRes.text();
+      console.error(`[ElevenLabs Webhook] OpenAI error:`, errText);
+      summary = "Summary unavailable — analysis failed.";
+      status = "Error";
+    }
+
+    console.log(`[ElevenLabs Webhook] Status: "${status}", Summary: "${summary}"`);
+
+    if (callType === "tech") {
+      await fleetScopeStorage.updateTruck(truck.id, { lastTechCallSummary: summary, lastTechCallStatus: status });
+    } else {
+      await fleetScopeStorage.updateTruck(truck.id, { lastCallSummary: summary, lastCallStatus: status });
+    }
+
+    // Update call_log if one exists for this conversation
+    try {
+      const callLog = await fleetScopeStorage.getCallLogByConversationId(conversationId);
+      if (callLog) {
+        const mappedOutcome = status === "Ready" || status === "Will Pick Up" ? "VEHICLE_READY"
+          : (status === "No Answer" || status === "Call Failed" || status === "Failed") ? "CALL_FAILED"
+          : "VEHICLE_NOT_READY";
+
+        const currentAttempt = callLog.attemptNumber || 1;
+        let nextFollowUp: string | undefined;
+
+        if (mappedOutcome === "VEHICLE_NOT_READY" && estimatedReadyDate) {
+          const eta = new Date(estimatedReadyDate);
+          eta.setDate(eta.getDate() - 1);
+          nextFollowUp = eta.toISOString().split("T")[0];
+        } else if (mappedOutcome === "VEHICLE_NOT_READY") {
+          const d = new Date();
+          d.setDate(d.getDate() + 3);
+          nextFollowUp = d.toISOString().split("T")[0];
+        }
+
+        if (mappedOutcome === "CALL_FAILED" && currentAttempt < 3) {
+          const d = new Date();
+          d.setDate(d.getDate() + 1);
+          nextFollowUp = d.toISOString().split("T")[0];
+        }
+
+        await fleetScopeStorage.updateCallLog(callLog.id, {
+          status: "completed",
+          outcome: mappedOutcome,
+          shopNotes: summary,
+          transcript: transcriptText,
+          estimatedReadyDate: estimatedReadyDate || callLog.estimatedReadyDate,
+          blockers: blockers || callLog.blockers,
+          attemptNumber: mappedOutcome === "CALL_FAILED" ? currentAttempt + 1 : currentAttempt,
+          nextFollowUpDate: nextFollowUp || callLog.nextFollowUpDate,
+        });
+        console.log(`[ElevenLabs Webhook] Updated call_log ${callLog.id} with outcome ${mappedOutcome}`);
+      }
+    } catch (logErr: any) {
+      console.warn(`[ElevenLabs Webhook] Could not update call_log:`, logErr.message);
+    }
+
+    res.status(200).json({ received: true, matched: true, summarized: true });
+  } catch (error: any) {
+    console.error("[ElevenLabs Webhook] Error:", error.message);
+    res.status(500).json({ message: error.message });
+  }
+}
+
 export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next: any) => Promise<any>): Router {
   const app = Router();
 
@@ -1468,10 +1678,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     shopListLastRun = await runShopListAutoSync();
   });
 
-  // Apply authentication to all fleet-scope routes except the /public/* paths,
-  // which are protected by their own API key check instead.
+  // Apply authentication to all fleet-scope routes except /public/* and the
+  // ElevenLabs webhook (which is called by ElevenLabs, not a browser session).
   app.use((req: any, res: any, next: any) => {
-    if (req.path.startsWith('/public/') || req.path === '/public') {
+    if (req.path.startsWith('/public/') || req.path === '/public' || req.path === '/elevenlabs/webhook') {
       return next();
     }
     return requireAuth(req, res, next);
@@ -3654,167 +3864,15 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  // ===== ELEVENLABS WEBHOOK =====
-  app.post("/elevenlabs/webhook", async (req, res) => {
-    try {
-      const body = req.body;
-      const conversationId = body?.conversation_id || body?.data?.conversation_id;
-      if (!conversationId) {
-        return res.status(400).json({ message: "Missing conversation_id" });
-      }
+  // ===== ELEVENLABS WEBHOOK (FS-prefix alias) =====
+  // The canonical route lives at /api/elevenlabs/webhook (registered in routes.ts).
+  // This alias at /api/fs/elevenlabs/webhook is kept for any tooling that already
+  // uses the /api/fs prefix. Auth is exempt via the middleware above.
+  app.post("/elevenlabs/webhook", elevenLabsWebhookHandler);
 
-      console.log(`[ElevenLabs Webhook] Received event for conversation: ${conversationId}`, JSON.stringify(body).slice(0, 500));
-
-      // Find the truck with this conversation ID — check both repair shop and tech call fields
-      const allTrucks = await fleetScopeStorage.getAllTrucks();
-      let truck = allTrucks.find((t: any) => t.lastCallConversationId === conversationId);
-      let callType: "repair" | "tech" = "repair";
-      if (!truck) {
-        truck = allTrucks.find((t: any) => t.lastTechCallConversationId === conversationId);
-        if (truck) callType = "tech";
-      }
-      if (!truck) {
-        console.warn(`[ElevenLabs Webhook] No truck found for conversation ${conversationId}`);
-        return res.status(200).json({ received: true, matched: false });
-      }
-
-      console.log(`[ElevenLabs Webhook] Matched truck ${truck.truckNumber} (${callType} call)`);
-
-      // Extract transcript from the webhook payload
-      const transcript = body?.transcript || body?.data?.transcript || body?.conversation?.transcript;
-      if (!transcript) {
-        console.log(`[ElevenLabs Webhook] No transcript yet for ${conversationId}`);
-        return res.status(200).json({ received: true, matched: true, transcriptReady: false });
-      }
-
-      // Build transcript string
-      let transcriptText = "";
-      if (Array.isArray(transcript)) {
-        transcriptText = transcript
-          .map((turn: any) => `${turn.role || turn.speaker || "Unknown"}: ${turn.message || turn.text || ""}`)
-          .join("\n");
-      } else if (typeof transcript === "string") {
-        transcriptText = transcript;
-      } else {
-        transcriptText = JSON.stringify(transcript);
-      }
-
-      // Generate summary with OpenAI
-      if (!process.env.FS_OPENAI_API_KEY) {
-        console.warn("[ElevenLabs Webhook] No OPENAI_API_KEY, skipping summary");
-        return res.status(200).json({ received: true, matched: true, summarized: false });
-      }
-
-      const systemPrompt = callType === "tech"
-        ? `You are a fleet coordinator assistant. Analyze technician pickup call transcripts. Respond in JSON with these fields:
-"status": one of these exact values: "Will Pick Up", "No Answer", "Call Failed", "Other Issues"
-"summary": 2-3 sentence factual summary of the call
-"estimated_ready_date": if a pickup date was mentioned, return it as YYYY-MM-DD, otherwise null
-"blockers": any issues preventing pickup, or null
-Respond ONLY with valid JSON, no other text.`
-        : `You are a fleet coordinator assistant. Analyze repair shop call transcripts. Respond in JSON with these fields:
-"status": one of these exact values: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Call Failed", "Failed"
-"summary": 2-3 sentence factual summary of the call
-"estimated_ready_date": if a completion/ready date was mentioned, return it as YYYY-MM-DD, otherwise null
-"blockers": any issues blocking repair completion (e.g. parts on order, awaiting authorization), or null
-Respond ONLY with valid JSON, no other text.`;
-
-      const userPrompt = callType === "tech"
-        ? `Analyze this technician pickup call transcript:\n\n${transcriptText}`
-        : `Analyze this repair shop call transcript:\n\n${transcriptText}`;
-
-      const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.FS_OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 200,
-          temperature: 0.3,
-        }),
-      });
-
-      let summary = "";
-      let status = "";
-      let estimatedReadyDate: string | null = null;
-      let blockers: string | null = null;
-      if (openaiRes.ok) {
-        const openaiData = await openaiRes.json();
-        const raw = openaiData.choices?.[0]?.message?.content?.trim() || "";
-        console.log(`[ElevenLabs Webhook] GPT response (${callType}) for truck ${truck.truckNumber}: ${raw}`);
-        try {
-          const parsed = JSON.parse(raw);
-          status = parsed.status || "";
-          summary = parsed.summary || "";
-          estimatedReadyDate = parsed.estimated_ready_date || null;
-          blockers = parsed.blockers || null;
-        } catch {
-          summary = raw;
-          status = "Unknown";
-        }
-      } else {
-        const errText = await openaiRes.text();
-        console.error(`[ElevenLabs Webhook] OpenAI error:`, errText);
-        summary = "Summary unavailable — analysis failed.";
-        status = "Error";
-      }
-
-      console.log(`[ElevenLabs Webhook] Status: "${status}", Summary: "${summary}"`);
-
-      if (callType === "tech") {
-        await fleetScopeStorage.updateTruck(truck.id, { lastTechCallSummary: summary, lastTechCallStatus: status });
-      } else {
-        await fleetScopeStorage.updateTruck(truck.id, { lastCallSummary: summary, lastCallStatus: status });
-      }
-
-      // Update call_log if one exists for this conversation
-      try {
-        const callLog = await fleetScopeStorage.getCallLogByConversationId(conversationId);
-        if (callLog) {
-          const mappedOutcome = status === "Ready" || status === "Will Pick Up" ? "VEHICLE_READY"
-            : (status === "No Answer" || status === "Call Failed" || status === "Failed") ? "CALL_FAILED"
-            : "VEHICLE_NOT_READY";
-
-          const currentAttempt = callLog.attemptNumber || 1;
-          let nextFollowUp: string | undefined;
-
-          if (mappedOutcome === "VEHICLE_NOT_READY" && estimatedReadyDate) {
-            const eta = new Date(estimatedReadyDate);
-            eta.setDate(eta.getDate() - 1);
-            nextFollowUp = eta.toISOString().split("T")[0];
-          } else if (mappedOutcome === "VEHICLE_NOT_READY") {
-            const d = new Date();
-            d.setDate(d.getDate() + 3);
-            nextFollowUp = d.toISOString().split("T")[0];
-          }
-
-          if (mappedOutcome === "CALL_FAILED" && currentAttempt < 3) {
-            const d = new Date();
-            d.setDate(d.getDate() + 1);
-            nextFollowUp = d.toISOString().split("T")[0];
-          }
-
-          await fleetScopeStorage.updateCallLog(callLog.id, {
-            status: "completed",
-            outcome: mappedOutcome,
-            shopNotes: summary,
-            transcript: transcriptText,
-            estimatedReadyDate: estimatedReadyDate || callLog.estimatedReadyDate,
-            blockers: blockers || callLog.blockers,
-            attemptNumber: mappedOutcome === "CALL_FAILED" ? currentAttempt + 1 : currentAttempt,
-            nextFollowUpDate: nextFollowUp || callLog.nextFollowUpDate,
-          });
-          console.log(`[ElevenLabs Webhook] Updated call_log ${callLog.id} with outcome ${mappedOutcome}`);
-
-          // Auto-trigger tech call DISABLED — previously called tech automatically when shop reported VEHICLE_READY
-          // To re-enable, uncomment the block below:
-          /*
+  // TOMBSTONE: old inline handler body removed — logic lives in elevenLabsWebhookHandler above.
+  // The commented-out auto-trigger tech call block that was here:
+  /*
           if (mappedOutcome === "VEHICLE_READY" && callLog.callType === "shop") {
             const truckForAutoCall = await fleetScopeStorage.getTruck(callLog.truckId);
             if (truckForAutoCall?.techPhone && truckForAutoCall.techPhone.trim()) {
@@ -3860,17 +3918,6 @@ Respond ONLY with valid JSON, no other text.`;
             }
           }
           */
-        }
-      } catch (logErr: any) {
-        console.warn(`[ElevenLabs Webhook] Could not update call_log:`, logErr.message);
-      }
-
-      res.status(200).json({ received: true, matched: true, summarized: true });
-    } catch (error: any) {
-      console.error("[ElevenLabs Webhook] Error:", error.message);
-      res.status(500).json({ message: error.message });
-    }
-  });
 
   // GET actions for a specific truck
   app.get("/trucks/:id/actions", async (req, res) => {
