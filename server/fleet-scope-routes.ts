@@ -1742,8 +1742,15 @@ async function searchElevenLabsConversationByPhone(
         if (vinUpper) {
           const vinInConv = extractVinFromConversation(c);
           if (vinInConv) {
-            if (vinInConv === vinUpper || vinInConv.slice(-8) === last8Vin) {
-              console.log(`[ElevenLabs] VIN match candidate: conv ${c.conversation_id} vinInConv=${vinInConv}`);
+            // If conversation carries a full VIN (17 chars), require exact equality to
+            // avoid false positives from last-8 collisions. Only use last-8 comparison
+            // when the conversation only has a partial (sub-17 char) VIN identifier.
+            const isFullVin = vinInConv.length >= 17;
+            const isMatch = isFullVin
+              ? vinInConv === vinUpper
+              : vinInConv === last8Vin;
+            if (isMatch) {
+              console.log(`[ElevenLabs] VIN match candidate: conv ${c.conversation_id} vinInConv=${vinInConv} (${isFullVin ? "full" : "last-8"})`);
               vinCandidates.push(c);
             }
           }
