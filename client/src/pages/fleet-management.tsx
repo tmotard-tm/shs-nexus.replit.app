@@ -284,6 +284,18 @@ export default function FleetManagement() {
   // Selected vehicle for detail view
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
+
+  // Capture ?openTruck= param once at mount (lazy useState so it runs once, before any URL cleaning)
+  const [pendingOpenTruck] = useState<string | null>(() => {
+    const p = new URLSearchParams(window.location.search).get('openTruck');
+    if (p) {
+      const params = new URLSearchParams(window.location.search);
+      params.delete('openTruck');
+      const qs = params.toString();
+      window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+    }
+    return p;
+  });
   
   // Nexus tracking data form state
   const [nexusStatus, setNexusStatus] = useState<string>("");
@@ -326,20 +338,17 @@ export default function FleetManagement() {
   
   const allVehicles = apiResponse?.vehicles || [];
 
-  // Auto-open vehicle detail sheet when page loads with ?openTruck=VEHICLE_NUMBER
+  // Auto-open vehicle detail sheet when page loads with ?openTruck=VEHICLE_NUMBER.
+  // pendingOpenTruck is captured once at mount (before any URL cleaning), so it
+  // survives allVehicles refetches and background reloads without losing the value.
   useEffect(() => {
-    if (allVehicles.length === 0) return;
-    const params = new URLSearchParams(window.location.search);
-    const openTruck = params.get('openTruck');
-    if (!openTruck) return;
-    const normalized = toCanonical(openTruck);
+    if (!pendingOpenTruck || allVehicles.length === 0) return;
+    const normalized = toCanonical(pendingOpenTruck);
     const match = allVehicles.find(v => toCanonical(v.vehicleNumber) === normalized);
-    setSearchQuery(openTruck);
-    if (match) setSelectedVehicle(match);
-    params.delete('openTruck');
-    const newSearch = params.toString();
-    window.history.replaceState(null, '', newSearch ? `?${newSearch}` : window.location.pathname);
-  }, [allVehicles]);
+    if (!match) return; // wait for next vehicle load — ref keeps the value
+    setSearchQuery(pendingOpenTruck);
+    setSelectedVehicle(match);
+  }, [allVehicles, pendingOpenTruck]);
 
   // Resync assignments mutation (re-checks TPMS + Holman APIs for selected vehicle)
   const resyncAssignmentsMutation = useMutation({
