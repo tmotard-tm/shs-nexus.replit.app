@@ -39,13 +39,18 @@ const app = express();
 // This ensures rate limiting and security features work correctly in production
 app.set('trust proxy', 1);
 
-// ElevenLabs webhook must be registered BEFORE global express.json() so that
+// ElevenLabs webhook routes must be registered BEFORE global express.json() so that
 // express.raw() can capture the original bytes for HMAC-SHA256 verification.
-// The FS_ELEVENLABS_WEBHOOK_SECRET env var enables signature verification.
+// Without this, the global JSON parser consumes the request body stream first
+// and the HMAC computed over req.body won't match the signed payload bytes.
+// FS_ELEVENLABS_WEBHOOK_SECRET (Replit Secret) enables signature verification.
 if (!process.env.FS_ELEVENLABS_WEBHOOK_SECRET) {
   console.warn("[ElevenLabs] WARNING: FS_ELEVENLABS_WEBHOOK_SECRET not set — signature verification DISABLED");
 }
+// Canonical URL (what ElevenLabs should call):
 app.post("/api/elevenlabs/webhook", express.raw({ type: "application/json" }), elevenLabsWebhookHandler);
+// Backwards-compat alias for tooling that already uses the /api/fs prefix:
+app.post("/api/fs/elevenlabs/webhook", express.raw({ type: "application/json" }), elevenLabsWebhookHandler);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));

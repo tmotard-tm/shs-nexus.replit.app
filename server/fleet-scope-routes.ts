@@ -1,4 +1,4 @@
-import express, { Router } from "express";
+import { Router } from "express";
 import { fleetScopeStorage } from "./fleet-scope-storage";
 import { storage } from "./storage";
 import { fsDb } from "./fleet-scope-db";
@@ -3873,11 +3873,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  // ===== ELEVENLABS WEBHOOK (FS-prefix alias) =====
-  // The canonical route lives at /api/elevenlabs/webhook (registered in routes.ts).
-  // This alias at /api/fs/elevenlabs/webhook is kept for backwards compatibility with
-  // any tooling that already points to the /api/fs prefix. Auth is exempt above.
-  app.post("/elevenlabs/webhook", express.raw({ type: "application/json" }), elevenLabsWebhookHandler);
+  // NOTE: Both /api/elevenlabs/webhook and /api/fs/elevenlabs/webhook are registered
+  // in server/index.ts BEFORE global express.json() so that express.raw() captures
+  // raw bytes for HMAC-SHA256 signature verification. Do NOT register them here.
 
   // GET actions for a specific truck
   app.get("/trucks/:id/actions", async (req, res) => {
