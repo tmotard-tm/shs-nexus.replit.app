@@ -3674,6 +3674,75 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // ===== STUCK CALL RECOVERY =====
+  // POST /api/fs/call-analysis/recover
+  // Admin endpoint: clears "Analyzing call..." stuck state for a truck.
+  // Supports two strategies:
+  //   strategy: "clear"  — sets summary to "Analysis unavailable" so UI stops spinning
+  //   strategy: "replay" — re-fetches conversation summary from ElevenLabs by stored conv ID
+  app.post("/api/fs/call-analysis/recover", async (req, res) => {
+    try {
+      const { truckId, callType = "repair", strategy = "clear" } = req.body;
+      if (!truckId) return res.status(400).json({ message: "truckId is required" });
+
+      const truck = await fleetScopeStorage.getTruck(truckId);
+      if (!truck) return res.status(404).json({ message: "Truck not found" });
+
+      if (strategy === "clear") {
+        if (callType === "tech") {
+          await fleetScopeStorage.updateTruck(truckId, {
+            lastTechCallSummary: "Analysis unavailable (manually cleared)",
+            lastTechCallStatus: truck.lastTechCallStatus ?? "Unknown",
+          });
+        } else {
+          await fleetScopeStorage.updateTruck(truckId, {
+            lastCallSummary: "Analysis unavailable (manually cleared)",
+            lastCallStatus: truck.lastCallStatus ?? "Unknown",
+          });
+        }
+        return res.json({ recovered: true, strategy: "clear", truckId });
+      }
+
+      if (strategy === "replay") {
+        const convId = callType === "tech" ? truck.lastTechCallConversationId : truck.lastCallConversationId;
+        if (!convId) {
+          return res.status(400).json({ message: "No conversation ID on record — cannot replay. Use strategy=clear to unblock." });
+        }
+        const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
+        if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
+
+        const elRes = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${convId}`, {
+          headers: { "xi-api-key": apiKey },
+        });
+        if (!elRes.ok) {
+          return res.status(502).json({ message: `ElevenLabs returned ${elRes.status}` });
+        }
+        const elData: any = await elRes.json();
+        const transcript = elData?.transcript || null;
+        const rawStatus = elData?.analysis?.call_successful ?? "unknown";
+        const summary = typeof elData?.analysis?.transcript_summary === "string"
+          ? elData.analysis.transcript_summary
+          : transcript
+            ? (Array.isArray(transcript)
+                ? transcript.map((t: any) => `${t.role}: ${t.message}`).join("\n")
+                : String(transcript))
+            : "No summary available";
+        const status = rawStatus === "success" ? "Ready" : rawStatus === "failure" ? "Not Ready" : "Analysis unavailable";
+
+        if (callType === "tech") {
+          await fleetScopeStorage.updateTruck(truckId, { lastTechCallSummary: summary, lastTechCallStatus: status });
+        } else {
+          await fleetScopeStorage.updateTruck(truckId, { lastCallSummary: summary, lastCallStatus: status });
+        }
+        return res.json({ recovered: true, strategy: "replay", truckId, status, summary });
+      }
+
+      return res.status(400).json({ message: "Invalid strategy. Use 'clear' or 'replay'." });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ===== ELEVENLABS WEBHOOK =====
   app.post("/elevenlabs/webhook", async (req, res) => {
     try {
