@@ -1664,6 +1664,13 @@ function extractPhoneFromConversation(conv: any): string {
     const raw = (init[field] || "").replace(/\D/g, "").slice(-10);
     if (raw) return raw;
   }
+  // Check conversation_initiation_client_data.dynamic_variables — this is the exact
+  // key path used when sending the outbound call; ElevenLabs echoes it back here.
+  const cicd = conv.conversation_initiation_client_data?.dynamic_variables || {};
+  for (const field of ELEVENLABS_PHONE_FIELDS) {
+    const raw = (cicd[field] || "").replace(/\D/g, "").slice(-10);
+    if (raw) return raw;
+  }
   return "";
 }
 
@@ -1671,6 +1678,9 @@ function extractVinFromConversation(conv: any): string {
   // The VIN is sent as dynamic_variables.vin_number (full) and last_8_vin (last 8 chars)
   const meta = conv.metadata || {};
   const sources = [
+    // Primary: conversation_initiation_client_data.dynamic_variables — exact key path
+    // used when sending the outbound call; ElevenLabs echoes it back in GET responses.
+    conv.conversation_initiation_client_data?.dynamic_variables,
     meta.dynamic_variables,
     meta.initiation_metadata,
     conv.dynamic_variables,
@@ -3924,17 +3934,32 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           return res.status(409).json({ message: `Conversation phone (${phoneInConv}) does not match truck phone (${truckPhone}). Pass force=true to override.` });
         }
       } else {
-        // Search by phone number for the most recent completed conversation
-        const toNumber = resolvedCallType === "tech" ? truck.techPhone : truck.repairPhone;
-        if (!toNumber) return res.status(400).json({ message: `No ${resolvedCallType === "tech" ? "tech" : "repair"} phone number on truck ${truckNumber}` });
-        const agentId = resolvedCallType === "tech" ? ELEVENLABS_TECH_AGENT_ID : ELEVENLABS_SHOP_AGENT_ID;
-        const afterUnixSecs = Math.floor(Date.now() / 1000) - 7 * 24 * 3600; // last 7 days
-        const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey, truck.vin ?? undefined);
-        if (!match) return res.status(404).json({ message: `No recent completed conversation found for truck ${truckNumber}` });
-        resolvedConvId = match.conversation_id;
-        // searchElevenLabsConversationByPhone now returns the full conversation detail
-        // object (fetched individually during matching), so no second fetch is needed.
-        convData = match;
+        // Step 1: Check our own call logs first — much more reliable than ElevenLabs
+        // search, since ElevenLabs does not persist dynamic_variables (phone/VIN) in
+        // retrievable conversation metadata. getCallLogsByTruckId returns logs ordered
+        // by callTimestamp desc, so [0] is the most recent.
+        const existingLogs = await fleetScopeStorage.getCallLogsByTruckId(truck.id);
+        const recentLog = existingLogs.find(
+          (l: any) => l.callType === resolvedCallType && l.elevenLabsConversationId
+        );
+        if (recentLog?.elevenLabsConversationId) {
+          console.log(`[Backfill] Found conv ${recentLog.elevenLabsConversationId} in call logs for truck ${truckNumber} (${resolvedCallType})`);
+          resolvedConvId = recentLog.elevenLabsConversationId;
+          convData = await fetchElevenLabsConversation(resolvedConvId, apiKey);
+          if (!convData) return res.status(404).json({ message: `Conversation ${resolvedConvId} (from call log) not found or not accessible` });
+        } else {
+          // Step 2: Fall back to ElevenLabs search by phone number
+          const toNumber = resolvedCallType === "tech" ? truck.techPhone : truck.repairPhone;
+          if (!toNumber) return res.status(400).json({ message: `No ${resolvedCallType === "tech" ? "tech" : "repair"} phone number on truck ${truckNumber}` });
+          const agentId = resolvedCallType === "tech" ? ELEVENLABS_TECH_AGENT_ID : ELEVENLABS_SHOP_AGENT_ID;
+          const afterUnixSecs = Math.floor(Date.now() / 1000) - 7 * 24 * 3600; // last 7 days
+          const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey, truck.vin ?? undefined);
+          if (!match) return res.status(404).json({ message: `No recent completed conversation found for truck ${truckNumber}` });
+          resolvedConvId = match.conversation_id;
+          // searchElevenLabsConversationByPhone returns the full conversation detail
+          // object (fetched individually during matching), so no second fetch is needed.
+          convData = match;
+        }
       }
 
       const transcript = convData.transcript || convData.data?.transcript;
