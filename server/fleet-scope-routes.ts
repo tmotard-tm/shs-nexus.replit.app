@@ -3302,9 +3302,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const elevenLabsConvId = result?.conversation_id || result?.conversationId || null;
       console.log(`[CallRepairShop] call_sid: ${callSid}, conversation_id: ${elevenLabsConvId} (keys: ${Object.keys(result || {}).join(', ')})`);
 
-      // Step 1: Write lastCallDate (non-optional — must always succeed)
+      // Step 1: Write lastCallDate + Calling status (non-optional — must always succeed)
       await fleetScopeStorage.updateTruck(truck.id, {
         lastCallDate: new Date(),
+        lastCallStatus: "Calling",
         lastCallSummary: null,
       });
 
@@ -3399,9 +3400,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const elevenLabsConvId = result?.conversation_id || result?.conversationId || null;
       console.log(`[CallTechnician] call_sid: ${callSid}, conversation_id: ${elevenLabsConvId}`);
 
-      // Step 1: Write lastTechCallDate (non-optional — must always succeed)
+      // Step 1: Write lastTechCallDate + Calling status (non-optional — must always succeed)
       await fleetScopeStorage.updateTruck(truck.id, {
         lastTechCallDate: new Date(),
+        lastTechCallStatus: "Calling",
         lastTechCallSummary: null,
       });
 
@@ -3757,8 +3759,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // POST /api/fs/call-analysis/backfill
   // Pulls the most-recent ElevenLabs conversation per truck and back-fills
   // lastCallDate / lastCallStatus / lastCallSummary / lastCallConversationId.
-  // Only processes trucks that have lastCallDate set but are missing a summary
-  // (or all trucks if ?force=true). Appends to fs_call_logs (never overwrites).
+  // Match order: stored conv ID → stored Twilio SID → most-recent by phone number.
+  // Recency guard: skips update when stored lastCallDate is newer than conversation.
+  // Call-log upsert: updates existing log in-place; inserts only when absent.
+  // Response: { checked, matched, updated, skipped, errors[] }
   app.post("/api/fs/call-analysis/backfill", async (req, res) => {
     try {
       const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
@@ -3767,23 +3771,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const { force = false, truckIds = null } = req.body || {};
 
       const allTrucks = await fleetScopeStorage.getAllTrucks();
-      // Determine which trucks to backfill
-      let targetTrucks = truckIds
+      // Determine which trucks to check
+      const targetTrucks: any[] = truckIds
         ? allTrucks.filter((t: any) => truckIds.includes(t.id))
         : allTrucks.filter((t: any) => {
             if (force) return true;
-            // Process trucks that have been called (lastCallDate) but have no summary yet
-            return (t.lastCallDate && (!t.lastCallSummary || !t.lastCallStatus));
+            // Trucks that have been called but are missing summary or status
+            return (t.lastCallDate && (!t.lastCallSummary || !t.lastCallStatus))
+              || (t.lastTechCallDate && (!t.lastTechCallSummary || !t.lastTechCallStatus));
           });
 
       if (targetTrucks.length === 0) {
-        return res.json({ processed: 0, updated: 0, skipped: 0, message: "No trucks need backfill. Use force=true to reprocess all." });
+        return res.json({ checked: 0, matched: 0, updated: 0, skipped: 0, errors: [], message: "No trucks need backfill. Use force=true to reprocess all." });
       }
 
       console.log(`[Backfill] Starting for ${targetTrucks.length} trucks (force=${force})`);
 
-      // Fetch ALL conversations from ElevenLabs (paginated, most-recent first)
-      // We use agent_id filter for the shop call agent (repair shop agent)
       const SHOP_AGENT_ID = "agent_7901kgj8m0w8ep6ar78fzthzr9jv";
       const TECH_AGENT_ID = "agent_9401kk2njc6veajaecs89wtbh840";
 
@@ -3799,7 +3802,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           if (cursor) url.searchParams.set("cursor", cursor);
           const resp = await fetch(url.toString(), { headers: { "xi-api-key": apiKey } });
           if (!resp.ok) {
-            console.warn(`[Backfill] Could not fetch conversations page ${page} for agent ${agentId}: ${resp.status}`);
+            console.warn(`[Backfill] Could not fetch page ${page} for agent ${agentId}: ${resp.status}`);
             break;
           }
           const data: any = await resp.json();
@@ -3821,32 +3824,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         } catch { return null; }
       }
 
-      // Fetch conversation lists from both agents
-      const [shopConversations, techConversations] = await Promise.all([
-        fetchAllConversations(SHOP_AGENT_ID),
-        fetchAllConversations(TECH_AGENT_ID),
-      ]);
-
-      console.log(`[Backfill] Fetched ${shopConversations.length} shop convs, ${techConversations.length} tech convs`);
-
-      // Build lookup: phone_number -> most-recent conversation (shop & tech separately)
-      // ElevenLabs conversation objects typically have: conversation_id, created_at, metadata.phone_number or to_number
-      function buildPhoneMap(convs: any[]): Map<string, any> {
-        const map = new Map<string, any>();
-        for (const conv of convs) {
-          const phone = (conv?.metadata?.to_number || conv?.to_number || conv?.phone_number || "").replace(/\D/g, "");
-          if (!phone || phone.length < 10) continue;
-          const existing = map.get(phone);
-          const existingTs = existing ? new Date(existing.created_at || 0).getTime() : 0;
-          const thisTs = new Date(conv.created_at || 0).getTime();
-          if (!existing || thisTs > existingTs) {
-            map.set(phone, conv);
-          }
-        }
-        return map;
-      }
-
-      // Also build lookup by conversation_id for trucks that already have one stored
+      // Build lookup maps
       function buildConvIdMap(convs: any[]): Map<string, any> {
         const map = new Map<string, any>();
         for (const conv of convs) {
@@ -3856,25 +3834,58 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return map;
       }
 
-      const shopPhoneMap = buildPhoneMap(shopConversations);
-      const techPhoneMap = buildPhoneMap(techConversations);
-      const shopConvIdMap = buildConvIdMap(shopConversations);
-      const techConvIdMap = buildConvIdMap(techConversations);
+      // Build Twilio SID → conversation map (from metadata if present)
+      function buildSidMap(convs: any[]): Map<string, any> {
+        const map = new Map<string, any>();
+        for (const conv of convs) {
+          const sid = conv?.metadata?.call_sid || conv?.call_sid || conv?.twilio_call_sid;
+          if (sid) map.set(sid, conv);
+        }
+        return map;
+      }
 
-      // GPT summariser (reuse same logic as webhook)
+      // Build phone → most-recent conversation map
+      function buildPhoneMap(convs: any[]): Map<string, any> {
+        const map = new Map<string, any>();
+        for (const conv of convs) {
+          const phone = (conv?.metadata?.to_number || conv?.to_number || conv?.phone_number || "").replace(/\D/g, "");
+          if (!phone || phone.length < 10) continue;
+          const existing = map.get(phone);
+          const existingTs = existing ? new Date(existing.created_at || 0).getTime() : 0;
+          const thisTs = new Date(conv.created_at || 0).getTime();
+          if (!existing || thisTs > existingTs) map.set(phone, conv);
+        }
+        return map;
+      }
+
+      // Fetch all conversations from both agents
+      const [shopConversations, techConversations] = await Promise.all([
+        fetchAllConversations(SHOP_AGENT_ID),
+        fetchAllConversations(TECH_AGENT_ID),
+      ]);
+      console.log(`[Backfill] Fetched ${shopConversations.length} shop convs, ${techConversations.length} tech convs`);
+
+      const shopConvIdMap = buildConvIdMap(shopConversations);
+      const shopSidMap = buildSidMap(shopConversations);
+      const shopPhoneMap = buildPhoneMap(shopConversations);
+      const techConvIdMap = buildConvIdMap(techConversations);
+      const techSidMap = buildSidMap(techConversations);
+      const techPhoneMap = buildPhoneMap(techConversations);
+
+      // GPT summariser
       async function summarise(transcriptText: string, callType: "repair" | "tech"): Promise<{ status: string; summary: string; estimatedReadyDate: string | null }> {
         if (!process.env.FS_OPENAI_API_KEY) return { status: "Unknown", summary: transcriptText.slice(0, 300), estimatedReadyDate: null };
         const systemPrompt = callType === "tech"
-          ? `You are a fleet coordinator assistant. Analyze technician pickup call transcripts. Respond in JSON with these fields:
-"status": one of these exact values: "Will Pick Up", "No Answer", "Call Failed", "Other Issues"
-"summary": 2-3 sentence factual summary of the call
-"estimated_ready_date": if a pickup date was mentioned, return it as YYYY-MM-DD, otherwise null
-Respond ONLY with valid JSON, no other text.`
-          : `You are a fleet coordinator assistant. Analyze repair shop call transcripts. Respond in JSON with these fields:
-"status": one of these exact values: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Call Failed", "Failed"
-"summary": 2-3 sentence factual summary of the call
-"estimated_ready_date": if a completion/ready date was mentioned, return it as YYYY-MM-DD, otherwise null
-Respond ONLY with valid JSON, no other text.`;
+          ? `You are a fleet coordinator assistant. Analyze technician pickup call transcripts. Respond in JSON:
+"status": one of: "Will Pick Up", "No Answer", "Call Failed", "Other Issues"
+"summary": 2-3 sentence factual summary
+"estimated_ready_date": YYYY-MM-DD or null
+Respond ONLY with valid JSON.`
+          : `You are a fleet coordinator assistant. Analyze repair shop call transcripts. Respond in JSON:
+"status": one of: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Call Failed", "Failed"
+"summary": 2-3 sentence factual summary
+"estimated_ready_date": YYYY-MM-DD or null
+Respond ONLY with valid JSON.`;
         try {
           const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
@@ -3893,33 +3904,72 @@ Respond ONLY with valid JSON, no other text.`;
         } catch { return { status: "Unknown", summary: "Summary unavailable.", estimatedReadyDate: null }; }
       }
 
+      // Helper to build transcript text from detail response
+      function buildTranscriptText(detail: any): string {
+        const transcript = detail?.transcript || [];
+        if (Array.isArray(transcript)) {
+          return transcript.map((t: any) => `${t.role || "Unknown"}: ${t.message || t.text || ""}`).join("\n");
+        }
+        if (typeof transcript === "string") return transcript;
+        return "";
+      }
+
+      // Helper to upsert call log: update if exists by convId, insert if new
+      async function upsertCallLog(
+        convId: string,
+        truckId: string, truckNumber: string, callType: "shop" | "tech",
+        phoneNumber: string, status: string, summary: string, transcriptText: string
+      ): Promise<void> {
+        const outcome = (callType === "shop")
+          ? (status === "Ready" ? "VEHICLE_READY" : (status === "No Answer" || status.includes("Failed")) ? "CALL_FAILED" : "VEHICLE_NOT_READY")
+          : (status === "Will Pick Up" ? "VEHICLE_READY" : (status === "No Answer" || status.includes("Failed")) ? "CALL_FAILED" : "VEHICLE_NOT_READY");
+        const existing = await fleetScopeStorage.getCallLogByConversationId(convId);
+        if (existing) {
+          await fleetScopeStorage.updateCallLog(existing.id, {
+            status: "completed", outcome, shopNotes: summary,
+            transcript: transcriptText || existing.transcript,
+          });
+        } else {
+          await fleetScopeStorage.createCallLog({
+            truckId, truckNumber, callType, phoneNumber,
+            elevenLabsConversationId: convId, status: "completed",
+            outcome, shopNotes: summary, transcript: transcriptText || undefined,
+          });
+        }
+      }
+
+      let checked = 0;
+      let matched = 0;
       let updated = 0;
       let skipped = 0;
+      const errors: string[] = [];
 
       for (const truck of targetTrucks) {
+        checked++;
         try {
           const repairPhone = (truck.repairPhone || "").replace(/\D/g, "");
           const techPhone = (truck.techPhone || "").replace(/\D/g, "");
 
           // --- Shop call backfill ---
-          if (truck.lastCallDate && (!truck.lastCallSummary || force)) {
-            // Try by stored conv ID first, then by phone
+          if (truck.lastCallDate && (!truck.lastCallSummary || !truck.lastCallStatus || force)) {
+            // Match order: stored conv ID → stored Twilio SID → most-recent by phone
             let conv = truck.lastCallConversationId ? shopConvIdMap.get(truck.lastCallConversationId) : null;
+            if (!conv && truck.lastCallSid) conv = shopSidMap.get(truck.lastCallSid);
             if (!conv && repairPhone) conv = shopPhoneMap.get(repairPhone);
 
             if (conv) {
+              matched++;
               const convId = conv.conversation_id || conv.id;
-              const detail = convId ? await fetchConversationDetail(convId) : null;
-              if (detail) {
-                // Build transcript text
-                const transcript = detail?.transcript || [];
-                let transcriptText = "";
-                if (Array.isArray(transcript)) {
-                  transcriptText = transcript.map((t: any) => `${t.role || "Unknown"}: ${t.message || t.text || ""}`).join("\n");
-                } else if (typeof transcript === "string") {
-                  transcriptText = transcript;
-                }
+              const convTs = conv.created_at ? new Date(conv.created_at).getTime() : 0;
+              const storedTs = truck.lastCallDate ? new Date(truck.lastCallDate).getTime() : 0;
 
+              // Recency guard: skip if stored date is newer than this conversation (unless force)
+              if (!force && storedTs > convTs && truck.lastCallSummary) {
+                skipped++;
+                console.log(`[Backfill] Shop call for ${truck.truckNumber}: stored date is newer, skipping`);
+              } else {
+                const detail = convId ? await fetchConversationDetail(convId) : null;
+                const transcriptText = detail ? buildTranscriptText(detail) : "";
                 let status = truck.lastCallStatus || "";
                 let summary = truck.lastCallSummary || "";
 
@@ -3929,7 +3979,7 @@ Respond ONLY with valid JSON, no other text.`;
                   summary = result.summary;
                 }
 
-                const callDate = conv.created_at ? new Date(conv.created_at) : (truck.lastCallDate ? new Date(truck.lastCallDate) : new Date());
+                const callDate = convTs ? new Date(convTs) : new Date(storedTs || Date.now());
 
                 await fleetScopeStorage.updateTruck(truck.id, {
                   lastCallDate: callDate,
@@ -3938,28 +3988,10 @@ Respond ONLY with valid JSON, no other text.`;
                   lastCallConversationId: convId || truck.lastCallConversationId,
                 });
 
-                // Append to call_logs (only if no log exists for this conversation)
-                if (convId) {
-                  const existing = await fleetScopeStorage.getCallLogByConversationId(convId);
-                  if (!existing) {
-                    await fleetScopeStorage.createCallLog({
-                      truckId: truck.id,
-                      truckNumber: truck.truckNumber,
-                      callType: "shop",
-                      phoneNumber: repairPhone || "",
-                      elevenLabsConversationId: convId,
-                      status: "completed",
-                      outcome: status === "Ready" ? "VEHICLE_READY" : (status === "No Answer" || status === "Call Failed") ? "CALL_FAILED" : "VEHICLE_NOT_READY",
-                      shopNotes: summary,
-                      transcript: transcriptText || undefined,
-                    });
-                  }
-                }
+                if (convId) await upsertCallLog(convId, truck.id, truck.truckNumber, "shop", repairPhone, status, summary, transcriptText);
 
                 updated++;
                 console.log(`[Backfill] Shop call updated for truck ${truck.truckNumber}: ${status}`);
-              } else {
-                skipped++;
               }
             } else {
               skipped++;
@@ -3967,22 +3999,24 @@ Respond ONLY with valid JSON, no other text.`;
           }
 
           // --- Tech call backfill ---
-          if (truck.lastTechCallDate && (!truck.lastTechCallSummary || force)) {
+          if (truck.lastTechCallDate && (!truck.lastTechCallSummary || !truck.lastTechCallStatus || force)) {
+            // Match order: stored conv ID → stored Twilio SID → most-recent by phone
             let conv = truck.lastTechCallConversationId ? techConvIdMap.get(truck.lastTechCallConversationId) : null;
+            if (!conv && truck.lastTechCallSid) conv = techSidMap.get(truck.lastTechCallSid);
             if (!conv && techPhone) conv = techPhoneMap.get(techPhone);
 
             if (conv) {
+              matched++;
               const convId = conv.conversation_id || conv.id;
-              const detail = convId ? await fetchConversationDetail(convId) : null;
-              if (detail) {
-                const transcript = detail?.transcript || [];
-                let transcriptText = "";
-                if (Array.isArray(transcript)) {
-                  transcriptText = transcript.map((t: any) => `${t.role || "Unknown"}: ${t.message || t.text || ""}`).join("\n");
-                } else if (typeof transcript === "string") {
-                  transcriptText = transcript;
-                }
+              const convTs = conv.created_at ? new Date(conv.created_at).getTime() : 0;
+              const storedTs = truck.lastTechCallDate ? new Date(truck.lastTechCallDate).getTime() : 0;
 
+              if (!force && storedTs > convTs && truck.lastTechCallSummary) {
+                skipped++;
+                console.log(`[Backfill] Tech call for ${truck.truckNumber}: stored date is newer, skipping`);
+              } else {
+                const detail = convId ? await fetchConversationDetail(convId) : null;
+                const transcriptText = detail ? buildTranscriptText(detail) : "";
                 let status = truck.lastTechCallStatus || "";
                 let summary = truck.lastTechCallSummary || "";
 
@@ -3992,7 +4026,7 @@ Respond ONLY with valid JSON, no other text.`;
                   summary = result.summary;
                 }
 
-                const callDate = conv.created_at ? new Date(conv.created_at) : (truck.lastTechCallDate ? new Date(truck.lastTechCallDate) : new Date());
+                const callDate = convTs ? new Date(convTs) : new Date(storedTs || Date.now());
 
                 await fleetScopeStorage.updateTruck(truck.id, {
                   lastTechCallDate: callDate,
@@ -4001,40 +4035,25 @@ Respond ONLY with valid JSON, no other text.`;
                   lastTechCallConversationId: convId || truck.lastTechCallConversationId,
                 });
 
-                if (convId) {
-                  const existing = await fleetScopeStorage.getCallLogByConversationId(convId);
-                  if (!existing) {
-                    await fleetScopeStorage.createCallLog({
-                      truckId: truck.id,
-                      truckNumber: truck.truckNumber,
-                      callType: "tech",
-                      phoneNumber: techPhone || "",
-                      elevenLabsConversationId: convId,
-                      status: "completed",
-                      outcome: status === "Will Pick Up" ? "VEHICLE_READY" : (status === "No Answer" || status === "Call Failed") ? "CALL_FAILED" : "VEHICLE_NOT_READY",
-                      shopNotes: summary,
-                      transcript: transcriptText || undefined,
-                    });
-                  }
-                }
+                if (convId) await upsertCallLog(convId, truck.id, truck.truckNumber, "tech", techPhone, status, summary, transcriptText);
 
                 updated++;
                 console.log(`[Backfill] Tech call updated for truck ${truck.truckNumber}: ${status}`);
-              } else {
-                skipped++;
               }
             } else {
               skipped++;
             }
           }
         } catch (truckErr: any) {
-          console.warn(`[Backfill] Error processing truck ${truck.truckNumber}:`, truckErr.message);
+          const errMsg = `truck ${truck.truckNumber}: ${truckErr.message}`;
+          console.warn(`[Backfill] Error processing ${errMsg}`);
+          errors.push(errMsg);
           skipped++;
         }
       }
 
-      console.log(`[Backfill] Complete. Updated: ${updated}, Skipped: ${skipped}`);
-      res.json({ processed: targetTrucks.length, updated, skipped });
+      console.log(`[Backfill] Complete. Checked: ${checked}, Matched: ${matched}, Updated: ${updated}, Skipped: ${skipped}, Errors: ${errors.length}`);
+      res.json({ checked, matched, updated, skipped, errors });
     } catch (error: any) {
       console.error("[Backfill] Error:", error.message);
       res.status(500).json({ message: error.message });

@@ -3809,13 +3809,21 @@ export default function Dashboard() {
                                     return (
                                       <Tooltip>
                                         <TooltipTrigger asChild>
-                                          <div className={`text-[9px] leading-none font-medium cursor-default ${colorClass} flex items-center gap-0.5`}>
+                                          <button
+                                            type="button"
+                                            className={`text-[9px] leading-none font-medium cursor-pointer ${colorClass} flex items-center gap-0.5 hover:opacity-80 transition-opacity`}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setSelectedTruckId(truck.id);
+                                              setDetailPanelOpen(true);
+                                            }}
+                                          >
                                             <PhoneCall className="w-2.5 h-2.5 shrink-0" />
                                             <span>{callStatus || callDate || "—"}</span>
-                                          </div>
+                                          </button>
                                         </TooltipTrigger>
                                         <TooltipContent side="bottom" className="max-w-[260px]">
-                                          <p className="text-xs font-medium mb-0.5">LucaAI Shop Call</p>
+                                          <p className="text-xs font-medium mb-0.5">LucaAI Shop Call — click to view details</p>
                                           {callDate && <p className="text-xs text-muted-foreground">{callDate}</p>}
                                           {truck.lastCallSummary && <p className="text-xs mt-0.5">{truck.lastCallSummary}</p>}
                                         </TooltipContent>
