@@ -1473,7 +1473,9 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
 
     const secret = process.env.FS_ELEVENLABS_WEBHOOK_SECRET;
     if (secret) {
-      const sigHeader = req.headers["elevenlabs-signature"] as string | undefined;
+      // Accept both "ElevenLabs-Signature" and "X-ElevenLabs-Signature" header variants
+      // (Express normalises header names to lowercase)
+      const sigHeader = (req.headers["elevenlabs-signature"] || req.headers["x-elevenlabs-signature"]) as string | undefined;
       if (!sigHeader) {
         res.status(401).json({ message: "Missing ElevenLabs-Signature header" });
         return;

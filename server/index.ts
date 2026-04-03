@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { elevenLabsWebhookHandler } from "./fleet-scope-routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
 import { createTestUsers } from "./create-test-users";
@@ -37,6 +38,14 @@ const app = express();
 // Trust proxy configuration for proper IP detection behind proxies/load balancers
 // This ensures rate limiting and security features work correctly in production
 app.set('trust proxy', 1);
+
+// ElevenLabs webhook must be registered BEFORE global express.json() so that
+// express.raw() can capture the original bytes for HMAC-SHA256 verification.
+// The FS_ELEVENLABS_WEBHOOK_SECRET env var enables signature verification.
+if (!process.env.FS_ELEVENLABS_WEBHOOK_SECRET) {
+  console.warn("[ElevenLabs] WARNING: FS_ELEVENLABS_WEBHOOK_SECRET not set — signature verification DISABLED");
+}
+app.post("/api/elevenlabs/webhook", express.raw({ type: "application/json" }), elevenLabsWebhookHandler);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));

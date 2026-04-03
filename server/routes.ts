@@ -1,4 +1,3 @@
-import express from "express";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { registerVrmRoutes } from "./vrm/routes";
@@ -29,7 +28,7 @@ import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
 import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
-import { registerFleetScopeRoutes, elevenLabsWebhookHandler } from "./fleet-scope-routes";
+import { registerFleetScopeRoutes } from "./fleet-scope-routes";
 import { registerWmsRoutes } from "./wms-engine-routes";
 import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
 import { fsDb } from "./fleet-scope-db";
@@ -518,16 +517,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ElevenLabs post-call webhook — must be registered here (top-level, no /api/fs prefix)
-  // so ElevenLabs can reach it without a session cookie and without the FS auth middleware.
-  // express.raw() captures the exact bytes ElevenLabs sent so the HMAC-SHA256 signature
-  // over (timestamp + "." + rawBody) can be verified inside the handler.
-  // The FS_ELEVENLABS_WEBHOOK_SECRET env var enables that verification.
-  if (!process.env.FS_ELEVENLABS_WEBHOOK_SECRET) {
-    console.warn("[ElevenLabs] WARNING: FS_ELEVENLABS_WEBHOOK_SECRET is not set — webhook signature verification is DISABLED");
-  }
-  app.post("/api/elevenlabs/webhook", express.raw({ type: "application/json" }), elevenLabsWebhookHandler);
-  console.log("[ElevenLabs] Webhook registered at POST /api/elevenlabs/webhook");
+  // NOTE: POST /api/elevenlabs/webhook is registered in server/index.ts BEFORE
+  // the global express.json() middleware so that express.raw() can capture the
+  // original bytes for HMAC-SHA256 signature verification. Do NOT register it here.
 
   // Mount Fleet-Scope module routes at /api/fs/*
   if (fsDb) {
