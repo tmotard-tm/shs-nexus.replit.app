@@ -3302,15 +3302,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const elevenLabsConvId = result?.conversation_id || result?.conversationId || null;
       console.log(`[CallRepairShop] call_sid: ${callSid}, conversation_id: ${elevenLabsConvId} (keys: ${Object.keys(result || {}).join(', ')})`);
 
+      // Step 1: Write lastCallDate (non-optional — must always succeed)
+      await fleetScopeStorage.updateTruck(truck.id, {
+        lastCallDate: new Date(),
+        lastCallSummary: null,
+      });
+
+      // Step 2: Write SID/ConvId (optional — warn but don't fail if new columns missing)
       try {
         await fleetScopeStorage.updateTruck(truck.id, {
-          lastCallDate: new Date(),
           lastCallSid: callSid,
           lastCallConversationId: elevenLabsConvId,
-          lastCallSummary: null,
         });
       } catch (saveErr: any) {
-        console.warn("[CallRepairShop] Could not save call metadata:", saveErr.message);
+        console.warn("[CallRepairShop] Could not save call SID/ConvId (columns may be missing):", saveErr.message);
       }
 
       res.json({ success: true, toNumber, callSid, conversationId: elevenLabsConvId, result });
@@ -3394,15 +3399,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const elevenLabsConvId = result?.conversation_id || result?.conversationId || null;
       console.log(`[CallTechnician] call_sid: ${callSid}, conversation_id: ${elevenLabsConvId}`);
 
+      // Step 1: Write lastTechCallDate (non-optional — must always succeed)
+      await fleetScopeStorage.updateTruck(truck.id, {
+        lastTechCallDate: new Date(),
+        lastTechCallSummary: null,
+      });
+
+      // Step 2: Write SID/ConvId (optional — warn but don't fail if new columns missing)
       try {
         await fleetScopeStorage.updateTruck(truck.id, {
-          lastTechCallDate: new Date(),
           lastTechCallSid: callSid,
           lastTechCallConversationId: elevenLabsConvId,
-          lastTechCallSummary: null,
         });
       } catch (saveErr: any) {
-        console.warn("[CallTechnician] Could not save call metadata:", saveErr.message);
+        console.warn("[CallTechnician] Could not save call SID/ConvId (columns may be missing):", saveErr.message);
       }
 
       res.json({ success: true, toNumber, callSid, conversationId: elevenLabsConvId, result });
@@ -3739,6 +3749,294 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       return res.status(400).json({ message: "Invalid strategy. Use 'clear' or 'replay'." });
     } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== ELEVENLABS CALL BACKFILL =====
+  // POST /api/fs/call-analysis/backfill
+  // Pulls the most-recent ElevenLabs conversation per truck and back-fills
+  // lastCallDate / lastCallStatus / lastCallSummary / lastCallConversationId.
+  // Only processes trucks that have lastCallDate set but are missing a summary
+  // (or all trucks if ?force=true). Appends to fs_call_logs (never overwrites).
+  app.post("/api/fs/call-analysis/backfill", async (req, res) => {
+    try {
+      const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
+      if (!apiKey) return res.status(500).json({ message: "ElevenLabs API key not configured" });
+
+      const { force = false, truckIds = null } = req.body || {};
+
+      const allTrucks = await fleetScopeStorage.getAllTrucks();
+      // Determine which trucks to backfill
+      let targetTrucks = truckIds
+        ? allTrucks.filter((t: any) => truckIds.includes(t.id))
+        : allTrucks.filter((t: any) => {
+            if (force) return true;
+            // Process trucks that have been called (lastCallDate) but have no summary yet
+            return (t.lastCallDate && (!t.lastCallSummary || !t.lastCallStatus));
+          });
+
+      if (targetTrucks.length === 0) {
+        return res.json({ processed: 0, updated: 0, skipped: 0, message: "No trucks need backfill. Use force=true to reprocess all." });
+      }
+
+      console.log(`[Backfill] Starting for ${targetTrucks.length} trucks (force=${force})`);
+
+      // Fetch ALL conversations from ElevenLabs (paginated, most-recent first)
+      // We use agent_id filter for the shop call agent (repair shop agent)
+      const SHOP_AGENT_ID = "agent_7901kgj8m0w8ep6ar78fzthzr9jv";
+      const TECH_AGENT_ID = "agent_9401kk2njc6veajaecs89wtbh840";
+
+      async function fetchAllConversations(agentId: string): Promise<any[]> {
+        const conversations: any[] = [];
+        let cursor: string | null = null;
+        let page = 0;
+        const MAX_PAGES = 20;
+        do {
+          const url = new URL("https://api.elevenlabs.io/v1/convai/conversations");
+          url.searchParams.set("agent_id", agentId);
+          url.searchParams.set("page_size", "100");
+          if (cursor) url.searchParams.set("cursor", cursor);
+          const resp = await fetch(url.toString(), { headers: { "xi-api-key": apiKey } });
+          if (!resp.ok) {
+            console.warn(`[Backfill] Could not fetch conversations page ${page} for agent ${agentId}: ${resp.status}`);
+            break;
+          }
+          const data: any = await resp.json();
+          const items = data?.conversations || data?.items || [];
+          conversations.push(...items);
+          cursor = data?.next_cursor || data?.cursor || null;
+          page++;
+        } while (cursor && page < MAX_PAGES);
+        return conversations;
+      }
+
+      async function fetchConversationDetail(convId: string): Promise<any | null> {
+        try {
+          const resp = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${convId}`, {
+            headers: { "xi-api-key": apiKey },
+          });
+          if (!resp.ok) return null;
+          return await resp.json();
+        } catch { return null; }
+      }
+
+      // Fetch conversation lists from both agents
+      const [shopConversations, techConversations] = await Promise.all([
+        fetchAllConversations(SHOP_AGENT_ID),
+        fetchAllConversations(TECH_AGENT_ID),
+      ]);
+
+      console.log(`[Backfill] Fetched ${shopConversations.length} shop convs, ${techConversations.length} tech convs`);
+
+      // Build lookup: phone_number -> most-recent conversation (shop & tech separately)
+      // ElevenLabs conversation objects typically have: conversation_id, created_at, metadata.phone_number or to_number
+      function buildPhoneMap(convs: any[]): Map<string, any> {
+        const map = new Map<string, any>();
+        for (const conv of convs) {
+          const phone = (conv?.metadata?.to_number || conv?.to_number || conv?.phone_number || "").replace(/\D/g, "");
+          if (!phone || phone.length < 10) continue;
+          const existing = map.get(phone);
+          const existingTs = existing ? new Date(existing.created_at || 0).getTime() : 0;
+          const thisTs = new Date(conv.created_at || 0).getTime();
+          if (!existing || thisTs > existingTs) {
+            map.set(phone, conv);
+          }
+        }
+        return map;
+      }
+
+      // Also build lookup by conversation_id for trucks that already have one stored
+      function buildConvIdMap(convs: any[]): Map<string, any> {
+        const map = new Map<string, any>();
+        for (const conv of convs) {
+          const cid = conv?.conversation_id || conv?.id;
+          if (cid) map.set(cid, conv);
+        }
+        return map;
+      }
+
+      const shopPhoneMap = buildPhoneMap(shopConversations);
+      const techPhoneMap = buildPhoneMap(techConversations);
+      const shopConvIdMap = buildConvIdMap(shopConversations);
+      const techConvIdMap = buildConvIdMap(techConversations);
+
+      // GPT summariser (reuse same logic as webhook)
+      async function summarise(transcriptText: string, callType: "repair" | "tech"): Promise<{ status: string; summary: string; estimatedReadyDate: string | null }> {
+        if (!process.env.FS_OPENAI_API_KEY) return { status: "Unknown", summary: transcriptText.slice(0, 300), estimatedReadyDate: null };
+        const systemPrompt = callType === "tech"
+          ? `You are a fleet coordinator assistant. Analyze technician pickup call transcripts. Respond in JSON with these fields:
+"status": one of these exact values: "Will Pick Up", "No Answer", "Call Failed", "Other Issues"
+"summary": 2-3 sentence factual summary of the call
+"estimated_ready_date": if a pickup date was mentioned, return it as YYYY-MM-DD, otherwise null
+Respond ONLY with valid JSON, no other text.`
+          : `You are a fleet coordinator assistant. Analyze repair shop call transcripts. Respond in JSON with these fields:
+"status": one of these exact values: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Call Failed", "Failed"
+"summary": 2-3 sentence factual summary of the call
+"estimated_ready_date": if a completion/ready date was mentioned, return it as YYYY-MM-DD, otherwise null
+Respond ONLY with valid JSON, no other text.`;
+        try {
+          const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${process.env.FS_OPENAI_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "gpt-4o-mini",
+              messages: [{ role: "system", content: systemPrompt }, { role: "user", content: `Analyze this call transcript:\n\n${transcriptText}` }],
+              max_tokens: 200, temperature: 0.3,
+            }),
+          });
+          if (!openaiRes.ok) return { status: "Unknown", summary: "Summary unavailable.", estimatedReadyDate: null };
+          const openaiData = await openaiRes.json();
+          const raw = openaiData.choices?.[0]?.message?.content?.trim() || "";
+          const parsed = JSON.parse(raw);
+          return { status: parsed.status || "Unknown", summary: parsed.summary || raw, estimatedReadyDate: parsed.estimated_ready_date || null };
+        } catch { return { status: "Unknown", summary: "Summary unavailable.", estimatedReadyDate: null }; }
+      }
+
+      let updated = 0;
+      let skipped = 0;
+
+      for (const truck of targetTrucks) {
+        try {
+          const repairPhone = (truck.repairPhone || "").replace(/\D/g, "");
+          const techPhone = (truck.techPhone || "").replace(/\D/g, "");
+
+          // --- Shop call backfill ---
+          if (truck.lastCallDate && (!truck.lastCallSummary || force)) {
+            // Try by stored conv ID first, then by phone
+            let conv = truck.lastCallConversationId ? shopConvIdMap.get(truck.lastCallConversationId) : null;
+            if (!conv && repairPhone) conv = shopPhoneMap.get(repairPhone);
+
+            if (conv) {
+              const convId = conv.conversation_id || conv.id;
+              const detail = convId ? await fetchConversationDetail(convId) : null;
+              if (detail) {
+                // Build transcript text
+                const transcript = detail?.transcript || [];
+                let transcriptText = "";
+                if (Array.isArray(transcript)) {
+                  transcriptText = transcript.map((t: any) => `${t.role || "Unknown"}: ${t.message || t.text || ""}`).join("\n");
+                } else if (typeof transcript === "string") {
+                  transcriptText = transcript;
+                }
+
+                let status = truck.lastCallStatus || "";
+                let summary = truck.lastCallSummary || "";
+
+                if (transcriptText && (!truck.lastCallSummary || force)) {
+                  const result = await summarise(transcriptText, "repair");
+                  status = result.status;
+                  summary = result.summary;
+                }
+
+                const callDate = conv.created_at ? new Date(conv.created_at) : (truck.lastCallDate ? new Date(truck.lastCallDate) : new Date());
+
+                await fleetScopeStorage.updateTruck(truck.id, {
+                  lastCallDate: callDate,
+                  lastCallStatus: status || truck.lastCallStatus,
+                  lastCallSummary: summary || truck.lastCallSummary,
+                  lastCallConversationId: convId || truck.lastCallConversationId,
+                });
+
+                // Append to call_logs (only if no log exists for this conversation)
+                if (convId) {
+                  const existing = await fleetScopeStorage.getCallLogByConversationId(convId);
+                  if (!existing) {
+                    await fleetScopeStorage.createCallLog({
+                      truckId: truck.id,
+                      truckNumber: truck.truckNumber,
+                      callType: "shop",
+                      phoneNumber: repairPhone || "",
+                      elevenLabsConversationId: convId,
+                      status: "completed",
+                      outcome: status === "Ready" ? "VEHICLE_READY" : (status === "No Answer" || status === "Call Failed") ? "CALL_FAILED" : "VEHICLE_NOT_READY",
+                      shopNotes: summary,
+                      transcript: transcriptText || undefined,
+                    });
+                  }
+                }
+
+                updated++;
+                console.log(`[Backfill] Shop call updated for truck ${truck.truckNumber}: ${status}`);
+              } else {
+                skipped++;
+              }
+            } else {
+              skipped++;
+            }
+          }
+
+          // --- Tech call backfill ---
+          if (truck.lastTechCallDate && (!truck.lastTechCallSummary || force)) {
+            let conv = truck.lastTechCallConversationId ? techConvIdMap.get(truck.lastTechCallConversationId) : null;
+            if (!conv && techPhone) conv = techPhoneMap.get(techPhone);
+
+            if (conv) {
+              const convId = conv.conversation_id || conv.id;
+              const detail = convId ? await fetchConversationDetail(convId) : null;
+              if (detail) {
+                const transcript = detail?.transcript || [];
+                let transcriptText = "";
+                if (Array.isArray(transcript)) {
+                  transcriptText = transcript.map((t: any) => `${t.role || "Unknown"}: ${t.message || t.text || ""}`).join("\n");
+                } else if (typeof transcript === "string") {
+                  transcriptText = transcript;
+                }
+
+                let status = truck.lastTechCallStatus || "";
+                let summary = truck.lastTechCallSummary || "";
+
+                if (transcriptText && (!truck.lastTechCallSummary || force)) {
+                  const result = await summarise(transcriptText, "tech");
+                  status = result.status;
+                  summary = result.summary;
+                }
+
+                const callDate = conv.created_at ? new Date(conv.created_at) : (truck.lastTechCallDate ? new Date(truck.lastTechCallDate) : new Date());
+
+                await fleetScopeStorage.updateTruck(truck.id, {
+                  lastTechCallDate: callDate,
+                  lastTechCallStatus: status || truck.lastTechCallStatus,
+                  lastTechCallSummary: summary || truck.lastTechCallSummary,
+                  lastTechCallConversationId: convId || truck.lastTechCallConversationId,
+                });
+
+                if (convId) {
+                  const existing = await fleetScopeStorage.getCallLogByConversationId(convId);
+                  if (!existing) {
+                    await fleetScopeStorage.createCallLog({
+                      truckId: truck.id,
+                      truckNumber: truck.truckNumber,
+                      callType: "tech",
+                      phoneNumber: techPhone || "",
+                      elevenLabsConversationId: convId,
+                      status: "completed",
+                      outcome: status === "Will Pick Up" ? "VEHICLE_READY" : (status === "No Answer" || status === "Call Failed") ? "CALL_FAILED" : "VEHICLE_NOT_READY",
+                      shopNotes: summary,
+                      transcript: transcriptText || undefined,
+                    });
+                  }
+                }
+
+                updated++;
+                console.log(`[Backfill] Tech call updated for truck ${truck.truckNumber}: ${status}`);
+              } else {
+                skipped++;
+              }
+            } else {
+              skipped++;
+            }
+          }
+        } catch (truckErr: any) {
+          console.warn(`[Backfill] Error processing truck ${truck.truckNumber}:`, truckErr.message);
+          skipped++;
+        }
+      }
+
+      console.log(`[Backfill] Complete. Updated: ${updated}, Skipped: ${skipped}`);
+      res.json({ processed: targetTrucks.length, updated, skipped });
+    } catch (error: any) {
+      console.error("[Backfill] Error:", error.message);
       res.status(500).json({ message: error.message });
     }
   });

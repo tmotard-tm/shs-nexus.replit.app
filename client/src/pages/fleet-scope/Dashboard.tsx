@@ -1576,6 +1576,23 @@ export default function Dashboard() {
     },
   });
 
+  const backfillCallsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/fs/call-analysis/backfill", {});
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
+      toast({
+        title: "LucaAI call sync complete",
+        description: data.message || `${data.updated} updated, ${data.skipped} skipped`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Call sync failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const syncDeclinedMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest('POST', '/api/fs/pos/sync-declined-repairs', {});
@@ -2308,6 +2325,28 @@ export default function Dashboard() {
             <RefreshCw className={`w-3 h-3 mr-1 ${syncRentalsMutation.isPending ? "animate-spin" : ""}`} />
             {syncRentalsMutation.isPending ? "Syncing…" : "Sync Rentals"}
           </Button>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => backfillCallsMutation.mutate()}
+                disabled={backfillCallsMutation.isPending}
+                data-testid="button-sync-call-statuses"
+              >
+                {backfillCallsMutation.isPending ? (
+                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                ) : (
+                  <PhoneCall className="w-3 h-3 mr-1" />
+                )}
+                {backfillCallsMutation.isPending ? "Syncing…" : "Sync Call Statuses"}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Pull latest LucaAI call summaries for trucks missing call data
+            </TooltipContent>
+          </Tooltip>
 
           <Button 
             variant="outline" 
@@ -3739,23 +3778,51 @@ export default function Dashboard() {
                                 })()}
                               </td>
                               <td className="px-2 py-2 text-center hidden lg:table-cell" data-testid={`text-rental-returned-${index}`}>
-                                <Select
-                                  value={truck.rentalReturned === true ? "true" : truck.rentalReturned === false ? "false" : "_blank_"}
-                                  onValueChange={(value) => handleBooleanChange(truck.id, "rentalReturned", value)}
-                                >
-                                  <SelectTrigger className="h-7 w-12 p-0 border-0 bg-transparent shadow-none hover:bg-muted/50 focus:ring-0 justify-center [&>svg]:hidden" data-testid={`select-rental-returned-${index}`}>
-                                    {truck.rentalReturned === true ? (
-                                      <span className="flex items-center justify-center w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-[10px] font-bold pt-px">Y</span>
-                                    ) : (
-                                      <span className="text-muted-foreground">&nbsp;</span>
-                                    )}
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="_blank_">—</SelectItem>
-                                    <SelectItem value="true">Yes</SelectItem>
-                                    <SelectItem value="false">No</SelectItem>
-                                  </SelectContent>
-                                </Select>
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <Select
+                                    value={truck.rentalReturned === true ? "true" : truck.rentalReturned === false ? "false" : "_blank_"}
+                                    onValueChange={(value) => handleBooleanChange(truck.id, "rentalReturned", value)}
+                                  >
+                                    <SelectTrigger className="h-7 w-12 p-0 border-0 bg-transparent shadow-none hover:bg-muted/50 focus:ring-0 justify-center [&>svg]:hidden" data-testid={`select-rental-returned-${index}`}>
+                                      {truck.rentalReturned === true ? (
+                                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-[10px] font-bold pt-px">Y</span>
+                                      ) : (
+                                        <span className="text-muted-foreground">&nbsp;</span>
+                                      )}
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="_blank_">—</SelectItem>
+                                      <SelectItem value="true">Yes</SelectItem>
+                                      <SelectItem value="false">No</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  {(truck.lastCallDate || truck.lastCallStatus) && (() => {
+                                    const callDate = truck.lastCallDate ? new Date(truck.lastCallDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+                                    const callStatus = truck.lastCallStatus || "";
+                                    const isGood = callStatus.toLowerCase().includes("ready") || callStatus.toLowerCase().includes("will pick");
+                                    const isBad = callStatus.toLowerCase().includes("no answer") || callStatus.toLowerCase().includes("failed");
+                                    const colorClass = isGood
+                                      ? "text-green-600 dark:text-green-400"
+                                      : isBad
+                                        ? "text-red-600 dark:text-red-400"
+                                        : "text-amber-600 dark:text-amber-400";
+                                    return (
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <div className={`text-[9px] leading-none font-medium cursor-default ${colorClass} flex items-center gap-0.5`}>
+                                            <PhoneCall className="w-2.5 h-2.5 shrink-0" />
+                                            <span>{callStatus || callDate || "—"}</span>
+                                          </div>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom" className="max-w-[260px]">
+                                          <p className="text-xs font-medium mb-0.5">LucaAI Shop Call</p>
+                                          {callDate && <p className="text-xs text-muted-foreground">{callDate}</p>}
+                                          {truck.lastCallSummary && <p className="text-xs mt-0.5">{truck.lastCallSummary}</p>}
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    );
+                                  })()}
+                                </div>
                               </td>
                               <td className="px-2 py-2 text-center hidden lg:table-cell" data-testid={`text-van-picked-up-${index}`}>
                                 <Select

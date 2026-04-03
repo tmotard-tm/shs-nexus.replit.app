@@ -545,6 +545,33 @@ DO $$ BEGIN
     ALTER TABLE "fs_trucks" ADD COLUMN "enterprise_id" text;
   END IF;
 END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'last_call_sid'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "last_call_sid" text;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'last_tech_call_sid'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "last_tech_call_sid" text;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_call_logs' AND column_name = 'twilio_call_sid'
+  ) THEN
+    ALTER TABLE "fs_call_logs" ADD COLUMN "twilio_call_sid" text;
+  END IF;
+END $$;
 `;
 
 let initialized = false;
