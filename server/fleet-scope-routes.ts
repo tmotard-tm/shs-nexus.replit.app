@@ -1692,6 +1692,10 @@ function extractVinFromConversation(conv: any): string {
 // Accept "done" and other known terminal statuses across ElevenLabs environments
 const TERMINAL_STATUSES = new Set(["done", "completed", "ended", "finished"]);
 
+// Maximum number of full conversation detail fetches per search to prevent API overload.
+// Candidates beyond this cap are skipped — phone/VIN matching requires full detail.
+const MAX_DETAIL_FETCHES = 15;
+
 async function searchElevenLabsConversationByPhone(
   agentId: string,
   toNumber: string,
@@ -1704,8 +1708,9 @@ async function searchElevenLabsConversationByPhone(
   const last8Vin = vinUpper.slice(-8);
   const maxPages = 5;
   let cursor: string | undefined;
+  let detailFetches = 0;
 
-  // Collect VIN candidates separately — used as fallback when no phone match found
+  // VIN candidates (full detail objects) accumulated as phone-match fallback
   const vinCandidates: any[] = [];
 
   for (let page = 0; page < maxPages; page++) {
@@ -1721,51 +1726,57 @@ async function searchElevenLabsConversationByPhone(
       const convs: any[] = data.conversations || [];
 
       let oldestTs = Infinity;
-      const phoneCandidates: any[] = [];
 
       for (const c of convs) {
         const startTs = c.start_time_unix_secs || 0;
         if (startTs < oldestTs) oldestTs = startTs;
         if (!TERMINAL_STATUSES.has((c.status || "").toLowerCase())) continue;
         if (startTs < afterUnixSecs) continue;
+        if (detailFetches >= MAX_DETAIL_FETCHES) {
+          console.log(`[ElevenLabs] Reached MAX_DETAIL_FETCHES (${MAX_DETAIL_FETCHES}), stopping search`);
+          break;
+        }
 
-        const phoneInConv = extractPhoneFromConversation(c);
+        // The list API only returns skeleton data (id, status, timestamps).
+        // dynamic_variables (phone, VIN) are only in the full detail response.
+        // Fetch full detail so extractPhoneFromConversation/extractVinFromConversation
+        // can actually find the fields used for matching.
+        const fullConv = await fetchElevenLabsConversation(c.conversation_id, apiKey);
+        detailFetches++;
+        if (!fullConv) continue;
+
+        const phoneInConv = extractPhoneFromConversation(fullConv);
         if (phoneInConv) {
-          // Phone field present — require it to match for phone candidates
-          if (phoneInConv === toDigits) phoneCandidates.push(c);
+          if (phoneInConv === toDigits) {
+            // Phone match — return full detail immediately (no second fetch needed by caller)
+            console.log(`[ElevenLabs] Phone-matched conv ${c.conversation_id} for ${toNumber} (page ${page + 1}, fetch #${detailFetches})`);
+            return fullConv;
+          }
         } else {
           console.log(`[ElevenLabs] Conv ${c.conversation_id}: no phone field in metadata`);
         }
 
         // VIN matching is independent of phone — collect VIN candidates regardless.
-        // They serve as a fallback if no phone candidates are found across all pages.
+        // They serve as a fallback if no phone candidates are found.
         if (vinUpper) {
-          const vinInConv = extractVinFromConversation(c);
+          const vinInConv = extractVinFromConversation(fullConv);
           if (vinInConv) {
-            // If conversation carries a full VIN (17 chars), require exact equality to
-            // avoid false positives from last-8 collisions. Only use last-8 comparison
-            // when the conversation only has a partial (sub-17 char) VIN identifier.
+            // Full VIN (≥17 chars): require exact equality to avoid last-8 collisions.
+            // Partial (last_8_vin): compare against truck's last 8 chars only.
             const isFullVin = vinInConv.length >= 17;
-            const isMatch = isFullVin
-              ? vinInConv === vinUpper
-              : vinInConv === last8Vin;
+            const isMatch = isFullVin ? vinInConv === vinUpper : vinInConv === last8Vin;
             if (isMatch) {
-              console.log(`[ElevenLabs] VIN match candidate: conv ${c.conversation_id} vinInConv=${vinInConv} (${isFullVin ? "full" : "last-8"})`);
-              vinCandidates.push(c);
+              console.log(`[ElevenLabs] VIN match candidate: conv ${c.conversation_id} vinInConv=${vinInConv} (${isFullVin ? "full" : "last-8"}, fetch #${detailFetches})`);
+              vinCandidates.push(fullConv);
             }
           }
         }
       }
 
-      if (phoneCandidates.length > 0) {
-        phoneCandidates.sort((a: any, b: any) => (b.start_time_unix_secs || 0) - (a.start_time_unix_secs || 0));
-        console.log(`[ElevenLabs] Phone-matched conv ${phoneCandidates[0].conversation_id} for ${toNumber} (page ${page + 1})`);
-        return phoneCandidates[0];
-      }
-
-      // Stop scanning if oldest item on this page is before our time window or no more pages
+      // Stop scanning if oldest item on this page predates our window, no more pages,
+      // or we've hit the detail fetch cap
       const nextCursor = data.next_cursor || data.cursor;
-      if (oldestTs < afterUnixSecs || !nextCursor) break;
+      if (oldestTs < afterUnixSecs || !nextCursor || detailFetches >= MAX_DETAIL_FETCHES) break;
       cursor = nextCursor;
     } catch (err: any) {
       console.error(`[ElevenLabs] Error searching conversations (page ${page + 1}):`, err.message);
@@ -1773,7 +1784,8 @@ async function searchElevenLabsConversationByPhone(
     }
   }
 
-  // Fall back to best VIN match if no phone match was found
+  // Fall back to best VIN match if no phone match was found.
+  // vinCandidates already contain full detail objects ready for the caller to use.
   if (vinCandidates.length > 0) {
     vinCandidates.sort((a: any, b: any) => (b.start_time_unix_secs || 0) - (a.start_time_unix_secs || 0));
     console.log(`[ElevenLabs] VIN-fallback matched conv ${vinCandidates[0].conversation_id} for VIN ${vinUpper}`);
@@ -1798,20 +1810,20 @@ async function pollForCallCompletion(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await new Promise<void>(resolve => setTimeout(resolve, intervalMs));
     try {
-      const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey, truck.vin ?? undefined);
-      if (!match) {
+      // searchElevenLabsConversationByPhone now returns the full conversation detail
+      // object (not a list skeleton), so no second fetchElevenLabsConversation is needed.
+      const conv = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey, truck.vin ?? undefined);
+      if (!conv) {
         if (attempt % 5 === 0) console.log(`[CallPoller] Truck ${truck.truckNumber} attempt ${attempt}/${maxAttempts}: no match yet`);
         continue;
       }
-      console.log(`[CallPoller] Truck ${truck.truckNumber}: found ${match.conversation_id}, fetching transcript`);
-      const conv = await fetchElevenLabsConversation(match.conversation_id, apiKey);
-      if (!conv) continue;
+      console.log(`[CallPoller] Truck ${truck.truckNumber}: found ${conv.conversation_id}`);
       const transcript = conv.transcript || conv.data?.transcript;
-      if (!transcript) { console.log(`[CallPoller] No transcript yet for ${match.conversation_id}`); continue; }
+      if (!transcript) { console.log(`[CallPoller] No transcript yet for ${conv.conversation_id}`); continue; }
       const transcriptText = buildTranscriptText(transcript);
       const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber);
-      const convCallDate = match.start_time_unix_secs ? new Date(match.start_time_unix_secs * 1000) : undefined;
-      await applyCallResultToTruck(truck, callType, match.conversation_id, status, summary, estimatedReadyDate, blockers, transcriptText, convCallDate);
+      const convCallDate = conv.start_time_unix_secs ? new Date(conv.start_time_unix_secs * 1000) : undefined;
+      await applyCallResultToTruck(truck, callType, conv.conversation_id, status, summary, estimatedReadyDate, blockers, transcriptText, convCallDate);
       console.log(`[CallPoller] Truck ${truck.truckNumber}: complete — status="${status}" after ${attempt} poll(s)`);
       return;
     } catch (err: any) {
@@ -3920,8 +3932,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const match = await searchElevenLabsConversationByPhone(agentId, toNumber, afterUnixSecs, apiKey, truck.vin ?? undefined);
         if (!match) return res.status(404).json({ message: `No recent completed conversation found for truck ${truckNumber}` });
         resolvedConvId = match.conversation_id;
-        convData = await fetchElevenLabsConversation(resolvedConvId!, apiKey);
-        if (!convData) return res.status(404).json({ message: `Conversation ${resolvedConvId} could not be fetched` });
+        // searchElevenLabsConversationByPhone now returns the full conversation detail
+        // object (fetched individually during matching), so no second fetch is needed.
+        convData = match;
       }
 
       const transcript = convData.transcript || convData.data?.transcript;
