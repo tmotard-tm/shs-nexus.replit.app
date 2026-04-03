@@ -3815,15 +3815,18 @@ export default function Dashboard() {
                                             : isBad
                                               ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-red-200 dark:border-red-800"
                                               : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800";
-                                      // In-cell display: show date when available, otherwise "Not called"
-                                      const cellDate = !hasCalled ? "Not called" : (callDate ?? "—");
-                                      const statusBadgeText = callStatus && callStatus !== "Calling" ? callStatus : null;
+                                      // In-cell: show date + status when called, "Not called" otherwise
+                                      const cellText = !hasCalled
+                                        ? "Not called"
+                                        : callDate
+                                          ? (callStatus ? `${callDate} · ${callStatus}` : callDate)
+                                          : (callStatus || "—");
                                       return (
                                         <Tooltip>
                                           <TooltipTrigger asChild>
                                             <button
                                               type="button"
-                                              className={`text-[9px] leading-none font-medium cursor-pointer px-1 py-0.5 rounded border whitespace-nowrap flex items-center gap-0.5 hover:opacity-80 transition-opacity ${badgeClass}`}
+                                              className={`text-[9px] leading-none font-medium cursor-pointer px-1 py-0.5 rounded border flex items-center gap-0.5 hover:opacity-80 transition-opacity ${badgeClass}`}
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 setSelectedTruckId(truck.id);
@@ -3831,7 +3834,7 @@ export default function Dashboard() {
                                               }}
                                             >
                                               <PhoneCall className="w-2 h-2 shrink-0" />
-                                              <span className="truncate max-w-[100px]">{label}: {statusBadgeText || cellDate}</span>
+                                              <span className="truncate max-w-[120px]">{label}: {cellText}</span>
                                             </button>
                                           </TooltipTrigger>
                                           <TooltipContent side="bottom" className="max-w-[260px]">
