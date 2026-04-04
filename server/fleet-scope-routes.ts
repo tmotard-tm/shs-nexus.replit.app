@@ -3567,33 +3567,33 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         };
       }
 
-      // Fetch the most recent status event per truck from fs_truck_status_events.
-      // Uses the same CTE + ROW_NUMBER pattern as the /pmf/days-in-status endpoint
-      // (which queries fs_pmf_status_events for PMF/PARQ vehicles).
-      // fs_truck_status_events is the fleet-scope equivalent of fs_pmf_status_events:
-      //   fs_pmf_status_events  → populated by PMF/PARQ sync on status changes
-      //   fs_truck_status_events → populated by updateTruck() on mainStatus changes
-      // Only events whose main_status matches the truck's CURRENT mainStatus are
-      // used in daysInStatus, rejecting stale entries from previous status periods.
+      // Fetch the most recent fleet-scope status event per truck from fs_pmf_status_events.
+      // Fleet truck status changes are written to fs_pmf_status_events with source='fleet_scope'
+      // by updateTruck() on every real mainStatus transition.
+      // This is the same table and the same CTE + ROW_NUMBER query pattern used by the
+      // /pmf/days-in-status endpoint for PMF/PARQ vehicles, ensuring consistent behavior.
+      // Only events whose status matches the truck's CURRENT mainStatus are used in
+      // daysInStatus, rejecting stale entries from previous status periods.
       const statusEventsResult = await getDb().execute(sql`
         WITH latest_status_events AS (
           SELECT
-            truck_id,
-            main_status,
+            asset_id,
+            status,
             effective_at,
-            ROW_NUMBER() OVER (PARTITION BY truck_id ORDER BY effective_at DESC) AS rn
-          FROM fs_truck_status_events
+            ROW_NUMBER() OVER (PARTITION BY asset_id ORDER BY effective_at DESC) AS rn
+          FROM fs_pmf_status_events
+          WHERE source = 'fleet_scope'
         )
-        SELECT truck_id, main_status, effective_at
+        SELECT asset_id, status, effective_at
         FROM latest_status_events
         WHERE rn = 1
       `);
 
-      type StatusEventRow = { truck_id: string; main_status: string; effective_at: string };
+      type StatusEventRow = { asset_id: string; status: string; effective_at: string };
       const statusEventMap: Record<string, { mainStatus: string; effectiveAt: Date }> = {};
       for (const row of statusEventsResult.rows as StatusEventRow[]) {
-        statusEventMap[row.truck_id] = {
-          mainStatus: row.main_status,
+        statusEventMap[row.asset_id] = {
+          mainStatus: row.status,
           effectiveAt: new Date(row.effective_at),
         };
       }

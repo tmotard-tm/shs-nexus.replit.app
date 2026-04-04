@@ -566,6 +566,27 @@ CREATE TABLE IF NOT EXISTS "fs_truck_status_events" (
 );
 CREATE INDEX IF NOT EXISTS "fs_truck_status_events_truck_id_idx" ON "fs_truck_status_events"("truck_id");
 CREATE INDEX IF NOT EXISTS "fs_truck_status_events_effective_at_idx" ON "fs_truck_status_events"("effective_at");
+
+-- Backfill fs_pmf_status_events with existing fleet trucks that have no fleet_scope events yet.
+-- This ensures daysInStatus is accurate for trucks added before this feature shipped,
+-- using their best available status timestamp (mainStatusChangedAt → rentalStartDate →
+-- datePutInRepair → lastUpdatedAt). Only inserts rows that don't already exist.
+INSERT INTO "fs_pmf_status_events" (asset_id, status, previous_status, effective_at, source)
+SELECT
+  t.id,
+  t.main_status,
+  NULL,
+  COALESCE(
+    t.main_status_changed_at,
+    t.last_updated_at,
+    NOW()
+  ),
+  'fleet_scope'
+FROM fs_trucks t
+WHERE t.main_status IS NOT NULL
+  AND t.id NOT IN (
+    SELECT asset_id FROM fs_pmf_status_events WHERE source = 'fleet_scope'
+  );
 `;
 
 let initialized = false;

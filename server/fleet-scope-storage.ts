@@ -260,19 +260,31 @@ export class DatabaseStorage implements IStorage {
       .where(eq(trucks.id, id))
       .returning();
 
-    // Log a status event only on real transitions — mirrors how fs_pmf_status_events
-    // is populated for PMF/PARQ vehicles. Used by the queue endpoint for daysInStatus.
+    // Log a status event only on real transitions — writes to fs_pmf_status_events with
+    // source='fleet_scope', using the same table and query pattern as the PMF/days-in-status
+    // endpoint.  Also writes to fs_truck_status_events for audit trail / backward compat.
     if (statusActuallyChanged && updates.mainStatus !== undefined) {
+      const effectiveAt = finalUpdates.mainStatusChangedAt as Date;
+      try {
+        await getDb().insert(pmfStatusEvents).values({
+          assetId: id, // truck UUID — distinguishable from PMF's 5-digit asset IDs
+          status: updates.mainStatus,
+          previousStatus: existing?.mainStatus ?? null,
+          effectiveAt,
+          source: "fleet_scope",
+        });
+      } catch (evtErr) {
+        console.warn(`[PmfStatusEvents/fleet_scope] Failed for truck ${id}:`, evtErr);
+      }
       try {
         await getDb().insert(truckStatusEvents).values({
           truckId: id,
           mainStatus: updates.mainStatus,
           previousStatus: existing?.mainStatus ?? null,
-          effectiveAt: finalUpdates.mainStatusChangedAt as Date,
+          effectiveAt,
           source: "system",
         });
       } catch (evtErr) {
-        // Non-fatal: warn but don't break the update
         console.warn(`[TruckStatusEvents] Failed to log status event for truck ${id}:`, evtErr);
       }
     }
