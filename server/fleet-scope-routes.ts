@@ -3598,6 +3598,31 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         };
       }
 
+      // Fetch the earliest open Holman PO date per truck from Snowflake.
+      // Used as the authoritative "entered repair" date for trucks in repair-phase
+      // statuses (Repairing, Confirming Status, Decision Pending, etc.).
+      // HOLMAN_ETL_PO_DETAILS is sourced from Holman's fleet management system
+      // (same Snowflake data used by fleet sync / the scraper pipeline).
+      // Key: zero-padded 6-digit vehicle number (matches HOLMAN_VEHICLE_NUMBER format).
+      const holmanRepairStartMap: Record<string, Date> = {};
+      try {
+        const repairPORows = await executeQuery<{ HOLMAN_VEHICLE_NUMBER: string; EARLIEST_PO_DATE: string }>(`
+          SELECT HOLMAN_VEHICLE_NUMBER, MIN(PO_DATE) AS EARLIEST_PO_DATE
+          FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS
+          WHERE PO_STATUS IN ('Open', 'Pending', 'In Progress')
+          GROUP BY HOLMAN_VEHICLE_NUMBER
+        `);
+        for (const row of repairPORows) {
+          const num = (row.HOLMAN_VEHICLE_NUMBER || '').toString().trim();
+          const dt = row.EARLIEST_PO_DATE ? new Date(row.EARLIEST_PO_DATE) : null;
+          if (num && dt && !isNaN(dt.getTime())) {
+            holmanRepairStartMap[num] = dt;
+          }
+        }
+      } catch (repairPOErr: any) {
+        console.warn('[Queue] Could not fetch Holman repair PO dates:', repairPOErr.message);
+      }
+
       // Fetch available spare vans from Snowflake for Step 7 suggestions.
       // Join with Holman_VEHICLES on VIN to include vehicle mileage (odometer).
       // Include AMS lat/lon for distance-based sorting.
@@ -3712,22 +3737,37 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return Math.max(0, Math.floor((now - dt.getTime()) / 86400000));
       }
 
-      // Status-aware daysInStatus — mirrors the fs_pmf_status_events / pmf/days-in-status
-      // pattern for fleet scope trucks:
-      // 1. fs_truck_status_events event log — the authoritative status-transition stream
-      //    (analogous to fs_pmf_status_events for PMF/PARQ vehicles). Only used when the
-      //    event's mainStatus matches the truck's current mainStatus to reject stale entries.
-      // 2. mainStatusChangedAt — denormalized fallback (set on same status transitions).
-      // 3. rentalStartDate — semantic fallback for rental-phase statuses.
-      // 4. datePutInRepair — semantic fallback for repair-phase statuses.
-      // 5. lastUpdatedAt — final fallback (always present).
+      // daysInStatus — priority chain for computing how long a truck has been in its
+      // current mainStatus.  Sources are ordered from most authoritative to least:
+      //
+      // 1. Snowflake HOLMAN_ETL_PO_DETAILS (repair trucks only) — earliest open PO date
+      //    from Holman's fleet-management system.  This is the same Snowflake data used
+      //    by the fleet sync pipeline and gives the most accurate "entered repair" date.
+      // 2. fs_truck_status_events event log (all trucks) — populated by updateTruck() on
+      //    every real mainStatus transition, using the same CTE pattern as the
+      //    /pmf/days-in-status endpoint's fs_pmf_status_events query.
+      //    Only used when the event's mainStatus matches the truck's current mainStatus.
+      // 3. mainStatusChangedAt — denormalized timestamp, set on every real transition
+      //    (same guard that writes fs_truck_status_events).
+      // 4. rentalStartDate — semantic fallback for rental-phase statuses.
+      // 5. datePutInRepair — semantic fallback for repair-phase statuses.
+      // 6. lastUpdatedAt — final fallback (always present).
       function daysInStatus(truck: (typeof allTrucks)[0]): number {
+        const ms = truck.mainStatus ?? '';
+        // Step 1: Snowflake Holman open PO date (repair trucks)
+        if (REPAIR_STATUSES.has(ms)) {
+          const padded = truck.truckNumber.padStart(6, '0');
+          const holmanDate = holmanRepairStartMap[padded];
+          if (holmanDate) return daysSince(holmanDate);
+        }
+        // Step 2: local status event log (mirrors fs_pmf_status_events pattern)
         const evt = statusEventMap[truck.id];
         if (evt && evt.mainStatus === truck.mainStatus) {
           return daysSince(evt.effectiveAt);
         }
+        // Step 3: denormalized timestamp
         if (truck.mainStatusChangedAt) return daysSince(truck.mainStatusChangedAt);
-        const ms = truck.mainStatus ?? '';
+        // Step 4–5: semantic date fallbacks
         if (RENTAL_STATUSES.has(ms)) {
           return daysSince(truck.rentalStartDate) || daysSince(truck.lastUpdatedAt);
         }
