@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ClipboardList, Search, AlertTriangle } from "lucide-react";
+import { Search, AlertTriangle } from "lucide-react";
 
 interface PlaceholderProps {
   icon: React.ReactNode;
@@ -20,16 +20,6 @@ function PlaceholderPage({ icon, title, description }: PlaceholderProps) {
         <Badge variant="secondary" className="no-default-hover-elevate no-default-active-elevate">Coming Soon</Badge>
       </Card>
     </div>
-  );
-}
-
-export function TodaysQueue() {
-  return (
-    <PlaceholderPage
-      icon={<ClipboardList className="w-12 h-12 text-muted-foreground" />}
-      title="Today's Queue"
-      description="Your daily action items across the fleet"
-    />
   );
 }
 

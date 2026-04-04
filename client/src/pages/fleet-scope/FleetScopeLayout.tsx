@@ -21,7 +21,8 @@ import Decommissioning from "./Decommissioning";
 import ToolAudit from "./ToolAudit";
 import BatchCaller from "./BatchCaller";
 import TechProfitability from "./TechProfitability";
-import { TodaysQueue, VehicleSearch, DiscrepancyFinder } from "./PlaceholderPages";
+import TodaysQueue from "./TodaysQueue";
+import { VehicleSearch, DiscrepancyFinder } from "./PlaceholderPages";
 import NotFound from "@/pages/not-found";
 
 export default function FleetScopeLayout() {

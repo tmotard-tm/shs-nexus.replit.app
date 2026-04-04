@@ -3536,6 +3536,271 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // ===== Today's Queue =====
+  // GET /queue/today — returns prioritized daily action list for the fleet team
+  app.get("/queue/today", async (_req, res) => {
+    try {
+      const allTrucks = await fleetScopeStorage.getAllTrucks();
+
+      // Fetch Holman scraper data (cached)
+      const scraperData = await fetchAllScraperData();
+
+      // Fetch latest REPAIR call log per truck
+      const callLogResult = await getDb().execute(sql`
+        SELECT DISTINCT ON (truck_id)
+          truck_id,
+          call_timestamp,
+          status,
+          estimated_ready_date
+        FROM fs_call_logs
+        WHERE call_type = 'repair'
+        ORDER BY truck_id, call_timestamp DESC
+      `);
+
+      type CallLogRow = { truck_id: string; call_timestamp: string | null; status: string | null; estimated_ready_date: string | null };
+      const callLogMap: Record<string, { callTimestamp: Date | null; callStatus: string | null; estimatedReadyDate: string | null }> = {};
+      for (const row of callLogResult.rows as CallLogRow[]) {
+        callLogMap[row.truck_id] = {
+          callTimestamp: row.call_timestamp ? new Date(row.call_timestamp) : null,
+          callStatus: row.status ?? null,
+          estimatedReadyDate: row.estimated_ready_date ?? null,
+        };
+      }
+
+      // Fetch available spare vans from Snowflake for Step 7 suggestions
+      let spareVans: Array<{ vehicleNumber: string; status: string; address: string }> = [];
+      try {
+        const spareRows = await executeQuery<{
+          VEHICLE_NUMBER: string;
+          TRUCK_STATUS: string;
+          AMS_CUR_ADDRESS: string;
+          AMS_CUR_CITY: string;
+          AMS_CUR_STATE: string;
+        }>(`
+          SELECT VEHICLE_NUMBER, TRUCK_STATUS, AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE
+          FROM PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES
+          ORDER BY VEHICLE_NUMBER
+          LIMIT 20
+        `);
+        const repairSet = new Set(allTrucks.map(t => t.truckNumber.replace(/^0+/, '') || '0'));
+        spareVans = spareRows
+          .filter(v => !repairSet.has((v.VEHICLE_NUMBER || '').replace(/^0+/, '') || '0'))
+          .map(v => ({
+            vehicleNumber: v.VEHICLE_NUMBER || '',
+            status: v.TRUCK_STATUS || '',
+            address: [v.AMS_CUR_ADDRESS, v.AMS_CUR_CITY, v.AMS_CUR_STATE].filter(Boolean).join(', '),
+          }));
+      } catch (spareErr: any) {
+        console.warn('[Queue] Could not fetch spare vans from Snowflake:', spareErr.message);
+      }
+
+      const now = Date.now();
+      const TODAY_START = new Date(); TODAY_START.setHours(0, 0, 0, 0);
+      const THREE_DAYS_MS = 3 * 86400000;
+
+      function daysSince(d: Date | string | null | undefined): number {
+        if (!d) return 0;
+        const dt = d instanceof Date ? d : new Date(d as string);
+        if (isNaN(dt.getTime())) return 0;
+        return Math.max(0, Math.floor((now - dt.getTime()) / 86400000));
+      }
+
+      function getHolmanStatus(truckNumber: string): string | null {
+        const padded = truckNumber.padStart(6, '0');
+        const data = scraperData[padded];
+        return data?.status ? (data.status as string).replace(/_/g, ' ') : null;
+      }
+
+      function daysInStatus(truck: (typeof allTrucks)[0]): number {
+        if (truck.rentalStartDate) return daysSince(truck.rentalStartDate);
+        if (truck.datePutInRepair) return daysSince(truck.datePutInRepair);
+        return daysSince(truck.lastUpdatedAt);
+      }
+
+      type QueueItem = {
+        step: number;
+        stepTitle: string;
+        truckId: string;
+        truckNumber: string;
+        techName: string | null;
+        fleetScopeStatus: string;
+        holmanStatus: string | null;
+        lucaStatus: string | null;
+        lastCallDate: string | null;
+        actionText: string;
+        sortKey: number;
+        suggestions?: Array<{ vehicleNumber: string; status: string; address: string }>;
+        isConflict?: boolean;
+      };
+
+      const items: QueueItem[] = [];
+      const assigned = new Set<string>();
+
+      // --- STEP 1: CONFIRM RENTAL RETURNED ---
+      const STEP1_STATUSES = new Set(['NLWC - Return Rental', 'On Road', 'Truck Swap', 'In Transit', 'Available to be assigned']);
+      for (const t of [...allTrucks].filter(t => STEP1_STATUSES.has(t.mainStatus || '')).sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
+        if (assigned.has(t.id)) continue;
+        assigned.add(t.id);
+        items.push({
+          step: 1, stepTitle: 'CONFIRM RENTAL RETURNED',
+          truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
+          fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
+          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          actionText: 'Confirm rental has been returned to Enterprise — contact tech or shop to verify',
+          sortKey: daysInStatus(t),
+        });
+      }
+
+      // --- STEP 2: CHECK WITH MORGAN TO SCHEDULE ---
+      for (const t of [...allTrucks].filter(t => !assigned.has(t.id) && t.mainStatus === 'Scheduling').sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
+        assigned.add(t.id);
+        items.push({
+          step: 2, stepTitle: 'CHECK WITH MORGAN TO SCHEDULE',
+          truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
+          fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
+          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          actionText: 'Check with Morgan — confirm shop appointment is booked and get scheduled date',
+          sortKey: daysInStatus(t),
+        });
+      }
+
+      // --- STEP 3: VEHICLE READY — RETRIEVE ASAP ---
+      const RETURNED_SET = new Set(['NLWC - Return Rental', 'On Road', 'Truck Swap', 'In Transit', 'Available to be assigned']);
+      const step3Candidates = [...allTrucks].filter(t => {
+        if (assigned.has(t.id)) return false;
+        const hs = getHolmanStatus(t.truckNumber);
+        const cl = callLogMap[t.id];
+        const lucaStatus = t.lastCallStatus ?? cl?.callStatus ?? null;
+        const erd = cl?.estimatedReadyDate ?? t.eta ?? t.expectedCompletion ?? null;
+        const holmanReady = hs === 'Repair Complete';
+        const lucaReady = lucaStatus === 'Ready';
+        const dateReady = erd ? (new Date(erd) <= TODAY_START && !RETURNED_SET.has(t.mainStatus ?? '')) : false;
+        return holmanReady || lucaReady || dateReady;
+      }).sort((a, b) => {
+        const erdA = callLogMap[a.id]?.estimatedReadyDate ?? a.eta ?? a.expectedCompletion ?? null;
+        const erdB = callLogMap[b.id]?.estimatedReadyDate ?? b.eta ?? b.expectedCompletion ?? null;
+        if (erdA && erdB) return new Date(erdA).getTime() - new Date(erdB).getTime();
+        if (erdA) return -1; if (erdB) return 1;
+        return daysInStatus(b) - daysInStatus(a);
+      });
+      for (const t of step3Candidates) {
+        if (assigned.has(t.id)) continue;
+        assigned.add(t.id);
+        const isConflict = t.mainStatus === 'Repairing' || t.mainStatus === 'Confirming Status';
+        const cl = callLogMap[t.id];
+        const erd = cl?.estimatedReadyDate ?? t.eta ?? t.expectedCompletion ?? null;
+        items.push({
+          step: 3, stepTitle: 'VEHICLE READY — RETRIEVE ASAP',
+          truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
+          fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
+          lucaStatus: t.lastCallStatus ?? cl?.callStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          actionText: isConflict
+            ? 'STATUS CONFLICT — Holman/Luca shows ready but FleetScope not updated. Correct all systems then arrange pickup.'
+            : 'Vehicle appears ready — verify with shop and arrange same-day pickup if confirmed',
+          sortKey: erd ? new Date(erd).getTime() : 0,
+          isConflict,
+        });
+      }
+
+      // --- STEP 4: ESCALATE TO ROB FOR AUTHORIZATION ---
+      for (const t of [...allTrucks].filter(t => {
+        if (assigned.has(t.id)) return false;
+        const hs = getHolmanStatus(t.truckNumber);
+        return t.mainStatus === 'Decision Pending' || hs === 'In Authorization';
+      }).sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
+        if (assigned.has(t.id)) continue;
+        assigned.add(t.id);
+        items.push({
+          step: 4, stepTitle: 'ESCALATE TO ROB FOR AUTHORIZATION',
+          truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
+          fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
+          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          actionText: 'Escalate to Rob — repair authorization decision needed. Rob to approve or deny today.',
+          sortKey: daysInStatus(t),
+        });
+      }
+
+      // --- STEP 5: INITIATE LUCA AI CALL ---
+      for (const t of [...allTrucks].filter(t => {
+        if (assigned.has(t.id)) return false;
+        if (t.mainStatus !== 'Repairing' && t.mainStatus !== 'Confirming Status') return false;
+        const cl = callLogMap[t.id];
+        const lastDate: Date | null = t.lastCallDate ?? cl?.callTimestamp ?? null;
+        const lucaStatus = t.lastCallStatus ?? cl?.callStatus ?? null;
+        const noRecentCall = !lastDate || (now - lastDate.getTime()) > THREE_DAYS_MS;
+        const badStatus = ['No Answer', 'Call Failed', 'Failed'].includes(lucaStatus ?? '');
+        return noRecentCall || badStatus;
+      }).sort((a, b) => {
+        const clA = callLogMap[a.id];
+        const clB = callLogMap[b.id];
+        const dA = (a.lastCallDate ?? clA?.callTimestamp)?.getTime() ?? 0;
+        const dB = (b.lastCallDate ?? clB?.callTimestamp)?.getTime() ?? 0;
+        return dA - dB; // ascending, nulls (0) first
+      })) {
+        if (assigned.has(t.id)) continue;
+        assigned.add(t.id);
+        const lastDate: Date | null = t.lastCallDate ?? callLogMap[t.id]?.callTimestamp ?? null;
+        const actionText = lastDate
+          ? `Last attempted: ${lastDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Initiate new Luca call.`
+          : 'No call on record. Initiate Luca AI call now.';
+        items.push({
+          step: 5, stepTitle: 'INITIATE LUCA AI CALL',
+          truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
+          fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
+          lucaStatus: t.lastCallStatus ?? callLogMap[t.id]?.callStatus ?? null,
+          lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          actionText,
+          sortKey: lastDate?.getTime() ?? 0,
+        });
+      }
+
+      // --- STEP 6: CONFIRM TAGS WITH CHERYL ---
+      for (const t of [...allTrucks].filter(t => !assigned.has(t.id) && t.mainStatus === 'Tags').sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
+        assigned.add(t.id);
+        items.push({
+          step: 6, stepTitle: 'CONFIRM TAGS WITH CHERYL',
+          truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
+          fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
+          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          actionText: 'Ask Cheryl to confirm tags are processed and cleared',
+          sortKey: daysInStatus(t),
+        });
+      }
+
+      // --- STEP 7: DECLINED REPAIR — FIND REPLACEMENT VEHICLE ---
+      for (const t of [...allTrucks].filter(t => !assigned.has(t.id) && t.mainStatus === 'Declined Repair').sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
+        assigned.add(t.id);
+        const thisNum = t.truckNumber.replace(/^0+/, '') || '0';
+        const suggestions = spareVans.filter(v => (v.vehicleNumber.replace(/^0+/, '') || '0') !== thisNum).slice(0, 3);
+        items.push({
+          step: 7, stepTitle: 'DECLINED REPAIR — FIND REPLACEMENT VEHICLE',
+          truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
+          fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
+          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          actionText: 'Repair declined — arrange replacement vehicle for tech. Suggested nearest available units:',
+          sortKey: daysInStatus(t),
+          suggestions: suggestions.length > 0 ? suggestions : [],
+        });
+      }
+
+      // --- NO ACTION REQUIRED ---
+      const noAction = allTrucks
+        .filter(t => !assigned.has(t.id))
+        .map(t => ({
+          truckId: t.id,
+          truckNumber: t.truckNumber,
+          techName: t.techName ?? null,
+          fleetScopeStatus: t.mainStatus ?? '',
+          holmanStatus: getHolmanStatus(t.truckNumber),
+        }));
+
+      res.json({ success: true, items, noAction, generatedAt: new Date().toISOString() });
+    } catch (error: any) {
+      console.error('[Queue] Error generating queue:', error);
+      res.status(500).json({ success: false, message: 'Failed to generate queue' });
+    }
+  });
+
   // API: Get full scraper detail for a single truck
   app.get("/trucks/scraper-detail/:truckNumber", async (req, res) => {
     try {

@@ -41,7 +41,7 @@ const NAV: NavSection[] = [
   {
     title: "Action Center",
     items: [
-      { label: "Today's Queue", href: "/fleet-scope/queue", icon: Clock, soon: true },
+      { label: "Today's Queue", href: "/fleet-scope/queue", icon: Clock },
     ],
   },
   {
