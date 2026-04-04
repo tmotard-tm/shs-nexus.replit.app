@@ -553,6 +553,9 @@ export const trucks = pgTable("fs_trucks", {
   // Shop List sync fields (from Rental Extension Review)
   enterpriseId: text("enterprise_id"), // Enterprise ID from Shop List column D
 
+  // Status change tracking — set whenever mainStatus is updated
+  mainStatusChangedAt: timestamp("main_status_changed_at"),
+
   // Timestamps
   lastUpdatedAt: timestamp("last_updated_at").default(sql`now()`),
   lastUpdatedBy: text("last_updated_by").default("System"),

@@ -233,6 +233,7 @@ export class DatabaseStorage implements IStorage {
     
     if (updates.mainStatus !== undefined) {
       finalUpdates.status = getCombinedStatus(updates.mainStatus, updates.subStatus || null);
+      finalUpdates.mainStatusChangedAt = new Date();
     } else if (updates.subStatus !== undefined) {
       // If only subStatus is updated, we need the existing mainStatus
       const existing = await this.getTruck(id);

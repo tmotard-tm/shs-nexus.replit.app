@@ -3567,8 +3567,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         };
       }
 
-      // Fetch available spare vans from Snowflake for Step 7 suggestions
-      // Include AMS_CUR_ZIP for distance computation and exclude trucks already in the repair system
+      // Fetch available spare vans from Snowflake for Step 7 suggestions.
+      // Join with Holman_VEHICLES on VIN to include vehicle mileage (odometer).
+      // Include AMS lat/lon for distance-based sorting.
       type SpareVanRow = {
         vehicleNumber: string;
         status: string;
@@ -3576,6 +3577,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         zip: string | null;
         lat: number | null;
         lon: number | null;
+        mileage: number | null;
       };
       let spareVanPool: SpareVanRow[] = [];
       try {
@@ -3588,12 +3590,15 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           AMS_CUR_ZIP: string;
           AMS_ZIP_LAT: number | null;
           AMS_ZIP_LON: number | null;
+          ODOMETER: number | null;
         }>(`
-          SELECT VEHICLE_NUMBER, TRUCK_STATUS,
-                 AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE, AMS_CUR_ZIP,
-                 AMS_ZIP_LAT, AMS_ZIP_LON
-          FROM PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES
-          ORDER BY VEHICLE_NUMBER
+          SELECT uv.VEHICLE_NUMBER, uv.TRUCK_STATUS,
+                 uv.AMS_CUR_ADDRESS, uv.AMS_CUR_CITY, uv.AMS_CUR_STATE, uv.AMS_CUR_ZIP,
+                 uv.AMS_ZIP_LAT, uv.AMS_ZIP_LON,
+                 hv.ODOMETER
+          FROM PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES uv
+          LEFT JOIN PARTS_SUPPLYCHAIN.FLEET.Holman_VEHICLES hv ON uv.VIN = hv.VIN
+          ORDER BY uv.VEHICLE_NUMBER
         `);
         const repairSet = new Set(allTrucks.map(t => (t.truckNumber || '').replace(/^0+/, '') || '0'));
         spareVanPool = spareRows
@@ -3605,6 +3610,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             zip: v.AMS_CUR_ZIP || null,
             lat: v.AMS_ZIP_LAT ? Number(v.AMS_ZIP_LAT) : null,
             lon: v.AMS_ZIP_LON ? Number(v.AMS_ZIP_LON) : null,
+            mileage: v.ODOMETER ? Number(v.ODOMETER) : null,
           }));
       } catch (spareErr: any) {
         console.warn('[Queue] Could not fetch spare vans from Snowflake:', spareErr.message);
@@ -3622,7 +3628,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // Get nearest spare vans to a given truck (sorted by distance asc, nulls last)
-      async function getNearestSpares(truck: (typeof allTrucks)[0], count = 3): Promise<Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null }>> {
+      async function getNearestSpares(truck: (typeof allTrucks)[0], count = 3): Promise<Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null; mileage: number | null }>> {
         const thisNum = (truck.truckNumber || '').replace(/^0+/, '') || '0';
         const candidates = spareVanPool.filter(v => (v.vehicleNumber.replace(/^0+/, '') || '0') !== thisNum);
 
@@ -3645,7 +3651,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           if (truckLat !== null && truckLon !== null && v.lat !== null && v.lon !== null) {
             distanceMiles = haversine(truckLat, truckLon, v.lat, v.lon);
           }
-          return { vehicleNumber: v.vehicleNumber, status: v.status, address: v.address, distanceMiles };
+          return { vehicleNumber: v.vehicleNumber, status: v.status, address: v.address, distanceMiles, mileage: v.mileage };
         });
 
         scored.sort((a, b) => {
@@ -3673,18 +3679,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return Math.max(0, Math.floor((now - dt.getTime()) / 86400000));
       }
 
-      // Status-aware daysInStatus: use the date field that corresponds to when the truck entered its current status
+      // Status-aware daysInStatus:
+      // Primary source is mainStatusChangedAt — set on every mainStatus change.
+      // Falls back to the most semantically appropriate date field per status type,
+      // then lastUpdatedAt as final fallback.
       function daysInStatus(truck: (typeof allTrucks)[0]): number {
+        // Prefer the dedicated status-change timestamp (most accurate)
+        if (truck.mainStatusChangedAt) return daysSince(truck.mainStatusChangedAt);
         const ms = truck.mainStatus ?? '';
         if (RENTAL_STATUSES.has(ms)) {
-          // Rental statuses: count from when rental started
           return daysSince(truck.rentalStartDate) || daysSince(truck.lastUpdatedAt);
         }
         if (REPAIR_STATUSES.has(ms)) {
-          // Repair statuses: count from when truck was put in repair
           return daysSince(truck.datePutInRepair) || daysSince(truck.lastUpdatedAt);
         }
-        // Tags, PMF, and other statuses: fall back to last update
         return daysSince(truck.lastUpdatedAt);
       }
 
@@ -3706,9 +3714,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         lastCallDate: string | null;
         actionText: string;
         sortKey: number;
-        suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null }>;
+        suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null; mileage: number | null }>;
         isConflict?: boolean;
       };
+
+      // Helper: call log is authoritative over denormalized truck fields for luca status/date
+      function lucaStatusFor(t: (typeof allTrucks)[0]): string | null {
+        return callLogMap[t.id]?.callStatus ?? t.lastCallStatus ?? null;
+      }
+      function lastCallDateFor(t: (typeof allTrucks)[0]): Date | null {
+        return callLogMap[t.id]?.callTimestamp ?? t.lastCallDate ?? null;
+      }
 
       const items: QueueItem[] = [];
       const assigned = new Set<string>();
@@ -3722,7 +3738,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           step: 1, stepTitle: 'CONFIRM RENTAL RETURNED',
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
-          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: 'Confirm rental has been returned to Enterprise — contact tech or shop to verify',
           sortKey: daysInStatus(t),
         });
@@ -3735,19 +3751,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           step: 2, stepTitle: 'CHECK WITH MORGAN TO SCHEDULE',
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
-          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: 'Check with Morgan — confirm shop appointment is booked and get scheduled date',
           sortKey: daysInStatus(t),
         });
       }
 
       // --- STEP 3: VEHICLE READY — RETRIEVE ASAP ---
+      // fs_call_logs are authoritative for estimatedReadyDate and lucaStatus
       const RETURNED_SET = new Set(['NLWC - Return Rental', 'On Road', 'Truck Swap', 'In Transit', 'Available to be assigned']);
       const step3Candidates = [...allTrucks].filter(t => {
         if (assigned.has(t.id)) return false;
         const hs = getHolmanStatus(t.truckNumber);
         const cl = callLogMap[t.id];
-        const lucaStatus = t.lastCallStatus ?? cl?.callStatus ?? null;
+        // Call log authoritative: use cl.callStatus first, then truck denormalized field
+        const lucaStatus = cl?.callStatus ?? t.lastCallStatus ?? null;
+        // Call log authoritative: use cl.estimatedReadyDate first, then truck fields
         const erd = cl?.estimatedReadyDate ?? t.eta ?? t.expectedCompletion ?? null;
         const holmanReady = hs === 'Repair Complete';
         const lucaReady = lucaStatus === 'Ready';
@@ -3770,7 +3789,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           step: 3, stepTitle: 'VEHICLE READY — RETRIEVE ASAP',
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
-          lucaStatus: t.lastCallStatus ?? cl?.callStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: isConflict
             ? 'STATUS CONFLICT — Holman/Luca shows ready but FleetScope not updated. Correct all systems then arrange pickup.'
             : 'Vehicle appears ready — verify with shop and arrange same-day pickup if confirmed',
@@ -3791,32 +3810,31 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           step: 4, stepTitle: 'ESCALATE TO ROB FOR AUTHORIZATION',
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
-          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: 'Escalate to Rob — repair authorization decision needed. Rob to approve or deny today.',
           sortKey: daysInStatus(t),
         });
       }
 
       // --- STEP 5: INITIATE LUCA AI CALL ---
+      // fs_call_logs are authoritative for last call date and status
       for (const t of [...allTrucks].filter(t => {
         if (assigned.has(t.id)) return false;
         if (t.mainStatus !== 'Repairing' && t.mainStatus !== 'Confirming Status') return false;
-        const cl = callLogMap[t.id];
-        const lastDate: Date | null = t.lastCallDate ?? cl?.callTimestamp ?? null;
-        const lucaStatus = t.lastCallStatus ?? cl?.callStatus ?? null;
+        // Call log authoritative for determining recency and status
+        const lastDate = lastCallDateFor(t);
+        const lucaStatus = lucaStatusFor(t);
         const noRecentCall = !lastDate || (now - lastDate.getTime()) > THREE_DAYS_MS;
         const badStatus = ['No Answer', 'Call Failed', 'Failed'].includes(lucaStatus ?? '');
         return noRecentCall || badStatus;
       }).sort((a, b) => {
-        const clA = callLogMap[a.id];
-        const clB = callLogMap[b.id];
-        const dA = (a.lastCallDate ?? clA?.callTimestamp)?.getTime() ?? 0;
-        const dB = (b.lastCallDate ?? clB?.callTimestamp)?.getTime() ?? 0;
+        const dA = lastCallDateFor(a)?.getTime() ?? 0;
+        const dB = lastCallDateFor(b)?.getTime() ?? 0;
         return dA - dB; // ascending, nulls (0) first
       })) {
         if (assigned.has(t.id)) continue;
         assigned.add(t.id);
-        const lastDate: Date | null = t.lastCallDate ?? callLogMap[t.id]?.callTimestamp ?? null;
+        const lastDate = lastCallDateFor(t);
         const actionText = lastDate
           ? `Last attempted: ${lastDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Initiate new Luca call.`
           : 'No call on record. Initiate Luca AI call now.';
@@ -3824,8 +3842,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           step: 5, stepTitle: 'INITIATE LUCA AI CALL',
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
-          lucaStatus: t.lastCallStatus ?? callLogMap[t.id]?.callStatus ?? null,
-          lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          lucaStatus: lucaStatusFor(t),
+          lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText,
           sortKey: lastDate?.getTime() ?? 0,
         });
@@ -3838,7 +3856,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           step: 6, stepTitle: 'CONFIRM TAGS WITH CHERYL',
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
-          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: 'Ask Cheryl to confirm tags are processed and cleared',
           sortKey: daysInStatus(t),
         });
@@ -3857,7 +3875,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           step: 7, stepTitle: 'DECLINED REPAIR — FIND REPLACEMENT VEHICLE',
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
-          lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
+          lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: 'Repair declined — arrange replacement vehicle for tech. Nearest available units:',
           sortKey: daysInStatus(t),
           suggestions,

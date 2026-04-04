@@ -20,7 +20,7 @@ interface QueueItem {
   actionText: string;
   sortKey: number;
   isConflict?: boolean;
-  suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null }>;
+  suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null; mileage: number | null }>;
 }
 
 interface NoActionItem {
@@ -141,7 +141,9 @@ function QueueRow({ item, done, onToggleDone }: { item: QueueItem; done: boolean
                 <div key={i} className="text-xs text-muted-foreground pl-4">
                   → Unit {s.vehicleNumber}
                   {s.distanceMiles !== null && <span className="mx-1">·</span>}
-                  {s.distanceMiles !== null && <span className="font-medium">{s.distanceMiles} mi</span>}
+                  {s.distanceMiles !== null && <span className="font-medium">{s.distanceMiles} mi away</span>}
+                  {s.mileage !== null && <span className="mx-1">·</span>}
+                  {s.mileage !== null && <span>{s.mileage.toLocaleString()} mi on odometer</span>}
                   {s.status && <span className="mx-1">·</span>}
                   {s.status && <span>{s.status}</span>}
                   {s.address && <span className="mx-1">·</span>}
