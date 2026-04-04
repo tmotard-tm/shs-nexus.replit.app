@@ -3568,17 +3568,25 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // Fetch the most recent status event per truck from fs_truck_status_events.
-      // This table is populated by updateTruck() on every real mainStatus transition —
-      // mirroring the fs_pmf_status_events pattern used by the PMF/days-in-status
-      // endpoint for lock-down duration tracking.  Only events whose mainStatus matches
-      // the truck's CURRENT mainStatus are used, so stale entries are ignored.
+      // Uses the same CTE + ROW_NUMBER pattern as the /pmf/days-in-status endpoint
+      // (which queries fs_pmf_status_events for PMF/PARQ vehicles).
+      // fs_truck_status_events is the fleet-scope equivalent of fs_pmf_status_events:
+      //   fs_pmf_status_events  → populated by PMF/PARQ sync on status changes
+      //   fs_truck_status_events → populated by updateTruck() on mainStatus changes
+      // Only events whose main_status matches the truck's CURRENT mainStatus are
+      // used in daysInStatus, rejecting stale entries from previous status periods.
       const statusEventsResult = await getDb().execute(sql`
-        SELECT DISTINCT ON (truck_id)
-          truck_id,
-          main_status,
-          effective_at
-        FROM fs_truck_status_events
-        ORDER BY truck_id, effective_at DESC
+        WITH latest_status_events AS (
+          SELECT
+            truck_id,
+            main_status,
+            effective_at,
+            ROW_NUMBER() OVER (PARTITION BY truck_id ORDER BY effective_at DESC) AS rn
+          FROM fs_truck_status_events
+        )
+        SELECT truck_id, main_status, effective_at
+        FROM latest_status_events
+        WHERE rn = 1
       `);
 
       type StatusEventRow = { truck_id: string; main_status: string; effective_at: string };
@@ -3809,7 +3817,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }).sort((a, b) => {
         const erdA = callLogMap[a.id]?.estimatedReadyDate ?? a.eta ?? a.expectedCompletion ?? null;
         const erdB = callLogMap[b.id]?.estimatedReadyDate ?? b.eta ?? b.expectedCompletion ?? null;
-        if (erdA && erdB) return new Date(erdA).getTime() - new Date(erdB).getTime();
+        if (erdA && erdB) {
+          const dateDiff = new Date(erdA).getTime() - new Date(erdB).getTime();
+          // Primary: ERD ascending; secondary tie-break: daysInStatus descending
+          return dateDiff !== 0 ? dateDiff : daysInStatus(b) - daysInStatus(a);
+        }
         if (erdA) return -1; if (erdB) return 1;
         return daysInStatus(b) - daysInStatus(a);
       });
