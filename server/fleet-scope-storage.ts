@@ -1,4 +1,4 @@
-import { trucks, actions, trackingRecords, pmfImports, pmfRows, pmfStatusEvents, pmfActivityLogs, pmfActivitySyncMeta, metricsSnapshots, spareVehicleDetails, purchaseOrders, poImportMeta, archivedTrucks, rentalImports, truckConsolidations, byovWeeklySnapshots, fleetWeeklySnapshots, pmfStatusWeeklySnapshots, repairWeeklySnapshots, fleetCostRecords, fleetCostImportMeta, approvedCostRecords, approvedCostImportMeta, decommissioningVehicles, callLogs, type Truck, type InsertTruck, type Action, type InsertAction, type TrackingRecord, type InsertTrackingRecord, type PmfImport, type PmfRow, type PmfStatusEvent, type PmfActivityLog, type InsertPmfActivityLog, type PmfActivitySyncMeta, type MetricsSnapshot, type InsertMetricsSnapshot, type SpareVehicleDetails, type InsertSpareVehicleDetails, type UpdateSpareVehicleDetails, type PurchaseOrder, type PoImportMeta, type ArchivedTruck, type InsertArchivedTruck, type RentalImport, type InsertRentalImport, type TruckConsolidation, type InsertTruckConsolidation, type ByovWeeklySnapshot, type InsertByovWeeklySnapshot, type FleetWeeklySnapshot, type InsertFleetWeeklySnapshot, type PmfStatusWeeklySnapshot, type InsertPmfStatusWeeklySnapshot, type RepairWeeklySnapshot, type InsertRepairWeeklySnapshot, type FleetCostRecord, type FleetCostImportMeta, type ApprovedCostRecord, type ApprovedCostImportMeta, type DecommissioningVehicle, type InsertDecommissioningVehicle, type CallLog, type InsertCallLog, getCombinedStatus } from "@shared/fleet-scope-schema";
+import { trucks, actions, trackingRecords, pmfImports, pmfRows, pmfStatusEvents, pmfActivityLogs, pmfActivitySyncMeta, metricsSnapshots, spareVehicleDetails, purchaseOrders, poImportMeta, archivedTrucks, rentalImports, truckConsolidations, byovWeeklySnapshots, fleetWeeklySnapshots, pmfStatusWeeklySnapshots, repairWeeklySnapshots, fleetCostRecords, fleetCostImportMeta, approvedCostRecords, approvedCostImportMeta, decommissioningVehicles, callLogs, truckStatusEvents, type Truck, type InsertTruck, type Action, type InsertAction, type TrackingRecord, type InsertTrackingRecord, type PmfImport, type PmfRow, type PmfStatusEvent, type PmfActivityLog, type InsertPmfActivityLog, type PmfActivitySyncMeta, type MetricsSnapshot, type InsertMetricsSnapshot, type SpareVehicleDetails, type InsertSpareVehicleDetails, type UpdateSpareVehicleDetails, type PurchaseOrder, type PoImportMeta, type ArchivedTruck, type InsertArchivedTruck, type RentalImport, type InsertRentalImport, type TruckConsolidation, type InsertTruckConsolidation, type ByovWeeklySnapshot, type InsertByovWeeklySnapshot, type FleetWeeklySnapshot, type InsertFleetWeeklySnapshot, type PmfStatusWeeklySnapshot, type InsertPmfStatusWeeklySnapshot, type RepairWeeklySnapshot, type InsertRepairWeeklySnapshot, type FleetCostRecord, type FleetCostImportMeta, type ApprovedCostRecord, type ApprovedCostImportMeta, type DecommissioningVehicle, type InsertDecommissioningVehicle, type CallLog, type InsertCallLog, getCombinedStatus } from "@shared/fleet-scope-schema";
 import { fsDb } from "./fleet-scope-db";
 import { eq, desc, gte, lte, and, inArray, sql } from "drizzle-orm";
 
@@ -231,9 +231,13 @@ export class DatabaseStorage implements IStorage {
     // If mainStatus is being updated, recompute combined status
     let finalUpdates: Record<string, unknown> = { ...updates, lastUpdatedAt: new Date() };
     
+    let previousStatus: string | undefined;
     if (updates.mainStatus !== undefined) {
       finalUpdates.status = getCombinedStatus(updates.mainStatus, updates.subStatus || null);
       finalUpdates.mainStatusChangedAt = new Date();
+      // Fetch existing truck to record the previous status for the event log
+      const existing = await this.getTruck(id);
+      previousStatus = existing?.mainStatus ?? undefined;
     } else if (updates.subStatus !== undefined) {
       // If only subStatus is updated, we need the existing mainStatus
       const existing = await this.getTruck(id);
@@ -252,6 +256,23 @@ export class DatabaseStorage implements IStorage {
       .set(finalUpdates)
       .where(eq(trucks.id, id))
       .returning();
+
+    // Log the status change event so daysInStatus can use this event stream
+    if (updates.mainStatus !== undefined) {
+      try {
+        await getDb().insert(truckStatusEvents).values({
+          truckId: id,
+          mainStatus: updates.mainStatus,
+          previousStatus: previousStatus ?? null,
+          effectiveAt: finalUpdates.mainStatusChangedAt as Date,
+          source: "system",
+        });
+      } catch (evtErr) {
+        // Non-fatal: log failure but don't break the update
+        console.warn(`[TruckStatusEvents] Failed to log status event for truck ${id}:`, evtErr);
+      }
+    }
+
     return truck;
   }
 

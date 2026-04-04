@@ -545,6 +545,27 @@ DO $$ BEGIN
     ALTER TABLE "fs_trucks" ADD COLUMN "enterprise_id" text;
   END IF;
 END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'main_status_changed_at'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "main_status_changed_at" timestamp;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "fs_truck_status_events" (
+  "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+  "truck_id" varchar NOT NULL REFERENCES "fs_trucks"("id") ON DELETE CASCADE,
+  "main_status" text NOT NULL,
+  "previous_status" text,
+  "effective_at" timestamp NOT NULL DEFAULT now(),
+  "source" text DEFAULT 'system',
+  "created_at" timestamp DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "fs_truck_status_events_truck_id_idx" ON "fs_truck_status_events"("truck_id");
+CREATE INDEX IF NOT EXISTS "fs_truck_status_events_effective_at_idx" ON "fs_truck_status_events"("effective_at");
 `;
 
 let initialized = false;

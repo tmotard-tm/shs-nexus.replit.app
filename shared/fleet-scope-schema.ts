@@ -783,6 +783,26 @@ export const insertPmfStatusEventSchema = createInsertSchema(pmfStatusEvents).om
 export type PmfStatusEvent = typeof pmfStatusEvents.$inferSelect;
 export type InsertPmfStatusEvent = z.infer<typeof insertPmfStatusEventSchema>;
 
+// Fleet Scope Truck Status Events - tracks every mainStatus change for fleet scope trucks.
+// Analogous to fs_pmf_status_events for PMF/PARQ vehicles. Used to compute daysInStatus.
+export const truckStatusEvents = pgTable("fs_truck_status_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  truckId: varchar("truck_id").notNull().references(() => trucks.id, { onDelete: "cascade" }),
+  mainStatus: text("main_status").notNull(),
+  previousStatus: text("previous_status"),
+  effectiveAt: timestamp("effective_at").notNull().default(sql`now()`),
+  source: text("source").default("system"), // 'system', 'manual', 'import'
+  createdAt: timestamp("created_at").default(sql`now()`),
+});
+
+export const insertTruckStatusEventSchema = createInsertSchema(truckStatusEvents).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type TruckStatusEvent = typeof truckStatusEvents.$inferSelect;
+export type InsertTruckStatusEvent = z.infer<typeof insertTruckStatusEventSchema>;
+
 // PMF Activity Logs - tracks vehicle activity from PARQ API (synced every 6 hours)
 export const pmfActivityLogs = pgTable("fs_pmf_activity_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

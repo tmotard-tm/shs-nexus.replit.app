@@ -3567,6 +3567,27 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         };
       }
 
+      // Fetch the most recent status event per truck from fs_truck_status_events.
+      // This is the authoritative source for when a truck entered its current status —
+      // analogous to fs_pmf_status_events for PMF/PARQ vehicles.
+      const statusEventsResult = await getDb().execute(sql`
+        SELECT DISTINCT ON (truck_id)
+          truck_id,
+          main_status,
+          effective_at
+        FROM fs_truck_status_events
+        ORDER BY truck_id, effective_at DESC
+      `);
+
+      type StatusEventRow = { truck_id: string; main_status: string; effective_at: string };
+      const statusEventMap: Record<string, { mainStatus: string; effectiveAt: Date }> = {};
+      for (const row of statusEventsResult.rows as StatusEventRow[]) {
+        statusEventMap[row.truck_id] = {
+          mainStatus: row.main_status,
+          effectiveAt: new Date(row.effective_at),
+        };
+      }
+
       // Fetch available spare vans from Snowflake for Step 7 suggestions.
       // Join with Holman_VEHICLES on VIN to include vehicle mileage (odometer).
       // Include AMS lat/lon for distance-based sorting.
@@ -3680,11 +3701,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // Status-aware daysInStatus:
-      // Primary source is mainStatusChangedAt — set on every mainStatus change.
-      // Falls back to the most semantically appropriate date field per status type,
-      // then lastUpdatedAt as final fallback.
+      // 1. Primary: fs_truck_status_events event log (authoritative status change stream,
+      //    analogous to fs_pmf_status_events for PMF/PARQ vehicles). Only used when the
+      //    event's mainStatus matches the truck's current mainStatus to avoid stale entries.
+      // 2. Fallback: mainStatusChangedAt field (denormalized copy set on every status update).
+      // 3. Semantic fallback: rentalStartDate for rental statuses, datePutInRepair for repair.
+      // 4. Final fallback: lastUpdatedAt.
       function daysInStatus(truck: (typeof allTrucks)[0]): number {
-        // Prefer the dedicated status-change timestamp (most accurate)
+        const evt = statusEventMap[truck.id];
+        if (evt && evt.mainStatus === truck.mainStatus) {
+          return daysSince(evt.effectiveAt);
+        }
         if (truck.mainStatusChangedAt) return daysSince(truck.mainStatusChangedAt);
         const ms = truck.mainStatus ?? '';
         if (RENTAL_STATUSES.has(ms)) {
