@@ -3567,6 +3567,29 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         };
       }
 
+      // Fetch the most recent status event per truck from fs_truck_status_events.
+      // This table is populated by updateTruck() on every real mainStatus transition —
+      // mirroring the fs_pmf_status_events pattern used by the PMF/days-in-status
+      // endpoint for lock-down duration tracking.  Only events whose mainStatus matches
+      // the truck's CURRENT mainStatus are used, so stale entries are ignored.
+      const statusEventsResult = await getDb().execute(sql`
+        SELECT DISTINCT ON (truck_id)
+          truck_id,
+          main_status,
+          effective_at
+        FROM fs_truck_status_events
+        ORDER BY truck_id, effective_at DESC
+      `);
+
+      type StatusEventRow = { truck_id: string; main_status: string; effective_at: string };
+      const statusEventMap: Record<string, { mainStatus: string; effectiveAt: Date }> = {};
+      for (const row of statusEventsResult.rows as StatusEventRow[]) {
+        statusEventMap[row.truck_id] = {
+          mainStatus: row.main_status,
+          effectiveAt: new Date(row.effective_at),
+        };
+      }
+
       // Fetch available spare vans from Snowflake for Step 7 suggestions.
       // Join with Holman_VEHICLES on VIN to include vehicle mileage (odometer).
       // Include AMS lat/lon for distance-based sorting.
@@ -3679,15 +3702,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return Math.max(0, Math.floor((now - dt.getTime()) / 86400000));
       }
 
-      // Status-aware daysInStatus — uses established truck date fields only.
-      // Priority chain mirrors the pmf/days-in-status pattern (event timestamp first, then
-      // semantic date fallbacks, then last-updated):
-      // 1. mainStatusChangedAt — set on every PATCH that changes mainStatus (most accurate).
-      // 2. rentalStartDate — semantic fallback for rental-phase statuses.
-      // 3. datePutInRepair — semantic fallback for repair-phase statuses.
-      // 4. lastUpdatedAt — final fallback (always present).
-      // Note: fs_truck_status_events event log integration is tracked as a follow-up task.
+      // Status-aware daysInStatus — mirrors the fs_pmf_status_events / pmf/days-in-status
+      // pattern for fleet scope trucks:
+      // 1. fs_truck_status_events event log — the authoritative status-transition stream
+      //    (analogous to fs_pmf_status_events for PMF/PARQ vehicles). Only used when the
+      //    event's mainStatus matches the truck's current mainStatus to reject stale entries.
+      // 2. mainStatusChangedAt — denormalized fallback (set on same status transitions).
+      // 3. rentalStartDate — semantic fallback for rental-phase statuses.
+      // 4. datePutInRepair — semantic fallback for repair-phase statuses.
+      // 5. lastUpdatedAt — final fallback (always present).
       function daysInStatus(truck: (typeof allTrucks)[0]): number {
+        const evt = statusEventMap[truck.id];
+        if (evt && evt.mainStatus === truck.mainStatus) {
+          return daysSince(evt.effectiveAt);
+        }
         if (truck.mainStatusChangedAt) return daysSince(truck.mainStatusChangedAt);
         const ms = truck.mainStatus ?? '';
         if (RENTAL_STATUSES.has(ms)) {

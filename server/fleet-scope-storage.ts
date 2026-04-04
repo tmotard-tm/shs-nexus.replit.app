@@ -231,16 +231,19 @@ export class DatabaseStorage implements IStorage {
     // If mainStatus is being updated, recompute combined status
     let finalUpdates: Record<string, unknown> = { ...updates, lastUpdatedAt: new Date() };
     
-    let previousStatus: string | undefined;
+    // Fetch existing truck once — needed for status computation and change detection
+    const existing = await this.getTruck(id);
+
+    let statusActuallyChanged = false;
     if (updates.mainStatus !== undefined) {
       finalUpdates.status = getCombinedStatus(updates.mainStatus, updates.subStatus || null);
-      finalUpdates.mainStatusChangedAt = new Date();
-      // Fetch existing truck to record the previous status for the event log
-      const existing = await this.getTruck(id);
-      previousStatus = existing?.mainStatus ?? undefined;
+      // Guard: only stamp mainStatusChangedAt when the status value is truly different
+      if (existing?.mainStatus !== updates.mainStatus) {
+        finalUpdates.mainStatusChangedAt = new Date();
+        statusActuallyChanged = true;
+      }
     } else if (updates.subStatus !== undefined) {
-      // If only subStatus is updated, we need the existing mainStatus
-      const existing = await this.getTruck(id);
+      // Only subStatus is changing — recompute combined status using existing mainStatus
       if (existing?.mainStatus) {
         finalUpdates.status = getCombinedStatus(existing.mainStatus, updates.subStatus || null);
       }
@@ -257,18 +260,19 @@ export class DatabaseStorage implements IStorage {
       .where(eq(trucks.id, id))
       .returning();
 
-    // Log the status change event so daysInStatus can use this event stream
-    if (updates.mainStatus !== undefined) {
+    // Log a status event only on real transitions — mirrors how fs_pmf_status_events
+    // is populated for PMF/PARQ vehicles. Used by the queue endpoint for daysInStatus.
+    if (statusActuallyChanged && updates.mainStatus !== undefined) {
       try {
         await getDb().insert(truckStatusEvents).values({
           truckId: id,
           mainStatus: updates.mainStatus,
-          previousStatus: previousStatus ?? null,
+          previousStatus: existing?.mainStatus ?? null,
           effectiveAt: finalUpdates.mainStatusChangedAt as Date,
           source: "system",
         });
       } catch (evtErr) {
-        // Non-fatal: log failure but don't break the update
+        // Non-fatal: warn but don't break the update
         console.warn(`[TruckStatusEvents] Failed to log status event for truck ${id}:`, evtErr);
       }
     }
