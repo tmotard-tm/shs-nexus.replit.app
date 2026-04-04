@@ -569,8 +569,8 @@ CREATE INDEX IF NOT EXISTS "fs_truck_status_events_effective_at_idx" ON "fs_truc
 
 -- Backfill fs_pmf_status_events with existing fleet trucks that have no fleet_scope events yet.
 -- This ensures daysInStatus is accurate for trucks added before this feature shipped,
--- using their best available status timestamp (mainStatusChangedAt → rentalStartDate →
--- datePutInRepair → lastUpdatedAt). Only inserts rows that don't already exist.
+-- using their best available status timestamp: COALESCE(mainStatusChangedAt, lastUpdatedAt, NOW()).
+-- Only inserts rows that don't already exist (idempotent).
 INSERT INTO "fs_pmf_status_events" (asset_id, status, previous_status, effective_at, source)
 SELECT
   t.id,
