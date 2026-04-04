@@ -20,7 +20,7 @@ interface QueueItem {
   actionText: string;
   sortKey: number;
   isConflict?: boolean;
-  suggestions?: Array<{ vehicleNumber: string; status: string; address: string }>;
+  suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null }>;
 }
 
 interface NoActionItem {
@@ -140,6 +140,8 @@ function QueueRow({ item, done, onToggleDone }: { item: QueueItem; done: boolean
               item.suggestions.map((s, i) => (
                 <div key={i} className="text-xs text-muted-foreground pl-4">
                   → Unit {s.vehicleNumber}
+                  {s.distanceMiles !== null && <span className="mx-1">·</span>}
+                  {s.distanceMiles !== null && <span className="font-medium">{s.distanceMiles} mi</span>}
                   {s.status && <span className="mx-1">·</span>}
                   {s.status && <span>{s.status}</span>}
                   {s.address && <span className="mx-1">·</span>}

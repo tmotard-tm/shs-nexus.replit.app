@@ -3568,7 +3568,16 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // Fetch available spare vans from Snowflake for Step 7 suggestions
-      let spareVans: Array<{ vehicleNumber: string; status: string; address: string }> = [];
+      // Include AMS_CUR_ZIP for distance computation and exclude trucks already in the repair system
+      type SpareVanRow = {
+        vehicleNumber: string;
+        status: string;
+        address: string;
+        zip: string | null;
+        lat: number | null;
+        lon: number | null;
+      };
+      let spareVanPool: SpareVanRow[] = [];
       try {
         const spareRows = await executeQuery<{
           VEHICLE_NUMBER: string;
@@ -3576,27 +3585,86 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           AMS_CUR_ADDRESS: string;
           AMS_CUR_CITY: string;
           AMS_CUR_STATE: string;
+          AMS_CUR_ZIP: string;
+          AMS_ZIP_LAT: number | null;
+          AMS_ZIP_LON: number | null;
         }>(`
-          SELECT VEHICLE_NUMBER, TRUCK_STATUS, AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE
+          SELECT VEHICLE_NUMBER, TRUCK_STATUS,
+                 AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE, AMS_CUR_ZIP,
+                 AMS_ZIP_LAT, AMS_ZIP_LON
           FROM PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES
           ORDER BY VEHICLE_NUMBER
-          LIMIT 20
         `);
-        const repairSet = new Set(allTrucks.map(t => t.truckNumber.replace(/^0+/, '') || '0'));
-        spareVans = spareRows
+        const repairSet = new Set(allTrucks.map(t => (t.truckNumber || '').replace(/^0+/, '') || '0'));
+        spareVanPool = spareRows
           .filter(v => !repairSet.has((v.VEHICLE_NUMBER || '').replace(/^0+/, '') || '0'))
           .map(v => ({
             vehicleNumber: v.VEHICLE_NUMBER || '',
             status: v.TRUCK_STATUS || '',
             address: [v.AMS_CUR_ADDRESS, v.AMS_CUR_CITY, v.AMS_CUR_STATE].filter(Boolean).join(', '),
+            zip: v.AMS_CUR_ZIP || null,
+            lat: v.AMS_ZIP_LAT ? Number(v.AMS_ZIP_LAT) : null,
+            lon: v.AMS_ZIP_LON ? Number(v.AMS_ZIP_LON) : null,
           }));
       } catch (spareErr: any) {
         console.warn('[Queue] Could not fetch spare vans from Snowflake:', spareErr.message);
       }
 
+      // Haversine distance in miles between two lat/lon pairs
+      function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const R = 3958.8;
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+        return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+      }
+
+      // Get nearest spare vans to a given truck (sorted by distance asc, nulls last)
+      async function getNearestSpares(truck: (typeof allTrucks)[0], count = 3): Promise<Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null }>> {
+        const thisNum = (truck.truckNumber || '').replace(/^0+/, '') || '0';
+        const candidates = spareVanPool.filter(v => (v.vehicleNumber.replace(/^0+/, '') || '0') !== thisNum);
+
+        // Resolve truck coordinates from repair address ZIP
+        let truckLat: number | null = null;
+        let truckLon: number | null = null;
+        if (truck.repairAddress) {
+          const zipMatch = truck.repairAddress.match(/\b(\d{5})(?:-\d{4})?\b/g);
+          const truckZip = zipMatch ? zipMatch[zipMatch.length - 1] : null;
+          if (truckZip) {
+            try {
+              const coords = await getZipCoordinates(truckZip);
+              if (coords) { truckLat = coords.lat; truckLon = coords.lng; }
+            } catch { /* ignore */ }
+          }
+        }
+
+        const scored = candidates.map(v => {
+          let distanceMiles: number | null = null;
+          if (truckLat !== null && truckLon !== null && v.lat !== null && v.lon !== null) {
+            distanceMiles = haversine(truckLat, truckLon, v.lat, v.lon);
+          }
+          return { vehicleNumber: v.vehicleNumber, status: v.status, address: v.address, distanceMiles };
+        });
+
+        scored.sort((a, b) => {
+          if (a.distanceMiles === null && b.distanceMiles === null) return 0;
+          if (a.distanceMiles === null) return 1;
+          if (b.distanceMiles === null) return -1;
+          return a.distanceMiles - b.distanceMiles;
+        });
+
+        return scored.slice(0, count);
+      }
+
       const now = Date.now();
       const TODAY_START = new Date(); TODAY_START.setHours(0, 0, 0, 0);
       const THREE_DAYS_MS = 3 * 86400000;
+
+      // Status-aware date constants for sorting
+      const RENTAL_STATUSES = new Set(['NLWC - Return Rental', 'On Road', 'Truck Swap', 'In Transit', 'Available to be assigned']);
+      const REPAIR_STATUSES = new Set(['Repairing', 'Confirming Status', 'Decision Pending', 'Declined Repair', 'Scheduling']);
 
       function daysSince(d: Date | string | null | undefined): number {
         if (!d) return 0;
@@ -3605,16 +3673,25 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return Math.max(0, Math.floor((now - dt.getTime()) / 86400000));
       }
 
+      // Status-aware daysInStatus: use the date field that corresponds to when the truck entered its current status
+      function daysInStatus(truck: (typeof allTrucks)[0]): number {
+        const ms = truck.mainStatus ?? '';
+        if (RENTAL_STATUSES.has(ms)) {
+          // Rental statuses: count from when rental started
+          return daysSince(truck.rentalStartDate) || daysSince(truck.lastUpdatedAt);
+        }
+        if (REPAIR_STATUSES.has(ms)) {
+          // Repair statuses: count from when truck was put in repair
+          return daysSince(truck.datePutInRepair) || daysSince(truck.lastUpdatedAt);
+        }
+        // Tags, PMF, and other statuses: fall back to last update
+        return daysSince(truck.lastUpdatedAt);
+      }
+
       function getHolmanStatus(truckNumber: string): string | null {
         const padded = truckNumber.padStart(6, '0');
         const data = scraperData[padded];
         return data?.status ? (data.status as string).replace(/_/g, ' ') : null;
-      }
-
-      function daysInStatus(truck: (typeof allTrucks)[0]): number {
-        if (truck.rentalStartDate) return daysSince(truck.rentalStartDate);
-        if (truck.datePutInRepair) return daysSince(truck.datePutInRepair);
-        return daysSince(truck.lastUpdatedAt);
       }
 
       type QueueItem = {
@@ -3629,7 +3706,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         lastCallDate: string | null;
         actionText: string;
         sortKey: number;
-        suggestions?: Array<{ vehicleNumber: string; status: string; address: string }>;
+        suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null }>;
         isConflict?: boolean;
       };
 
@@ -3768,18 +3845,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       // --- STEP 7: DECLINED REPAIR — FIND REPLACEMENT VEHICLE ---
-      for (const t of [...allTrucks].filter(t => !assigned.has(t.id) && t.mainStatus === 'Declined Repair').sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
+      // Compute nearest spare vans concurrently for each declined truck
+      const step7Trucks = [...allTrucks].filter(t => !assigned.has(t.id) && t.mainStatus === 'Declined Repair').sort((a, b) => daysInStatus(b) - daysInStatus(a));
+      const step7Results = await Promise.all(step7Trucks.map(t => getNearestSpares(t, 3)));
+      for (let i = 0; i < step7Trucks.length; i++) {
+        const t = step7Trucks[i];
+        if (assigned.has(t.id)) continue;
         assigned.add(t.id);
-        const thisNum = t.truckNumber.replace(/^0+/, '') || '0';
-        const suggestions = spareVans.filter(v => (v.vehicleNumber.replace(/^0+/, '') || '0') !== thisNum).slice(0, 3);
+        const suggestions = step7Results[i];
         items.push({
           step: 7, stepTitle: 'DECLINED REPAIR — FIND REPLACEMENT VEHICLE',
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
           lucaStatus: t.lastCallStatus ?? null, lastCallDate: t.lastCallDate?.toISOString() ?? null,
-          actionText: 'Repair declined — arrange replacement vehicle for tech. Suggested nearest available units:',
+          actionText: 'Repair declined — arrange replacement vehicle for tech. Nearest available units:',
           sortKey: daysInStatus(t),
-          suggestions: suggestions.length > 0 ? suggestions : [],
+          suggestions,
         });
       }
 
