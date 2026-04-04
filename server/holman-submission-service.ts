@@ -69,7 +69,8 @@ export class HolmanSubmissionService {
   async updateSubmissionStatus(
     id: string,
     status: 'pending' | 'processing' | 'completed' | 'failed',
-    errorMessage?: string | null
+    errorMessage?: string | null,
+    lastObservedTech?: string | null
   ): Promise<HolmanSubmission | null> {
     const updateData: any = {
       status,
@@ -82,6 +83,10 @@ export class HolmanSubmissionService {
     
     if (errorMessage) {
       updateData.errorMessage = errorMessage;
+    }
+
+    if (lastObservedTech !== undefined) {
+      updateData.lastObservedTech = lastObservedTech;
     }
 
     const [updated] = await db.update(holmanSubmissions)
@@ -152,11 +157,19 @@ export class HolmanSubmissionService {
           ? `Confirmed unassigned via fleet sync (assignedStatus="${vehicle.assignedStatus}")`
           : `Fleet sync shows "${vehicle.assignedStatus}" — Holman may still be processing`;
       } else if (action === 'assign') {
-        const techMatch = expectedTech && techInHolman.toLowerCase().includes(expectedTech.toLowerCase());
-        success = (assignedStatus.includes('assign') && !assignedStatus.includes('unassign')) || techMatch;
-        message = success
-          ? `Confirmed assigned via fleet sync (assignedStatus="${vehicle.assignedStatus}", tech="${techInHolman}")`
-          : `Fleet sync shows "${vehicle.assignedStatus}" — Holman may still be processing`;
+        const techMatch = !!(expectedTech && techInHolman.toLowerCase().includes(expectedTech.toLowerCase()));
+        const isAssigned = assignedStatus.includes('assign') && !assignedStatus.includes('unassign');
+        success = techMatch;
+        if (techMatch) {
+          message = `Confirmed assigned via fleet sync (assignedStatus="${vehicle.assignedStatus}", tech="${techInHolman}")`;
+        } else if (expectedTech && techInHolman && !techMatch) {
+          // Tech is present in Holman but doesn't match — warn regardless of assignedStatus string
+          const statusContext = isAssigned ? 'vehicle is "Assigned"' : `assignedStatus="${vehicle.assignedStatus}"`;
+          console.warn(`[HolmanVerify] Submission ${submission.id} (vehicle ${vehicleNumber}): ${statusContext} but tech mismatch — expected="${expectedTech}", actual="${techInHolman}". Leaving pending until timeout.`);
+          message = `Fleet sync shows ${statusContext} but tech is "${techInHolman}", expected "${expectedTech}" — Holman may not have applied the change`;
+        } else {
+          message = `Fleet sync shows "${vehicle.assignedStatus}" (tech="${techInHolman}") — Holman may still be processing`;
+        }
       } else {
         // field_test or other — just finding the vehicle is enough
         success = true;
@@ -169,6 +182,10 @@ export class HolmanSubmissionService {
         await this.propagateStatusToFleetLog(submission, 'completed', message);
       } else {
         console.log(`[HolmanVerify] Fleet sync: submission ${submission.id} not yet confirmed: ${message}`);
+        // Persist the last observed tech so timeout/expiry messages can include actual vs expected
+        if (action === 'assign' && techInHolman) {
+          await this.updateSubmissionStatus(submission.id, 'pending', null, techInHolman);
+        }
       }
     }
   }
@@ -350,7 +367,16 @@ export class HolmanSubmissionService {
         if (newStatus === 'completed') {
           await settleSubmission('completed', message);
         } else {
-          const failMsg = `Verification expired after ${HOLMAN_SUBMISSION_EXPIRY_MS / 60000} minutes. Last: ${message}`;
+          let techDetail = '';
+          if (submission.action === 'assign' && submission.enterpriseId) {
+            techDetail = ` Expected tech: "${submission.enterpriseId}"`;
+            if (submission.lastObservedTech) {
+              techDetail += `, last observed in Holman: "${submission.lastObservedTech}"`;
+            }
+            techDetail += '.';
+          }
+          const failMsg = `Verification expired after ${HOLMAN_SUBMISSION_EXPIRY_MS / 60000} minutes.${techDetail} Last: ${message}`;
+          console.error(`[HolmanVerify] Submission ${submissionId} (vehicle ${submission.holmanVehicleNumber}, ${submission.action}) expired without confirmation.${techDetail}`);
           await settleSubmission('failed', failMsg);
         }
       } catch (err: any) {
@@ -443,7 +469,16 @@ export class HolmanSubmissionService {
         completed++;
         await this.propagateStatusToFleetLog(submission, 'completed', message);
       } else if (ageMs > HOLMAN_SUBMISSION_EXPIRY_MS + POST_EXPIRY_BUFFER_MS) {
-        const failMsg = `Verification expired after ${Math.round(ageMs / 60000)} minutes. Last: ${message}`;
+        let techDetail = '';
+        if (submission.action === 'assign' && submission.enterpriseId) {
+          techDetail = ` Expected tech: "${submission.enterpriseId}"`;
+          if (submission.lastObservedTech) {
+            techDetail += `, last observed in Holman: "${submission.lastObservedTech}"`;
+          }
+          techDetail += '.';
+        }
+        const failMsg = `Verification expired after ${Math.round(ageMs / 60000)} minutes.${techDetail} Last: ${message}`;
+        console.error(`[HolmanVerify] Submission ${submission.id} (vehicle ${submission.holmanVehicleNumber}, ${submission.action}) expired without confirmation.${techDetail}`);
         await this.updateSubmissionStatus(submission.id, 'failed', failMsg);
         await this.propagateStatusToFleetLog(submission, 'failed', failMsg);
         failed++;

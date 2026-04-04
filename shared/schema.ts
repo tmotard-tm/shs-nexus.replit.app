@@ -1604,6 +1604,7 @@ export const holmanSubmissions = pgTable("holman_submissions", {
   lastCheckedAt: timestamp("last_checked_at"),
   completedAt: timestamp("completed_at"),
   errorMessage: text("error_message"),
+  lastObservedTech: text("last_observed_tech"), // Last clientData2 value seen in Holman fleet sync
   createdAt: timestamp("created_at").defaultNow().notNull(),
   createdBy: text("created_by"), // User who initiated
 }, (table) => ({
