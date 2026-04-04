@@ -299,10 +299,10 @@ export default function TodaysQueue() {
         description: "The repair shop is being called now.",
       });
       await queryClient.invalidateQueries({ queryKey: ["/api/fs/queue/today"] });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Failed to start call",
-        description: error.message || "Could not initiate call to repair shop.",
+        description: error instanceof Error ? error.message : "Could not initiate call to repair shop.",
         variant: "destructive",
       });
     } finally {
