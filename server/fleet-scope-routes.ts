@@ -3797,6 +3797,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         sortKey: number;
         suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null; mileage: number | null }>;
         isConflict?: boolean;
+        repairPhone: string | null;
+        techState: string | null;
       };
 
       // Helper: call log is authoritative over denormalized truck fields for luca status/date
