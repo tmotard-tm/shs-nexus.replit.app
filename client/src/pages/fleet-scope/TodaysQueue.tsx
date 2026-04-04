@@ -165,7 +165,7 @@ function QueueRow({ item, done, onToggleDone }: { item: QueueItem; done: boolean
           onClick={() => onToggleDone(item.truckId)}
         >
           {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
-          {done ? "Done" : "Done"}
+          {done ? "Done" : "Mark Done"}
         </Button>
       </div>
     </div>

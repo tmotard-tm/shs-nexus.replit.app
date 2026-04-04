@@ -3689,6 +3689,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       const now = Date.now();
       const TODAY_START = new Date(); TODAY_START.setHours(0, 0, 0, 0);
+      // End-of-day boundary: ERDs with any time today still count as "today or past"
+      const TODAY_END = new Date(); TODAY_END.setHours(23, 59, 59, 999);
       const THREE_DAYS_MS = 3 * 86400000;
 
       // Status-aware date constants for sorting
@@ -3801,7 +3803,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const erd = cl?.estimatedReadyDate ?? t.eta ?? t.expectedCompletion ?? null;
         const holmanReady = hs === 'Repair Complete';
         const lucaReady = lucaStatus === 'Ready';
-        const dateReady = erd ? (new Date(erd) <= TODAY_START && !RETURNED_SET.has(t.mainStatus ?? '')) : false;
+        // Compare against end-of-day so any ERD time today (not just midnight) qualifies
+        const dateReady = erd ? (new Date(erd) <= TODAY_END && !RETURNED_SET.has(t.mainStatus ?? '')) : false;
         return holmanReady || lucaReady || dateReady;
       }).sort((a, b) => {
         const erdA = callLogMap[a.id]?.estimatedReadyDate ?? a.eta ?? a.expectedCompletion ?? null;
