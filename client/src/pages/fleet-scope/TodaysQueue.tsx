@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { RefreshCw, CheckCircle2, Circle, AlertTriangle, ChevronDown, ChevronRight, Clock } from "lucide-react";
+import { RefreshCw, CheckCircle2, Circle, AlertTriangle, ChevronDown, ChevronRight, Clock, Phone, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface QueueItem {
   step: number;
@@ -21,6 +22,8 @@ interface QueueItem {
   sortKey: number;
   isConflict?: boolean;
   suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null; mileage: number | null }>;
+  repairPhone: string | null;
+  techState: string | null;
 }
 
 interface NoActionItem {
@@ -37,6 +40,40 @@ interface QueueResponse {
   noAction: NoActionItem[];
   generatedAt: string;
 }
+
+const STATE_TO_REGION: Record<string, string> = {
+  VA: "East Coast & Southeast", FL: "East Coast & Southeast", NY: "East Coast & Southeast",
+  GA: "East Coast & Southeast", MD: "East Coast & Southeast", NC: "East Coast & Southeast",
+  PA: "East Coast & Southeast", MA: "East Coast & Southeast", CT: "East Coast & Southeast",
+  DE: "East Coast & Southeast", RI: "East Coast & Southeast", NJ: "East Coast & Southeast",
+  WV: "East Coast & Southeast", ME: "East Coast & Southeast", SC: "East Coast & Southeast",
+  TX: "Central & Midwest", IL: "Central & Midwest", OH: "Central & Midwest",
+  KY: "Central & Midwest", IN: "Central & Midwest", MI: "Central & Midwest",
+  MO: "Central & Midwest", TN: "Central & Midwest", WI: "Central & Midwest",
+  IA: "Central & Midwest", KS: "Central & Midwest", OK: "Central & Midwest",
+  ND: "Central & Midwest", NE: "Central & Midwest", MN: "Central & Midwest",
+  CA: "West Coast & Deep South", AL: "West Coast & Deep South", AR: "West Coast & Deep South",
+  CO: "West Coast & Deep South", MS: "West Coast & Deep South", WA: "West Coast & Deep South",
+  AZ: "West Coast & Deep South", ID: "West Coast & Deep South", LA: "West Coast & Deep South",
+  OR: "West Coast & Deep South", UT: "West Coast & Deep South", HI: "West Coast & Deep South",
+};
+
+const REGION_OPTIONS = ["East Coast & Southeast", "Central & Midwest", "West Coast & Deep South"];
+
+const REGION_COLORS: Record<string, { active: string; inactive: string }> = {
+  "East Coast & Southeast": {
+    active: "bg-blue-500 text-white border-blue-500",
+    inactive: "border-blue-300 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20",
+  },
+  "Central & Midwest": {
+    active: "bg-amber-500 text-white border-amber-500",
+    inactive: "border-amber-300 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20",
+  },
+  "West Coast & Deep South": {
+    active: "bg-emerald-500 text-white border-emerald-500",
+    inactive: "border-emerald-300 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20",
+  },
+};
 
 const STEP_COLORS: Record<number, string> = {
   1: "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300",
@@ -107,7 +144,22 @@ function LucaStatusBadge({ status }: { status: string | null }) {
   return <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded", color)}>{status}</span>;
 }
 
-function QueueRow({ item, done, onToggleDone }: { item: QueueItem; done: boolean; onToggleDone: (id: string) => void }) {
+function QueueRow({
+  item,
+  done,
+  onToggleDone,
+  callingId,
+  onCallShop,
+}: {
+  item: QueueItem;
+  done: boolean;
+  onToggleDone: (id: string) => void;
+  callingId: string | null;
+  onCallShop: (id: string) => void;
+}) {
+  const isCalling = callingId === item.truckId;
+  const showCallButton = item.step === 5 && !!item.repairPhone;
+
   return (
     <div className={cn(
       "flex items-start gap-3 px-4 py-3 transition-all duration-200",
@@ -124,6 +176,9 @@ function QueueRow({ item, done, onToggleDone }: { item: QueueItem; done: boolean
         <div className="flex flex-wrap items-center gap-2 mb-1">
           <span className={cn("font-mono text-sm font-semibold", done && "line-through")}>{item.truckNumber}</span>
           {item.techName && <span className="text-sm text-muted-foreground">{item.techName}</span>}
+          {item.techState && (
+            <span className="text-xs font-medium bg-muted text-muted-foreground px-1.5 py-0.5 rounded">{item.techState}</span>
+          )}
           <StatusPill label="FS" value={item.fleetScopeStatus} />
           <StatusPill label="Holman" value={item.holmanStatus} />
           <LucaStatusBadge status={item.lucaStatus} />
@@ -161,7 +216,24 @@ function QueueRow({ item, done, onToggleDone }: { item: QueueItem; done: boolean
         )}
       </div>
 
-      <div className="flex-shrink-0 self-start pt-0.5">
+      <div className="flex-shrink-0 self-start pt-0.5 flex items-center gap-1.5">
+        {showCallButton && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2.5 text-xs gap-1.5 text-purple-700 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-700 dark:hover:bg-purple-900/20"
+            onClick={() => onCallShop(item.truckId)}
+            disabled={isCalling || !!callingId}
+            title="Call repair shop via LucaAI"
+          >
+            {isCalling ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Phone className="h-3.5 w-3.5" />
+            )}
+            {isCalling ? "Calling…" : "Call Shop"}
+          </Button>
+        )}
         <Button
           size="sm"
           variant={done ? "secondary" : "outline"}
@@ -177,9 +249,13 @@ function QueueRow({ item, done, onToggleDone }: { item: QueueItem; done: boolean
 }
 
 export default function TodaysQueue() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [doneSet, setDoneSet] = useState<Set<string>>(() => loadDoneSet());
   const [collapsedSteps, setCollapsedSteps] = useState<Set<number>>(new Set());
   const [noActionExpanded, setNoActionExpanded] = useState(false);
+  const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set());
+  const [callingId, setCallingId] = useState<string | null>(null);
 
   const { data, isLoading, isFetching, refetch, dataUpdatedAt } = useQuery<QueueResponse>({
     queryKey: ["/api/fs/queue/today"],
@@ -205,12 +281,49 @@ export default function TodaysQueue() {
     });
   }, []);
 
+  const toggleRegion = useCallback((region: string) => {
+    setSelectedRegions(prev => {
+      const next = new Set(prev);
+      if (next.has(region)) next.delete(region);
+      else next.add(region);
+      return next;
+    });
+  }, []);
+
+  const handleCallShop = useCallback(async (truckId: string) => {
+    setCallingId(truckId);
+    try {
+      await apiRequest("POST", `/api/fs/trucks/${truckId}/call-repair-shop`, {});
+      toast({
+        title: "Call initiated",
+        description: "The repair shop is being called now.",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["/api/fs/queue/today"] });
+    } catch (error: any) {
+      toast({
+        title: "Failed to start call",
+        description: error.message || "Could not initiate call to repair shop.",
+        variant: "destructive",
+      });
+    } finally {
+      setCallingId(null);
+    }
+  }, [toast, queryClient]);
+
   useEffect(() => {
     setDoneSet(loadDoneSet());
   }, []);
 
-  const items = data?.items ?? [];
+  const allItems = data?.items ?? [];
   const noAction = data?.noAction ?? [];
+
+  const items = selectedRegions.size === 0
+    ? allItems
+    : allItems.filter(item => {
+        if (!item.techState) return false;
+        const region = STATE_TO_REGION[item.techState];
+        return region ? selectedRegions.has(region) : false;
+      });
 
   const stepGroups = items.reduce<Record<number, QueueItem[]>>((acc, item) => {
     if (!acc[item.step]) acc[item.step] = [];
@@ -227,37 +340,66 @@ export default function TodaysQueue() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="sticky top-0 z-10 bg-background border-b border-border px-4 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold">Today's Queue</h1>
-          {!isLoading && (
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary" className="text-xs">
-                {doneCount}/{totalActionable} done
-              </Badge>
-              {noAction.length > 0 && (
-                <span className="text-xs text-muted-foreground">+{noAction.length} no action</span>
-              )}
-            </div>
-          )}
+      <div className="sticky top-0 z-10 bg-background border-b border-border px-4 py-3 space-y-2">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-semibold">Today's Queue</h1>
+            {!isLoading && (
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-xs">
+                  {doneCount}/{totalActionable} done
+                </Badge>
+                {noAction.length > 0 && (
+                  <span className="text-xs text-muted-foreground">+{noAction.length} no action</span>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {generatedAt && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {generatedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5"
+              onClick={() => refetch()}
+              disabled={isFetching}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {generatedAt && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {generatedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-            </span>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {REGION_OPTIONS.map(region => {
+            const isActive = selectedRegions.has(region);
+            const colors = REGION_COLORS[region];
+            return (
+              <button
+                key={region}
+                onClick={() => toggleRegion(region)}
+                className={cn(
+                  "text-xs font-medium px-2.5 py-1 rounded-full border transition-colors",
+                  isActive ? colors.active : colors.inactive
+                )}
+              >
+                {region}
+              </button>
+            );
+          })}
+          {selectedRegions.size > 0 && (
+            <button
+              onClick={() => setSelectedRegions(new Set())}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors ml-1 underline underline-offset-2"
+            >
+              Clear
+            </button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5"
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
-            Refresh
-          </Button>
         </div>
       </div>
 
@@ -271,9 +413,19 @@ export default function TodaysQueue() {
           <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
             Failed to load queue. Try refreshing.
           </div>
-        ) : items.length === 0 && noAction.length === 0 ? (
+        ) : allItems.length === 0 && noAction.length === 0 ? (
           <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
             No vehicles in the system yet.
+          </div>
+        ) : items.length === 0 && selectedRegions.size > 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-muted-foreground text-sm gap-2">
+            <span>No items in the selected region{selectedRegions.size > 1 ? "s" : ""}.</span>
+            <button
+              onClick={() => setSelectedRegions(new Set())}
+              className="text-xs underline underline-offset-2 hover:text-foreground transition-colors"
+            >
+              Clear filter
+            </button>
           </div>
         ) : (
           <div className="divide-y divide-border">
@@ -315,6 +467,8 @@ export default function TodaysQueue() {
                           item={item}
                           done={doneSet.has(item.truckId)}
                           onToggleDone={toggleDone}
+                          callingId={callingId}
+                          onCallShop={handleCallShop}
                         />
                       ))}
                     </div>

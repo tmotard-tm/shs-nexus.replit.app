@@ -3822,6 +3822,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: 'Confirm rental has been returned to Enterprise — contact tech or shop to verify',
           sortKey: daysInStatus(t),
+          repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
         });
       }
 
@@ -3835,6 +3836,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: 'Check with Morgan — confirm shop appointment is booked and get scheduled date',
           sortKey: daysInStatus(t),
+          repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
         });
       }
 
@@ -3881,6 +3883,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             : 'Vehicle appears ready — verify with shop and arrange same-day pickup if confirmed',
           sortKey: erd ? new Date(erd).getTime() : 0,
           isConflict,
+          repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
         });
       }
 
@@ -3899,6 +3902,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: 'Escalate to Rob — repair authorization decision needed. Rob to approve or deny today.',
           sortKey: daysInStatus(t),
+          repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
         });
       }
 
@@ -3932,6 +3936,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText,
           sortKey: lastDate?.getTime() ?? 0,
+          repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
         });
       }
 
@@ -3945,6 +3950,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
           actionText: 'Ask Cheryl to confirm tags are processed and cleared',
           sortKey: daysInStatus(t),
+          repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
         });
       }
 
@@ -3965,6 +3971,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           actionText: 'Repair declined — arrange replacement vehicle for tech. Nearest available units:',
           sortKey: daysInStatus(t),
           suggestions,
+          repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
         });
       }
 
