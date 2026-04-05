@@ -81,7 +81,7 @@ const navGroups = [
   },
 ];
 
-const placeholderRoutes = ["/fleet-scope/queue", "/fleet-scope/vehicle-search", "/fleet-scope/discrepancies"];
+const placeholderRoutes = ["/fleet-scope/vehicle-search", "/fleet-scope/discrepancies"];
 
 export function AppSidebar() {
   const [location] = useLocation();
