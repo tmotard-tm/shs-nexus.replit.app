@@ -46,22 +46,27 @@ const EMPTY_FORM: FormData = {
 
 // ─── Status badge colour map ──────────────────────────────────────────────────
 
+// Mirrors Fleet Scope's mainStatusColors from StatusBadge.tsx:
+//   amber  = #F5A623 bg / #000000 fg
+//   red    = #EF4444 bg / #FFFFFF fg
+//   green  = #22C55E bg / #FFFFFF fg
+//   cyan   = #CFFAFE bg / #155E75 fg (Truck Swap only)
 const STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
-  "Repairing":              { fg: "#B45309", bg: "#FFFBEB" },
-  "Decision Pending":       { fg: "#B45309", bg: "#FFFBEB" },
-  "Confirming Status":      { fg: "#1A56DB", bg: "#EFF4FF" },
-  "Declined Repair":        { fg: "#DC2626", bg: "#FEF2F2" },
-  "Approved for sale":      { fg: "#0D9668", bg: "#ECFDF5" },
-  "Tags":                   { fg: "#1A56DB", bg: "#EFF4FF" },
-  "Scheduling":             { fg: "#1A56DB", bg: "#EFF4FF" },
-  "PMF":                    { fg: "#1A56DB", bg: "#EFF4FF" },
-  "In Transit":             { fg: "#1A56DB", bg: "#EFF4FF" },
-  "On Road":                { fg: "#0D9668", bg: "#ECFDF5" },
-  "Needs truck assigned":   { fg: "#B45309", bg: "#FFFBEB" },
-  "Available to be assigned": { fg: "#0D9668", bg: "#ECFDF5" },
-  "Relocate Van":           { fg: "#B45309", bg: "#FFFBEB" },
-  "NLWC - Return Rental":   { fg: "#B45309", bg: "#FFFBEB" },
-  "Truck Swap":             { fg: "#B45309", bg: "#FFFBEB" },
+  "Confirming Status":        { fg: "#000000", bg: "#F5A623" },
+  "Decision Pending":         { fg: "#FFFFFF", bg: "#EF4444" },
+  "Repairing":                { fg: "#000000", bg: "#F5A623" },
+  "Declined Repair":          { fg: "#FFFFFF", bg: "#EF4444" },
+  "Approved for sale":        { fg: "#000000", bg: "#F5A623" },
+  "Tags":                     { fg: "#000000", bg: "#F5A623" },
+  "Scheduling":               { fg: "#FFFFFF", bg: "#22C55E" },
+  "PMF":                      { fg: "#000000", bg: "#F5A623" },
+  "In Transit":               { fg: "#FFFFFF", bg: "#22C55E" },
+  "On Road":                  { fg: "#FFFFFF", bg: "#22C55E" },
+  "Needs truck assigned":     { fg: "#000000", bg: "#F5A623" },
+  "Available to be assigned": { fg: "#FFFFFF", bg: "#22C55E" },
+  "Relocate Van":             { fg: "#000000", bg: "#F5A623" },
+  "NLWC - Return Rental":     { fg: "#FFFFFF", bg: "#EF4444" },
+  "Truck Swap":               { fg: "#155E75", bg: "#CFFAFE" },
 };
 
 function StatusBadge({ status }: { status: string }) {
