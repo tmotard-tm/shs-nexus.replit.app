@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { RefreshCw, CheckCircle2, Circle, AlertTriangle, ChevronDown, ChevronRight, Clock, Phone, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
 
 interface QueueItem {
   step: number;
@@ -150,22 +150,28 @@ function QueueRow({
   onToggleDone,
   callingId,
   onCallShop,
+  onRowClick,
 }: {
   item: QueueItem;
   done: boolean;
   onToggleDone: (id: string) => void;
   callingId: string | null;
   onCallShop: (id: string) => void;
+  onRowClick: (id: string) => void;
 }) {
   const isCalling = callingId === item.truckId;
   const showCallButton = item.step === 5 && !!item.repairPhone;
 
   return (
-    <div className={cn(
-      "flex items-start gap-3 px-4 py-3 transition-all duration-200",
-      "border-b border-border last:border-0",
-      done && "opacity-40"
-    )}>
+    <div
+      className={cn(
+        "flex items-start gap-3 px-4 py-3 transition-all duration-200 cursor-pointer",
+        "border-b border-border last:border-0",
+        "hover:bg-muted/30",
+        done && "opacity-40"
+      )}
+      onClick={() => onRowClick(item.truckId)}
+    >
       <div className="flex-shrink-0 pt-0.5">
         <span className={cn("inline-flex items-center justify-center rounded-full text-xs font-bold w-6 h-6 border", STEP_COLORS[item.step])}>
           {item.step}
@@ -222,7 +228,7 @@ function QueueRow({
             size="sm"
             variant="outline"
             className="h-7 px-2.5 text-xs gap-1.5 text-purple-700 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-700 dark:hover:bg-purple-900/20"
-            onClick={() => onCallShop(item.truckId)}
+            onClick={(e) => { e.stopPropagation(); onCallShop(item.truckId); }}
             disabled={isCalling || !!callingId}
             title="Call repair shop via LucaAI"
           >
@@ -238,7 +244,7 @@ function QueueRow({
           size="sm"
           variant={done ? "secondary" : "outline"}
           className={cn("h-7 px-2.5 text-xs gap-1.5", done && "text-green-700 dark:text-green-400")}
-          onClick={() => onToggleDone(item.truckId)}
+          onClick={(e) => { e.stopPropagation(); onToggleDone(item.truckId); }}
         >
           {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
           {done ? "Done" : "Mark Done"}
@@ -256,8 +262,10 @@ export default function TodaysQueue() {
   const [noActionExpanded, setNoActionExpanded] = useState(false);
   const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set());
   const [callingId, setCallingId] = useState<string | null>(null);
+  const [selectedTruckId, setSelectedTruckId] = useState<string | null>(null);
+  const [detailPanelOpen, setDetailPanelOpen] = useState(false);
 
-  const { data, isLoading, isFetching, refetch, dataUpdatedAt } = useQuery<QueueResponse>({
+  const { data, isLoading, isFetching, refetch } = useQuery<QueueResponse>({
     queryKey: ["/api/fs/queue/today"],
     staleTime: 2 * 60 * 1000,
   });
@@ -309,6 +317,11 @@ export default function TodaysQueue() {
       setCallingId(null);
     }
   }, [toast, queryClient]);
+
+  const handleRowClick = useCallback((truckId: string) => {
+    setSelectedTruckId(truckId);
+    setDetailPanelOpen(true);
+  }, []);
 
   useEffect(() => {
     setDoneSet(loadDoneSet());
@@ -469,6 +482,7 @@ export default function TodaysQueue() {
                           onToggleDone={toggleDone}
                           callingId={callingId}
                           onCallShop={handleCallShop}
+                          onRowClick={handleRowClick}
                         />
                       ))}
                     </div>
@@ -495,7 +509,11 @@ export default function TodaysQueue() {
                 {noActionExpanded && (
                   <div>
                     {noAction.map(item => (
-                      <div key={item.truckId} className="flex items-center gap-3 px-4 py-2 border-b border-border last:border-0 opacity-60">
+                      <div
+                        key={item.truckId}
+                        className="flex items-center gap-3 px-4 py-2 border-b border-border last:border-0 opacity-60 cursor-pointer hover:bg-muted/30 transition-colors"
+                        onClick={() => handleRowClick(item.truckId)}
+                      >
                         <span className="font-mono text-sm">{item.truckNumber}</span>
                         {item.techName && <span className="text-xs text-muted-foreground">{item.techName}</span>}
                         <StatusPill label="FS" value={item.fleetScopeStatus} />
@@ -509,6 +527,12 @@ export default function TodaysQueue() {
           </div>
         )}
       </div>
+
+      <TruckDetailPanel
+        truckId={selectedTruckId}
+        open={detailPanelOpen}
+        onOpenChange={(open) => setDetailPanelOpen(open)}
+      />
     </div>
   );
 }

@@ -145,7 +145,7 @@ function SuggestedReplacements({ truckNumber }: { truckNumber: string | number |
 }
 
 interface TruckDetailPanelProps {
-  truckId: number | null;
+  truckId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUpdateAms?: (truckNumber: string, vin?: string) => void;
@@ -208,7 +208,7 @@ function EditableInfoRow({
   value: string | null | undefined;
   icon?: React.ReactNode;
   fieldName: string;
-  truckId: number;
+  truckId: string;
   placeholder?: string;
   testIdPrefix: string;
 }) {
@@ -350,7 +350,7 @@ function EditableBoolRow({
   value: boolean | null | undefined;
   icon?: React.ReactNode;
   fieldName: string;
-  truckId: number;
+  truckId: string;
   testIdPrefix: string;
 }) {
   const { toast } = useToast();

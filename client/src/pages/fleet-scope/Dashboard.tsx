@@ -521,7 +521,7 @@ export default function Dashboard() {
 
   // Inline editing state
   const [editingCell, setEditingCell] = useState<{truckId: string; field: string} | null>(null);
-  const [selectedTruckId, setSelectedTruckId] = useState<number | null>(null);
+  const [selectedTruckId, setSelectedTruckId] = useState<string | null>(null);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [amsVehiclePanelOpen, setAmsVehiclePanelOpen] = useState(false);
   const [selectedTruckForAms, setSelectedTruckForAms] = useState<string | null>(null);
