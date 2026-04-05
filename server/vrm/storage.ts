@@ -13,11 +13,13 @@ import {
   vrmRentalDecisions,
   vrmRentalDecisionActions,
   vrmRentalChecks,
+  vrmNewRentalLog,
   type VrmTech,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
   type InsertVrmRentalDecisionAction,
   type InsertVrmRentalCheck,
+  type InsertVrmNewRentalLog,
 } from "../../shared/vrm-schema";
 
 // ─── Dashboard queries ────────────────────────────────────────────────────────
@@ -479,4 +481,39 @@ export async function listRentalChecks(limit = 100) {
     .from(vrmRentalChecks)
     .orderBy(desc(vrmRentalChecks.checkedAt))
     .limit(limit);
+}
+
+// ─── New Rental Log ───────────────────────────────────────────────────────────
+
+export async function listNewRentalLog() {
+  return db
+    .select()
+    .from(vrmNewRentalLog)
+    .orderBy(desc(vrmNewRentalLog.createdAt));
+}
+
+export async function createNewRentalLogEntry(data: InsertVrmNewRentalLog) {
+  const [row] = await db.insert(vrmNewRentalLog).values(data).returning();
+  return row;
+}
+
+export async function bulkCreateNewRentalLogEntries(rows: InsertVrmNewRentalLog[]) {
+  if (!rows.length) return [];
+  return db.insert(vrmNewRentalLog).values(rows).returning();
+}
+
+export async function updateNewRentalLogEntry(
+  id: string,
+  data: Partial<InsertVrmNewRentalLog>,
+) {
+  const [row] = await db
+    .update(vrmNewRentalLog)
+    .set(data)
+    .where(eq(vrmNewRentalLog.id, id))
+    .returning();
+  return row;
+}
+
+export async function deleteNewRentalLogEntry(id: string) {
+  await db.delete(vrmNewRentalLog).where(eq(vrmNewRentalLog.id, id));
 }

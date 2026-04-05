@@ -5,6 +5,7 @@ import {
   ClipboardCheck,
   ShieldAlert,
   TrendingUp,
+  ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 
@@ -92,6 +93,7 @@ export interface NavItem {
 export const navItems: NavItem[] = [
   { label: "Dashboard", path: "/vehicle-rental-management", icon: LayoutDashboard },
   { label: "New Rentals", path: "/vehicle-rental-management/new-rentals", icon: TrendingUp },
+  { label: "New Rental - Full Log", path: "/vehicle-rental-management/new-rental-full-log", icon: ClipboardList },
   { label: "Active Rentals", path: "/vehicle-rental-management/tech-population", icon: Users },
   { label: "Escalations", path: "/vehicle-rental-management/escalations", icon: AlertTriangle },
   { label: "DCA Review", path: "/vehicle-rental-management/dca-review", icon: ClipboardCheck },

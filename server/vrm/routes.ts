@@ -32,6 +32,11 @@ import {
   listRentalDecisionActions,
   addRentalChecks,
   listRentalChecks,
+  listNewRentalLog,
+  createNewRentalLogEntry,
+  bulkCreateNewRentalLogEntries,
+  updateNewRentalLogEntry,
+  deleteNewRentalLogEntry,
 } from "./storage";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck } from "./snowflake-queries";
 import { generateAuditPdf } from "./pdf-generator";
@@ -697,6 +702,63 @@ export function registerVrmRoutes(): Router {
           performedByName: req.body.flaggedByName ?? "Fleet Team",
         });
       }
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── New Rental Log ──────────────────────────────────────────────────────────
+
+  router.get("/new-rental-log", async (_req, res) => {
+    try {
+      const rows = await listNewRentalLog();
+      res.json(rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post("/new-rental-log", async (req, res) => {
+    try {
+      const row = await createNewRentalLogEntry(req.body);
+      res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post("/new-rental-log/import", async (req, res) => {
+    try {
+      const rows: any[] = Array.isArray(req.body) ? req.body : [];
+      const valid: any[] = [];
+      const errors: string[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        try {
+          valid.push(rows[i]);
+        } catch (e: any) {
+          errors.push(`Row ${i + 1}: ${e.message}`);
+        }
+      }
+      const inserted = valid.length > 0 ? await bulkCreateNewRentalLogEntries(valid) : [];
+      res.json({ inserted: inserted.length, skipped: errors.length, errors });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.patch("/new-rental-log/:id", async (req, res) => {
+    try {
+      const row = await updateNewRentalLogEntry(req.params.id, req.body);
+      res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.delete("/new-rental-log/:id", async (req, res) => {
+    try {
+      await deleteNewRentalLogEntry(req.params.id);
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

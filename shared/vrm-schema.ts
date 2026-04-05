@@ -334,6 +334,33 @@ export const vrmRentalChecks = pgTable("vrm_rental_checks", {
   checkedAtIdx: index("vrm_rental_checks_at_idx").on(table.checkedAt),
 }));
 
+export const vrmNewRentalLog = pgTable("vrm_new_rental_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  dateOfRequest: date("date_of_request"),
+  vanRentalPo: text("van_rental_po"),
+  name: text("name"),
+  enterpriseId: text("enterprise_id"),
+  trimVanNum: text("trim_van_num"),
+  techPhNum: text("tech_ph_num"),
+  vanAssignedInTpms: text("van_assigned_in_tpms"),
+  startRentalDate: date("start_rental_date"),
+  repairLocation: text("repair_location"),
+  issue: text("issue"),
+  permanentSolution: boolean("permanent_solution").notNull().default(false),
+  amsUpdated: boolean("ams_updated").notNull().default(false),
+  fleetTrackerUpdated: boolean("fleet_tracker_updated").notNull().default(false),
+  rentalApproved: boolean("rental_approved").notNull().default(false),
+  approvedInHolman: boolean("approved_in_holman").notNull().default(false),
+  unitNumber: text("unit_number"),
+  teamMembers: text("team_members"),
+  existingRentalOnTruck: text("existing_rental_on_truck"),
+  newRentalOrExtension: text("new_rental_or_extension"),
+  truckBreakdownOrNewHire: text("truck_breakdown_or_new_hire"),
+  existingRentalOpenHowLong: text("existing_rental_open_how_long"),
+  techServiceDate: date("tech_service_date"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ─── Insert schemas ────────────────────────────────────────────────────────────
 
 export const insertVrmTechSchema = createInsertSchema(vrmTechs).omit({
@@ -404,3 +431,10 @@ export type VrmRentalDecisionAction = typeof vrmRentalDecisionActions.$inferSele
 export type InsertVrmRentalDecisionAction = z.infer<typeof insertVrmRentalDecisionActionSchema>;
 export type VrmRentalCheck = typeof vrmRentalChecks.$inferSelect;
 export type InsertVrmRentalCheck = z.infer<typeof insertVrmRentalCheckSchema>;
+
+export const insertVrmNewRentalLogSchema = createInsertSchema(vrmNewRentalLog).omit({
+  id: true,
+  createdAt: true,
+});
+export type VrmNewRentalLog = typeof vrmNewRentalLog.$inferSelect;
+export type InsertVrmNewRentalLog = z.infer<typeof insertVrmNewRentalLogSchema>;

@@ -315,5 +315,34 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_escalations_tech_idx ON vrm_escalations(tech_id);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_tech_notes_tech_idx ON vrm_tech_notes(tech_id);`);
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_new_rental_log (
+      id                          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      date_of_request             DATE,
+      van_rental_po               TEXT,
+      name                        TEXT,
+      enterprise_id               TEXT,
+      trim_van_num                TEXT,
+      tech_ph_num                 TEXT,
+      van_assigned_in_tpms        TEXT,
+      start_rental_date           DATE,
+      repair_location             TEXT,
+      issue                       TEXT,
+      permanent_solution          BOOLEAN NOT NULL DEFAULT false,
+      ams_updated                 BOOLEAN NOT NULL DEFAULT false,
+      fleet_tracker_updated       BOOLEAN NOT NULL DEFAULT false,
+      rental_approved             BOOLEAN NOT NULL DEFAULT false,
+      approved_in_holman          BOOLEAN NOT NULL DEFAULT false,
+      unit_number                 TEXT,
+      team_members                TEXT,
+      existing_rental_on_truck    TEXT,
+      new_rental_or_extension     TEXT,
+      truck_breakdown_or_new_hire TEXT,
+      existing_rental_open_how_long TEXT,
+      tech_service_date           DATE,
+      created_at                  TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+
   console.log("[VRM] Schema initialised");
 }

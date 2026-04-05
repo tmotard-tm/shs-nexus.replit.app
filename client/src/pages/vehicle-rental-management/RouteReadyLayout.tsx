@@ -9,6 +9,7 @@ import Escalations from "./pages/Escalations";
 import DCAReview from "./pages/DCAReview";
 import ExceptionCases from "./pages/ExceptionCases";
 import NewRentals from "./pages/NewRentals";
+import NewRentalFullLog from "./pages/NewRentalFullLog";
 
 function getPageTitle(path: string): string {
   if (path === "/vehicle-rental-management" || path === "/vehicle-rental-management/") return "Dashboard";
@@ -33,6 +34,7 @@ export default function RouteReadyLayout() {
             <Route path="/vehicle-rental-management/escalations" component={Escalations} />
             <Route path="/vehicle-rental-management/dca-review" component={DCAReview} />
             <Route path="/vehicle-rental-management/exception-cases" component={ExceptionCases} />
+            <Route path="/vehicle-rental-management/new-rental-full-log" component={NewRentalFullLog} />
             <Route>
               <WipPlaceholder moduleName="Page Not Found" />
             </Route>
