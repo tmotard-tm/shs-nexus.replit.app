@@ -164,16 +164,23 @@ function parseCSV(text: string): Record<string, string>[] {
   return rows;
 }
 
+type StringField = Exclude<keyof FormData, "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman">;
+type BooleanField = "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman";
+
+function isBooleanField(field: keyof FormData): field is BooleanField {
+  return BOOLEAN_FIELDS.has(field);
+}
+
 function mapCSVRowToForm(raw: Record<string, string>): Partial<FormData> {
   const entry: Partial<FormData> = {};
   for (const [csvHeader, rawVal] of Object.entries(raw)) {
     const field = CSV_HEADER_MAP[csvHeader.toLowerCase()];
     if (!field) continue;
-    if (BOOLEAN_FIELDS.has(field)) {
+    if (isBooleanField(field)) {
       const lower = rawVal.toLowerCase().trim();
-      (entry as any)[field] = lower === "yes" || lower === "true" || lower === "1";
+      entry[field] = lower === "yes" || lower === "true" || lower === "1";
     } else {
-      (entry as any)[field] = rawVal || null;
+      entry[field as StringField] = rawVal || null;
     }
   }
   return entry;
@@ -226,14 +233,30 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const payload: Partial<FormData> = {};
-      for (const [k, v] of Object.entries(form)) {
-        if (BOOLEAN_FIELDS.has(k as keyof FormData)) {
-          (payload as any)[k] = v;
-        } else {
-          (payload as any)[k] = (v as string).trim() === "" ? null : (v as string).trim();
-        }
-      }
+      const payload: Partial<FormData> = {
+        permanentSolution: form.permanentSolution,
+        amsUpdated: form.amsUpdated,
+        fleetTrackerUpdated: form.fleetTrackerUpdated,
+        rentalApproved: form.rentalApproved,
+        approvedInHolman: form.approvedInHolman,
+        dateOfRequest: form.dateOfRequest?.trim() || null,
+        vanRentalPo: form.vanRentalPo?.trim() || null,
+        name: form.name?.trim() || null,
+        enterpriseId: form.enterpriseId?.trim() || null,
+        trimVanNum: form.trimVanNum?.trim() || null,
+        techPhNum: form.techPhNum?.trim() || null,
+        vanAssignedInTpms: form.vanAssignedInTpms?.trim() || null,
+        startRentalDate: form.startRentalDate?.trim() || null,
+        repairLocation: form.repairLocation?.trim() || null,
+        issue: form.issue?.trim() || null,
+        unitNumber: form.unitNumber?.trim() || null,
+        teamMembers: form.teamMembers?.trim() || null,
+        existingRentalOnTruck: form.existingRentalOnTruck?.trim() || null,
+        newRentalOrExtension: form.newRentalOrExtension?.trim() || null,
+        truckBreakdownOrNewHire: form.truckBreakdownOrNewHire?.trim() || null,
+        existingRentalOpenHowLong: form.existingRentalOpenHowLong?.trim() || null,
+        techServiceDate: form.techServiceDate?.trim() || null,
+      };
       if (isEdit) {
         return apiRequest("PATCH", `/api/vrm/new-rental-log/${entry!.id}`, payload);
       }

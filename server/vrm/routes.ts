@@ -42,6 +42,7 @@ import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfita
 import { generateAuditPdf } from "./pdf-generator";
 import {
   vrmTechs, vrmOutreachLog, vrmEscalations, vrmExceptionCases, vrmReachabilityLog,
+  insertVrmNewRentalLogSchema,
 } from "../../shared/vrm-schema";
 
 export function registerVrmRoutes(): Router {
@@ -721,7 +722,11 @@ export function registerVrmRoutes(): Router {
 
   router.post("/new-rental-log", async (req, res) => {
     try {
-      const row = await createNewRentalLogEntry(req.body);
+      const parsed = insertVrmNewRentalLogSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.issues });
+      }
+      const row = await createNewRentalLogEntry(parsed.data);
       res.json(row);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -730,14 +735,15 @@ export function registerVrmRoutes(): Router {
 
   router.post("/new-rental-log/import", async (req, res) => {
     try {
-      const rows: any[] = Array.isArray(req.body) ? req.body : [];
-      const valid: any[] = [];
+      const rawRows: unknown[] = Array.isArray(req.body) ? req.body : [];
+      const valid: ReturnType<typeof insertVrmNewRentalLogSchema.parse>[] = [];
       const errors: string[] = [];
-      for (let i = 0; i < rows.length; i++) {
-        try {
-          valid.push(rows[i]);
-        } catch (e: any) {
-          errors.push(`Row ${i + 1}: ${e.message}`);
+      for (let i = 0; i < rawRows.length; i++) {
+        const parsed = insertVrmNewRentalLogSchema.safeParse(rawRows[i]);
+        if (parsed.success) {
+          valid.push(parsed.data);
+        } else {
+          errors.push(`Row ${i + 1}: ${parsed.error.issues.map((e) => e.message).join(", ")}`);
         }
       }
       const inserted = valid.length > 0 ? await bulkCreateNewRentalLogEntries(valid) : [];
@@ -749,7 +755,11 @@ export function registerVrmRoutes(): Router {
 
   router.patch("/new-rental-log/:id", async (req, res) => {
     try {
-      const row = await updateNewRentalLogEntry(req.params.id, req.body);
+      const parsed = insertVrmNewRentalLogSchema.partial().safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.issues });
+      }
+      const row = await updateNewRentalLogEntry(req.params.id, parsed.data);
       res.json(row);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
